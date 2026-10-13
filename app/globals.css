@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-otb-blue-deep: #051647;
+  --color-otb-blue-medium: #002187;
+  --color-otb-green: #C4D600;
+  --color-otb-green-80: #CFDB6D;
+  --color-otb-green-50: #E0E7A3;
+  --color-otb-orange: #F7915E;
+}
+
+:root {
+  --background: #f4f5f8;
+  --foreground: #0f172a;
+}
+
+.dark {
+  --background: #030d29;
+  --foreground: #f1f5f9;
+  --field-background: #041238;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.dark :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) {
+  background-color: var(--field-background);
+}
+
+.dark select option {
+  background-color: var(--field-background);
+  color: var(--foreground);
+}
+
+.topbar-icon-button {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  transition: color 0.2s ease, background-color 0.2s ease;
+  cursor: pointer;
+}
+
+.topbar-action-button {
+  display: inline-flex;
+  height: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 9999px;
+  padding: 0 0.875rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+  transition: color 0.2s ease, background-color 0.2s ease;
+  cursor: pointer;
+}
+
+@keyframes notification-dropdown-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.notification-dropdown-enter {
+  animation: notification-dropdown-enter 180ms ease-out both;
+  transform-origin: top right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-dropdown-enter {
+    animation: none;
+  }
+}
+
+/* Regra global: todo elemento clicável com cursor pointer */
+button, [role="button"], label, a {
+  cursor: pointer;
+}
+
+/* Toggle Uiverse.io por alexruix - isolado e sem conflito de variáveis */
+.uiverse-switch {
+  font-size: 15px;
+  position: relative;
+  display: inline-block;
+  width: 3.5em;
+  height: 2em;
+  cursor: pointer;
+}
+
+.uiverse-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+  pointer-events: none;
+}
+
+.uiverse-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #28096b;
+  transition: 0.5s;
+  border-radius: 30px;
+}
+
+.uiverse-slider:before {
+  position: absolute;
+  content: "";
+  height: 1.4em;
+  width: 1.4em;
+  border-radius: 50%;
+  left: 10%;
+  bottom: 15%;
+  box-shadow: inset 8px -4px 0px 0px #fff000;
+  background: #28096b;
+  transition: 0.5s;
+}
+
+.uiverse-switch input:checked + .uiverse-slider {
+  background-color: #522ba7;
+}
+
+.uiverse-switch input:checked + .uiverse-slider:before {
+  transform: translateX(100%);
+  box-shadow: inset 15px -4px 0px 15px #fff000;
+}
