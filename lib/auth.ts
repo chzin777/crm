@@ -4,7 +4,9 @@ import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { admin } from "better-auth/plugins";
 import { prisma } from "@/lib/prisma";
 
-const secret = process.env.BETTER_AUTH_SECRET;
+const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
+// Build-time page data collection imports this module without runtime secrets; validation stays strict at runtime.
+const secret = process.env.BETTER_AUTH_SECRET || (isBuildPhase ? "build-phase-placeholder-secret-not-for-runtime" : undefined);
 if (!secret || secret.length < 32) {
   throw new Error("BETTER_AUTH_SECRET must be configured with at least 32 characters.");
 }
