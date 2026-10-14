@@ -9,9 +9,10 @@ interface FormSelectProps {
   options: readonly string[];
   onChange: (value: string) => void;
   ariaLabel?: string;
+  required?: boolean;
 }
 
-export function FormSelect({ label, value, options, onChange, ariaLabel }: FormSelectProps) {
+export function FormSelect({ label, value, options, onChange, ariaLabel, required = false }: FormSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -33,7 +34,9 @@ export function FormSelect({ label, value, options, onChange, ariaLabel }: FormS
 
   return (
     <div ref={rootRef} className="relative space-y-1.5">
-      <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</span>
+      <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+        {label}{required && <> <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></>}
+      </span>
       <button
         type="button"
         aria-label={ariaLabel ?? label}

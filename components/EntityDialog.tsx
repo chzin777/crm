@@ -4,9 +4,10 @@ interface EntityDialogProps {
   description: string;
   onClose: () => void;
   children: React.ReactNode;
+  size?: "md" | "lg";
 }
 
-export function EntityDialog({ titleId, title, description, onClose, children }: EntityDialogProps) {
+export function EntityDialog({ titleId, title, description, onClose, children, size = "md" }: EntityDialogProps) {
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm"
@@ -18,7 +19,7 @@ export function EntityDialog({ titleId, title, description, onClose, children }:
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
+        className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6 ${size === "lg" ? "h-[min(780px,92vh)] max-w-3xl" : "h-[min(640px,90vh)] max-w-xl"}`}
       >
         <header className="mb-5 flex shrink-0 items-start justify-between gap-4">
           <div>

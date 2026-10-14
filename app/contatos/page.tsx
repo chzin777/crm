@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
 import { BirthdayDatePicker } from "@/components/BirthdayDatePicker";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import Stepper, { Step } from "@/components/Stepper";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
-import { initialContacts, type Contact, type ContactCategory } from "@/lib/contacts";
-import { initialSegmentNames } from "@/lib/segments";
+import type { Contact, ContactCategory } from "@/lib/contacts";
+import { useCrmData } from "@/hooks/useCrmData";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 import {
   ArrowUpRight,
   Bell,
@@ -25,7 +27,6 @@ type ContactFilter = "Todos" | "Clientes" | "Leads" | "NPS" | "Inativos";
 
 const filters: ContactFilter[] = ["Todos", "Clientes", "Leads", "NPS", "Inativos"];
 const contactCategoryOptions: ContactCategory[] = ["cliente", "lead", "nps", "inativo"];
-const segmentOptions = Object.values(initialSegmentNames);
 const contactCategoryNames: Record<ContactCategory, string> = {
   cliente: "Cliente",
   lead: "Lead",
@@ -53,38 +54,95 @@ const fromDateInput = (value: string) => {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 };
 const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const validBrazilianAreaCodes = new Set([
+  "11", "12", "13", "14", "15", "16", "17", "18", "19", "21", "22", "24", "27", "28",
+  "31", "32", "33", "34", "35", "37", "38", "41", "42", "43", "44", "45", "46", "47",
+  "48", "49", "51", "53", "54", "55", "61", "62", "63", "64", "65", "66", "67", "68",
+  "69", "71", "73", "74", "75", "77", "79", "81", "82", "83", "84", "85", "86", "87",
+  "88", "89", "91", "92", "93", "94", "95", "96", "97", "98", "99",
+]);
+
+const formatBrazilianPhone = (value: string) => {
+  let digits = value.replace(/\D/g, "");
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) {
+    digits = digits.slice(2);
+  }
+  digits = digits.slice(0, 11);
+  if (digits.length <= 2) return digits ? `(${digits}` : "";
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  const subscriber = digits.slice(2);
+  const splitAt = digits.length > 10 ? 5 : 4;
+  return `(${digits.slice(0, 2)}) ${subscriber.slice(0, splitAt)}-${subscriber.slice(splitAt)}`;
+};
+
+const isValidBrazilianPhone = (value: string) => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 10 && digits.length !== 11) return false;
+  if (!validBrazilianAreaCodes.has(digits.slice(0, 2))) return false;
+  const subscriber = digits.slice(2);
+  return digits.length === 11 ? /^9\d{8}$/.test(subscriber) : /^[2-5]\d{7}$/.test(subscriber);
+};
 
 export default function ContatosPage() {
-  const [isDark, setIsDark] = useState(false);
+  const { isDark, toggleTheme } = useCrmTheme();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ContactFilter>("Todos");
-  const [contacts, setContacts] = useState<Contact[]>(initialContacts);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const { data: segments } = useCrmData<{ id: string; nome: string }[]>("segments", []);
+  const segmentOptions = [...new Set([
+    ...segments.map((segment) => segment.nome),
+    ...contacts.map((contact) => contact.segmento.trim()).filter(Boolean),
+  ])];
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [dataError, setDataError] = useState("");
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 15, total: 0, totalPages: 0 });
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [form, setForm] = useState({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead" as ContactCategory, segmento: "" });
 
-  const toggleTheme = () => {
-    setIsDark((prev) => {
-      const next = !prev;
-      if (next) {
-        document.documentElement.classList.add("dark");
-        localStorage.setItem("otb-crm-theme", "dark");
-      } else {
-        document.documentElement.classList.remove("dark");
-        localStorage.setItem("otb-crm-theme", "light");
-      }
-      return next;
-    });
+  const categoryToApiFilter: Record<ContactFilter, string> = {
+    Todos: "",
+    Clientes: "", // handled client-side via compras > 0 since API doesn't have this filter
+    Leads: "lead",
+    NPS: "nps",
+    Inativos: "inativo",
   };
 
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("otb-crm-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
+  const fetchContacts = useCallback(async (page = 1, search = "", filter: ContactFilter = "Todos", size?: number) => {
+    setContactsLoading(true);
+    setDataError("");
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", String(size ?? pagination.pageSize));
+      if (search) params.set("search", search);
+      const apiCategory = categoryToApiFilter[filter];
+      if (apiCategory) params.set("category", apiCategory);
+
+      const response = await fetch(`/api/contacts?${params.toString()}`);
+      const result = await response.json() as { data?: Contact[]; error?: string; pagination?: typeof pagination };
+      if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
+      setContacts(result.data ?? []);
+      if (result.pagination) setPagination(result.pagination);
+    } catch (error: unknown) {
+      setDataError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
+    } finally {
+      setContactsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchContacts(1, searchTerm, activeFilter);
+  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchContacts(1, searchTerm, activeFilter);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedContact && !isCreateOpen) return;
@@ -98,47 +156,44 @@ export default function ContatosPage() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedContact, isCreateOpen]);
 
-  const filteredContacts = contacts.filter((contact) => {
-    const query = searchTerm.trim().toLocaleLowerCase("pt-BR");
-    const matchesQuery = `${contact.nome} ${contact.telefone} ${contact.email} ${contact.segmento}`.toLocaleLowerCase("pt-BR").includes(query);
-    const matchesFilter = activeFilter === "Todos"
-      || (activeFilter === "Clientes" && contact.compras > 0)
-      || (activeFilter === "Leads" && contact.categoria === "lead")
-      || (activeFilter === "NPS" && contact.categoria === "nps")
-      || (activeFilter === "Inativos" && contact.categoria === "inativo");
-    return matchesQuery && matchesFilter;
-  });
-
+  // Stats are computed from the current page of contacts (server-side pagination)
   const totalSpent = contacts.reduce((sum, contact) => sum + contact.totalGasto, 0);
   const clientsWithPurchases = contacts.filter((contact) => contact.compras > 0).length;
   const openLeads = contacts.filter((contact) => contact.categoria === "lead").length;
   const inactiveContacts = contacts.filter((contact) => contact.categoria === "inativo").length;
 
-  const addContact = () => {
+  const addContact = async () => {
     const nome = form.nome.trim();
     const telefone = form.telefone.trim();
-    if (!nome || !telefone) {
-      setFormError("Informe o nome e o telefone do contato.");
+    if (!nome || !isValidBrazilianPhone(telefone)) {
+      setFormError(!nome ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
       return;
     }
     if (!isValidEmail(form.email.trim())) {
       setFormError("Informe um e-mail válido.");
       return;
     }
-    const initials = nome.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-    setContacts((current) => [{
-      id: `ct-${Date.now()}`,
-      nome,
-      telefone,
-      email: form.email.trim(),
-      dataNascimento: fromDateInput(form.dataNascimento),
-      categoria: form.categoria,
-      segmento: form.segmento,
-      ultimoContato: "Agora",
-      compras: 0,
-      totalGasto: 0,
-      iniciais: initials,
-    }, ...current]);
+    try {
+      const response = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome,
+          telefone,
+          email: form.email.trim(),
+          dataNascimento: fromDateInput(form.dataNascimento),
+          categoria: form.categoria,
+          segmento: form.segmento,
+        }),
+      });
+      const result = await response.json() as { data?: Contact; error?: string };
+      const savedContact = result.data;
+      if (!response.ok || !savedContact) throw new Error(result.error || "Não foi possível salvar o contato.");
+      setContacts((current) => [savedContact, ...current]);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Não foi possível salvar o contato.");
+      return;
+    }
     setActiveFilter("Todos");
     setSearchTerm("");
     setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: "" });
@@ -159,7 +214,7 @@ export default function ContatosPage() {
     setFormError("");
   };
 
-  const saveContact = () => {
+  const saveContact = async () => {
     if (!selectedContact) return;
     const nome = form.nome.trim();
     const telefone = form.telefone.trim();
@@ -171,19 +226,28 @@ export default function ContatosPage() {
       setFormError("Informe um e-mail válido.");
       return;
     }
-    const updatedContact = {
-      ...selectedContact,
-      nome,
-      telefone,
-      email: form.email.trim(),
-      dataNascimento: fromDateInput(form.dataNascimento),
-      categoria: form.categoria,
-      segmento: form.segmento.trim() || contactCategoryNames[form.categoria],
-      iniciais: nome.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase(),
-    };
-    setContacts((current) => current.map((contact) => contact.id === updatedContact.id ? updatedContact : contact));
-    setSelectedContact(updatedContact);
-    setFormError("");
+    try {
+      const response = await fetch(`/api/contacts/${encodeURIComponent(selectedContact.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome,
+          telefone,
+          email: form.email.trim(),
+          dataNascimento: fromDateInput(form.dataNascimento),
+          categoria: form.categoria,
+          segmento: form.segmento.trim() || contactCategoryNames[form.categoria],
+        }),
+      });
+      const result = await response.json() as { data?: Contact; error?: string };
+      const savedContact = result.data;
+      if (!response.ok || !savedContact) throw new Error(result.error || "Não foi possível atualizar o contato.");
+      setContacts((current) => current.map((contact) => contact.id === savedContact.id ? savedContact : contact));
+      setSelectedContact(savedContact);
+      setFormError("");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Não foi possível atualizar o contato.");
+    }
   };
 
   const metrics = [
@@ -215,6 +279,7 @@ export default function ContatosPage() {
 
         {/* Conteúdo */}
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
+          {dataError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{dataError}</p>}
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Contatos</h1>
@@ -246,7 +311,7 @@ export default function ContatosPage() {
               <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white">Base de contatos</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{filteredContacts.length} de {contacts.length} contatos</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Página {pagination.page} de {pagination.totalPages} ({pagination.total} contatos)</p>
                 </div>
                 <label className="relative block w-full lg:max-w-sm">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -297,7 +362,12 @@ export default function ContatosPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredContacts.map((contact) => (
+                  {contactsLoading && (
+                    <tr><td colSpan={6} className="px-5 py-8">
+                      <LoadingSpinner label="Carregando contatos..." className="w-full justify-center" />
+                    </td></tr>
+                  )}
+                  {!contactsLoading && contacts.map((contact) => (
                     <tr
                       key={contact.id}
                       tabIndex={0}
@@ -327,7 +397,7 @@ export default function ContatosPage() {
                       <td className="px-5 py-3.5 text-right text-xs font-bold text-slate-900 dark:text-white">{contact.totalGasto ? currency(contact.totalGasto) : "—"}</td>
                     </tr>
                   ))}
-                  {filteredContacts.length === 0 && (
+                  {!contactsLoading && contacts.length === 0 && (
                     <tr><td colSpan={6} className="px-5 py-14 text-center">
                       <Search className="mx-auto h-5 w-5 text-slate-400" />
                       <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum contato encontrado</p>
@@ -338,8 +408,44 @@ export default function ContatosPage() {
               </table>
             </div>
             <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800">
-              <span>Mostrando {filteredContacts.length} de {contacts.length} contatos</span>
-              <span>Dados demonstrativos</span>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                  <span>Itens por página:</span>
+                  <select
+                    value={pagination.pageSize}
+                    onChange={(e) => {
+                      const size = Number(e.target.value);
+                      setPagination((prev) => ({ ...prev, pageSize: size, page: 1 }));
+                      fetchContacts(1, searchTerm, activeFilter, size);
+                    }}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value={15}>15</option>
+                    <option value={30}>30</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={pagination.page <= 1 || contactsLoading}
+                  onClick={() => fetchContacts(pagination.page - 1, searchTerm, activeFilter)}
+                  className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Anterior
+                </button>
+                <span>Página {pagination.page} de {pagination.totalPages}</span>
+                <button
+                  type="button"
+                  disabled={pagination.page >= pagination.totalPages || contactsLoading}
+                  onClick={() => fetchContacts(pagination.page + 1, searchTerm, activeFilter)}
+                  className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Próxima
+                </button>
+              </div>
             </footer>
           </section>
         </main>
@@ -358,8 +464,8 @@ export default function ContatosPage() {
               onStepChange={() => setFormError("")}
               onFinalStepCompleted={addContact}
               validateStep={(step) => {
-                if (step === 1 && (!form.nome.trim() || !form.telefone.trim() || !isValidEmail(form.email.trim()))) {
-                  setFormError(!isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : "Informe o nome e o telefone do contato.");
+                if (step === 1 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
+                  setFormError(!isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
                   return false;
                 }
                 if (step === 2 && !segmentOptions.some((segment) => segment === form.segmento)) {
@@ -370,8 +476,8 @@ export default function ContatosPage() {
                   setFormError("Informe um e-mail válido.");
                   return false;
                 }
-                if (step === 3 && (!form.nome.trim() || !form.telefone.trim() || !isValidEmail(form.email.trim()))) {
-                  setFormError("Confira o nome e o telefone do contato.");
+                if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
+                  setFormError(!isValidBrazilianPhone(form.telefone) ? "Informe um telefone brasileiro válido com DDD." : "Confira o nome e os dados do contato.");
                   return false;
                 }
                 setFormError("");
@@ -395,8 +501,8 @@ export default function ContatosPage() {
               <Step title="Identificação" description="Dados pessoais">
                 <div className="space-y-4">
                   <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Dados do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Informe como podemos identificar e falar com essa pessoa.</p></div>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo *</span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone *</span><input type="tel" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={15} placeholder="(11) 91234-5678" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: formatBrazilianPhone(event.target.value) }); setFormError(""); }} aria-describedby="new-contact-phone-hint" className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /><span id="new-contact-phone-hint" className="text-[10px] font-normal text-slate-400">Formato brasileiro com DDD. Ex.: (11) 91234-5678</span></label>
                   {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
               </Step>
@@ -415,6 +521,7 @@ export default function ContatosPage() {
                     value={form.segmento || "Selecione um segmento"}
                     options={segmentOptions}
                     onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }}
+                    required
                   />
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <BirthdayDatePicker value={form.dataNascimento} onChange={(dataNascimento) => setForm({ ...form, dataNascimento })} />
@@ -444,9 +551,9 @@ export default function ContatosPage() {
                     <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{form.telefone}</p>
                   </div>
                 </div>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo</span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone</span><input type="tel" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="tel" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <FormSelect label="Categoria" value={contactCategoryNames[form.categoria]} options={contactCategoryOptions.map((category) => contactCategoryNames[category])} onChange={(value) => setForm({ ...form, categoria: contactCategoryOptions.find((category) => contactCategoryNames[category] === value) ?? "lead" })} />
                 </div>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Perfil / segmento</span><input value={form.segmento} onChange={(event) => setForm({ ...form, segmento: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>

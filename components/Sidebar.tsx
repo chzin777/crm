@@ -2,24 +2,63 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { motion } from "motion/react";
+import { useRef, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "motion/react";
+import { authClient } from "@/lib/auth-client";
 import {
   Kanban,
   LayoutDashboard,
   Users,
   Tags,
+  Store,
   MessageSquare,
   Award,
   UserCog,
   Settings,
   ChevronRight,
-  TrendingUp,
+  LogOut,
+  User as UserIcon,
+  MoreVertical,
 } from "lucide-react";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const { data: session } = authClient.useSession();
+  const userName = session?.user?.name ?? "Usuário";
+  const userEmail = session?.user?.email ?? "";
+  const userInitials = userName
+    .split(" ")
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+    if (isProfileMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isProfileMenuOpen]);
+
+  async function handleLogout() {
+    await authClient.signOut({
+      fetchOptions: {
+        onSuccess: () => {
+          router.push("/login");
+        },
+      },
+    });
+  }
 
   const menuItems = [
     {
@@ -31,7 +70,6 @@ export function Sidebar() {
       title: "Pipelines",
       href: "/",
       icon: Kanban,
-      badge: "8",
     },
     {
       title: "Contatos & Clientes",
@@ -44,10 +82,14 @@ export function Sidebar() {
       icon: Tags,
     },
     {
+      title: "Lojas",
+      href: "/lojas",
+      icon: Store,
+    },
+    {
       title: "Campanhas",
       href: "/campanhas",
       icon: MessageSquare,
-      badge: "Novo",
     },
     {
       title: "Pesquisas NPS",
@@ -127,37 +169,87 @@ export function Sidebar() {
                 <Icon className={`w-4 h-4 ${isActive ? "text-[#C4D600] dark:text-[#051647]" : "text-slate-400 dark:text-slate-400"}`} />
                 {!isCollapsed && <span>{item.title}</span>}
               </div>
-              {item.badge && !isCollapsed && (
-                <span
-                  className={`relative z-10 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    isActive
-                      ? "bg-white/20 text-white dark:bg-[#051647]/20 dark:text-[#051647]"
-                      : "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]"
-                  }`}
-                >
-                  {item.badge}
-                </span>
-              )}
             </Link>
           );
         })}
       </div>
 
       {/* Rodapé da Sidebar com Card de Perfil */}
-      <div className="p-4 border-t border-slate-200 dark:border-slate-800/80">
-        <div className={`flex items-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 ${isCollapsed ? "justify-center" : "gap-3"}`}>
-          <div title={isCollapsed ? "Gestor de Marketing" : undefined} className="w-9 h-9 rounded-full bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] flex items-center justify-center font-bold text-xs shrink-0">
-            OB
+      <div className="relative p-4 border-t border-slate-200 dark:border-slate-800/80" ref={profileMenuRef}>
+        <button
+          type="button"
+          onClick={() => setIsProfileMenuOpen((prev) => !prev)}
+          className={`w-full flex items-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors cursor-pointer ${isCollapsed ? "justify-center" : "gap-3"}`}
+          aria-haspopup="true"
+          aria-expanded={isProfileMenuOpen}
+          title={isCollapsed ? userName : undefined}
+        >
+          <div className="w-9 h-9 rounded-full bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] flex items-center justify-center font-bold text-xs shrink-0">
+            {userInitials}
           </div>
           {!isCollapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-slate-800 dark:text-white truncate leading-tight">
-                Gestor de Marketing
-              </p>
-              <p className="text-[11px] text-slate-400 truncate">Óticas Brasil CRM</p>
-            </div>
+            <>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-xs font-bold text-slate-800 dark:text-white truncate leading-tight">
+                  {userName}
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">{userEmail || "Óticas Brasil CRM"}</p>
+              </div>
+              <MoreVertical className="w-4 h-4 text-slate-400 shrink-0" />
+            </>
           )}
-        </div>
+        </button>
+
+        <AnimatePresence>
+          {isProfileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 6, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.97 }}
+              transition={{ duration: 0.15 }}
+              className={`absolute z-50 mb-2 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl overflow-hidden ${isCollapsed ? "left-full bottom-0 ml-2" : "left-4 right-4 bottom-full"}`}
+            >
+              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800">
+                <p className="text-xs font-bold text-slate-800 dark:text-white truncate">{userName}</p>
+                <p className="text-[11px] text-slate-400 truncate">{userEmail}</p>
+              </div>
+              <div className="py-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsProfileMenuOpen(false);
+                    router.push("/perfil");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <UserIcon className="w-4 h-4 text-slate-400" />
+                  Meu Perfil
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsProfileMenuOpen(false);
+                    router.push("/configuracoes");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <Settings className="w-4 h-4 text-slate-400" />
+                  Configurações
+                </button>
+              </div>
+              <div className="border-t border-slate-100 dark:border-slate-800 py-1">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sair
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <button

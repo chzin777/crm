@@ -16,7 +16,6 @@ import {
   YAxis,
 } from "recharts";
 import {
-  ArrowUpRight,
   Bell,
   CalendarDays,
   CircleDollarSign,
@@ -26,97 +25,126 @@ import {
   Target,
 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
+import Link from "next/link";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 
 type Period = "7d" | "30d" | "12m";
+interface DashboardData {
+  contacts: number;
+  purchases: number;
+  totalRevenue: number;
+  categoryCounts: Record<string, number>;
+  pipelineCounts: Record<string, number>;
+  nps: number | null;
+  npsResponses: number;
+  dailySales: { day: string; revenue: number; sales: number }[];
+  recentContacts: { id: string; name: string; category: string; updatedAt: string }[];
+}
 
-const revenueByPeriod: Record<Period, { label: string; receita: number; meta: number }[]> = {
-  "7d": [
-    { label: "Seg", receita: 1850, meta: 2100 },
-    { label: "Ter", receita: 2670, meta: 2300 },
-    { label: "Qua", receita: 2140, meta: 2400 },
-    { label: "Qui", receita: 3310, meta: 2500 },
-    { label: "Sex", receita: 2890, meta: 2700 },
-    { label: "Sáb", receita: 3560, meta: 3000 },
-    { label: "Dom", receita: 1990, meta: 2200 },
-  ],
-  "30d": [
-    { label: "Sem. 1", receita: 16800, meta: 18000 },
-    { label: "Sem. 2", receita: 21400, meta: 19500 },
-    { label: "Sem. 3", receita: 18750, meta: 20500 },
-    { label: "Sem. 4", receita: 25690, meta: 22000 },
-  ],
-  "12m": [
-    { label: "Nov", receita: 62400, meta: 60000 },
-    { label: "Dez", receita: 71800, meta: 65000 },
-    { label: "Jan", receita: 68500, meta: 70000 },
-    { label: "Fev", receita: 74300, meta: 72000 },
-    { label: "Mar", receita: 79200, meta: 74000 },
-    { label: "Abr", receita: 81800, meta: 78000 },
-    { label: "Mai", receita: 84600, meta: 80000 },
-    { label: "Jun", receita: 82750, meta: 82000 },
-    { label: "Jul", receita: 91100, meta: 85000 },
-    { label: "Ago", receita: 88400, meta: 87000 },
-    { label: "Set", receita: 96200, meta: 90000 },
-    { label: "Out", receita: 104800, meta: 95000 },
-  ],
+const stageLabels: Record<string, string> = {
+  "novo-lead": "Novo lead",
+  "em-atendimento": "Em atendimento",
+  fechamento: "Fechamento",
+  "pos-venda": "Pós-venda",
+  recompra: "Recompra",
+  reativacao: "Reativação",
 };
-
-const summaries: Record<Period, { revenue: string; revenueChange: string; deals: string; dealsChange: string; conversion: string; conversionChange: string; nps: string; npsChange: string }> = {
-  "7d": { revenue: "R$ 18.410", revenueChange: "+8,4%", deals: "12", dealsChange: "+3", conversion: "27,3%", conversionChange: "+1,8 p.p.", nps: "9,4", npsChange: "+0,2" },
-  "30d": { revenue: "R$ 82.640", revenueChange: "+12,8%", deals: "38", dealsChange: "+6", conversion: "24,6%", conversionChange: "+2,1 p.p.", nps: "9,3", npsChange: "+0,4" },
-  "12m": { revenue: "R$ 946.800", revenueChange: "+16,2%", deals: "412", dealsChange: "+48", conversion: "23,8%", conversionChange: "+1,6 p.p.", nps: "9,2", npsChange: "+0,3" },
+const categoryLabels: Record<string, { label: string; color: string }> = {
+  cliente: { label: "Clientes", color: "#002187" },
+  lead: { label: "Leads", color: "#F7915E" },
+  nps: { label: "NPS", color: "#C4D600" },
+  inativo: { label: "Inativos", color: "#94a3b8" },
 };
-
-const pipelineData = [
-  { etapa: "Novos leads", deals: 42 },
-  { etapa: "Em atendimento", deals: 27 },
-  { etapa: "Fechamento", deals: 15 },
-];
-
-const customerSegments = [
-  { name: "Novos clientes", value: 42, color: "#002187" },
-  { name: "Recorrentes", value: 38, color: "#C4D600" },
-  { name: "Em reativação", value: 20, color: "#F7915E" },
-];
-
-const recentActivity = [
-  { initials: "AM", name: "Amanda Meirelles", detail: "Novo orçamento · Armação Vogue", value: "R$ 890", stage: "Em atendimento", color: "bg-blue-100 text-[#002187]" },
-  { initials: "GS", name: "Guilherme Sampaio", detail: "Ray-Ban Aviator Polarizado", value: "R$ 1.250", stage: "Novo lead", color: "bg-[#F7915E]/15 text-[#b94a15]" },
-  { initials: "CS", name: "Carlos Eduardo Silveira", detail: "Oakley Grau Esportivo", value: "R$ 1.950", stage: "Recompra", color: "bg-[#C4D600]/25 text-[#051647]" },
-  { initials: "LF", name: "Lucas Ferraz Fontes", detail: "Reposição de lentes Acuvue", value: "R$ 540", stage: "Recompra", color: "bg-[#C4D600]/25 text-[#051647]" },
-];
+const toLocalDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value);
 
 export default function PainelPage() {
-  const [isDark, setIsDark] = useState(false);
+  const { isDark, toggleTheme } = useCrmTheme();
   const [period, setPeriod] = useState<Period>("30d");
-  const summary = summaries[period];
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [dashboardError, setDashboardError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentDate, setCurrentDate] = useState<Date | null>(null);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("otb-crm-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
+    let active = true;
+    fetch("/api/dashboard")
+      .then(async (response) => {
+        const result = await response.json() as { data?: DashboardData; error?: string };
+        if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível carregar os indicadores.");
+        if (active) {
+          setCurrentDate(new Date());
+          setDashboardData(result.data);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setDashboardError(error instanceof Error ? error.message : "Não foi possível carregar os indicadores.");
+      })
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
   }, []);
 
-  const toggleTheme = () => {
-    setIsDark((previous) => {
-      const next = !previous;
-      document.documentElement.classList.toggle("dark", next);
-      localStorage.setItem("otb-crm-theme", next ? "dark" : "light");
-      return next;
-    });
-  };
-
+  const today = currentDate ?? new Date("2000-01-01T12:00:00");
+  const periodDays = period === "7d" ? 7 : period === "30d" ? 30 : 365;
+  const startDate = new Date(today);
+  startDate.setDate(startDate.getDate() - periodDays + 1);
+  const matchingSales = (dashboardData?.dailySales ?? []).filter((sale) => sale.day >= toLocalDateKey(startDate) && sale.day <= toLocalDateKey(today));
+  const salesByDay = new Map(matchingSales.map((sale) => [sale.day, sale]));
+  const revenueByPeriod = period === "7d"
+    ? Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(today);
+        date.setDate(date.getDate() - 6 + index);
+        const key = toLocalDateKey(date);
+        return { label: date.toLocaleDateString("pt-BR", { weekday: "short" }), receita: salesByDay.get(key)?.revenue ?? 0 };
+      })
+    : period === "30d"
+      ? Array.from({ length: 4 }, (_, index) => {
+          const firstDate = new Date(startDate);
+          firstDate.setDate(firstDate.getDate() + index * 7);
+          const lastDate = new Date(firstDate);
+          lastDate.setDate(lastDate.getDate() + 6);
+          return {
+            label: `Sem. ${index + 1}`,
+            receita: matchingSales.filter((sale) => sale.day >= toLocalDateKey(firstDate) && sale.day <= toLocalDateKey(lastDate)).reduce((sum, sale) => sum + sale.revenue, 0),
+          };
+        })
+      : Array.from({ length: 12 }, (_, index) => {
+          const date = new Date(today.getFullYear(), today.getMonth() - 11 + index, 1);
+          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+          return {
+            label: date.toLocaleDateString("pt-BR", { month: "short" }),
+            receita: matchingSales.filter((sale) => sale.day.startsWith(key)).reduce((sum, sale) => sum + sale.revenue, 0),
+          };
+        });
+  const rangeRevenue = matchingSales.reduce((sum, sale) => sum + sale.revenue, 0);
+  const pipelineData = Object.entries(dashboardData?.pipelineCounts ?? {}).map(([stage, deals]) => ({
+    etapa: stageLabels[stage] ?? stage,
+    deals,
+  }));
+  const totalPipeline = pipelineData.reduce((sum, item) => sum + item.deals, 0);
+  const customerSegments = Object.entries(dashboardData?.categoryCounts ?? {})
+    .filter(([category]) => category in categoryLabels)
+    .map(([category, count]) => ({
+      name: categoryLabels[category].label,
+      value: dashboardData?.contacts ? Math.round((count / dashboardData.contacts) * 100) : 0,
+      color: categoryLabels[category].color,
+    }));
+  const recentActivity = (dashboardData?.recentContacts ?? []).map((contact) => ({
+    id: contact.id,
+    name: contact.name,
+    detail: `Contato atualizado · ${new Date(contact.updatedAt).toLocaleString("pt-BR")}`,
+    stage: categoryLabels[contact.category]?.label ?? contact.category,
+  }));
   const metrics = [
-    { label: "Receita", value: summary.revenue, change: summary.revenueChange, note: "vs. período anterior", icon: CircleDollarSign, iconClass: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
-    { label: "Deals ativos", value: summary.deals, change: summary.dealsChange, note: "oportunidades no funil", icon: ShoppingBag, iconClass: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
-    { label: "Conversão", value: summary.conversion, change: summary.conversionChange, note: "lead até a compra", icon: Target, iconClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
-    { label: "NPS médio", value: summary.nps, change: summary.npsChange, note: "satisfação dos clientes", icon: Star, iconClass: "bg-orange-50 text-[#b94a15] dark:bg-orange-950/30 dark:text-[#F7915E]" },
+    { label: "Receita no período", value: formatCurrency(rangeRevenue), note: `${matchingSales.reduce((sum, sale) => sum + sale.sales, 0).toLocaleString("pt-BR")} vendas importadas`, icon: CircleDollarSign, iconClass: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
+    { label: "Contatos", value: (dashboardData?.contacts ?? 0).toLocaleString("pt-BR"), note: "registros no banco", icon: ShoppingBag, iconClass: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
+    { label: "Compras", value: (dashboardData?.purchases ?? 0).toLocaleString("pt-BR"), note: `valor histórico ${formatCurrency(dashboardData?.totalRevenue ?? 0)}`, icon: Target, iconClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+    { label: "NPS", value: dashboardData?.nps === null || dashboardData?.nps === undefined ? "—" : String(dashboardData.nps), note: `${dashboardData?.npsResponses ?? 0} respostas registradas`, icon: Star, iconClass: "bg-orange-50 text-[#b94a15] dark:bg-orange-950/30 dark:text-[#F7915E]" },
   ];
 
   const tooltipStyle = {
@@ -146,6 +174,8 @@ export default function PainelPage() {
         </header>
 
         <main className="space-y-5 px-6 pb-10 pt-8 sm:px-8">
+          {dashboardError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{dashboardError}</p>}
+          {isLoading && <LoadingSpinner label="Carregando dados reais do banco..." />}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Painel</h1>
@@ -176,12 +206,7 @@ export default function PainelPage() {
                       <Icon className="h-4 w-4" />
                     </span>
                   </div>
-                  <div className="mt-3 flex items-center gap-1.5 text-[11px]">
-                    <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-700 dark:text-emerald-300">
-                      <ArrowUpRight className="h-3.5 w-3.5" />{metric.change}
-                    </span>
-                    <span className="text-slate-400">{metric.note}</span>
-                  </div>
+                  <p className="mt-3 text-[11px] text-slate-400">{metric.note}</p>
                 </article>
               );
             })}
@@ -192,21 +217,19 @@ export default function PainelPage() {
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white">Receita ao longo do período</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Faturamento comparado à meta</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Vendas importadas</p>
                 </div>
                 <div className="flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-400">
                   <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: revenueColor }} />Receita</span>
-                  <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 bg-[#F7915E]" />Meta</span>
                 </div>
               </div>
               <div className="h-[250px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={revenueByPeriod[period]} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <AreaChart data={revenueByPeriod} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid stroke={isDark ? "#1e335b" : "#e2e8f0"} vertical={false} strokeDasharray="3 4" />
                     <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} dy={8} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} tickFormatter={(value: number) => new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 0 }).format(value)} width={48} />
                     <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
-                    <Area isAnimationActive={false} type="monotone" dataKey="meta" stroke="#F7915E" strokeWidth={2} strokeDasharray="5 5" fill="transparent" />
                     <Area isAnimationActive={false} type="monotone" dataKey="receita" stroke={revenueColor} strokeWidth={2.5} fill={revenueColor} fillOpacity={0.1} activeDot={{ r: 4, fill: "#C4D600", stroke: "#051647", strokeWidth: 2 }} />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -215,8 +238,8 @@ export default function PainelPage() {
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f] sm:p-5 xl:col-span-4" aria-label="Funil de novos clientes">
               <div className="mb-3">
-                <h2 className="text-sm font-bold text-slate-900 dark:text-white">Funil de novos clientes</h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">42 leads · 35,7% chegam ao fechamento</p>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">Oportunidades por etapa</h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{totalPipeline} oportunidades registradas</p>
               </div>
               <div className="h-[250px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -236,7 +259,7 @@ export default function PainelPage() {
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f] sm:p-5 xl:col-span-4" aria-label="Perfil de clientes">
               <div>
                 <h2 className="text-sm font-bold text-slate-900 dark:text-white">Perfil de clientes</h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Distribuição da base ativa</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Distribuição dos contatos cadastrados</p>
               </div>
               <div className="mt-3 grid grid-cols-[minmax(130px,1fr)_1fr] items-center gap-2">
                 <div className="h-[190px] w-full">
@@ -261,33 +284,26 @@ export default function PainelPage() {
                   ))}
                 </div>
               </div>
-              <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
-                <span className="text-slate-500 dark:text-slate-400">Clientes recorrentes</span>
-                <span className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300"><ArrowUpRight className="h-3.5 w-3.5" />+8,2%</span>
-              </div>
+              <p className="border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">{(dashboardData?.contacts ?? 0).toLocaleString("pt-BR")} contatos no total</p>
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f] sm:p-5 xl:col-span-8" aria-label="Atividade recente">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white">Atividade recente</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Últimos deals atualizados</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Contatos atualizados recentemente</p>
                 </div>
                 <span className="text-xs font-semibold text-[#002187] dark:text-[#C4D600]">{recentActivity.length} atualizações</span>
               </div>
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {recentActivity.map((activity) => (
-                  <div key={activity.name} className="flex items-center gap-3 py-3">
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[10px] font-bold ${activity.color}`}>{activity.initials}</span>
+                  <div key={activity.id} className="flex items-center gap-3 py-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#C4D600]/20 text-[10px] font-bold text-[#051647]">{activity.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-semibold text-slate-800 dark:text-slate-100">{activity.name}</p>
                       <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">{activity.detail}</p>
                     </div>
-                    <div className="hidden shrink-0 text-right sm:block">
-                      <p className="text-xs font-bold text-slate-800 dark:text-slate-100">{activity.value}</p>
-                      <p className="text-[10px] text-slate-400">{activity.stage}</p>
-                    </div>
-                    <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${activity.color}`}>{activity.stage}</span>
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{activity.stage}</span>
                   </div>
                 ))}
               </div>
@@ -299,13 +315,12 @@ export default function PainelPage() {
               <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><RefreshCw className="h-4 w-4" /></span>
               <div>
                 <p className="text-xs font-bold text-slate-900 dark:text-white">Clientes para reativar</p>
-                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">8 clientes sem compra há mais de 6 meses.</p>
+                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{dashboardData?.categoryCounts.inativo ?? 0} contatos classificados como inativos.</p>
               </div>
             </div>
-            <button type="button" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
+            <Link href="/contatos" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
               Ver clientes
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </button>
+            </Link>
           </section>
         </main>
       </div>

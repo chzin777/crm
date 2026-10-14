@@ -5,8 +5,10 @@ import { Bell, Check, Plus, ShieldCheck, Users } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormSelect } from "@/components/FormSelect";
 import Stepper, { Step } from "@/components/Stepper";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 
 type UserRole = "Administrador" | "Supervisor" | "Operador";
 
@@ -18,31 +20,51 @@ interface TeamUser {
   nivel: UserRole;
 }
 
-const initialUsers: TeamUser[] = [
-  { id: "usr-1", nome: "Ana Paula Silva", email: "ana.paula@oticasbrasil.com.br", cargo: "Coordenadora de Marketing", nivel: "Administrador" },
-  { id: "usr-2", nome: "Camila Guimarães", email: "camila.g@oticasbrasil.com.br", cargo: "Atendimento & Balcão", nivel: "Operador" },
-  { id: "usr-3", nome: "Marcos Vinícius", email: "marcos.v@oticasbrasil.com.br", cargo: "Atendimento & Balcão", nivel: "Operador" },
-  { id: "usr-4", nome: "Felipe Nogueira", email: "felipe.n@oticasbrasil.com.br", cargo: "Gestor Comercial", nivel: "Supervisor" },
-];
+interface ApiTeamUser {
+  id: string;
+  name: string;
+  email: string;
+  jobTitle: string | null;
+  teamLevel: string;
+  role: string;
+}
 
 const roles: UserRole[] = ["Administrador", "Supervisor", "Operador"];
 const toUserRole = (value: string): UserRole => roles.find((role) => role === value) ?? "Operador";
+const toApiRole = (role: UserRole) => role === "Administrador" ? "admin" : role === "Supervisor" ? "supervisor" : "user";
+const fromApiUser = (user: ApiTeamUser): TeamUser => ({
+  id: user.id,
+  nome: user.name,
+  email: user.email,
+  cargo: user.jobTitle ?? "",
+  nivel: toUserRole(user.teamLevel || (user.role === "admin" ? "Administrador" : "Operador")),
+});
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
 export default function UsuariosPage() {
-  const [isDark, setIsDark] = useState(false);
-  const [usuarios, setUsuarios] = useState(initialUsers);
+  const { isDark, toggleTheme } = useCrmTheme();
+  const [usuarios, setUsuarios] = useState<TeamUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<TeamUser | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [form, setForm] = useState({ nome: "", email: "", cargo: "", nivel: "Operador" as UserRole });
   const [formError, setFormError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [usersError, setUsersError] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("otb-crm-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
+    let active = true;
+    fetch("/api/users")
+      .then(async (response) => {
+        const result = await response.json() as { data?: ApiTeamUser[]; error?: string };
+        if (!response.ok) throw new Error(result.error || "Não foi possível carregar os usuários.");
+        if (active) setUsuarios((result.data ?? []).map(fromApiUser));
+      })
+      .catch((error: unknown) => {
+        if (active) setUsersError(error instanceof Error ? error.message : "Não foi possível carregar os usuários.");
+      })
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -57,15 +79,6 @@ export default function UsuariosPage() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedUser, isCreateOpen]);
-
-  const toggleTheme = () => {
-    setIsDark((prev) => {
-      const next = !prev;
-      document.documentElement.classList.toggle("dark", next);
-      localStorage.setItem("otb-crm-theme", next ? "dark" : "light");
-      return next;
-    });
-  };
 
   const startEditingUser = (user: TeamUser) => {
     setSelectedUser(user);
@@ -86,42 +99,53 @@ export default function UsuariosPage() {
     return true;
   };
 
-  const createUser = () => {
+  const createUser = async () => {
     if (!validateStep(1) || !validateStep(2)) return;
-    const user: TeamUser = {
-      id: `usr-${Date.now()}`,
-      nome: form.nome.trim(),
-      email: form.email.trim(),
-      cargo: form.cargo.trim(),
-      nivel: form.nivel,
-    };
-    setUsuarios((current) => [user, ...current]);
-    setSelectedUser(null);
-    setIsCreateOpen(false);
-    setForm({ nome: "", email: "", cargo: "", nivel: "Operador" });
-    setFormError("");
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: form.nome.trim(), email: form.email.trim(), jobTitle: form.cargo.trim(), role: toApiRole(form.nivel) }),
+      });
+      const result = await response.json() as { data?: ApiTeamUser; error?: string };
+      if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível criar o usuário.");
+      setUsuarios((current) => [fromApiUser(result.data!), ...current]);
+      setSelectedUser(null);
+      setIsCreateOpen(false);
+      setForm({ nome: "", email: "", cargo: "", nivel: "Operador" });
+      setNotice("Usuário cadastrado no banco. O convite por e-mail ainda não está configurado.");
+      setFormError("");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Não foi possível criar o usuário.");
+    }
   };
 
-  const saveUser = () => {
+  const saveUser = async () => {
     if (!selectedUser || !form.nome.trim() || !isValidEmail(form.email.trim()) || !form.cargo.trim()) {
       setFormError("Preencha nome, e-mail e cargo para salvar.");
       return;
     }
-    const updatedUser = {
-      ...selectedUser,
-      nome: form.nome.trim(),
-      email: form.email.trim(),
-      cargo: form.cargo.trim(),
-      nivel: form.nivel,
-    };
-    setUsuarios((current) => current.map((user) => user.id === updatedUser.id ? updatedUser : user));
-    setSelectedUser(updatedUser);
-    setFormError("");
+    try {
+      const response = await fetch("/api/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selectedUser.id, name: form.nome.trim(), email: form.email.trim(), jobTitle: form.cargo.trim(), role: toApiRole(form.nivel) }),
+      });
+      const result = await response.json() as { data?: ApiTeamUser; error?: string };
+      if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível atualizar o usuário.");
+      const updatedUser = fromApiUser(result.data);
+      setUsuarios((current) => current.map((user) => user.id === updatedUser.id ? updatedUser : user));
+      setSelectedUser(updatedUser);
+      setFormError("");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Não foi possível atualizar o usuário.");
+    }
   };
 
   const openCreate = () => {
     setForm({ nome: "", email: "", cargo: "", nivel: "Operador" });
     setFormError("");
+    setNotice("");
     setIsCreateOpen(true);
   };
 
@@ -139,24 +163,31 @@ export default function UsuariosPage() {
               <Bell className="h-4 w-4" />
             </button>
             <button type="button" onClick={openCreate} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-              <Plus className="w-4 h-4" /> Convidar Usuário
+              <Plus className="w-4 h-4" /> Cadastrar usuário
             </button>
           </div>
         </header>
 
         <main className="space-y-6 p-8">
+          {usersError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{usersError}</p>}
+          {notice && <p role="status" className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 px-4 py-3 text-sm text-slate-700 dark:text-slate-200">{notice}</p>}
           <div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Equipe e Permissões</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Usuários com acesso ao funil de relacionamento e disparos de marketing</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Usuários cadastrados com acesso às ferramentas de relacionamento e campanhas.</p>
           </div>
 
           <section aria-label="Usuários da equipe" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
             <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-              <div><h2 className="text-sm font-bold text-slate-900 dark:text-white">Membros da equipe</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{usuarios.length} usuários com acesso</p></div>
+              <div><h2 className="text-sm font-bold text-slate-900 dark:text-white">Membros da equipe</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{usuarios.length} registros de usuário no banco</p></div>
               <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]"><Users className="h-4 w-4" /></span>
             </header>
             <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-              {usuarios.map((user) => (
+              {isLoading && (
+                <li className="grid min-h-48 place-items-center px-5">
+                  <LoadingSpinner label="Carregando usuários..." className="w-full justify-center" />
+                </li>
+              )}
+              {!isLoading && usuarios.map((user) => (
                 <li key={user.id}>
                   <button
                     type="button"
@@ -171,6 +202,7 @@ export default function UsuariosPage() {
                   </button>
                 </li>
               ))}
+              {!isLoading && usuarios.length === 0 && <li className="p-6 text-center text-sm text-slate-500 dark:text-slate-400">Nenhum usuário encontrado.</li>}
             </ul>
           </section>
         </main>
@@ -207,15 +239,15 @@ export default function UsuariosPage() {
               <Step title="Identificação" description="Nome e e-mail">
                 <div className="space-y-4">
                   <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Dados do usuário</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Informe o nome e o endereço para envio do convite.</p></div>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo *</span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>E-mail *</span><input type="email" value={form.email} onChange={(event) => { setForm({ ...form, email: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>E-mail <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="email" value={form.email} onChange={(event) => { setForm({ ...form, email: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
               </Step>
               <Step title="Acesso" description="Cargo e permissões">
                 <div className="space-y-4">
                   <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Defina o acesso</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha o cargo e nível de permissão na plataforma.</p></div>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Cargo *</span><input value={form.cargo} onChange={(event) => { setForm({ ...form, cargo: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Cargo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.cargo} onChange={(event) => { setForm({ ...form, cargo: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <FormSelect label="Nível de permissão" value={form.nivel} options={roles} onChange={(nivel) => setForm({ ...form, nivel: toUserRole(nivel) })} />
                   {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
@@ -240,9 +272,9 @@ export default function UsuariosPage() {
                   <span className="grid h-11 w-11 place-items-center rounded-full bg-[#C4D600]/20 text-xs font-bold text-[#051647] dark:text-[#C4D600]">{form.nome.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
                   <span><span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300"><ShieldCheck className="h-3 w-3" />{form.nivel}</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{form.cargo}</span></span>
                 </div>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo</span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>E-mail</span><input type="email" value={form.email} onChange={(event) => { setForm({ ...form, email: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Cargo</span><input value={form.cargo} onChange={(event) => { setForm({ ...form, cargo: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>E-mail <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="email" value={form.email} onChange={(event) => { setForm({ ...form, email: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Cargo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.cargo} onChange={(event) => { setForm({ ...form, cargo: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 <FormSelect label="Nível de permissão" value={form.nivel} options={roles} onChange={(nivel) => setForm({ ...form, nivel: toUserRole(nivel) })} />
                 {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>

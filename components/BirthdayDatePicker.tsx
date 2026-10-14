@@ -50,7 +50,7 @@ export function BirthdayDatePicker({ value, onChange }: BirthdayDatePickerProps)
   };
 
   return (
-    <div className="space-y-1.5">
+    <div className={`relative space-y-1.5 ${isOpen ? "z-[130]" : ""}`}>
       <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Data de nascimento</span>
       <button
         type="button"
@@ -69,7 +69,7 @@ export function BirthdayDatePicker({ value, onChange }: BirthdayDatePickerProps)
         <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
       {isOpen && (
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-[#07194f]">
+        <div className="absolute left-0 top-full z-[130] mt-2 w-full rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-[#07194f]">
           {showYears ? (
             <div className="grid max-h-56 grid-cols-4 gap-1 overflow-y-auto">
               {years.map((year) => (

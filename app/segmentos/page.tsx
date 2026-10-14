@@ -12,19 +12,30 @@ import {
   Sparkles,
   Tags,
   Target,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import Stepper, { Step } from "@/components/Stepper";
-import { initialContacts, type ContactCategory } from "@/lib/contacts";
-import { initialSegmentNames } from "@/lib/segments";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
+import type { Contact, ContactCategory } from "@/lib/contacts";
+import { useCrmData } from "@/hooks/useCrmData";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 
 type SegmentStatus = "Ativo" | "Rascunho";
 type SegmentFilter = "Todos" | SegmentStatus;
 type AudienceMode = "criterios" | "contatos";
 type ContactFilter = "Todos" | "Clientes" | "Leads" | "NPS" | "Inativos";
+type CriterionKind = "geral" | "loja";
+
+interface SegmentCriterion {
+  id: string;
+  nome: string;
+  tipo: CriterionKind;
+  inativo?: boolean;
+}
 
 interface Segment {
   id: string;
@@ -40,87 +51,6 @@ interface Segment {
   campanhas: number;
 }
 
-const initialSegments: Segment[] = [
-  {
-    id: "seg-1",
-    nome: initialSegmentNames.postAtendimentoNps,
-    descricao: "Clientes que concluíram uma compra recentemente.",
-    status: "Ativo",
-    membros: 1284,
-    atualizado: "Hoje, 09:42",
-    criterios: ["Compra concluída", "Últimos 30 minutos", "Telefone válido"],
-    modoPublico: "criterios",
-    contatosSelecionados: [],
-    objetivo: "Enviar pesquisa de satisfação após atendimento.",
-    campanhas: 1,
-  },
-  {
-    id: "seg-2",
-    nome: initialSegmentNames.adaptacaoLentesNps,
-    descricao: "Clientes que estão usando lentes novas há um mês.",
-    status: "Ativo",
-    membros: 638,
-    atualizado: "Hoje, 08:15",
-    criterios: ["Compra de lentes", "Entre 28 e 35 dias da compra", "Não respondeu à pesquisa"],
-    modoPublico: "criterios",
-    contatosSelecionados: [],
-    objetivo: "Acompanhar adaptação e identificar necessidade de ajuste.",
-    campanhas: 1,
-  },
-  {
-    id: "seg-3",
-    nome: initialSegmentNames.interesseArmacoes,
-    descricao: "Leads que pediram orçamento de armação nos últimos dias.",
-    status: "Ativo",
-    membros: 412,
-    atualizado: "Ontem, 16:20",
-    criterios: ["Lead com orçamento aberto", "Interesse em armação", "Sem compra nos últimos 7 dias"],
-    modoPublico: "criterios",
-    contatosSelecionados: [],
-    objetivo: "Retomar o atendimento e avançar o orçamento.",
-    campanhas: 2,
-  },
-  {
-    id: "seg-4",
-    nome: initialSegmentNames.reativacaoClientes,
-    descricao: "Clientes sem compras há mais de seis meses.",
-    status: "Ativo",
-    membros: 348,
-    atualizado: "Ontem, 14:05",
-    criterios: ["Compra anterior", "Sem compra há mais de 180 dias", "Telefone válido"],
-    modoPublico: "criterios",
-    contatosSelecionados: [],
-    objetivo: "Criar uma oportunidade de retorno à loja.",
-    campanhas: 1,
-  },
-  {
-    id: "seg-5",
-    nome: initialSegmentNames.recallExameAnual,
-    descricao: "Pacientes próximos de completar um ano do último exame.",
-    status: "Ativo",
-    membros: 112,
-    atualizado: "13/10/2026",
-    criterios: ["Exame registrado", "Entre 350 e 365 dias do exame"],
-    modoPublico: "criterios",
-    contatosSelecionados: [],
-    objetivo: "Lembrar o cliente de atualizar o exame de vista.",
-    campanhas: 1,
-  },
-  {
-    id: "seg-6",
-    nome: initialSegmentNames.compradoresFrequentes,
-    descricao: "Clientes com histórico recorrente de compras.",
-    status: "Rascunho",
-    membros: 0,
-    atualizado: "Criado em 12/10/2026",
-    criterios: ["Três ou mais compras", "Últimos 12 meses"],
-    modoPublico: "criterios",
-    contatosSelecionados: [],
-    objetivo: "Preparar ofertas de fidelização para clientes frequentes.",
-    campanhas: 0,
-  },
-];
-
 const statusStyles: Record<SegmentStatus, string> = {
   Ativo: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
   Rascunho: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -134,22 +64,44 @@ const contactCategoryLabels: Record<ContactCategory, string> = {
   nps: "NPS",
   inativo: "Inativo",
 };
-const presetCriteria = [
-  "Comprou nos últimos 30 dias",
-  "Comprou nos últimos 90 dias",
-  "Comprou nos últimos 180 dias",
-  "Sem compra há mais de 180 dias",
-  "Tem compra de lentes multifocais",
-  "Exame vence nos próximos 30 dias",
-  "Ainda não respondeu ao NPS",
-  "Recebeu NPS abaixo de 7",
-  "Tem orçamento em aberto",
-  "Telefone válido",
+const presetCriteria: SegmentCriterion[] = [
+  { id: "criteria-30d", nome: "Comprou nos últimos 30 dias", tipo: "geral" },
+  { id: "criteria-90d", nome: "Comprou nos últimos 90 dias", tipo: "geral" },
+  { id: "criteria-180d", nome: "Comprou nos últimos 180 dias", tipo: "geral" },
+  { id: "criteria-inactive-180d", nome: "Sem compra há mais de 180 dias", tipo: "geral" },
+  { id: "criteria-no-nps", nome: "Ainda não respondeu ao NPS", tipo: "geral" },
+  { id: "criteria-low-nps", nome: "Recebeu NPS abaixo de 7", tipo: "geral" },
+  { id: "criteria-valid-phone", nome: "Telefone válido", tipo: "geral" },
 ];
 
+const criterionKinds: CriterionKind[] = ["geral", "loja"];
+const criterionKindLabels: Record<CriterionKind, string> = {
+  geral: "Geral",
+  loja: "Loja",
+};
 export default function SegmentosPage() {
-  const [isDark, setIsDark] = useState(false);
-  const [segments, setSegments] = useState(initialSegments);
+  const { isDark, toggleTheme } = useCrmTheme();
+  const { data: segments, setData: setSegments, isLoading: segmentsLoading, error: segmentsError } = useCrmData<Segment[]>("segments", []);
+  const { data: savedCriteriaOptions, setData: setSavedCriteriaOptions, error: criteriaDataError } = useCrmData<SegmentCriterion[]>("criteria", []);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const { data: campaigns, error: campaignsError } = useCrmData<{ id: string; publico: string }[]>("campaigns", []);
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [contactsError, setContactsError] = useState("");
+  const [storeNumbers, setStoreNumbers] = useState<number[]>([]);
+  const [audienceCounts, setAudienceCounts] = useState<Record<string, number>>({});
+  const requestedAudienceKeysRef = useRef(new Set<string>());
+  const storeCriteria = [...storeNumbers]
+    .sort((a, b) => a - b)
+    .map((number) => ({ id: `store-${number}`, nome: `Loja ${number}`, tipo: "loja" as const }));
+  const isSystemCriterion = (criterion: SegmentCriterion) =>
+    presetCriteria.some((preset) => preset.id === criterion.id) || criterion.id.startsWith("store-");
+  // System criteria (presets and stores) keep their name and type; only the "inativo" flag is read from saved data.
+  const criteriaOptions: SegmentCriterion[] = [
+    ...presetCriteria.map((preset) => ({ ...preset, inativo: savedCriteriaOptions.find((saved) => saved.id === preset.id)?.inativo === true })),
+    ...storeCriteria.map((store) => ({ ...store, inativo: savedCriteriaOptions.find((saved) => saved.id === store.id)?.inativo === true })),
+    ...savedCriteriaOptions.filter((saved) => !isSystemCriterion(saved)),
+  ];
+  const setCriteriaOptions = (options: SegmentCriterion[]) => setSavedCriteriaOptions(options);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<SegmentFilter>("Todos");
   const [selectedSegment, setSelectedSegment] = useState<Segment | null>(null);
@@ -163,23 +115,56 @@ export default function SegmentosPage() {
   const [contactFilter, setContactFilter] = useState<ContactFilter>("Todos");
   const [isContactPickerOpen, setIsContactPickerOpen] = useState(false);
   const [isCriteriaMenuOpen, setIsCriteriaMenuOpen] = useState(false);
+  const [criteriaSearchTerm, setCriteriaSearchTerm] = useState("");
+  const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
+  const [editingCriterionId, setEditingCriterionId] = useState<string | null>(null);
+  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind });
+  const [criteriaManagerError, setCriteriaManagerError] = useState("");
   const criteriaMenuRef = useRef<HTMLDivElement>(null);
   const criteriaTriggerRef = useRef<HTMLButtonElement>(null);
   const criteriaMenuPortalRef = useRef<HTMLDivElement>(null);
   const [criteriaMenuPosition, setCriteriaMenuPosition] = useState<CSSProperties>({});
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("otb-crm-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = savedTheme === "dark" || (!savedTheme && prefersDark);
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
+    let active = true;
+    fetch("/api/contacts/search?limit=50")
+      .then(async (response) => {
+        const result = await response.json() as { data?: Contact[]; error?: string };
+        if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
+        if (active) {
+          setContacts(result.data ?? []);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setContactsError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
+      })
+      .finally(() => { if (active) setContactsLoading(false); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (!selectedSegment && !isCreateOpen) return;
+    let active = true;
+    fetch("/api/segments/audience")
+      .then(async (response) => {
+        const result = await response.json() as { data?: { number: number; name: string }[] };
+        if (active && response.ok) setStoreNumbers((result.data ?? []).map((store) => store.number));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+
+  useEffect(() => {
+    if (!selectedSegment && !isCreateOpen && !isCriteriaManagerOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (isCriteriaManagerOpen) {
+          event.stopPropagation();
+          setIsCriteriaManagerOpen(false);
+          setEditingCriterionId(null);
+          setCriteriaManagerError("");
+          return;
+        }
         if (isContactPickerOpen) {
           event.stopPropagation();
           setIsContactPickerOpen(false);
@@ -192,7 +177,7 @@ export default function SegmentosPage() {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedSegment, isCreateOpen, isContactPickerOpen]);
+  }, [selectedSegment, isCreateOpen, isContactPickerOpen, isCriteriaManagerOpen]);
 
   useEffect(() => {
     if (!isCriteriaMenuOpen) return;
@@ -202,7 +187,7 @@ export default function SegmentosPage() {
       const bounds = trigger.getBoundingClientRect();
       const availableBelow = window.innerHeight - bounds.bottom - 12;
       const availableAbove = bounds.top - 12;
-      const desiredHeight = Math.min(240, window.innerHeight - 24);
+      const desiredHeight = Math.min(360, window.innerHeight - 24);
       const openAbove = availableBelow < desiredHeight && availableAbove > availableBelow;
       const availableSpace = openAbove ? availableAbove : availableBelow;
       const maxHeight = Math.max(96, Math.min(desiredHeight, availableSpace));
@@ -232,25 +217,60 @@ export default function SegmentosPage() {
     };
   }, [isCriteriaMenuOpen]);
 
-  const toggleTheme = () => {
-    setIsDark((previous) => {
-      const next = !previous;
-      document.documentElement.classList.toggle("dark", next);
-      localStorage.setItem("otb-crm-theme", next ? "dark" : "light");
-      return next;
-    });
-  };
+  const audienceKey = (criterionNames: string[]) => criterionNames.join("\n");
+  const countByCriteria = (criterionNames: string[]) => audienceCounts[audienceKey(criterionNames)] ?? 0;
+  const segmentMemberCount = (segment: Segment) => segment.modoPublico === "contatos"
+    ? segment.contatosSelecionados.length
+    : countByCriteria(segment.criterios);
+
+  // Counts are computed by the server over the whole contact base, never from the paged contact list.
+  const neededAudiences = [
+    ...segments.filter((segment) => segment.modoPublico !== "contatos").map((segment) => segment.criterios),
+    form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean),
+  ].filter((names) => names.length > 0);
+  const neededAudiencesSignature = JSON.stringify(neededAudiences);
+  const criteriaOptionsSignature = JSON.stringify(criteriaOptions);
+  useEffect(() => {
+    const audiences = JSON.parse(neededAudiencesSignature) as string[][];
+    const options = JSON.parse(criteriaOptionsSignature) as SegmentCriterion[];
+    const groups: Record<string, SegmentCriterion[]> = {};
+    for (const names of audiences) {
+      const key = audienceKey(names);
+      const resolved = names.map((name) => {
+        const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
+        return options.find((option) => option.nome === name || option.nome === legacyName);
+      });
+      if (resolved.some((option) => !option)) continue;
+      const signature = `${key}|${JSON.stringify(resolved)}`;
+      if (requestedAudienceKeysRef.current.has(signature)) continue;
+      requestedAudienceKeysRef.current.add(signature);
+      groups[key] = resolved as SegmentCriterion[];
+    }
+    if (Object.keys(groups).length === 0) return;
+    fetch("/api/segments/audience", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups }),
+    })
+      .then(async (response) => {
+        const result = await response.json() as { counts?: Record<string, number> };
+        if (response.ok && result.counts) setAudienceCounts((current) => ({ ...current, ...result.counts }));
+      })
+      .catch(() => undefined);
+  }, [neededAudiencesSignature, criteriaOptionsSignature]);
+  const segmentCampaignCount = (segment: Segment) =>
+    campaigns.filter((campaign) => campaign.publico.split(", ").includes(segment.nome)).length;
 
   const filteredSegments = segments.filter((segment) => {
-    const selectedNames = initialContacts.filter((contact) => segment.contatosSelecionados.includes(contact.id)).map((contact) => contact.nome).join(" ");
+    const selectedNames = contacts.filter((contact) => segment.contatosSelecionados.includes(contact.id)).map((contact) => contact.nome).join(" ");
     const matchesSearch = `${segment.nome} ${segment.descricao} ${segment.objetivo} ${segment.criterios.join(" ")} ${selectedNames}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));
     return matchesSearch && (activeFilter === "Todos" || segment.status === activeFilter);
   });
 
   const activeCount = segments.filter((segment) => segment.status === "Ativo").length;
-  const totalMembers = segments.reduce((total, segment) => total + segment.membros, 0);
-  const connectedCampaigns = segments.reduce((total, segment) => total + segment.campanhas, 0);
-  const availableContacts = initialContacts.filter((contact) => {
+  const totalMembers = segments.reduce((total, segment) => total + segmentMemberCount(segment), 0);
+  const connectedCampaigns = segments.reduce((total, segment) => total + segmentCampaignCount(segment), 0);
+  const availableContacts = contacts.filter((contact) => {
     const matchesSearch = `${contact.nome} ${contact.telefone} ${contact.email}`.toLocaleLowerCase("pt-BR").includes(contactSearch.trim().toLocaleLowerCase("pt-BR"));
     const matchesFilter = contactFilter === "Todos"
       || (contactFilter === "Clientes" && contact.compras > 0)
@@ -261,14 +281,96 @@ export default function SegmentosPage() {
   });
   const allVisibleContactsSelected = availableContacts.length > 0
     && availableContacts.every((contact) => selectedContactIds.includes(contact.id));
-  const selectedContactRecords = initialContacts.filter((contact) => selectedContactIds.includes(contact.id));
+  const selectedContactRecords = contacts.filter((contact) => selectedContactIds.includes(contact.id));
   const selectedCriteria = form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean);
+  const normalizedCriteriaSearch = criteriaSearchTerm.trim().toLocaleLowerCase("pt-BR");
+  const filteredCriteriaOptions = criteriaOptions.filter((criterion) =>
+    (!criterion.inativo || selectedCriteria.includes(criterion.nome))
+    && criterion.nome.toLocaleLowerCase("pt-BR").includes(normalizedCriteriaSearch));
+  const [managerSearch, setManagerSearch] = useState("");
+  const normalizedManagerSearch = managerSearch.trim().toLocaleLowerCase("pt-BR");
+  const managerCriteria = criteriaOptions.filter((criterion) =>
+    criterion.nome.toLocaleLowerCase("pt-BR").includes(normalizedManagerSearch));
+
+  const saveCriteriaOptions = (nextCriteria: SegmentCriterion[]) => {
+    setCriteriaOptions(nextCriteria);
+    setCriteriaManagerError("");
+    return true;
+  };
+
+  const toggleCriterionActive = (criterion: SegmentCriterion) => {
+    const inativo = !criterion.inativo;
+    const exists = savedCriteriaOptions.some((saved) => saved.id === criterion.id);
+    saveCriteriaOptions(exists
+      ? savedCriteriaOptions.map((saved) => saved.id === criterion.id ? { ...saved, inativo } : saved)
+      : [...savedCriteriaOptions, { id: criterion.id, nome: criterion.nome, tipo: criterion.tipo, inativo }]);
+  };
+
+  const resetCriterionForm = () => {
+    setCriterionForm({ nome: "", tipo: "geral" });
+    setEditingCriterionId(null);
+    setCriteriaManagerError("");
+  };
+
+  const submitCriterion = () => {
+    const nome = criterionForm.nome.trim();
+    if (!nome) {
+      setCriteriaManagerError("Informe o nome do critério.");
+      return;
+    }
+    if (criteriaOptions.some((criterion) =>
+      criterion.nome.toLocaleLowerCase("pt-BR") === nome.toLocaleLowerCase("pt-BR")
+      && criterion.id !== editingCriterionId)) {
+      setCriteriaManagerError("Já existe um critério com esse nome.");
+      return;
+    }
+
+    if (editingCriterionId) {
+      const existingCriterion = criteriaOptions.find((criterion) => criterion.id === editingCriterionId);
+      if (!existingCriterion || isSystemCriterion(existingCriterion)) {
+        setCriteriaManagerError("Critérios padrão do sistema não podem ser editados, apenas inativados.");
+        return;
+      }
+      const updatedCriteria = savedCriteriaOptions.map((criterion) => criterion.id === editingCriterionId
+        ? { ...criterion, nome, tipo: criterionForm.tipo }
+        : criterion);
+      if (!saveCriteriaOptions(updatedCriteria)) return;
+      if (existingCriterion.nome !== nome) {
+        setSegments((current) => current.map((segment) => ({
+          ...segment,
+          criterios: segment.criterios.map((criterion) => criterion === existingCriterion.nome ? nome : criterion),
+        })));
+        setForm((current) => ({
+          ...current,
+          criterios: current.criterios.split("\n").map((criterion) => criterion.trim() === existingCriterion.nome ? nome : criterion).join("\n"),
+        }));
+        setSelectedSegment((current) => current ? {
+          ...current,
+          criterios: current.criterios.map((criterion) => criterion === existingCriterion.nome ? nome : criterion),
+        } : current);
+      }
+    } else {
+      const newCriterion: SegmentCriterion = {
+        id: `criterion-${crypto.randomUUID()}`,
+        nome,
+        tipo: criterionForm.tipo,
+      };
+      if (!saveCriteriaOptions([...savedCriteriaOptions, newCriterion])) return;
+    }
+    resetCriterionForm();
+  };
+
+  const deleteCriterion = (criterion: SegmentCriterion) => {
+    if (isSystemCriterion(criterion)) return;
+    if (!saveCriteriaOptions(savedCriteriaOptions.filter((item) => item.id !== criterion.id))) return;
+    resetCriterionForm();
+  };
 
   const metrics = [
     { label: "Segmentos", value: segments.length.toString(), detail: "na biblioteca", icon: Tags, color: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
-    { label: "Ativos", value: activeCount.toString(), detail: "atualizados automaticamente", icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
-    { label: "Pessoas alcançáveis", value: totalMembers.toLocaleString("pt-BR"), detail: "somatório dos segmentos", icon: Users, color: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
-    { label: "Campanhas vinculadas", value: connectedCampaigns.toString(), detail: "usando esses públicos", icon: Target, color: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]" },
+    { label: "Ativos", value: activeCount.toString(), detail: "status dos segmentos", icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+    { label: "Contatos vinculados", value: totalMembers.toLocaleString("pt-BR"), detail: "soma dos públicos (pode haver repetição)", icon: Users, color: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
+    { label: "Campanhas vinculadas", value: connectedCampaigns.toString(), detail: "associação pelo público salvo", icon: Target, color: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]" },
   ];
 
   const validateSegmentStep = (step: number) => {
@@ -291,15 +393,16 @@ export default function SegmentosPage() {
   };
 
   const createSegment = () => {
-    const selectedContacts = initialContacts.filter((contact) => selectedContactIds.includes(contact.id));
+    const selectedContacts = contacts.filter((contact) => selectedContactIds.includes(contact.id));
+    const criterios = form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean);
     const segment: Segment = {
-      id: `seg-${Date.now()}`,
+      id: `seg-${crypto.randomUUID()}`,
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       status: "Rascunho",
-      membros: audienceMode === "contatos" ? selectedContacts.length : 0,
+      membros: audienceMode === "contatos" ? selectedContacts.length : countByCriteria(criterios),
       atualizado: "Criado agora",
-      criterios: audienceMode === "criterios" ? form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean) : [],
+      criterios: audienceMode === "criterios" ? criterios : [],
       modoPublico: audienceMode,
       contatosSelecionados: audienceMode === "contatos" ? [...selectedContactIds] : [],
       objetivo: form.descricao.trim(),
@@ -353,8 +456,8 @@ export default function SegmentosPage() {
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       membros: audienceMode === "contatos"
-        ? selectedContactIds.length
-        : selectedSegment.modoPublico === "criterios" ? selectedSegment.membros : 0,
+        ? contacts.filter((contact) => selectedContactIds.includes(contact.id)).length
+        : countByCriteria(criterios),
       atualizado: "Atualizado agora",
       criterios: audienceMode === "criterios" ? criterios : [],
       modoPublico: audienceMode,
@@ -366,6 +469,21 @@ export default function SegmentosPage() {
     setFormError("");
     setIsCriteriaMenuOpen(false);
     setIsContactPickerOpen(false);
+  };
+
+  const deleteSegment = (segment: Segment) => {
+    const linkedCampaigns = segmentCampaignCount(segment);
+    const campaignNote = linkedCampaigns > 0
+      ? `\n\n${linkedCampaigns} campanha(s) vinculada(s) permanecerão salvas com o público registrado.`
+      : "";
+    if (!window.confirm(`Excluir o segmento "${segment.nome}"? Esta ação não pode ser desfeita.${campaignNote}`)) return;
+
+    setSegments((current) => current.filter((item) => item.id !== segment.id));
+    if (selectedSegment?.id === segment.id) {
+      setSelectedSegment(null);
+      setIsEditingSegment(false);
+      setIsContactPickerOpen(false);
+    }
   };
 
   const closeOverlay = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -390,6 +508,9 @@ export default function SegmentosPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
+            <button type="button" onClick={() => { resetCriterionForm(); setIsCriteriaManagerOpen(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
+              <Tags className="h-3.5 w-3.5" />Gerenciar critérios
+            </button>
             <button type="button" onClick={() => setIsCreateOpen(true)} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
               <Plus className="h-4 w-4" /> Criar segmento
             </button>
@@ -397,12 +518,13 @@ export default function SegmentosPage() {
         </header>
 
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
+          {(segmentsError || criteriaDataError || contactsError || campaignsError) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{segmentsError || criteriaDataError || contactsError || campaignsError}</p>}
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Segmentos</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Organize públicos por comportamento, compra e relacionamento.</p>
             </div>
-            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"><Sparkles className="h-3.5 w-3.5 text-[#F7915E]" />Públicos atualizados automaticamente</span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"><Sparkles className="h-3.5 w-3.5 text-[#F7915E]" />Públicos vinculados aos contatos reais</span>
           </div>
 
           <section aria-label="Resumo dos segmentos" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
@@ -457,10 +579,16 @@ export default function SegmentosPage() {
                     <th className="px-4 py-3">Status</th>
                     <th className="px-5 py-3">Atualizado</th>
                     <th className="px-4 py-3 text-right">Campanhas</th>
+                    <th className="px-4 py-3 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredSegments.map((segment) => (
+                  {segmentsLoading && (
+                    <tr><td colSpan={7} className="px-5 py-8">
+                      <LoadingSpinner label="Carregando segmentos..." className="w-full justify-center" />
+                    </td></tr>
+                  )}
+                  {!segmentsLoading && filteredSegments.map((segment) => (
                     <tr
                       key={segment.id}
                       tabIndex={0}
@@ -480,18 +608,31 @@ export default function SegmentosPage() {
                           <span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{segment.nome}</span><span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">{segment.descricao}</span></span>
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-200">{segment.membros.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-200">{segmentMemberCount(segment).toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-3.5"><span className="inline-flex max-w-56 items-center gap-1.5 truncate text-xs text-slate-600 dark:text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{segment.modoPublico === "contatos" ? `${segment.contatosSelecionados.length} contatos selecionados` : segment.criterios[0] || "Sem critérios"}</span><span className="ml-1 text-[10px] text-slate-400">{segment.modoPublico === "criterios" && segment.criterios.length > 1 ? `+${segment.criterios.length - 1}` : ""}</span></td>
                       <td className="px-4 py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[segment.status]}`}>{segment.status}</span></td>
                       <td className="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400">{segment.atualizado}</td>
-                      <td className="px-4 py-3.5 text-right text-xs font-semibold text-slate-700 dark:text-slate-200">{segment.campanhas}</td>
+                      <td className="px-4 py-3.5 text-right text-xs font-semibold text-slate-700 dark:text-slate-200">{segmentCampaignCount(segment)}</td>
+                      <td className="px-4 py-3.5 text-right">
+                        <button
+                          type="button"
+                          aria-label={`Excluir segmento ${segment.nome}`}
+                          title="Excluir segmento"
+                          onClick={(event) => { event.stopPropagation(); deleteSegment(segment); }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span className="sr-only sm:not-sr-only">Excluir</span>
+                        </button>
+                      </td>
                     </tr>
                   ))}
-                  {filteredSegments.length === 0 && <tr><td colSpan={6} className="px-5 py-14 text-center"><Search className="mx-auto h-5 w-5 text-slate-400" /><p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum segmento encontrado</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p></td></tr>}
+                  {!segmentsLoading && filteredSegments.length === 0 && <tr><td colSpan={7} className="px-5 py-14 text-center"><Search className="mx-auto h-5 w-5 text-slate-400" /><p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum segmento encontrado</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p></td></tr>}
                 </tbody>
               </table>
             </div>
-            <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800"><span>Mostrando {filteredSegments.length} de {segments.length} segmentos</span><span>Dados demonstrativos</span></footer>
+            <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800"><span>Mostrando {filteredSegments.length} de {segments.length} segmentos salvos</span><span>Banco de dados</span></footer>
           </section>
         </main>
       </div>
@@ -539,9 +680,14 @@ export default function SegmentosPage() {
                   </Step>
                   <Step title="Público" description="Regras ou contatos existentes">
                     <div className="space-y-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Como definir o público?</h3>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha regras automáticas ou selecione contatos da base.</p>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Como definir o público?</h3>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Combine regras de compra, NPS, telefone e loja ou selecione contatos da base.</p>
+                        </div>
+                        <button type="button" onClick={() => { resetCriterionForm(); setIsCriteriaManagerOpen(true); }} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 text-[10px] font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
+                          <Tags className="h-3 w-3" />Gerenciar critérios
+                        </button>
                       </div>
                       <div role="group" aria-label="Origem do público" className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/80">
                         <button type="button" aria-pressed={audienceMode === "criterios"} onClick={() => { setAudienceMode("criterios"); setFormError(""); setIsCriteriaMenuOpen(false); }} className={`h-8 rounded-md px-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${audienceMode === "criterios" ? "bg-white text-[#051647] shadow-xs dark:bg-[#051647] dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>Usar critérios</button>
@@ -549,12 +695,18 @@ export default function SegmentosPage() {
                       </div>
                       {audienceMode === "criterios" ? (
                         <div className="space-y-2.5">
+                          <p className="text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                            A contagem usa os campos reais disponíveis: compras, respostas NPS, telefone e loja. Critérios personalizados sem campo correspondente não entram na contagem.
+                          </p>
                           <div ref={criteriaMenuRef} className="relative space-y-1.5">
                             <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Critérios do público <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
                             <button
                               ref={criteriaTriggerRef}
                               type="button"
-                              onClick={() => setIsCriteriaMenuOpen((open) => !open)}
+                              onClick={() => {
+                                if (!isCriteriaMenuOpen) setCriteriaSearchTerm("");
+                                setIsCriteriaMenuOpen((open) => !open);
+                              }}
                               onKeyDown={(event) => {
                                 if (event.key === "Escape") {
                                   event.preventDefault();
@@ -588,31 +740,61 @@ export default function SegmentosPage() {
                                 }}
                                 className="overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-[#07194f]"
                               >
-                                {presetCriteria.map((criterion) => {
-                                  const isSelected = selectedCriteria.includes(criterion);
+                                <label className="sticky top-0 z-10 block bg-white p-1 dark:bg-[#07194f]">
+                                  <span className="sr-only">Buscar critérios</span>
+                                  <span className="relative block">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                      type="search"
+                                      autoFocus
+                                      value={criteriaSearchTerm}
+                                      onChange={(event) => setCriteriaSearchTerm(event.target.value)}
+                                      aria-label="Buscar critérios"
+                                      placeholder="Buscar critério..."
+                                      className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                                    />
+                                  </span>
+                                </label>
+                                {criterionKinds.map((kind) => {
+                                  const groupedCriteria = filteredCriteriaOptions.filter((criterion) => criterion.tipo === kind);
+                                  if (groupedCriteria.length === 0) return null;
                                   return (
-                                    <button
-                                      key={criterion}
-                                      type="button"
-                                      role="menuitemcheckbox"
-                                      aria-checked={isSelected}
-                                      onClick={() => {
-                                        if (!isSelected) {
-                                          setForm((current) => {
-                                            const currentCriteria = current.criterios.split("\n").map((item) => item.trim()).filter(Boolean);
-                                            return { ...current, criterios: [...currentCriteria, criterion].join("\n") };
-                                          });
-                                        }
-                                        setFormError("");
-                                        setIsCriteriaMenuOpen(false);
-                                      }}
-                                      className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
-                                    >
-                                      <span>{criterion}</span>
-                                      {isSelected && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
-                                    </button>
+                                    <div key={kind}>
+                                      <p className="px-3 pb-1 pt-2 text-[9px] font-bold uppercase tracking-wide text-slate-400">{criterionKindLabels[kind]}</p>
+                                      {groupedCriteria.map((criterion) => {
+                                        const isSelected = selectedCriteria.includes(criterion.nome);
+                                        return (
+                                          <button
+                                            key={criterion.id}
+                                            type="button"
+                                            role="menuitemcheckbox"
+                                            aria-checked={isSelected}
+                                            onClick={() => {
+                                              setForm((current) => {
+                                                const currentCriteria = current.criterios.split("\n").map((item) => item.trim()).filter(Boolean);
+                                                return {
+                                                  ...current,
+                                                  criterios: (isSelected
+                                                    ? currentCriteria.filter((item) => item !== criterion.nome)
+                                                    : [...currentCriteria, criterion.nome]).join("\n"),
+                                                };
+                                              });
+                                              setFormError("");
+                                              setIsCriteriaMenuOpen(false);
+                                            }}
+                                            className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+                                          >
+                                            <span>{criterion.nome}</span>
+                                            {isSelected && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
                                   );
                                 })}
+                                {filteredCriteriaOptions.length === 0 && (
+                                  <p className="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">Nenhum critério encontrado.</p>
+                                )}
                               </div>,
                               document.body
                             )}
@@ -726,7 +908,10 @@ export default function SegmentosPage() {
                           <button
                             ref={criteriaTriggerRef}
                             type="button"
-                            onClick={() => setIsCriteriaMenuOpen((open) => !open)}
+                            onClick={() => {
+                              if (!isCriteriaMenuOpen) setCriteriaSearchTerm("");
+                              setIsCriteriaMenuOpen((open) => !open);
+                            }}
                             onKeyDown={(event) => {
                               if (event.key === "Escape") {
                                 event.preventDefault();
@@ -760,34 +945,61 @@ export default function SegmentosPage() {
                               }}
                               className="overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-[#07194f]"
                             >
-                              {presetCriteria.map((criterion) => {
-                                const isSelected = selectedCriteria.includes(criterion);
+                              <label className="sticky top-0 z-10 block bg-white p-1 dark:bg-[#07194f]">
+                                <span className="sr-only">Buscar critérios</span>
+                                <span className="relative block">
+                                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                  <input
+                                    type="search"
+                                    autoFocus
+                                    value={criteriaSearchTerm}
+                                    onChange={(event) => setCriteriaSearchTerm(event.target.value)}
+                                    aria-label="Buscar critérios"
+                                    placeholder="Buscar critério..."
+                                    className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                                  />
+                                </span>
+                              </label>
+                              {criterionKinds.map((kind) => {
+                                const groupedCriteria = filteredCriteriaOptions.filter((criterion) => criterion.tipo === kind);
+                                if (groupedCriteria.length === 0) return null;
                                 return (
-                                  <button
-                                    key={criterion}
-                                    type="button"
-                                    role="menuitemcheckbox"
-                                    aria-checked={isSelected}
-                                    onClick={() => {
-                                      setForm((current) => {
-                                        const currentCriteria = current.criterios.split("\n").map((item) => item.trim()).filter(Boolean);
-                                        return {
-                                          ...current,
-                                          criterios: (isSelected
-                                            ? currentCriteria.filter((item) => item !== criterion)
-                                            : [...currentCriteria, criterion]).join("\n"),
-                                        };
-                                      });
-                                      setFormError("");
-                                      setIsCriteriaMenuOpen(false);
-                                    }}
-                                    className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
-                                  >
-                                    <span>{criterion}</span>
-                                    {isSelected && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
-                                  </button>
+                                  <div key={kind}>
+                                    <p className="px-3 pb-1 pt-2 text-[9px] font-bold uppercase tracking-wide text-slate-400">{criterionKindLabels[kind]}</p>
+                                    {groupedCriteria.map((criterion) => {
+                                      const isSelected = selectedCriteria.includes(criterion.nome);
+                                      return (
+                                        <button
+                                          key={criterion.id}
+                                          type="button"
+                                          role="menuitemcheckbox"
+                                          aria-checked={isSelected}
+                                          onClick={() => {
+                                            setForm((current) => {
+                                              const currentCriteria = current.criterios.split("\n").map((item) => item.trim()).filter(Boolean);
+                                              return {
+                                                ...current,
+                                                criterios: (isSelected
+                                                  ? currentCriteria.filter((item) => item !== criterion.nome)
+                                                  : [...currentCriteria, criterion.nome]).join("\n"),
+                                              };
+                                            });
+                                            setFormError("");
+                                            setIsCriteriaMenuOpen(false);
+                                          }}
+                                          className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+                                        >
+                                          <span>{criterion.nome}</span>
+                                          {isSelected && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 );
                               })}
+                              {filteredCriteriaOptions.length === 0 && (
+                                <p className="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">Nenhum critério encontrado.</p>
+                              )}
                             </div>,
                             document.body
                           )}
@@ -847,6 +1059,13 @@ export default function SegmentosPage() {
                   </div>
                 </div>
                 <footer className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => deleteSegment(selectedSegment)}
+                    className="mr-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />Excluir segmento
+                  </button>
                   <button type="button" onClick={() => { setIsEditingSegment(false); setFormError(""); setIsCriteriaMenuOpen(false); }} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
                   <button type="button" onClick={saveSegmentChanges} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer">
                     <Check className="h-3.5 w-3.5" />Salvar alterações
@@ -855,14 +1074,14 @@ export default function SegmentosPage() {
               </div>
             ) : selectedSegment && (
               <div>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedSegment.status]}`}>{selectedSegment.status}</span><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><Users className="h-3.5 w-3.5" />{selectedSegment.membros.toLocaleString("pt-BR")} pessoas</span></div>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedSegment.status]}`}>{selectedSegment.status}</span><span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><Users className="h-3.5 w-3.5" />{segmentMemberCount(selectedSegment).toLocaleString("pt-BR")} pessoas</span></div>
                 <div className="mt-5"><h3 className="text-[10px] font-bold uppercase text-slate-400">Descrição</h3><p className="mt-1 text-sm text-slate-700 dark:text-slate-200">{selectedSegment.descricao}</p><p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{selectedSegment.objetivo}</p></div>
                 {selectedSegment.modoPublico === "criterios" ? (
                   <section className="mt-5"><h3 className="text-[10px] font-bold uppercase text-slate-400">Critérios do público</h3><ul className="mt-2 space-y-2">{selectedSegment.criterios.map((criterion) => <li key={criterion} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{criterion}</li>)}</ul></section>
                 ) : (
-                  <section className="mt-5"><h3 className="text-[10px] font-bold uppercase text-slate-400">Contatos selecionados</h3><ul className="mt-2 space-y-2">{initialContacts.filter((contact) => selectedSegment.contatosSelecionados.includes(contact.id)).map((contact) => <li key={contact.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"><span className="grid h-7 w-7 place-items-center rounded-full bg-[#C4D600]/20 text-[9px] font-bold text-[#051647] dark:text-[#C4D600]">{contact.iniciais}</span><span>{contact.nome}</span></li>)}</ul></section>
+                  <section className="mt-5"><h3 className="text-[10px] font-bold uppercase text-slate-400">Contatos selecionados</h3><ul className="mt-2 space-y-2">{contacts.filter((contact) => selectedSegment.contatosSelecionados.includes(contact.id)).map((contact) => <li key={contact.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"><span className="grid h-7 w-7 place-items-center rounded-full bg-[#C4D600]/20 text-[9px] font-bold text-[#051647] dark:text-[#C4D600]">{contact.iniciais}</span><span>{contact.nome}</span></li>)}</ul></section>
                 )}
-                <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs dark:border-slate-800"><span className="text-slate-500 dark:text-slate-400">Campanhas vinculadas</span><span className="font-semibold text-slate-900 dark:text-white">{selectedSegment.campanhas}</span></div>
+                <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs dark:border-slate-800"><span className="text-slate-500 dark:text-slate-400">Campanhas vinculadas</span><span className="font-semibold text-slate-900 dark:text-white">{segmentCampaignCount(selectedSegment)}</span></div>
               </div>
             )}
           </section>
@@ -900,7 +1119,7 @@ export default function SegmentosPage() {
             <div className="shrink-0 space-y-4 border-b border-slate-100 p-5 dark:border-slate-800 sm:px-6">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Exibindo {availableContacts.length} de {initialContacts.length} contatos
+                  Exibindo {availableContacts.length} de {contacts.length} contatos
                 </p>
                 <label className="relative block w-full sm:max-w-md">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -918,11 +1137,11 @@ export default function SegmentosPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div role="tablist" aria-label="Filtrar contatos por categoria" className="flex flex-wrap gap-1.5">
                   {contactFilters.map((filter) => {
-                    const count = filter === "Todos" ? initialContacts.length
-                      : filter === "Clientes" ? initialContacts.filter((contact) => contact.compras > 0).length
-                      : filter === "Leads" ? initialContacts.filter((contact) => contact.categoria === "lead").length
-                      : filter === "NPS" ? initialContacts.filter((contact) => contact.categoria === "nps").length
-                      : initialContacts.filter((contact) => contact.categoria === "inativo").length;
+                    const count = filter === "Todos" ? contacts.length
+                      : filter === "Clientes" ? contacts.filter((contact) => contact.compras > 0).length
+                      : filter === "Leads" ? contacts.filter((contact) => contact.categoria === "lead").length
+                      : filter === "NPS" ? contacts.filter((contact) => contact.categoria === "nps").length
+                      : contacts.filter((contact) => contact.categoria === "inativo").length;
                     return (
                       <button
                         key={filter}
@@ -957,7 +1176,11 @@ export default function SegmentosPage() {
             </div>
 
             <ul aria-label="Resultados de contatos" className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-              {availableContacts.length > 0 ? availableContacts.map((contact) => {
+              {contactsLoading ? (
+                <li className="grid min-h-48 place-items-center px-5">
+                  <LoadingSpinner label="Carregando contatos..." className="w-full justify-center" />
+                </li>
+              ) : availableContacts.length > 0 ? availableContacts.map((contact) => {
                 const isSelected = selectedContactIds.includes(contact.id);
                 return (
                   <li key={contact.id}>
@@ -1010,6 +1233,150 @@ export default function SegmentosPage() {
               >
                 Concluir seleção
               </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      {isCriteriaManagerOpen && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-[#051647]/65 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsCriteriaManagerOpen(false);
+              resetCriterionForm();
+            }
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="criteria-manager-title" className="flex h-[min(900px,94vh)] max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-8">
+            <header className="mb-4 shrink-0 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 id="criteria-manager-title" className="text-lg font-bold text-slate-900 dark:text-white">Gerenciar critérios de segmentação</h2>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Critérios padrão do sistema só podem ser ativados ou inativados. Critérios criados por você também podem ser editados e removidos.</p>
+                </div>
+                <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} aria-label="Fechar gerenciamento de critérios" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={managerSearch}
+                  onChange={(event) => setManagerSearch(event.target.value)}
+                  placeholder="Pesquisar critérios..."
+                  aria-label="Pesquisar critérios"
+                  className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                />
+              </div>
+            </header>
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+              <div id="criterion-form" className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-700 dark:bg-slate-800/40">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{editingCriterionId ? "Editar critério" : "Criar critério"}</h3>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(160px,0.65fr)]">
+                  <label className="block space-y-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    Nome do critério <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span>
+                    <input
+                      autoFocus
+                      value={criterionForm.nome}
+                      onChange={(event) => { setCriterionForm((current) => ({ ...current, nome: event.target.value })); setCriteriaManagerError(""); }}
+                      placeholder="Ex.: Loja: Pinheiros"
+                      className="h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-base font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    />
+                  </label>
+                  <label className="block space-y-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    Categoria
+                    <select
+                      value={criterionForm.tipo}
+                      onChange={(event) => {
+                        const tipo = criterionKinds.find((kind) => kind === event.target.value);
+                        if (tipo) setCriterionForm((current) => ({ ...current, tipo }));
+                      }}
+                      className="h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:focus:border-[#C4D600]"
+                    >
+                      {criterionKinds.map((kind) => <option key={kind} value={kind}>{criterionKindLabels[kind]}</option>)}
+                    </select>
+                  </label>
+                </div>
+                {criteriaManagerError && <p role="alert" className="text-sm font-medium text-[#9a3d12] dark:text-[#F7915E]">{criteriaManagerError}</p>}
+                <div className="flex justify-end gap-2">
+                  {editingCriterionId && <button type="button" onClick={resetCriterionForm} className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">Cancelar edição</button>}
+                  <button type="button" onClick={submitCriterion} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
+                    {editingCriterionId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                    {editingCriterionId ? "Salvar critério" : "Adicionar critério"}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Critérios disponíveis</h3>
+                  <span className="text-xs text-slate-400">{criteriaOptions.length} critérios</span>
+                </div>
+                <p className="mb-3 text-xs text-slate-400">Critérios inativos deixam de aparecer para novas seleções, mas continuam valendo nos segmentos que já os utilizam. Remover um critério próprio também não apaga ele dos segmentos existentes.</p>
+                <div className="space-y-5">
+                  {criterionKinds.map((kind) => {
+                    const groupedCriteria = managerCriteria.filter((criterion) => criterion.tipo === kind);
+                    if (!groupedCriteria.length) return null;
+                    return (
+                      <section key={kind} aria-label={criterionKindLabels[kind]}>
+                        <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{criterionKindLabels[kind]}</h4>
+                        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+                          {groupedCriteria.map((criterion) => {
+                            const system = isSystemCriterion(criterion);
+                            return (
+                              <li key={criterion.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <span className={`truncate text-sm ${criterion.inativo ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200"}`}>{criterion.nome}</span>
+                                  {system && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">Padrão</span>}
+                                </span>
+                                <span className="flex shrink-0 items-center gap-2">
+                                  {!system && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo });
+                                          setEditingCriterionId(criterion.id);
+                                          setCriteriaManagerError("");
+                                          document.getElementById("criterion-form")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                                        }}
+                                        aria-label={`Editar critério ${criterion.nome}`}
+                                        className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-[#002187] hover:bg-[#002187]/5 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteCriterion(criterion)}
+                                        aria-label={`Remover critério ${criterion.nome}`}
+                                        className="rounded-md px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
+                                      >
+                                        Remover
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={!criterion.inativo}
+                                    aria-label={`${criterion.inativo ? "Ativar" : "Inativar"} critério ${criterion.nome}`}
+                                    title={criterion.inativo ? "Inativo: não aparece para seleção" : "Ativo"}
+                                    onClick={() => toggleCriterionActive(criterion)}
+                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer hover:cursor-pointer ${criterion.inativo ? "bg-slate-300 dark:bg-slate-600" : "bg-[#002187] dark:bg-[#C4D600]"}`}
+                                  >
+                                    <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${criterion.inativo ? "" : "translate-x-5 dark:bg-[#051647]"}`} />
+                                  </button>
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </section>
+                    );
+                  })}
+                  {managerCriteria.length === 0 && <p className="py-6 text-center text-sm text-slate-500">Nenhum critério encontrado.</p>}
+                </div>
+              </div>
+            </div>
+            <footer className="mt-5 flex shrink-0 justify-end border-t border-slate-100 pt-4 dark:border-slate-800">
+              <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Concluir</button>
             </footer>
           </section>
         </div>

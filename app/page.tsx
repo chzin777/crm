@@ -1,22 +1,39 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "motion/react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { NotificationDropdown } from "@/components/NotificationDropdown";
+import { EntityDialog } from "@/components/EntityDialog";
+import { StageEditorDialog } from "@/components/StageEditorDialog";
+import { SendMessageDialog } from "@/components/SendMessageDialog";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { useCrmData } from "@/hooks/useCrmData";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
+import type { Contact } from "@/lib/contacts";
 import {
+  STAGE_DEFINITIONS,
+  STAGE_PROGRESS,
+  orderedStages,
+  resolveStageConfigs,
+  type PipelineId,
+  type StageConfig,
+  type StageConfigStore,
+  type LegacyPipelineRules,
+  type StageDefinition,
+  type StageId,
+} from "@/lib/pipeline-stages";
+import {
+  AlertCircle,
   Bell,
+  CheckCircle2,
+  Pencil,
   Plus,
   Search,
-  Filter,
-  Flame,
-  Clock,
   UserCheck,
   RefreshCw,
-  MoreVertical,
-  CheckCircle2,
   ArrowRight,
   CalendarDays,
   Mail,
@@ -25,13 +42,21 @@ import {
   X,
 } from "lucide-react";
 
-type PipelineId = "novos" | "relacionamento";
-type ColumnId = "novo-lead" | "em-atendimento" | "fechamento" | "pos-venda" | "recompra" | "reativacao";
+type ColumnId = StageId;
+const CARD_PAGE_SIZES = [10, 20, 30, 50] as const;
 
 interface PurchaseRecord {
   produto: string;
   data: string;
   valor: string;
+}
+
+function formatPhone(value: string) {
+  let digits = value.replace(/\D/g, "");
+  if (digits.length > 11 && digits.startsWith("55")) digits = digits.slice(2);
+  if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return value;
 }
 
 interface PipelineCard {
@@ -43,6 +68,7 @@ interface PipelineCard {
   email: string;
   dataNascimento: string;
   ultimasCompras: PurchaseRecord[];
+  contactId?: string;
   tag: string;
   tagColor: string;
   valor: string;
@@ -52,28 +78,35 @@ interface PipelineCard {
   iniciais: string;
   coluna: ColumnId;
   mensagem: string;
-}
-
-interface PipelineStage {
-  id: ColumnId;
-  titulo: string;
-  descricao: string;
-  bgColuna: string;
+  entrouEmEtapaEm?: string;
 }
 
 interface PipelineConfig {
   titulo: string;
   descricao: string;
-  stages: PipelineStage[];
+  stages: StageDefinition[];
+}
+
+const pipelineMeta: Record<PipelineId, { titulo: string; descricao: string }> = {
+  novos: { titulo: "Novos clientes", descricao: "Do primeiro contato à primeira compra." },
+  relacionamento: { titulo: "Clientes recorrentes", descricao: "Pós-venda, recompra e recuperação de clientes." },
+};
+
+function isStageOverdue(card: PipelineCard, config: StageConfig | undefined): boolean {
+  if (!config?.maxDiasNaEtapa || !card.entrouEmEtapaEm) return false;
+  const enteredAt = new Date(card.entrouEmEtapaEm).getTime();
+  return Number.isFinite(enteredAt) && Date.now() - enteredAt > config.maxDiasNaEtapa * 86400000;
 }
 
 const normalizeSearchText = (value: string) =>
   value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
 
 export default function Home() {
-  const [isDark, setIsDark] = useState(false);
+  const { isDark, toggleTheme } = useCrmTheme();
   const [periodo, setPeriodo] = useState<"mes" | "tri" | "ano">("tri");
   const [activePipelineId, setActivePipelineId] = useState<PipelineId>("novos");
+  const [cardsPerPage, setCardsPerPage] = useState<number>(10);
+  const [stagePages, setStagePages] = useState<Partial<Record<ColumnId, number>>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
@@ -81,198 +114,63 @@ export default function Home() {
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationAreaRef = useRef<HTMLDivElement>(null);
   const [selectedCard, setSelectedCard] = useState<PipelineCard | null>(null);
+  const [messageCard, setMessageCard] = useState<PipelineCard | null>(null);
+  const [loadedPurchases, setLoadedPurchases] = useState<{ contactId: string; items: PurchaseRecord[] | null } | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactsError, setContactsError] = useState("");
+  const [isCreateDealOpen, setIsCreateDealOpen] = useState(false);
+  const [dealContactId, setDealContactId] = useState("");
+  const [dealTitle, setDealTitle] = useState("");
+  const [dealPipelineId, setDealPipelineId] = useState<PipelineId>("novos");
+  const [dealStageId, setDealStageId] = useState<ColumnId>("novo-lead");
+  const [contactsLoading, setContactsLoading] = useState(true);
+  const [dealError, setDealError] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const closeDialogButtonRef = useRef<HTMLButtonElement>(null);
   const dialogReturnFocusRef = useRef<HTMLElement | null>(null);
 
-  const [cards, setCards] = useState<PipelineCard[]>([
-    {
-      id: "C-1",
-      pipelineId: "novos",
-      titulo: "Ray-Ban Aviator Polarizado",
-      cliente: "Guilherme Sampaio",
-      telefone: "(11) 99120-7734",
-      email: "guilherme.sampaio@email.com",
-      dataNascimento: "12/04/1988",
-      ultimasCompras: [
-        { produto: "Ray-Ban Aviator Polarizado", data: "11/10/2026", valor: "R$ 1.250" },
-        { produto: "Lentes solares polarizadas", data: "05/12/2025", valor: "R$ 680" },
-      ],
-      tag: "Quente",
-      tagColor: "bg-[#F7915E]/15 text-[#b94a15] dark:text-[#F7915E]",
-      valor: "R$ 1.250",
-      progresso: 85,
-      progressoCor: "bg-[#C4D600]",
-      diasNaEtapa: "2h na etapa",
-      iniciais: "GS",
-      coluna: "novo-lead",
-      mensagem: "Olá Guilherme! Vi que consultou o Ray-Ban Aviator, separamos para você ver na loja...",
-    },
-    {
-      id: "C-2",
-      pipelineId: "novos",
-      titulo: "Exame + Armação Vogue",
-      cliente: "Amanda Meirelles",
-      telefone: "(11) 98319-2200",
-      email: "amanda.meirelles@email.com",
-      dataNascimento: "21/09/1993",
-      ultimasCompras: [
-        { produto: "Exame de vista + armação Vogue", data: "12/10/2026", valor: "R$ 890" },
-        { produto: "Lentes antirreflexo", data: "14/03/2026", valor: "R$ 420" },
-      ],
-      tag: "Novo",
-      tagColor: "bg-blue-100 text-[#002187] dark:bg-blue-900/50 dark:text-blue-300",
-      valor: "R$ 890",
-      progresso: 70,
-      progressoCor: "bg-[#002187] dark:bg-[#C4D600]",
-      diasNaEtapa: "1d na etapa",
-      iniciais: "AM",
-      coluna: "em-atendimento",
-      mensagem: "Amanda, tudo bem? Podemos confirmar seu agendamento de exame de vista para amanhã?",
-    },
-    {
-      id: "C-3",
-      pipelineId: "relacionamento",
-      titulo: "Pesquisa Pós-Atendimento",
-      cliente: "Mariana Albuquerque",
-      telefone: "(11) 98721-4432",
-      email: "mariana.albuquerque@email.com",
-      dataNascimento: "08/06/1985",
-      ultimasCompras: [
-        { produto: "Armação de acetato", data: "13/10/2026", valor: "R$ 760" },
-        { produto: "Óculos de sol", data: "20/02/2026", valor: "R$ 540" },
-      ],
-      tag: "NPS 30min",
-      tagColor: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
-      valor: "Nota 10",
-      progresso: 95,
-      progressoCor: "bg-emerald-500",
-      diasNaEtapa: "32min atrás",
-      iniciais: "MA",
-      coluna: "pos-venda",
-      mensagem: "Mariana, muito obrigado pela visita! De 0 a 10, como avalia nosso atendimento hoje?",
-    },
-    {
-      id: "C-4",
-      pipelineId: "relacionamento",
-      titulo: "Adaptação Multifocal Varilux",
-      cliente: "Beatriz Nogueira Dias",
-      telefone: "(11) 99451-2210",
-      email: "beatriz.nogueira@email.com",
-      dataNascimento: "17/11/1974",
-      ultimasCompras: [
-        { produto: "Lentes multifocais Varilux", data: "13/09/2026", valor: "R$ 2.450" },
-        { produto: "Óculos para leitura", data: "09/08/2025", valor: "R$ 680" },
-      ],
-      tag: "NPS 30 Dias",
-      tagColor: "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300",
-      valor: "1 Mês de uso",
-      progresso: 60,
-      progressoCor: "bg-purple-500",
-      diasNaEtapa: "30d na etapa",
-      iniciais: "BN",
-      coluna: "pos-venda",
-      mensagem: "Beatriz, faz 1 mês dos seus novos óculos! Como está a adaptação da sua visão de perto?",
-    },
-    {
-      id: "C-5",
-      pipelineId: "relacionamento",
-      titulo: "Reposição Lentes Acuvue",
-      cliente: "Lucas Ferraz Fontes",
-      telefone: "(11) 98844-3321",
-      email: "lucas.ferraz@email.com",
-      dataNascimento: "03/02/1991",
-      ultimasCompras: [
-        { produto: "Lentes de contato Acuvue", data: "28/09/2026", valor: "R$ 540" },
-        { produto: "Solução para lentes", data: "30/06/2026", valor: "R$ 95" },
-      ],
-      tag: "Recorrente",
-      tagColor: "bg-[#C4D600]/25 text-[#051647] dark:text-[#C4D600]",
-      valor: "R$ 540",
-      progresso: 90,
-      progressoCor: "bg-[#C4D600]",
-      diasNaEtapa: "15d na etapa",
-      iniciais: "LF",
-      coluna: "recompra",
-      mensagem: "Lucas, seu kit de lentes está próximo de acabar. Quer garantir a reposição com frete grátis?",
-    },
-    {
-      id: "C-6",
-      pipelineId: "relacionamento",
-      titulo: "Oakley Grau Esportivo",
-      cliente: "Carlos Eduardo Silveira",
-      telefone: "(11) 97134-8890",
-      email: "carlos.silveira@email.com",
-      dataNascimento: "25/07/1982",
-      ultimasCompras: [
-        { produto: "Oakley grau esportivo", data: "08/10/2026", valor: "R$ 1.950" },
-        { produto: "Óculos de sol Oakley", data: "11/01/2026", valor: "R$ 1.180" },
-      ],
-      tag: "VIP",
-      tagColor: "bg-[#C4D600]/25 text-[#051647] dark:text-[#C4D600]",
-      valor: "R$ 1.950",
-      progresso: 80,
-      progressoCor: "bg-[#051647] dark:bg-[#C4D600]",
-      diasNaEtapa: "5d na etapa",
-      iniciais: "CS",
-      coluna: "recompra",
-      mensagem: "Carlos, chegaram novos modelos da linha esportiva que você curte. Passe para conferir!",
-    },
-    {
-      id: "C-7",
-      pipelineId: "relacionamento",
-      titulo: "Exame Anual Vencido",
-      cliente: "Roberto Mendes Filho",
-      telefone: "(11) 98112-9933",
-      email: "roberto.mendes@email.com",
-      dataNascimento: "14/03/1968",
-      ultimasCompras: [
-        { produto: "Armação e lentes graduadas", data: "02/02/2026", valor: "R$ 1.940" },
-        { produto: "Óculos de sol", data: "19/12/2024", valor: "R$ 620" },
-      ],
-      tag: "Recall",
-      tagColor: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-      valor: "8m sem compra",
-      progresso: 40,
-      progressoCor: "bg-amber-500",
-      diasNaEtapa: "22d na etapa",
-      iniciais: "RM",
-      coluna: "reativacao",
-      mensagem: "Roberto, sua saúde visual é prioridade. Já faz 1 ano do seu exame de vista. Vamos agendar?",
-    },
-    {
-      id: "C-8",
-      pipelineId: "relacionamento",
-      titulo: "Retorno Cliente Inativo",
-      cliente: "Juliana Peixoto Ramos",
-      telefone: "(11) 97650-1122",
-      email: "juliana.peixoto@email.com",
-      dataNascimento: "30/01/1989",
-      ultimasCompras: [
-        { produto: "Armação de acetato", data: "15/10/2025", valor: "R$ 1.390" },
-        { produto: "Lentes antirreflexo", data: "22/05/2024", valor: "R$ 490" },
-      ],
-      tag: "Inativo +1 ano",
-      tagColor: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
-      valor: "1 ano sem visita",
-      progresso: 30,
-      progressoCor: "bg-rose-500",
-      diasNaEtapa: "35d na etapa",
-      iniciais: "JP",
-      coluna: "reativacao",
-      mensagem: "Juliana, estamos com saudades! Temos um voucher especial de retorno para você nas Óticas Brasil.",
-    },
-  ]);
+  const { data: cards, setData: setCards, isLoading: cardsLoading, isSaving: cardsSaving, error: cardsError, reloadData: reloadPipeline } = useCrmData<PipelineCard[]>("pipeline", []);
+  const { data: settingsData } = useCrmData<{ pipelineRules?: LegacyPipelineRules }>("settings", {}, { autoSave: false });
+  const { data: stageStore, setData: setStageStore, saveData: saveStageStore } = useCrmData<StageConfigStore>("pipeline-stages", { stages: {} }, { autoSave: false });
+  const [editingStageId, setEditingStageId] = useState<StageId | null>(null);
+  const stageConfigs = useMemo(
+    () => resolveStageConfigs(stageStore, settingsData.pipelineRules),
+    [stageStore, settingsData.pipelineRules]
+  );
+  const pipelinesConfig = useMemo<Record<PipelineId, PipelineConfig>>(() => ({
+    novos: { ...pipelineMeta.novos, stages: orderedStages("novos", stageConfigs) },
+    relacionamento: { ...pipelineMeta.relacionamento, stages: orderedStages("relacionamento", stageConfigs) },
+  }), [stageConfigs]);
+  const stageTitle = (stageId: StageId) => stageConfigs[stageId].titulo;
+
+  const handleSaveStage = async (stageId: StageId, config: StageConfig, position: number) => {
+    const pipelineId = STAGE_DEFINITIONS.find((stage) => stage.id === stageId)!.pipelineId;
+    const ids = orderedStages(pipelineId, stageConfigs).map((stage) => stage.id).filter((id) => id !== stageId);
+    ids.splice(position, 0, stageId);
+    const stages = { ...(stageStore.stages ?? {}) };
+    ids.forEach((id, index) => {
+      stages[id] = id === stageId ? { ...config, ordem: index } : { ...(stages[id] ?? {}), ordem: index };
+    });
+    const next: StageConfigStore = { stages };
+    await saveStageStore(next);
+    setStageStore(next);
+  };
+  const editingStage = editingStageId ? STAGE_DEFINITIONS.find((stage) => stage.id === editingStageId) : undefined;
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("otb-crm-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
-      setIsDark(true);
-      document.documentElement.classList.add("dark");
-    } else {
-      setIsDark(false);
-      document.documentElement.classList.remove("dark");
-    }
+    let active = true;
+    fetch("/api/contacts/search?limit=50")
+      .then(async (response) => {
+        const result = await response.json() as { data?: Contact[]; error?: string };
+        if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
+        if (active) setContacts(result.data ?? []);
+      })
+      .catch((error: unknown) => {
+        if (active) setContactsError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
+      })
+      .finally(() => { if (active) setContactsLoading(false); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -287,6 +185,19 @@ export default function Home() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showNotifications]);
+
+  const selectedContactId = selectedCard?.contactId;
+  useEffect(() => {
+    if (!selectedContactId) return;
+    const controller = new AbortController();
+    fetch(`/api/contacts/${encodeURIComponent(selectedContactId)}/purchases`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { data?: PurchaseRecord[] } | null) => setLoadedPurchases({ contactId: selectedContactId, items: body?.data ?? [] }))
+      .catch(() => {
+        if (!controller.signal.aborted) setLoadedPurchases({ contactId: selectedContactId, items: [] });
+      });
+    return () => controller.abort();
+  }, [selectedContactId]);
 
   useEffect(() => {
     if (!selectedCard) return;
@@ -303,20 +214,6 @@ export default function Home() {
       previousFocus?.focus();
     };
   }, [selectedCard]);
-
-  const toggleTheme = () => {
-    setIsDark((prev) => {
-      const next = !prev;
-      if (next) {
-        document.documentElement.classList.add("dark");
-        localStorage.setItem("otb-crm-theme", "dark");
-      } else {
-        document.documentElement.classList.remove("dark");
-        localStorage.setItem("otb-crm-theme", "light");
-      }
-      return next;
-    });
-  };
 
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, cardId: string) => {
@@ -347,7 +244,7 @@ export default function Home() {
         const insertionIndex = lastTargetIndex + 1;
         return [
           ...remaining.slice(0, insertionIndex),
-          { ...movingCard, coluna: targetColId },
+          { ...movingCard, coluna: targetColId, progresso: STAGE_PROGRESS[targetColId], diasNaEtapa: "Atualizado agora", entrouEmEtapaEm: movingCard.coluna === targetColId ? movingCard.entrouEmEtapaEm : new Date().toISOString() },
           ...remaining.slice(insertionIndex),
         ];
       });
@@ -383,7 +280,13 @@ export default function Home() {
 
         const targetCard = remaining[targetIndex];
         const insertionIndex = targetIndex + (position === "after" ? 1 : 0);
-        remaining.splice(insertionIndex, 0, { ...sourceCard, coluna: targetCard.coluna });
+        remaining.splice(insertionIndex, 0, {
+          ...sourceCard,
+          coluna: targetCard.coluna,
+          progresso: STAGE_PROGRESS[targetCard.coluna],
+          diasNaEtapa: "Atualizado agora",
+          entrouEmEtapaEm: sourceCard.coluna === targetCard.coluna ? sourceCard.entrouEmEtapaEm : new Date().toISOString(),
+        });
         return remaining;
       });
     }
@@ -393,46 +296,108 @@ export default function Home() {
     setDragOverCard(null);
   };
 
-  const pipelinesConfig: Record<PipelineId, PipelineConfig> = {
-    novos: {
-      titulo: "Novos clientes",
-      descricao: "Do primeiro contato à primeira compra.",
-      stages: [
-        { id: "novo-lead", titulo: "Novo lead", descricao: "Aguardando qualificação", bgColuna: "bg-[#f8f9fc] dark:bg-[#07194f]/60" },
-        { id: "em-atendimento", titulo: "Em atendimento", descricao: "Necessidade e orçamento", bgColuna: "bg-[#f5f8ff] dark:bg-[#07194f]/60" },
-        { id: "fechamento", titulo: "Fechamento", descricao: "Pronto para a primeira compra", bgColuna: "bg-[#fbfcf5] dark:bg-[#07194f]/60" },
-      ],
-    },
-    relacionamento: {
-      titulo: "Clientes recorrentes",
-      descricao: "Pós-venda, recompra e recuperação de clientes.",
-      stages: [
-        { id: "pos-venda", titulo: "Pós-venda", descricao: "Acompanhamento e satisfação", bgColuna: "bg-[#f8f9fc] dark:bg-[#07194f]/60" },
-        { id: "recompra", titulo: "Recompra", descricao: "Reposição e novas necessidades", bgColuna: "bg-[#fbfcf5] dark:bg-[#07194f]/60" },
-        { id: "reativacao", titulo: "Reativação", descricao: "Retomar clientes inativos", bgColuna: "bg-[#f5f8ff] dark:bg-[#07194f]/60" },
-      ],
-    },
+  const openDealDialog = (stage?: ColumnId) => {
+    let pipelineId = activePipelineId;
+    let stageId = stage;
+    if (stage) {
+      pipelineId = pipelinesConfig.novos.stages.some((item) => item.id === stage) ? "novos" : "relacionamento";
+    } else {
+      stageId = pipelinesConfig[pipelineId].stages[0].id;
+    }
+    setDealPipelineId(pipelineId);
+    setDealStageId(stageId ?? pipelinesConfig[pipelineId].stages[0].id);
+    setDealContactId("");
+    setDealTitle("");
+    setDealError("");
+    setIsCreateDealOpen(true);
+  };
+  const createDeal = () => {
+    const contact = contacts.find((item) => item.id === dealContactId);
+    if (!contact) {
+      setDealError(contactsError || "Selecione um contato existente para criar a oportunidade.");
+      return;
+    }
+    const selectedStage = pipelinesConfig[dealPipelineId].stages.find((stage) => stage.id === dealStageId) ?? pipelinesConfig[dealPipelineId].stages[0];
+    const categoryLabel: Record<Contact["categoria"], string> = {
+      cliente: "Cliente",
+      lead: "Lead",
+      nps: "NPS",
+      inativo: "Inativo",
+    };
+    const tagColor = contact.categoria === "lead"
+      ? "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]"
+      : contact.categoria === "cliente"
+        ? "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]"
+        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+    const card: PipelineCard = {
+      id: crypto.randomUUID(),
+      pipelineId: dealPipelineId,
+      titulo: dealTitle.trim() || `Acompanhar ${contact.nome}`,
+      cliente: contact.nome,
+      telefone: contact.telefone,
+      email: contact.email,
+      dataNascimento: contact.dataNascimento,
+      ultimasCompras: [],
+      contactId: contact.id,
+      tag: contact.segmento || categoryLabel[contact.categoria],
+      tagColor,
+      valor: "Valor a definir",
+      progresso: STAGE_PROGRESS[selectedStage.id],
+      progressoCor: "bg-[#C4D600]",
+      diasNaEtapa: "Novo",
+      entrouEmEtapaEm: new Date().toISOString(),
+      iniciais: contact.iniciais,
+      coluna: selectedStage.id,
+      mensagem: "",
+    };
+    setCards((current) => [card, ...current]);
+    setActivePipelineId(dealPipelineId);
+    setDealError("");
+    setIsCreateDealOpen(false);
   };
   const activePipeline = pipelinesConfig[activePipelineId];
-  const activeCards = cards.filter((card) => card.pipelineId === activePipelineId);
-  const allPipelineStages = Object.values(pipelinesConfig).flatMap((pipeline) => pipeline.stages);
-  const normalizedSearchQuery = normalizeSearchText(searchQuery.trim());
+  const normalizedSearchQuery = useMemo(() => normalizeSearchText(searchQuery.trim()), [searchQuery]);
   const searchActive = normalizedSearchQuery.length > 0;
-  const matchingCards = searchActive
-    ? cards.filter((card) => {
-        const searchableText = [
-          card.cliente,
-          card.telefone,
-          card.email,
-          card.titulo,
-          card.tag,
-          card.dataNascimento,
-          pipelinesConfig[card.pipelineId].titulo,
-          allPipelineStages.find((stage) => stage.id === card.coluna)?.titulo ?? "",
-        ].join(" ");
-        return normalizeSearchText(searchableText).includes(normalizedSearchQuery);
-      })
-    : [];
+
+  const activeCards = useMemo(
+    () => cards.filter((card) => card.pipelineId === activePipelineId),
+    [cards, activePipelineId]
+  );
+
+  const cardsByStage = useMemo(() => {
+    const grouped: Record<ColumnId, PipelineCard[]> = {
+      "novo-lead": [],
+      "em-atendimento": [],
+      fechamento: [],
+      "pos-venda": [],
+      recompra: [],
+      reativacao: [],
+    };
+    for (const card of activeCards) {
+      if (grouped[card.coluna]) grouped[card.coluna].push(card);
+    }
+    return grouped;
+  }, [activeCards]);
+
+  const matchingCards = useMemo(() => {
+    if (!searchActive) return [];
+    return cards.filter((card) => {
+      const searchableText = [
+        card.cliente,
+        card.telefone,
+        card.email,
+        card.titulo,
+        card.tag,
+        card.dataNascimento,
+        pipelineMeta[card.pipelineId].titulo,
+        stageConfigs[card.coluna]?.titulo ?? "",
+      ].join(" ");
+      return normalizeSearchText(searchableText).includes(normalizedSearchQuery);
+    });
+  }, [cards, searchActive, normalizedSearchQuery, stageConfigs]);
+
+  const novosCount = useMemo(() => cards.filter((card) => card.pipelineId === "novos").length, [cards]);
+  const relacionamentoCount = useMemo(() => cards.filter((card) => card.pipelineId === "relacionamento").length, [cards]);
 
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
@@ -472,9 +437,6 @@ export default function Home() {
                 }`}
               >
                 <Bell className="h-4 w-4" />
-                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#F7915E] text-[10px] font-bold text-white">
-                  7
-                </span>
               </button>
 
               <NotificationDropdown
@@ -486,6 +448,7 @@ export default function Home() {
             {/* Botão Criar estilo Dribbble */}
             <button
               type="button"
+              onClick={() => openDealDialog()}
               className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 stroke-[3]" />
@@ -547,6 +510,56 @@ export default function Home() {
             </div>
             <button
               type="button"
+              onClick={async () => {
+                setSyncMessage(null);
+                setIsSyncing(true);
+                try {
+                  let totalCreated = 0;
+                  let totalCards = 0;
+                  // Each call syncs one batch; columns are refreshed between calls.
+                  for (let batch = 0; batch < 100; batch++) {
+                    const res = await fetch("/api/pipeline/sync", { method: "POST" });
+                    const data = await res.json() as { error?: string; done?: boolean; created?: number; total?: number };
+                    if (!res.ok) {
+                      await reloadPipeline().catch(() => undefined);
+                      setSyncMessage({
+                        type: totalCreated > 0 ? "success" : "error",
+                        text: totalCreated > 0
+                          ? `${totalCreated} cards foram gravados na pipeline.`
+                          : data.error || "Erro ao sincronizar.",
+                      });
+                      return;
+                    }
+                    totalCreated += data.created ?? 0;
+                    totalCards = data.total ?? totalCards;
+                    if ((data.created ?? 0) > 0) await reloadPipeline();
+                    if (data.done) break;
+                    setSyncMessage({ type: "success", text: `Sincronizando... ${totalCards} cards na pipeline até agora.` });
+                  }
+                  setSyncMessage({
+                    type: "success",
+                    text: `Sincronização concluída: ${totalCreated} cards novos gravados, ${totalCards} cards na pipeline.`,
+                  });
+                } catch (error: unknown) {
+                  setSyncMessage({
+                    type: "error",
+                    text: error instanceof Error
+                      ? `Falha ao sincronizar: ${error.message}`
+                      : "Falha de conexão ao sincronizar.",
+                  });
+                } finally {
+                  setIsSyncing(false);
+                }
+              }}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 bg-white dark:bg-[#07194f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+              <span>{isSyncing ? "Sincronizando..." : "Sincronizar contatos"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openDealDialog()}
               className="flex items-center gap-1.5 bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] px-4 py-1.5 rounded-full text-xs font-bold shadow-xs hover:opacity-95 transition-all cursor-pointer hover:cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -554,6 +567,13 @@ export default function Home() {
             </button>
             </div>
           </div>
+
+          {syncMessage && (
+            <div className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${syncMessage.type === "success" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300"}`}>
+              {syncMessage.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              {syncMessage.text}
+            </div>
+          )}
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div role="tablist" aria-label="Pipelines de clientes" className={`${searchActive ? "hidden" : "inline-flex"} rounded-xl bg-slate-100 p-1 dark:bg-slate-800/80`}>
@@ -566,7 +586,7 @@ export default function Home() {
             >
               {activePipelineId === "novos" && <motion.span layoutId="pipeline-tab-ativo" className="pointer-events-none absolute inset-0 rounded-lg bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
               <span className="relative z-10 flex items-center gap-2"><UserCheck className="h-4 w-4" />Novos clientes</span>
-              <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{cards.filter((card) => card.pipelineId === "novos").length}</span>
+              <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{novosCount}</span>
             </button>
             <button
               type="button"
@@ -577,7 +597,7 @@ export default function Home() {
             >
               {activePipelineId === "relacionamento" && <motion.span layoutId="pipeline-tab-ativo" className="pointer-events-none absolute inset-0 rounded-lg bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
               <span className="relative z-10 flex items-center gap-2"><RefreshCw className="h-4 w-4" />Relacionamento</span>
-              <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{cards.filter((card) => card.pipelineId === "relacionamento").length}</span>
+              <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{relacionamentoCount}</span>
             </button>
           </div>
           <label className="relative block w-full sm:max-w-xs">
@@ -607,8 +627,30 @@ export default function Home() {
 
         {/* Etapas do funil */}
         <main className="flex-1 px-6 sm:px-8 pb-10">
+          {cardsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{cardsError}</p>}
+          {cardsSaving && <LoadingSpinner label="Salvando alterações no banco..." size={32} className="mb-4" />}
+          {contactsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{contactsError}</p>}
+          {!searchActive && (
+            <label className="mb-4 flex w-fit items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Cards por página
+              <select
+                value={cardsPerPage}
+                onChange={(event) => {
+                  setCardsPerPage(Number(event.target.value));
+                  setStagePages({});
+                }}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-white dark:focus:border-[#C4D600] cursor-pointer hover:cursor-pointer"
+              >
+                {CARD_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+          )}
           {searchActive ? (
-            matchingCards.length > 0 ? (
+            cardsLoading ? (
+              <div className="max-w-4xl border-y border-slate-200 py-8 dark:border-slate-800">
+                <LoadingSpinner label="Carregando oportunidades..." className="w-full justify-center" />
+              </div>
+            ) : matchingCards.length > 0 ? (
               <div className="max-w-4xl divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">
                 {matchingCards.map((card) => (
                   <button
@@ -627,11 +669,11 @@ export default function Home() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">{card.cliente}</span>
                       <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{card.titulo} · {card.telefone}</span>
-                      <span className="mt-1 block text-[10px] text-slate-400 sm:hidden">{pipelinesConfig[card.pipelineId].titulo} · {allPipelineStages.find((stage) => stage.id === card.coluna)?.titulo}</span>
+                      <span className="mt-1 block text-[10px] text-slate-400 sm:hidden">{pipelinesConfig[card.pipelineId].titulo} · {stageTitle(card.coluna)}</span>
                     </span>
                     <span className="hidden shrink-0 text-right sm:block">
                       <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">{pipelinesConfig[card.pipelineId].titulo}</span>
-                      <span className="block text-[11px] text-slate-500 dark:text-slate-400">{allPipelineStages.find((stage) => stage.id === card.coluna)?.titulo}</span>
+                      <span className="block text-[11px] text-slate-500 dark:text-slate-400">{stageTitle(card.coluna)}</span>
                     </span>
                     <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${card.tagColor}`}>{card.tag}</span>
                   </button>
@@ -646,7 +688,10 @@ export default function Home() {
           ) : (
           <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3 xl:gap-5">
             {activePipeline.stages.map((coluna, stageIndex) => {
-              const cardsDaColuna = activeCards.filter((card) => card.coluna === coluna.id);
+              const cardsDaColuna = cardsByStage[coluna.id];
+              const pageCount = Math.max(1, Math.ceil(cardsDaColuna.length / cardsPerPage));
+              const currentPage = Math.min(stagePages[coluna.id] ?? 1, pageCount);
+              const visibleCards = cardsDaColuna.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
               const isOver = dragOverColumn === coluna.id;
 
               return (
@@ -673,22 +718,37 @@ export default function Home() {
                     <div className="flex min-w-0 items-start gap-2.5">
                       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white text-[10px] font-bold text-[#002187] shadow-xs dark:bg-[#051647] dark:text-[#C4D600]">{String(stageIndex + 1).padStart(2, "0")}</span>
                       <div className="min-w-0">
-                        <h2 className="font-bold text-sm text-slate-900 dark:text-white">{coluna.titulo}</h2>
-                        <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{coluna.descricao}</p>
+                        <h2 className="font-bold text-sm text-slate-900 dark:text-white">{stageConfigs[coluna.id].titulo}</h2>
+                        <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{stageConfigs[coluna.id].descricao}</p>
                       </div>
                     </div>
-                    <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-[#002187] dark:bg-[#051647] dark:text-[#C4D600]">
-                      {cardsDaColuna.length}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditingStageId(coluna.id)}
+                        aria-label={`Editar etapa ${stageConfigs[coluna.id].titulo}`}
+                        title="Editar etapa"
+                        className="grid h-6 w-6 place-items-center rounded-full text-slate-500 hover:bg-white/80 hover:text-[#002187] dark:text-slate-400 dark:hover:bg-[#051647] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-[#002187] dark:bg-[#051647] dark:text-[#C4D600]">
+                        {cardsDaColuna.length}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Fila de Cartões */}
                   <div className="flex flex-1 flex-col gap-3">
-                    {cardsDaColuna.length === 0 ? (
+                    {cardsLoading ? (
+                      <div className="flex min-h-32 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/80 px-4 dark:border-slate-700">
+                        <LoadingSpinner label={`Carregando etapa ${stageConfigs[coluna.id].titulo}...`} />
+                      </div>
+                    ) : cardsDaColuna.length === 0 ? (
                       <div className="flex min-h-32 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/80 px-4 text-center text-xs text-slate-400 dark:border-slate-700">
                         Nenhum deal nesta etapa
                       </div>
-                    ) : cardsDaColuna.map((card) => (
+                    ) : visibleCards.map((card) => (
                       <div
                         key={card.id}
                         draggable
@@ -766,25 +826,59 @@ export default function Home() {
                             <span className="text-[10px] text-slate-400">
                               {card.diasNaEtapa}
                             </span>
+                            {isStageOverdue(card, stageConfigs[card.coluna]) && (
+                              <span className="rounded-full bg-[#F7915E]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#9a3d12] dark:text-[#F7915E]" title={`Limite da etapa: ${stageConfigs[card.coluna].maxDiasNaEtapa} dias`}>
+                                Prazo excedido
+                              </span>
+                            )}
                           </div>
 
                           {/* Botão Oficial do WhatsApp com Logotipo Real */}
                           <button
                             type="button"
-                            className="relative z-20 pointer-events-auto flex items-center gap-1.5 bg-[#25D366] hover:bg-[#20ba5a] text-white px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer hover:cursor-pointer shadow-xs"
-                            title="Disparar mensagem no WhatsApp"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setMessageCard(card);
+                            }}
+                            className="relative z-20 pointer-events-auto flex items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
+                            title="Enviar mensagem"
                           >
                             <WhatsAppIcon className="w-3.5 h-3.5 fill-white" />
-                            <span>WhatsApp</span>
+                            <span>Enviar mensagem</span>
                           </button>
                         </div>
                         </div>
                       </div>
                     ))}
 
+                    {cardsDaColuna.length > 0 && (
+                      <div className="mt-1 flex items-center justify-between gap-2 border-t border-slate-200/70 px-1 pt-3 dark:border-slate-700/70">
+                        <button
+                          type="button"
+                          onClick={() => setStagePages((current) => ({ ...current, [coluna.id]: Math.max(1, currentPage - 1) }))}
+                          disabled={currentPage === 1}
+                          className="rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800/70 cursor-pointer hover:cursor-pointer"
+                        >
+                          Anterior
+                        </button>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Página {currentPage} de {pageCount}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setStagePages((current) => ({ ...current, [coluna.id]: Math.min(pageCount, currentPage + 1) }))}
+                          disabled={currentPage === pageCount}
+                          className="rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800/70 cursor-pointer hover:cursor-pointer"
+                        >
+                          Próxima
+                        </button>
+                      </div>
+                    )}
+
                     {/* Botão Dribbble "+ Add deal" pontilhado */}
                     <button
                       type="button"
+                      onClick={() => openDealDialog(coluna.id)}
                       className="mt-auto w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer hover:cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -798,6 +892,107 @@ export default function Home() {
           )}
         </main>
       </div>
+
+      {editingStage && (
+        <StageEditorDialog
+          key={editingStage.id}
+          stageName={stageConfigs[editingStage.id].titulo}
+          config={stageConfigs[editingStage.id]}
+          position={pipelinesConfig[editingStage.pipelineId].stages.findIndex((stage) => stage.id === editingStage.id)}
+          stageCount={pipelinesConfig[editingStage.pipelineId].stages.length}
+          onClose={() => setEditingStageId(null)}
+          onSave={(config, position) => handleSaveStage(editingStage.id, config, position)}
+        />
+      )}
+
+      {messageCard && (
+        <SendMessageDialog
+          recipientName={messageCard.cliente}
+          recipientPhone={formatPhone(messageCard.telefone)}
+          onClose={() => setMessageCard(null)}
+          onSend={async ({ text, files }) => {
+            const body = new FormData();
+            body.set("phone", messageCard.telefone);
+            body.set("text", text);
+            files.forEach((file) => body.append("files", file));
+            const response = await fetch("/api/whatsapp/send", { method: "POST", body });
+            if (!response.ok) {
+              const data = await response.json().catch(() => null);
+              throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
+            }
+          }}
+        />
+      )}
+
+      {isCreateDealOpen && (
+        <EntityDialog
+          titleId="create-deal-title"
+          title="Nova oportunidade"
+          description="Vincule uma oportunidade a um contato existente no banco."
+          onClose={() => setIsCreateDealOpen(false)}
+        >
+          <div className="flex h-full flex-col gap-4">
+            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Contato
+              <select
+                value={dealContactId}
+                onChange={(event) => setDealContactId(event.target.value)}
+                disabled={contactsLoading || contacts.length === 0}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+              >
+                <option value="">{contactsLoading ? "Carregando contatos..." : "Selecione um contato"}</option>
+                {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.nome} · {contact.telefone}</option>)}
+              </select>
+            </label>
+            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Nome da oportunidade
+              <input
+                value={dealTitle}
+                onChange={(event) => setDealTitle(event.target.value)}
+                placeholder="Ex.: Orçamento de lentes"
+                maxLength={200}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+              />
+            </label>
+            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Pipeline
+              <select
+                value={dealPipelineId}
+                onChange={(event) => {
+                  const pipelineId = event.target.value === "relacionamento" ? "relacionamento" : "novos";
+                  setDealPipelineId(pipelineId);
+                  setDealStageId(pipelinesConfig[pipelineId].stages[0].id);
+                }}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+              >
+                <option value="novos">Novos clientes</option>
+                <option value="relacionamento">Relacionamento</option>
+              </select>
+            </label>
+            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Etapa
+              <select
+                value={dealStageId}
+                onChange={(event) => {
+                  const stage = pipelinesConfig[dealPipelineId].stages.find((item) => item.id === event.target.value);
+                  if (stage) setDealStageId(stage.id);
+                }}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+              >
+                {pipelinesConfig[dealPipelineId].stages.map((stage) => <option key={stage.id} value={stage.id}>{stageTitle(stage.id)}</option>)}
+              </select>
+            </label>
+            {contacts.length === 0 && !contactsLoading && !contactsError && (
+              <p className="text-xs text-slate-500">Cadastre um contato antes de criar uma oportunidade.</p>
+            )}
+            {dealError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{dealError}</p>}
+            <div className="mt-auto flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <button type="button" onClick={() => setIsCreateDealOpen(false)} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
+              <button type="button" onClick={createDeal} disabled={contactsLoading || contacts.length === 0} className="h-9 rounded-lg bg-[#051647] px-3 text-xs font-bold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">Criar oportunidade</button>
+            </div>
+          </div>
+        </EntityDialog>
+      )}
 
       {selectedCard && (
         <div
@@ -845,7 +1040,7 @@ export default function Home() {
                 <dl className="space-y-3 text-sm">
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                    <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Telefone</dt><dd>{selectedCard.telefone}</dd></div>
+                    <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Telefone</dt><dd>{formatPhone(selectedCard.telefone)}</dd></div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
@@ -862,7 +1057,7 @@ export default function Home() {
                 <h3 className="mb-3 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Negócio atual</h3>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                   <div className="col-span-2"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Deal</dt><dd className="font-semibold">{selectedCard.titulo}</dd></div>
-                  <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Etapa</dt><dd>{allPipelineStages.find((stage) => stage.id === selectedCard.coluna)?.titulo}</dd></div>
+                  <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Etapa</dt><dd>{stageTitle(selectedCard.coluna)}</dd></div>
                   <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Na etapa</dt><dd>{selectedCard.diasNaEtapa}</dd></div>
                   <div className="col-span-2"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Valor / situação</dt><dd className="font-bold">{selectedCard.valor}</dd></div>
                 </dl>
@@ -874,15 +1069,28 @@ export default function Home() {
                 <ShoppingBag className="h-4 w-4" /> Últimas compras
               </h3>
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {selectedCard.ultimasCompras.map((purchase) => (
-                  <div key={`${purchase.data}-${purchase.produto}`} className="flex items-center justify-between gap-4 py-3 text-sm">
+              {(() => {
+                const purchases = selectedCard.ultimasCompras.length > 0
+                  ? selectedCard.ultimasCompras
+                  : loadedPurchases && loadedPurchases.contactId === selectedCard.contactId ? loadedPurchases.items ?? [] : null;
+                if (purchases === null) {
+                  return selectedCard.contactId
+                    ? <LoadingSpinner label="Carregando compras..." size={32} className="py-3" />
+                    : <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas para esta oportunidade.</p>;
+                }
+                if (purchases.length === 0) {
+                  return <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas para esta oportunidade.</p>;
+                }
+                return purchases.map((purchase, index) => (
+                  <div key={`${purchase.data}-${purchase.produto}-${index}`} className="flex items-center justify-between gap-4 py-3 text-sm">
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-slate-800 dark:text-slate-100">{purchase.produto}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">{purchase.data}</p>
                     </div>
                     <span className="shrink-0 font-bold text-slate-900 dark:text-white">{purchase.valor}</span>
                   </div>
-                ))}
+                ));
+              })()}
               </div>
             </section>
           </section>
