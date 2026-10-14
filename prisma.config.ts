@@ -8,6 +8,9 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: createDatabaseUrl(process.env, { direct: true }),
+    // `prisma generate` (e.g. Vercel build) doesn't connect, so env vars may be absent.
+    url: process.env.DB_HOST
+      ? createDatabaseUrl(process.env, { direct: true })
+      : "postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public",
   },
 });
