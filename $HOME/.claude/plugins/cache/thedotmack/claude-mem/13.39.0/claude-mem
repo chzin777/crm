@@ -1,0 +1,2 @@
+#!/bin/bash
+node "$HOME/.claude/plugins/cache/thedotmack/claude-mem/13.39.0/scripts/claude-mem-launcher.cjs" "$@"

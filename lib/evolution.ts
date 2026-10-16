@@ -6,11 +6,16 @@ async function evolution<T>(path: string, init?: RequestInit): Promise<T> {
   if (!BASE_URL || !API_KEY) {
     throw new Error("Evolution API não configurada. Defina EVOLUTION_API_URL e EVOLUTION_API_KEY no .env.");
   }
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", apikey: API_KEY, ...init?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", apikey: API_KEY, ...init?.headers },
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar à Evolution API em ${BASE_URL}. Verifique se ela está rodando.`);
+  }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = body?.response?.message ?? body?.message ?? response.statusText;
@@ -32,7 +37,7 @@ export function sendText(phone: string, text: string) {
   });
 }
 
-export function sendMedia(phone: string, file: { mimetype: string; fileName: string; base64: string }, caption?: string) {
+export function sendMedia(phone: string, file: { mimetype: string; fileName: string; base64?: string; url?: string }, caption?: string) {
   const mediatype = file.mimetype.startsWith("image/") ? "image" : file.mimetype.startsWith("video/") ? "video" : "document";
   return evolution(`/message/sendMedia/${INSTANCE}`, {
     method: "POST",
@@ -42,7 +47,7 @@ export function sendMedia(phone: string, file: { mimetype: string; fileName: str
       mimetype: file.mimetype,
       fileName: file.fileName,
       caption: caption || undefined,
-      media: file.base64,
+      ...(file.url ? { mediaUrl: file.url } : { media: file.base64 }),
     }),
   });
 }

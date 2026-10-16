@@ -49,3 +49,25 @@ Em qualquer desenvolvimento de interface ou estilo deste projeto, é obrigatóri
 
 ### Interações e Botões
 - Em absolutamente todos os botões clicáveis, aplicar cursor de ponteiro (`cursor-pointer` ou `hover:cursor-pointer`).
+
+## ⚠️ REBUILD OBRIGATÓRIO APÓS QUALQUER ALTERAÇÃO (REGRA ABSOLUTA)
+
+**TODA** alteração neste projeto — código, estilo, configuração, dependência, documentação, banco de dados, env vars, docker-compose, schema Prisma, assets, etc. — **EXIGE** rebuild imediato no servidor. Sem exceções. Não pergunte, não deduza, não assuma que "não precisa". Se algo mudou, faça o rebuild.
+
+### Procedimento obrigatório (sempre, sem exceção):
+
+1. Sincronizar as alterações locais para `/opt/crm/crm/` no servidor (via SCP, git push/pull ou rsync)
+2. Conectar via SSH ao servidor (`172.30.20.15`, credenciais na memória privada `server-credentials`)
+3. Em `/opt/crm/`, executar **obrigatoriamente e na ordem exata**:
+   ```bash
+   docker compose down
+   docker compose up --build -d
+   ```
+4. Aguardar os containers subirem e verificar com `docker compose ps` que todos estão `running`/`healthy`
+
+### Regras inegociáveis:
+- **Nunca** pular o `docker compose down` antes do `up --build` — imagens antigas ficam cacheadas e as alterações não são aplicadas
+- **Nunca** usar apenas `docker compose restart` ou `docker compose up -d` sem `--build` — isso não reconstrói a imagem
+- **Nunca** considerar uma alteração "pequena demais" para rebuild — toda mudança exige rebuild
+- O caminho do código-fonte no servidor é `/opt/crm/crm/` e o `docker-compose.yml` ativo fica em `/opt/crm/` com `build.context: ./crm`
+- Quando o usuário perguntar "fez o rebuild?", ele se refere especificamente a `docker compose down && docker compose up --build -d`

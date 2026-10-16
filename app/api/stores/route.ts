@@ -57,11 +57,40 @@ function toData(input: z.infer<typeof storeSchema>) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
-  const data = await cached("stores", 300, async () => {
-    const stores = await prisma.store.findMany({ orderBy: { number: "asc" } });
+  const url = new URL(request.url);
+  const sortByRaw = url.searchParams.get("sortBy") || "number";
+  const sortOrderRaw = url.searchParams.get("sortOrder") || "asc";
+
+  const allowedSortFields: Record<string, string> = {
+    loja: "number",
+    numero: "number",
+    number: "number",
+    nome: "name",
+    name: "name",
+    cidade: "city",
+    city: "city",
+    bairro: "neighborhoods",
+    neighborhoods: "neighborhoods",
+    status: "active",
+    active: "active",
+    contatos: "unitCount",
+    unitCount: "unitCount",
+  };
+  const sortField = allowedSortFields[sortByRaw] ?? "number";
+  const sortOrder = sortOrderRaw === "desc" ? "desc" : "asc";
+
+  // Campos compostos (como neighborhoods) não são ordenáveis diretamente no Prisma;
+  // para esses, mantemos a ordenação por número como fallback seguro.
+  const isSortableField = ["number", "name", "city", "active"].includes(sortField);
+  const effectiveSortField = isSortableField ? sortField : "number";
+  const effectiveSortOrder = isSortableField ? sortOrder : "asc";
+
+  const cacheKey = `stores:${effectiveSortField}:${effectiveSortOrder}`;
+  const data = await cached(cacheKey, 300, async () => {
+    const stores = await prisma.store.findMany({ orderBy: { [effectiveSortField]: effectiveSortOrder } });
     return stores.map(serialize);
   });
   return Response.json({ data });
@@ -76,7 +105,7 @@ export async function POST(request: Request) {
     return Response.json({ error: `Já existe a loja ${parsed.data.number}.` }, { status: 409 });
   }
   const store = await prisma.store.create({ data: toData(parsed.data) });
-  await invalidateCache("stores");
+  await invalidateCache("stores", "audience:store:");
   return Response.json({ data: serialize(store) }, { status: 201 });
 }
 
@@ -93,7 +122,7 @@ export async function PATCH(request: Request) {
   }
   const store = await prisma.store.update({ where: { id }, data: toData(parsed.data) }).catch(() => null);
   if (!store) return Response.json({ error: "Loja não encontrada." }, { status: 404 });
-  await invalidateCache("stores");
+  await invalidateCache("stores", "audience:store:");
   return Response.json({ data: serialize(store) });
 }
 
@@ -103,6 +132,6 @@ export async function DELETE(request: Request) {
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!id) return Response.json({ error: "Loja inválida." }, { status: 400 });
   await prisma.store.delete({ where: { id } }).catch(() => null);
-  await invalidateCache("stores");
+  await invalidateCache("stores", "audience:store:");
   return Response.json({ ok: true });
 }

@@ -1,85 +1,127 @@
-# Redis (cache), PgBouncer (pool de conexões) e Evolution API (WhatsApp) para o CRM.
-# O PostgreSQL continua externo: aponte POSTGRESQL_HOST/POSTGRESQL_PORT para ele no .env.
 services:
-  app:
-    build: .
-    depends_on:
-      - redis
-      - pgbouncer
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm-postgres
+    restart: unless-stopped
     environment:
-      # A aplicação usa o PgBouncer e o Redis da própria rede do compose.
-      DB_HOST: pgbouncer
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_POOL_MAX: ${DB_POOL_MAX:-10}
-      REDIS_URL: redis://redis:6379
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Defina BETTER_AUTH_SECRET no .env}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
-    ports:
-      - "127.0.0.1:6379:6379"
-    restart: unless-stopped
-
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm_user
+      POSTGRES_PASSWORD: CrmSecure2024!Pass
+    volumes:
+    - ./postgres/data:/var/lib/postgresql/data
+    networks:
+    - crm-network
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U crm_user -d crm
+      interval: 10s
+      timeout: 5s
+      retries: 5
   pgbouncer:
     image: edoburu/pgbouncer:latest
+    container_name: crm-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      DB_HOST: ${POSTGRESQL_HOST:?Defina POSTGRESQL_HOST no .env}
-      DB_PORT: ${POSTGRESQL_PORT:-5432}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@postgres:5432/crm
       POOL_MODE: transaction
-      AUTH_TYPE: scram-sha-256
-      MAX_CLIENT_CONN: 500
-      DEFAULT_POOL_SIZE: 20
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 25
       MIN_POOL_SIZE: 5
       RESERVE_POOL_SIZE: 5
-      SERVER_RESET_QUERY: DISCARD ALL
-      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options,schema
+      RESERVE_POOL_TIMEOUT: 3
+      SERVER_IDLE_TIMEOUT: 600
+      SERVER_LIFETIME: 3600
+      AUTH_TYPE: scram-sha-256
     ports:
-      - "127.0.0.1:6432:5432"
+    - 6432:6432
+    networks:
+    - crm-network
+  redis:
+    image: redis:7-alpine
+    container_name: crm-redis
     restart: unless-stopped
-
-  # Evolution API (WhatsApp). Painel/API em http://localhost:8080
-  evolution-postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: evolution
-      POSTGRES_USER: evolution
-      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:?Defina EVOLUTION_DB_PASSWORD no .env}
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
-      - evolution_pg:/var/lib/postgresql/data
-    restart: unless-stopped
-
+    - ./redis/data:/data
+    networks:
+    - crm-network
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
   evolution-api:
-    image: atendai/evolution-api:v2.2.3
-    depends_on:
-      - evolution-postgres
-      - redis
-    environment:
-      SERVER_URL: http://localhost:8080
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Defina EVOLUTION_API_KEY no .env}
-      DATABASE_ENABLED: "true"
-      DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD}@evolution-postgres:5432/evolution
-      CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: redis://redis:6379/6
-      CACHE_REDIS_PREFIX_KEY: evolution
-      CACHE_LOCAL_ENABLED: "false"
-    volumes:
-      - evolution_instances:/evolution/instances
-    ports:
-      - "127.0.0.1:8080:8080"
+    image: evoapicloud/evolution-api:latest
+    container_name: crm-evolution-api
     restart: unless-stopped
-
-volumes:
-  evolution_pg:
-  evolution_instances:
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SERVER_URL: http://localhost:8080
+      AUTHENTICATION_API_KEY: EvoApiSecure2024!Key
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: 'true'
+      DATABASE_ENABLED: 'true'
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgres://crm_user:CrmSecure2024!Pass@postgres:5432/evolution_db?schema=public
+      CACHE_REDIS_ENABLED: 'true'
+      CACHE_REDIS_URI: redis://redis:6379/1
+      STORE_MESSAGES: 'true'
+      STORE_MESSAGE_UP: 'true'
+      STORE_CONTACTS: 'true'
+      STORE_CHATS: 'true'
+      CLEAN_STORE_CLEANING_INTERVAL: 7200
+      CLEAN_STORE_MESSAGES: 'true'
+      CLEAN_STORE_MESSAGE_UP: 'true'
+      CLEAN_STORE_CONTACTS: 'true'
+      CLEAN_STORE_CHATS: 'true'
+    ports:
+    - 8080:8080
+    volumes:
+    - ./evolution-api/instances:/evolution/instances
+    networks:
+    - crm-network
+  crm-app:
+    build:
+      context: ./crm
+      dockerfile: Dockerfile
+    container_name: crm-app
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      evolution-api:
+        condition: service_started
+    env_file:
+    - ./crm/.env
+    environment:
+      NODE_ENV: production
+      LD_LIBRARY_PATH: /opt/oracle/instantclient_19_26
+      TNS_ADMIN: /tmp/oracletest/network/admin
+      PORT: 3000
+      BETTER_AUTH_SECRET: fyxYszaRyn2UT0NXuiK3oFVgjXruvCt3ZLkGK_Q9LWa7n6eevE4Pee5Q8T6ZV7rZ
+      BETTER_AUTH_URL: http://172.30.20.15:3000
+      DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@pgbouncer:5432/crm
+      REDIS_URL: redis://redis:6379/0
+      EVOLUTION_API_URL: http://evolution-api:8080
+      EVOLUTION_API_KEY: EvoApiSecure2024!Key
+      MINIO_ENDPOINT: 172.30.20.15
+    ports:
+    - 3000:3000
+    networks:
+    - crm-network
+networks:
+  crm-network:
+    driver: bridge

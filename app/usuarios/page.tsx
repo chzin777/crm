@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, Check, Plus, ShieldCheck, Users } from "lucide-react";
+import { Bell, Check, Plus, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
@@ -9,6 +9,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormSelect } from "@/components/FormSelect";
 import Stepper, { Step } from "@/components/Stepper";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { useToast } from "@/components/ToastProvider";
 
 type UserRole = "Administrador" | "Supervisor" | "Operador";
 
@@ -43,6 +44,7 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
 export default function UsuariosPage() {
   const { isDark, toggleTheme } = useCrmTheme();
+  const toast = useToast();
   const [usuarios, setUsuarios] = useState<TeamUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<TeamUser | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -114,9 +116,12 @@ export default function UsuariosPage() {
       setIsCreateOpen(false);
       setForm({ nome: "", email: "", cargo: "", nivel: "Operador" });
       setNotice("Usuário cadastrado no banco. O convite por e-mail ainda não está configurado.");
+      toast.success("Usuário adicionado", `${result.data.name} foi cadastrado.`);
       setFormError("");
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Não foi possível criar o usuário.");
+      const message = error instanceof Error ? error.message : "Não foi possível criar o usuário.";
+      setFormError(message);
+      toast.error("Erro ao adicionar usuário", message);
     }
   };
 
@@ -137,8 +142,11 @@ export default function UsuariosPage() {
       setUsuarios((current) => current.map((user) => user.id === updatedUser.id ? updatedUser : user));
       setSelectedUser(updatedUser);
       setFormError("");
+      toast.success("Usuário atualizado", `${updatedUser.nome} foi salvo.`);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Não foi possível atualizar o usuário.");
+      const message = error instanceof Error ? error.message : "Não foi possível atualizar o usuário.";
+      setFormError(message);
+      toast.error("Erro ao atualizar usuário", message);
     }
   };
 
@@ -161,6 +169,9 @@ export default function UsuariosPage() {
             <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => { setIsLoading(true); setUsersError(""); fetch("/api/users").then(async (r) => { const res = await r.json() as { data?: ApiTeamUser[]; error?: string }; if (!r.ok) throw new Error(res.error || "Não foi possível carregar os usuários."); setUsuarios((res.data ?? []).map(fromApiUser)); }).catch((e: unknown) => setUsersError(e instanceof Error ? e.message : "Não foi possível carregar os usuários.")).finally(() => setIsLoading(false)); }} disabled={isLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </button>
             <button type="button" onClick={openCreate} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
               <Plus className="w-4 h-4" /> Cadastrar usuário

@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, Star, TrendingUp, Users, X } from "lucide-react";
+import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, RefreshCw, Star, TrendingUp, Users, X } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { useToast } from "@/components/ToastProvider";
 
 type SurveyKey = "atendimento" | "produto";
 
@@ -78,6 +79,7 @@ const getLinePoints = (values: number[]) =>
 
 export default function NpsPage() {
   const { isDark, toggleTheme } = useCrmTheme();
+  const toast = useToast();
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const { data: npsConfig, setData: setNpsConfig, isSaving: configSaving, error: configError } = useCrmData<NpsConfig>("nps", { messages: initialMessages });
   const messages = npsConfig.messages ?? initialMessages;
@@ -91,6 +93,22 @@ export default function NpsPage() {
   const [editingSurvey, setEditingSurvey] = useState<SurveyKey | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [messageError, setMessageError] = useState("");
+
+  const reloadResponses = useCallback(async () => {
+    setResponsesLoading(true);
+    setResponsesError("");
+    try {
+      const response = await fetch("/api/nps");
+      const result = await response.json() as { data?: NpsResponse[]; error?: string };
+      if (!response.ok) throw new Error(result.error || "Não foi possível carregar as respostas.");
+      setCurrentDate(new Date());
+      setResponses(result.data ?? []);
+    } catch (error: unknown) {
+      setResponsesError(error instanceof Error ? error.message : "Não foi possível carregar as respostas.");
+    } finally {
+      setResponsesLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -170,6 +188,7 @@ export default function NpsPage() {
     setNpsConfig((current) => ({ ...current, messages: updatedMessages }));
     setEditingSurvey(null);
     setMessageError("");
+    toast.success("Mensagem atualizada", "A mensagem da pesquisa foi salva.");
   };
   const saveResponse = async () => {
     const rating = Number(responseDraft.rating);
@@ -195,8 +214,11 @@ export default function NpsPage() {
       setResponseDraft({ surveyKey: "atendimento", contactId: "", rating: "", comment: "" });
       setResponseFormError("");
       setIsResponseFormOpen(false);
+      toast.success("Avaliação adicionada", "A resposta NPS foi registrada.");
     } catch (error) {
-      setResponseFormError(error instanceof Error ? error.message : "Não foi possível salvar a avaliação.");
+      const message = error instanceof Error ? error.message : "Não foi possível salvar a avaliação.";
+      setResponseFormError(message);
+      toast.error("Erro ao salvar avaliação", message);
     }
   };
   const editedSurvey = surveys.find((survey) => survey.key === editingSurvey);
@@ -213,6 +235,9 @@ export default function NpsPage() {
             <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => void reloadResponses()} disabled={responsesLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${responsesLoading ? "animate-spin" : ""}`} />
             </button>
           </div>
         </header>

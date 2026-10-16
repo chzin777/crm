@@ -51,6 +51,30 @@ export async function GET(request: Request) {
   const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("pageSize")) || 50));
   const search = url.searchParams.get("search")?.trim() || "";
   const category = url.searchParams.get("category") || "";
+  const sortByRaw = url.searchParams.get("sortBy") || "lastPurchaseDate";
+  const sortOrderRaw = url.searchParams.get("sortOrder") || "desc";
+
+  const allowedSortFields: Record<string, string> = {
+    nome: "name",
+    name: "name",
+    telefone: "phone",
+    phone: "phone",
+    email: "email",
+    categoria: "category",
+    category: "category",
+    segmento: "segment",
+    segment: "segment",
+    ultimoContato: "lastPurchaseDate",
+    lastPurchaseDate: "lastPurchaseDate",
+    dataNascimento: "birthDate",
+    birthDate: "birthDate",
+    compras: "purchases",
+    purchases: "purchases",
+    totalGasto: "totalSpent",
+    totalSpent: "totalSpent",
+  };
+  const sortField = allowedSortFields[sortByRaw] ?? "lastPurchaseDate";
+  const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
 
   const where: Record<string, unknown> = {};
   if (search) {
@@ -67,7 +91,7 @@ export async function GET(request: Request) {
   const [contacts, total] = await Promise.all([
     prisma.contact.findMany({
       where,
-      orderBy: { name: "asc" },
+      orderBy: { [sortField]: sortOrder },
       skip: (page - 1) * pageSize,
       take: pageSize,
       select: {
@@ -125,6 +149,6 @@ export async function POST(request: Request) {
       totalSpent: true,
     },
   });
-  await invalidateCache("dashboard");
+  await invalidateCache("dashboard", "audience:store:");
   return Response.json({ data: toContact(contact) }, { status: 201 });
 }

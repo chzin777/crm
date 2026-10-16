@@ -111,21 +111,21 @@ export function Sidebar() {
   return (
     <aside className={`relative sticky top-4 my-4 ml-4 h-[calc(100vh-2rem)] shrink-0 rounded-2xl border border-slate-200 bg-white shadow-sm transition-[width,background-color] duration-200 ease-out dark:border-slate-800 dark:bg-[#051647] flex flex-col ${isCollapsed ? "w-20" : "w-64"}`}>
       {/* Topo da Sidebar com Logo Oficial */}
-      <div className={`h-16 flex items-center border-b border-slate-200 dark:border-slate-800/80 ${isCollapsed ? "justify-center px-0" : "px-5"}`}>
+      <div className={`h-28 flex items-center border-b border-slate-200 dark:border-slate-800/80 ${isCollapsed ? "justify-center px-0" : "px-5"}`}>
         <Link href="/" aria-label="Óticas Brasil" className="flex items-center gap-2.5 cursor-pointer hover:cursor-pointer">
           {isCollapsed ? (
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-[#051647] text-xs font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">OB</span>
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-[#051647] text-base font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">OB</span>
           ) : (
             <>
               <img
-                src="/logos/logo-oticas-brasil.png"
+                src="/logos/logo-login-oticas-brasil-light.png"
                 alt="Óticas Brasil"
-                className="h-7 w-auto object-contain dark:hidden"
+                className="h-16 w-auto object-contain dark:hidden"
               />
               <img
-                src="/logos/logo-oticas-brasil-branca.png"
+                src="/logos/logo-login-oticas-brasil.png"
                 alt="Óticas Brasil"
-                className="hidden h-7 w-auto object-contain dark:block"
+                className="hidden h-16 w-auto object-contain dark:block"
               />
             </>
           )}
@@ -133,7 +133,7 @@ export function Sidebar() {
       </div>
 
       {/* Navegação */}
-      <div className="flex-1 py-5 px-3 space-y-1 overflow-y-auto">
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-5">
         {!isCollapsed && (
           <div className="px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
             Marketing & Vendas
@@ -150,7 +150,7 @@ export function Sidebar() {
               aria-current={isActive ? "page" : undefined}
               aria-label={isCollapsed ? item.title : undefined}
               title={isCollapsed ? item.title : undefined}
-              className={`relative flex items-center py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ease-out cursor-pointer hover:cursor-pointer ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} ${
+              className={`group relative flex items-center rounded-xl py-2.5 text-sm font-semibold transition-colors duration-200 ease-out cursor-pointer hover:cursor-pointer ${isCollapsed ? "justify-center px-0" : "gap-3 px-3"} ${
                 isActive
                   ? "text-white dark:text-[#051647]"
                   : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white"
@@ -158,21 +158,18 @@ export function Sidebar() {
             >
               {isActive && (
                 <motion.span
-                  layoutId="sidebar-active-link"
-                  className="pointer-events-none absolute inset-0 rounded-xl bg-[#051647] shadow-xs dark:bg-[#C4D600]"
-                  initial={{ opacity: 0, scale: 0.96, y: 3 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#051647]/90 to-[#002187]/80 shadow-lg shadow-blue-900/30 dark:from-[#C4D600]/90 dark:to-[#C4D600]/80 dark:shadow-[#C4D600]/20"
                 />
               )}
-              <div className={`relative z-10 flex items-center ${isCollapsed ? "justify-center" : "gap-3"}`}>
-                <Icon className={`w-4 h-4 ${isActive ? "text-[#C4D600] dark:text-[#051647]" : "text-slate-400 dark:text-slate-400"}`} />
-                {!isCollapsed && <span>{item.title}</span>}
-              </div>
+              <Icon className={`relative z-10 w-4 h-4 shrink-0 ${isActive ? "text-[#C4D600] dark:text-[#051647]" : "text-slate-400 dark:text-slate-400"}`} />
+              {!isCollapsed && <span className="relative z-10">{item.title}</span>}
             </Link>
           );
         })}
-      </div>
+      </nav>
 
       {/* Rodapé da Sidebar com Card de Perfil */}
       <div className="relative p-4 border-t border-slate-200 dark:border-slate-800/80" ref={profileMenuRef}>

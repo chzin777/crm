@@ -7,7 +7,10 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   Tags,
@@ -20,9 +23,20 @@ import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import Stepper, { Step } from "@/components/Stepper";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { useToast } from "@/components/ToastProvider";
+import { CriterionRulesEditor, emptyRule } from "@/components/CriterionRulesEditor";
+import { FormSelect } from "@/components/FormSelect";
+import { describeRule, validateRule, type SegmentRule } from "@/lib/segment-rules";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+
+const generateId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+};
 
 type SegmentStatus = "Ativo" | "Rascunho";
 type SegmentFilter = "Todos" | SegmentStatus;
@@ -34,6 +48,7 @@ interface SegmentCriterion {
   id: string;
   nome: string;
   tipo: CriterionKind;
+  regras?: SegmentRule[];
   inativo?: boolean;
 }
 
@@ -81,30 +96,72 @@ const criterionKindLabels: Record<CriterionKind, string> = {
 };
 export default function SegmentosPage() {
   const { isDark, toggleTheme } = useCrmTheme();
-  const { data: segments, setData: setSegments, isLoading: segmentsLoading, error: segmentsError } = useCrmData<Segment[]>("segments", []);
+  const toast = useToast();
+  const { data: segments, setData: setSegments, isLoading: segmentsLoading, error: segmentsError, reloadData: segmentsReload } = useCrmData<Segment[]>("segments", []);
   const { data: savedCriteriaOptions, setData: setSavedCriteriaOptions, error: criteriaDataError } = useCrmData<SegmentCriterion[]>("criteria", []);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const { data: campaigns, error: campaignsError } = useCrmData<{ id: string; publico: string }[]>("campaigns", []);
   const [contactsLoading, setContactsLoading] = useState(true);
   const [contactsError, setContactsError] = useState("");
-  const [storeNumbers, setStoreNumbers] = useState<number[]>([]);
+  const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
   const [audienceCounts, setAudienceCounts] = useState<Record<string, number>>({});
   const requestedAudienceKeysRef = useRef(new Set<string>());
-  const storeCriteria = [...storeNumbers]
-    .sort((a, b) => a - b)
-    .map((number) => ({ id: `store-${number}`, nome: `Loja ${number}`, tipo: "loja" as const }));
+  const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "nome", order: "asc" });
+  const handleSort = (field: string) => {
+    setSortConfig((prev) => {
+      const nextOrder = prev.field === field && prev.order === "asc" ? "desc" : "asc";
+      return { field, order: nextOrder };
+    });
+  };
+  const SortIndicator = ({ field }: { field: string }) => {
+    const isActive = sortConfig.field === field;
+    if (!isActive) return <ChevronsUpDown className="h-3 w-3 text-slate-300 dark:text-slate-600" />;
+    return <ChevronUp className={`h-3 w-3 transition-transform ${sortConfig.order === "desc" ? "rotate-180" : ""} text-[#002187] dark:text-[#C4D600]`} />;
+  };
+  const sortedSegments = [...segments].sort((a, b) => {
+    const dir = sortConfig.order === "asc" ? 1 : -1;
+    switch (sortConfig.field) {
+      case "nome":
+        return dir * a.nome.localeCompare(b.nome, "pt-BR");
+      case "pessoas":
+        return dir * ((audienceCounts[a.id] ?? 0) - (audienceCounts[b.id] ?? 0));
+      case "criterios":
+        return dir * ((a.criterios?.length ?? 0) - (b.criterios?.length ?? 0));
+      case "status":
+        return dir * String(a.status ?? "").localeCompare(String(b.status ?? ""), "pt-BR");
+      case "atualizado":
+        return dir * new Date(a.atualizado ?? 0).getTime() - new Date(b.atualizado ?? 0).getTime();
+      case "campanhas": {
+        const aCamp = campaigns.filter((c) => c.publico === a.nome).length;
+        const bCamp = campaigns.filter((c) => c.publico === b.nome).length;
+        return dir * (aCamp - bCamp);
+      }
+      default:
+        return 0;
+    }
+  });
+  const storeCriteria = [...stores]
+    .sort((a, b) => a.number - b.number)
+    .map((store) => ({
+      id: `store-${store.number}`,
+      nome: `Loja ${store.number}`,
+      tipo: "loja" as const,
+      inativo: !store.active,
+    }));
   const isSystemCriterion = (criterion: SegmentCriterion) =>
     presetCriteria.some((preset) => preset.id === criterion.id) || criterion.id.startsWith("store-");
-  // System criteria (presets and stores) keep their name and type; only the "inativo" flag is read from saved data.
+  const isStoreCriterion = (criterion: SegmentCriterion) => criterion.id.startsWith("store-");
+  // Presets use their saved inactive flag; store criteria always mirror the store's active status.
   const criteriaOptions: SegmentCriterion[] = [
     ...presetCriteria.map((preset) => ({ ...preset, inativo: savedCriteriaOptions.find((saved) => saved.id === preset.id)?.inativo === true })),
-    ...storeCriteria.map((store) => ({ ...store, inativo: savedCriteriaOptions.find((saved) => saved.id === store.id)?.inativo === true })),
+    ...storeCriteria,
     ...savedCriteriaOptions.filter((saved) => !isSystemCriterion(saved)),
   ];
   const setCriteriaOptions = (options: SegmentCriterion[]) => setSavedCriteriaOptions(options);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<SegmentFilter>("Todos");
   const [selectedSegment, setSelectedSegment] = useState<Segment | null>(null);
+  const [pendingDeleteSegment, setPendingDeleteSegment] = useState<Segment | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditingSegment, setIsEditingSegment] = useState(false);
   const [form, setForm] = useState({ nome: "", descricao: "", criterios: "" });
@@ -118,7 +175,7 @@ export default function SegmentosPage() {
   const [criteriaSearchTerm, setCriteriaSearchTerm] = useState("");
   const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
   const [editingCriterionId, setEditingCriterionId] = useState<string | null>(null);
-  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind });
+  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind, regras: [emptyRule()] as SegmentRule[] });
   const [criteriaManagerError, setCriteriaManagerError] = useState("");
   const criteriaMenuRef = useRef<HTMLDivElement>(null);
   const criteriaTriggerRef = useRef<HTMLButtonElement>(null);
@@ -146,8 +203,8 @@ export default function SegmentosPage() {
     let active = true;
     fetch("/api/segments/audience")
       .then(async (response) => {
-        const result = await response.json() as { data?: { number: number; name: string }[] };
-        if (active && response.ok) setStoreNumbers((result.data ?? []).map((store) => store.number));
+        const result = await response.json() as { data?: { number: number; active: boolean }[] };
+        if (active && response.ok) setStores(result.data ?? []);
       })
       .catch(() => undefined);
     return () => { active = false; };
@@ -155,9 +212,14 @@ export default function SegmentosPage() {
 
 
   useEffect(() => {
-    if (!selectedSegment && !isCreateOpen && !isCriteriaManagerOpen) return;
+    if (!selectedSegment && !isCreateOpen && !isCriteriaManagerOpen && !pendingDeleteSegment) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (pendingDeleteSegment) {
+          event.stopPropagation();
+          setPendingDeleteSegment(null);
+          return;
+        }
         if (isCriteriaManagerOpen) {
           event.stopPropagation();
           setIsCriteriaManagerOpen(false);
@@ -177,7 +239,7 @@ export default function SegmentosPage() {
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedSegment, isCreateOpen, isContactPickerOpen, isCriteriaManagerOpen]);
+  }, [selectedSegment, isCreateOpen, isContactPickerOpen, isCriteriaManagerOpen, pendingDeleteSegment]);
 
   useEffect(() => {
     if (!isCriteriaMenuOpen) return;
@@ -238,7 +300,12 @@ export default function SegmentosPage() {
       const key = audienceKey(names);
       const resolved = names.map((name) => {
         const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
-        return options.find((option) => option.nome === name || option.nome === legacyName);
+        const option = options.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
+        if (option) return option;
+        const deletedStore = /^Loja (\d+)$/i.exec(legacyName);
+        return deletedStore
+          ? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const }
+          : undefined;
       });
       if (resolved.some((option) => !option)) continue;
       const signature = `${key}|${JSON.stringify(resolved)}`;
@@ -261,7 +328,7 @@ export default function SegmentosPage() {
   const segmentCampaignCount = (segment: Segment) =>
     campaigns.filter((campaign) => campaign.publico.split(", ").includes(segment.nome)).length;
 
-  const filteredSegments = segments.filter((segment) => {
+  const filteredSegments = sortedSegments.filter((segment) => {
     const selectedNames = contacts.filter((contact) => segment.contatosSelecionados.includes(contact.id)).map((contact) => contact.nome).join(" ");
     const matchesSearch = `${segment.nome} ${segment.descricao} ${segment.objetivo} ${segment.criterios.join(" ")} ${selectedNames}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));
     return matchesSearch && (activeFilter === "Todos" || segment.status === activeFilter);
@@ -288,6 +355,20 @@ export default function SegmentosPage() {
     (!criterion.inativo || selectedCriteria.includes(criterion.nome))
     && criterion.nome.toLocaleLowerCase("pt-BR").includes(normalizedCriteriaSearch));
   const [managerSearch, setManagerSearch] = useState("");
+  const [collapsedKinds, setCollapsedKinds] = useState<CriterionKind[]>(criterionKinds);
+  const highlightMatch = (text: string, term: string) => {
+    const query = term.trim();
+    if (!query) return text;
+    const index = text.toLocaleLowerCase("pt-BR").indexOf(query.toLocaleLowerCase("pt-BR"));
+    if (index < 0) return text;
+    return (
+      <>
+        {text.slice(0, index)}
+        <mark className="rounded bg-[#C4D600]/60 px-0.5 text-[#051647] dark:bg-[#C4D600] dark:text-[#051647]">{text.slice(index, index + query.length)}</mark>
+        {text.slice(index + query.length)}
+      </>
+    );
+  };
   const normalizedManagerSearch = managerSearch.trim().toLocaleLowerCase("pt-BR");
   const managerCriteria = criteriaOptions.filter((criterion) =>
     criterion.nome.toLocaleLowerCase("pt-BR").includes(normalizedManagerSearch));
@@ -304,10 +385,11 @@ export default function SegmentosPage() {
     saveCriteriaOptions(exists
       ? savedCriteriaOptions.map((saved) => saved.id === criterion.id ? { ...saved, inativo } : saved)
       : [...savedCriteriaOptions, { id: criterion.id, nome: criterion.nome, tipo: criterion.tipo, inativo }]);
+    toast.success(inativo ? "Critério inativado" : "Critério ativado", `"${criterion.nome}" foi atualizado.`);
   };
 
   const resetCriterionForm = () => {
-    setCriterionForm({ nome: "", tipo: "geral" });
+    setCriterionForm({ nome: "", tipo: "geral", regras: [emptyRule()] });
     setEditingCriterionId(null);
     setCriteriaManagerError("");
   };
@@ -324,6 +406,21 @@ export default function SegmentosPage() {
       setCriteriaManagerError("Já existe um critério com esse nome.");
       return;
     }
+    if (criterionForm.regras.length === 0) {
+      setCriteriaManagerError("Adicione ao menos uma regra para definir quem atende ao critério.");
+      return;
+    }
+    const ruleError = criterionForm.regras.map(validateRule).find(Boolean);
+    if (ruleError) {
+      setCriteriaManagerError(ruleError);
+      return;
+    }
+    const regras = criterionForm.regras.map((rule) => ({
+      campo: rule.campo,
+      operador: rule.operador,
+      ...(rule.valor !== undefined && rule.valor !== "" ? { valor: rule.valor.trim() } : {}),
+      ...(rule.valor2 ? { valor2: rule.valor2.trim() } : {}),
+    }));
 
     if (editingCriterionId) {
       const existingCriterion = criteriaOptions.find((criterion) => criterion.id === editingCriterionId);
@@ -332,9 +429,10 @@ export default function SegmentosPage() {
         return;
       }
       const updatedCriteria = savedCriteriaOptions.map((criterion) => criterion.id === editingCriterionId
-        ? { ...criterion, nome, tipo: criterionForm.tipo }
+        ? { ...criterion, nome, tipo: criterionForm.tipo, regras }
         : criterion);
       if (!saveCriteriaOptions(updatedCriteria)) return;
+      toast.success("Critério atualizado", `"${nome}" foi salvo.`);
       if (existingCriterion.nome !== nome) {
         setSegments((current) => current.map((segment) => ({
           ...segment,
@@ -351,11 +449,13 @@ export default function SegmentosPage() {
       }
     } else {
       const newCriterion: SegmentCriterion = {
-        id: `criterion-${crypto.randomUUID()}`,
+        id: `criterion-${generateId()}`,
         nome,
         tipo: criterionForm.tipo,
+        regras,
       };
       if (!saveCriteriaOptions([...savedCriteriaOptions, newCriterion])) return;
+      toast.success("Critério adicionado", `"${nome}" foi criado.`);
     }
     resetCriterionForm();
   };
@@ -363,6 +463,7 @@ export default function SegmentosPage() {
   const deleteCriterion = (criterion: SegmentCriterion) => {
     if (isSystemCriterion(criterion)) return;
     if (!saveCriteriaOptions(savedCriteriaOptions.filter((item) => item.id !== criterion.id))) return;
+    toast.success("Critério excluído", `"${criterion.nome}" foi removido.`);
     resetCriterionForm();
   };
 
@@ -396,7 +497,7 @@ export default function SegmentosPage() {
     const selectedContacts = contacts.filter((contact) => selectedContactIds.includes(contact.id));
     const criterios = form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean);
     const segment: Segment = {
-      id: `seg-${crypto.randomUUID()}`,
+      id: `seg-${generateId()}`,
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       status: "Rascunho",
@@ -419,6 +520,7 @@ export default function SegmentosPage() {
     setContactFilter("Todos");
     setIsContactPickerOpen(false);
     setIsCreateOpen(false);
+    toast.success("Segmento criado", `"${segment.nome}" foi adicionado.`);
   };
 
   const startEditingSegment = (segment: Segment) => {
@@ -469,16 +571,12 @@ export default function SegmentosPage() {
     setFormError("");
     setIsCriteriaMenuOpen(false);
     setIsContactPickerOpen(false);
+    toast.success("Segmento atualizado", `"${updatedSegment.nome}" foi salvo.`);
   };
 
   const deleteSegment = (segment: Segment) => {
-    const linkedCampaigns = segmentCampaignCount(segment);
-    const campaignNote = linkedCampaigns > 0
-      ? `\n\n${linkedCampaigns} campanha(s) vinculada(s) permanecerão salvas com o público registrado.`
-      : "";
-    if (!window.confirm(`Excluir o segmento "${segment.nome}"? Esta ação não pode ser desfeita.${campaignNote}`)) return;
-
     setSegments((current) => current.filter((item) => item.id !== segment.id));
+    toast.success("Segmento excluído", `"${segment.nome}" foi removido.`);
     if (selectedSegment?.id === segment.id) {
       setSelectedSegment(null);
       setIsEditingSegment(false);
@@ -486,13 +584,18 @@ export default function SegmentosPage() {
     }
   };
 
+  const closeSegmentModals = () => {
+    setSelectedSegment(null);
+    setIsCreateOpen(false);
+    setIsEditingSegment(false);
+    setIsContactPickerOpen(false);
+    setIsCriteriaManagerOpen(false);
+    setIsCriteriaMenuOpen(false);
+    setPendingDeleteSegment(null);
+  };
+
   const closeOverlay = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) {
-      setSelectedSegment(null);
-      setIsCreateOpen(false);
-      setIsEditingSegment(false);
-      setIsContactPickerOpen(false);
-    }
+    if (event.target === event.currentTarget) closeSegmentModals();
   };
 
   return (
@@ -508,7 +611,10 @@ export default function SegmentosPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => { resetCriterionForm(); setIsCriteriaManagerOpen(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
+            <button type="button" onClick={() => void segmentsReload()} disabled={segmentsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${segmentsLoading ? "animate-spin" : ""}`} />
+            </button>
+            <button type="button" onClick={() => { resetCriterionForm(); setCollapsedKinds(criterionKinds); setIsCriteriaManagerOpen(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
               <Tags className="h-3.5 w-3.5" />Gerenciar critérios
             </button>
             <button type="button" onClick={() => setIsCreateOpen(true)} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
@@ -573,12 +679,12 @@ export default function SegmentosPage() {
               <table className="w-full min-w-[760px] border-collapse text-left">
                 <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
                   <tr>
-                    <th className="px-5 py-3">Segmento</th>
-                    <th className="px-4 py-3">Pessoas</th>
-                    <th className="px-4 py-3">Critérios</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-5 py-3">Atualizado</th>
-                    <th className="px-4 py-3 text-right">Campanhas</th>
+                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("nome")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Segmento<SortIndicator field="nome" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("pessoas")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Pessoas<SortIndicator field="pessoas" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("criterios")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Critérios<SortIndicator field="criterios" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status<SortIndicator field="status" /></button></th>
+                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("atualizado")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Atualizado<SortIndicator field="atualizado" /></button></th>
+                    <th className="px-4 py-3 text-right"><button type="button" onClick={() => handleSort("campanhas")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Campanhas<SortIndicator field="campanhas" /></button></th>
                     <th className="px-4 py-3 text-right">Ações</th>
                   </tr>
                 </thead>
@@ -618,7 +724,7 @@ export default function SegmentosPage() {
                           type="button"
                           aria-label={`Excluir segmento ${segment.nome}`}
                           title="Excluir segmento"
-                          onClick={(event) => { event.stopPropagation(); deleteSegment(segment); }}
+                          onClick={(event) => { event.stopPropagation(); setPendingDeleteSegment(segment); }}
                           onKeyDown={(event) => event.stopPropagation()}
                           className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
                         >
@@ -642,7 +748,7 @@ export default function SegmentosPage() {
           <section role="dialog" aria-modal="true" aria-labelledby="segment-dialog-title" className={`w-full ${isCreateOpen || isEditingSegment ? "max-w-xl flex h-[min(640px,90vh)] max-h-[90vh] flex-col overflow-hidden" : "max-w-lg"} rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6`}>
             <div className={`flex items-start justify-between gap-4 ${isCreateOpen || isEditingSegment ? "mb-5 shrink-0" : "mb-5"}`}>
               <div><h2 id="segment-dialog-title" className="text-base font-bold text-slate-900 dark:text-white">{isCreateOpen ? "Criar segmento" : selectedSegment?.nome}</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{isCreateOpen ? "Defina um público para usar nas campanhas." : isEditingSegment ? "Atualize os dados e o público deste segmento." : "Critérios e campanhas vinculadas a este público."}</p></div>
-              <button type="button" onClick={() => { setSelectedSegment(null); setIsCreateOpen(false); setIsEditingSegment(false); setIsContactPickerOpen(false); }} aria-label="Fechar" title="Fechar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={closeSegmentModals} aria-label="Fechar" title="Fechar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-4 w-4" /></button>
             </div>
             {isCreateOpen ? (
               <>
@@ -685,7 +791,7 @@ export default function SegmentosPage() {
                           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Como definir o público?</h3>
                           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Combine regras de compra, NPS, telefone e loja ou selecione contatos da base.</p>
                         </div>
-                        <button type="button" onClick={() => { resetCriterionForm(); setIsCriteriaManagerOpen(true); }} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 text-[10px] font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
+                        <button type="button" onClick={() => { resetCriterionForm(); setCollapsedKinds(criterionKinds); setIsCriteriaManagerOpen(true); }} className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 text-[10px] font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
                           <Tags className="h-3 w-3" />Gerenciar critérios
                         </button>
                       </div>
@@ -889,7 +995,7 @@ export default function SegmentosPage() {
                       rows={2}
                       value={form.descricao}
                       onChange={(event) => { setForm((current) => ({ ...current, descricao: event.target.value })); setFormError(""); }}
-                      className="min-h-20 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                      className="min-h-20 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
                     />
                   </label>
                   <div className="space-y-3">
@@ -1061,12 +1167,12 @@ export default function SegmentosPage() {
                 <footer className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
                   <button
                     type="button"
-                    onClick={() => deleteSegment(selectedSegment)}
+                    onClick={() => setPendingDeleteSegment(selectedSegment)}
                     className="mr-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
                   >
                     <Trash2 className="h-3.5 w-3.5" />Excluir segmento
                   </button>
-                  <button type="button" onClick={() => { setIsEditingSegment(false); setFormError(""); setIsCriteriaMenuOpen(false); }} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
+                  <button type="button" onClick={closeSegmentModals} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
                   <button type="button" onClick={saveSegmentChanges} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer">
                     <Check className="h-3.5 w-3.5" />Salvar alterações
                   </button>
@@ -1256,45 +1362,37 @@ export default function SegmentosPage() {
                 </div>
                 <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} aria-label="Fechar gerenciamento de critérios" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-5 w-5" /></button>
               </div>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={managerSearch}
-                  onChange={(event) => setManagerSearch(event.target.value)}
-                  placeholder="Pesquisar critérios..."
-                  aria-label="Pesquisar critérios"
-                  className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                />
-              </div>
             </header>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
               <div id="criterion-form" className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-700 dark:bg-slate-800/40">
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{editingCriterionId ? "Editar critério" : "Criar critério"}</h3>
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(160px,0.65fr)]">
-                  <label className="block space-y-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300">
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                     Nome do critério <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span>
                     <input
                       autoFocus
                       value={criterionForm.nome}
                       onChange={(event) => { setCriterionForm((current) => ({ ...current, nome: event.target.value })); setCriteriaManagerError(""); }}
                       placeholder="Ex.: Loja: Pinheiros"
-                      className="h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-base font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-200 dark:focus:border-[#C4D600]"
                     />
                   </label>
-                  <label className="block space-y-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300">
-                    Categoria
-                    <select
-                      value={criterionForm.tipo}
-                      onChange={(event) => {
-                        const tipo = criterionKinds.find((kind) => kind === event.target.value);
+                  <div className="block">
+                    <FormSelect
+                      label="Categoria"
+                      value={criterionKindLabels[criterionForm.tipo]}
+                      options={criterionKinds.map((kind) => criterionKindLabels[kind])}
+                      onChange={(label) => {
+                        const tipo = criterionKinds.find((kind) => criterionKindLabels[kind] === label);
                         if (tipo) setCriterionForm((current) => ({ ...current, tipo }));
                       }}
-                      className="h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:focus:border-[#C4D600]"
-                    >
-                      {criterionKinds.map((kind) => <option key={kind} value={kind}>{criterionKindLabels[kind]}</option>)}
-                    </select>
-                  </label>
+                    />
+                  </div>
                 </div>
+                <CriterionRulesEditor
+                  rules={criterionForm.regras}
+                  onChange={(regras) => { setCriterionForm((current) => ({ ...current, regras })); setCriteriaManagerError(""); }}
+                />
                 {criteriaManagerError && <p role="alert" className="text-sm font-medium text-[#9a3d12] dark:text-[#F7915E]">{criteriaManagerError}</p>}
                 <div className="flex justify-end gap-2">
                   {editingCriterionId && <button type="button" onClick={resetCriterionForm} className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">Cancelar edição</button>}
@@ -1304,27 +1402,55 @@ export default function SegmentosPage() {
                   </button>
                 </div>
               </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={managerSearch}
+                  onChange={(event) => setManagerSearch(event.target.value)}
+                  placeholder="Pesquisar critérios..."
+                  aria-label="Pesquisar critérios"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-xs font-medium text-slate-700 shadow-xs outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-200 dark:focus:border-[#C4D600]"
+                />
+              </div>
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Critérios disponíveis</h3>
                   <span className="text-xs text-slate-400">{criteriaOptions.length} critérios</span>
                 </div>
-                <p className="mb-3 text-xs text-slate-400">Critérios inativos deixam de aparecer para novas seleções, mas continuam valendo nos segmentos que já os utilizam. Remover um critério próprio também não apaga ele dos segmentos existentes.</p>
+                <p className="mb-3 text-xs text-slate-400">Critérios inativos deixam de aparecer para novas seleções, mas continuam valendo nos segmentos que já os utilizam. O status dos critérios de loja acompanha o cadastro: lojas inativas ficam com o critério inativo e lojas removidas deixam de aparecer. Remover um critério próprio também não apaga ele dos segmentos existentes.</p>
                 <div className="space-y-5">
                   {criterionKinds.map((kind) => {
                     const groupedCriteria = managerCriteria.filter((criterion) => criterion.tipo === kind);
                     if (!groupedCriteria.length) return null;
+                    const isSearching = normalizedManagerSearch.length > 0;
+                    const isExpanded = isSearching || !collapsedKinds.includes(kind);
                     return (
                       <section key={kind} aria-label={criterionKindLabels[kind]}>
-                        <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{criterionKindLabels[kind]}</h4>
-                        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() => setCollapsedKinds((current) => current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind])}
+                          className="mb-2 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                            {criterionKindLabels[kind]}
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-slate-500 dark:bg-slate-800 dark:text-slate-400">{groupedCriteria.length}</span>
+                          </span>
+                          <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExpanded ? "" : "-rotate-90"}`} />
+                        </button>
+                        {isExpanded && <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
                           {groupedCriteria.map((criterion) => {
                             const system = isSystemCriterion(criterion);
                             return (
-                              <li key={criterion.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                                <span className="flex min-w-0 items-center gap-2">
-                                  <span className={`truncate text-sm ${criterion.inativo ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200"}`}>{criterion.nome}</span>
-                                  {system && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">Padrão</span>}
+                              <li key={criterion.id} className={`flex items-center justify-between gap-3 px-4 py-3 ${isSearching ? "bg-[#C4D600]/10 dark:bg-[#C4D600]/5" : ""}`}>
+                                <span className="flex min-w-0 flex-col gap-0.5">
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <span className={`truncate text-sm ${criterion.inativo ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200"}`}>{highlightMatch(criterion.nome, managerSearch)}</span>
+                                    {system && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">Padrão</span>}
+                                  </span>
+                                  {!system && (criterion.regras?.length
+                                    ? <span className="text-xs text-slate-400">{criterion.regras.map(describeRule).join(" • ")}</span>
+                                    : <span className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">Sem regras: nenhum contato atende. Edite para definir.</span>)}
                                 </span>
                                 <span className="flex shrink-0 items-center gap-2">
                                   {!system && (
@@ -1332,7 +1458,7 @@ export default function SegmentosPage() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo });
+                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo, regras: criterion.regras?.length ? criterion.regras : [emptyRule()] });
                                           setEditingCriterionId(criterion.id);
                                           setCriteriaManagerError("");
                                           document.getElementById("criterion-form")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -1356,10 +1482,11 @@ export default function SegmentosPage() {
                                     type="button"
                                     role="switch"
                                     aria-checked={!criterion.inativo}
-                                    aria-label={`${criterion.inativo ? "Ativar" : "Inativar"} critério ${criterion.nome}`}
-                                    title={criterion.inativo ? "Inativo: não aparece para seleção" : "Ativo"}
+                                    aria-label={isStoreCriterion(criterion) ? `Status da loja para ${criterion.nome}` : `${criterion.inativo ? "Ativar" : "Inativar"} critério ${criterion.nome}`}
+                                    title={isStoreCriterion(criterion) ? "Status definido pelo cadastro da loja" : criterion.inativo ? "Inativo: não aparece para seleção" : "Ativo"}
+                                    disabled={isStoreCriterion(criterion)}
                                     onClick={() => toggleCriterionActive(criterion)}
-                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors cursor-pointer hover:cursor-pointer ${criterion.inativo ? "bg-slate-300 dark:bg-slate-600" : "bg-[#002187] dark:bg-[#C4D600]"}`}
+                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${isStoreCriterion(criterion) ? "cursor-not-allowed opacity-80" : "cursor-pointer hover:cursor-pointer"} ${criterion.inativo ? "bg-slate-300 dark:bg-slate-600" : "bg-[#002187] dark:bg-[#C4D600]"}`}
                                   >
                                     <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${criterion.inativo ? "" : "translate-x-5 dark:bg-[#051647]"}`} />
                                   </button>
@@ -1367,7 +1494,7 @@ export default function SegmentosPage() {
                               </li>
                             );
                           })}
-                        </ul>
+                        </ul>}
                       </section>
                     );
                   })}
@@ -1377,6 +1504,51 @@ export default function SegmentosPage() {
             </div>
             <footer className="mt-5 flex shrink-0 justify-end border-t border-slate-100 pt-4 dark:border-slate-800">
               <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Concluir</button>
+            </footer>
+          </section>
+        </div>
+      )}
+      {pendingDeleteSegment && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-[#051647]/60 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPendingDeleteSegment(null);
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-segment-title"
+            aria-describedby="delete-segment-description"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-[#07194f]"
+          >
+            <h2 id="delete-segment-title" className="text-base font-bold text-slate-900 dark:text-white">Excluir segmento?</h2>
+            <p id="delete-segment-description" className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+              Tem certeza de que deseja excluir &quot;{pendingDeleteSegment.nome}&quot;? Esta ação não pode ser desfeita.
+            </p>
+            {segmentCampaignCount(pendingDeleteSegment) > 0 && (
+              <p className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                {segmentCampaignCount(pendingDeleteSegment)} campanha(s) vinculada(s) permanecerão salvas com o público registrado.
+              </p>
+            )}
+            <footer className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteSegment(null)}
+                className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteSegment(pendingDeleteSegment);
+                  setPendingDeleteSegment(null);
+                }}
+                className="h-9 rounded-lg bg-red-600 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-red-700 cursor-pointer hover:cursor-pointer"
+              >
+                Excluir segmento
+              </button>
             </footer>
           </section>
         </div>

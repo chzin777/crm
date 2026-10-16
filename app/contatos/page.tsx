@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
+import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { BirthdayDatePicker } from "@/components/BirthdayDatePicker";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import Stepper, { Step } from "@/components/Stepper";
@@ -12,15 +13,19 @@ import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { useToast } from "@/components/ToastProvider";
 import {
   ArrowUpRight,
   Bell,
   CircleDollarSign,
   Plus,
+  RefreshCw,
   Search,
   UserPlus,
   Users,
   Check,
+  ChevronUp,
+  ChevronsUpDown,
 } from "lucide-react";
 
 type ContactFilter = "Todos" | "Clientes" | "Leads" | "NPS" | "Inativos";
@@ -51,6 +56,12 @@ const toDateInput = (value: string) => {
 
 const fromDateInput = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+};
+
+const formatDateBR = (value: string | null | undefined) => {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 };
 const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -85,6 +96,7 @@ const isValidBrazilianPhone = (value: string) => {
 
 export default function ContatosPage() {
   const { isDark, toggleTheme } = useCrmTheme();
+  const toast = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ContactFilter>("Todos");
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -99,7 +111,21 @@ export default function ContatosPage() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formError, setFormError] = useState("");
-  const [form, setForm] = useState({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead" as ContactCategory, segmento: "" });
+  const [form, setForm] = useState({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead" as ContactCategory, segmento: [] as string[] });
+  const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "ultimoContato", order: "desc" });
+
+  const handleSort = useCallback((field: string) => {
+    setSortConfig((prev) => {
+      const nextOrder = prev.field === field && prev.order === "desc" ? "asc" : "desc";
+      return { field, order: nextOrder };
+    });
+  }, []);
+
+  const SortIndicator = ({ field }: { field: string }) => {
+    const isActive = sortConfig.field === field;
+    if (!isActive) return <ChevronsUpDown className="h-3 w-3 text-slate-300 dark:text-slate-600" />;
+    return <ChevronUp className={`h-3 w-3 transition-transform ${sortConfig.order === "desc" ? "rotate-180" : ""} text-[#002187] dark:text-[#C4D600]`} />;
+  };
 
   const categoryToApiFilter: Record<ContactFilter, string> = {
     Todos: "",
@@ -109,7 +135,7 @@ export default function ContatosPage() {
     Inativos: "inativo",
   };
 
-  const fetchContacts = useCallback(async (page = 1, search = "", filter: ContactFilter = "Todos", size?: number) => {
+  const fetchContacts = useCallback(async (page = 1, search = "", filter: ContactFilter = "Todos", size?: number, sort?: { field: string; order: "asc" | "desc" }) => {
     setContactsLoading(true);
     setDataError("");
     try {
@@ -119,6 +145,9 @@ export default function ContatosPage() {
       if (search) params.set("search", search);
       const apiCategory = categoryToApiFilter[filter];
       if (apiCategory) params.set("category", apiCategory);
+      const activeSort = sort ?? sortConfig;
+      params.set("sortBy", activeSort.field);
+      params.set("sortOrder", activeSort.order);
 
       const response = await fetch(`/api/contacts?${params.toString()}`);
       const result = await response.json() as { data?: Contact[]; error?: string; pagination?: typeof pagination };
@@ -133,16 +162,16 @@ export default function ContatosPage() {
   }, []);
 
   useEffect(() => {
-    fetchContacts(1, searchTerm, activeFilter);
-  }, [activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig);
+  }, [activeFilter, sortConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => {
-      fetchContacts(1, searchTerm, activeFilter);
+      fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig);
     }, 400);
     return () => clearTimeout(timer);
-  }, [searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchTerm, sortConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedContact && !isCreateOpen) return;
@@ -183,20 +212,23 @@ export default function ContatosPage() {
           email: form.email.trim(),
           dataNascimento: fromDateInput(form.dataNascimento),
           categoria: form.categoria,
-          segmento: form.segmento,
+          segmento: form.segmento.join(", "),
         }),
       });
       const result = await response.json() as { data?: Contact; error?: string };
       const savedContact = result.data;
       if (!response.ok || !savedContact) throw new Error(result.error || "Não foi possível salvar o contato.");
       setContacts((current) => [savedContact, ...current]);
+      toast.success("Contato adicionado", `${savedContact.nome} foi cadastrado.`);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Não foi possível salvar o contato.");
+      const message = error instanceof Error ? error.message : "Não foi possível salvar o contato.";
+      setFormError(message);
+      toast.error("Erro ao adicionar contato", message);
       return;
     }
     setActiveFilter("Todos");
     setSearchTerm("");
-    setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: "" });
+    setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: [] });
     setFormError("");
     setIsCreateOpen(false);
   };
@@ -209,7 +241,7 @@ export default function ContatosPage() {
       email: contact.email,
       dataNascimento: toDateInput(contact.dataNascimento),
       categoria: contact.categoria,
-      segmento: contact.segmento,
+      segmento: contact.segmento ? contact.segmento.split(",").map((s) => s.trim()).filter(Boolean) : [],
     });
     setFormError("");
   };
@@ -236,7 +268,7 @@ export default function ContatosPage() {
           email: form.email.trim(),
           dataNascimento: fromDateInput(form.dataNascimento),
           categoria: form.categoria,
-          segmento: form.segmento.trim() || contactCategoryNames[form.categoria],
+          segmento: form.segmento.join(", ") || contactCategoryNames[form.categoria],
         }),
       });
       const result = await response.json() as { data?: Contact; error?: string };
@@ -245,8 +277,11 @@ export default function ContatosPage() {
       setContacts((current) => current.map((contact) => contact.id === savedContact.id ? savedContact : contact));
       setSelectedContact(savedContact);
       setFormError("");
+      toast.success("Contato atualizado", `${savedContact.nome} foi salvo.`);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Não foi possível atualizar o contato.");
+      const message = error instanceof Error ? error.message : "Não foi possível atualizar o contato.";
+      setFormError(message);
+      toast.error("Erro ao atualizar contato", message);
     }
   };
 
@@ -271,7 +306,10 @@ export default function ContatosPage() {
             <button type="button" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => { setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: "" }); setFormError(""); setIsCreateOpen(true); }} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
+            <button type="button" onClick={() => void fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig)} disabled={contactsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
+            </button>
+            <button type="button" onClick={() => { setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: [] }); setFormError(""); setIsCreateOpen(true); }} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
               <Plus className="w-4 h-4" /> Novo Contato
             </button>
           </div>
@@ -311,7 +349,7 @@ export default function ContatosPage() {
               <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white">Base de contatos</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Página {pagination.page} de {pagination.totalPages} ({pagination.total} contatos)</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Página {pagination.page.toLocaleString('pt-BR')} de {pagination.totalPages.toLocaleString('pt-BR')} ({pagination.total.toLocaleString('pt-BR')} contatos)</p>
                 </div>
                 <label className="relative block w-full lg:max-w-sm">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -353,12 +391,12 @@ export default function ContatosPage() {
               <table className="w-full min-w-[860px] border-collapse text-left">
                 <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
                   <tr>
-                    <th className="px-5 py-3">Contato</th>
-                    <th className="px-4 py-3">Perfil</th>
-                    <th className="px-4 py-3">Último contato</th>
-                    <th className="px-4 py-3">Nascimento</th>
-                    <th className="px-4 py-3 text-right">Compras</th>
-                    <th className="px-5 py-3 text-right">Total gasto</th>
+                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("nome")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Contato<SortIndicator field="nome" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("segmento")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Perfil<SortIndicator field="segmento" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("ultimoContato")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Último contato<SortIndicator field="ultimoContato" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("dataNascimento")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Nascimento<SortIndicator field="dataNascimento" /></button></th>
+                    <th className="px-4 py-3 text-right"><button type="button" onClick={() => handleSort("compras")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Compras<SortIndicator field="compras" /></button></th>
+                    <th className="px-5 py-3 text-right"><button type="button" onClick={() => handleSort("totalGasto")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Total gasto<SortIndicator field="totalGasto" /></button></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -391,8 +429,8 @@ export default function ContatosPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${categoryStyles[contact.categoria]}`}>{contact.segmento}</span></td>
-                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{contact.ultimoContato}</td>
-                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{contact.dataNascimento}</td>
+                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{formatDateBR(contact.ultimoContato)}</td>
+                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{formatDateBR(contact.dataNascimento)}</td>
                       <td className="px-4 py-3.5 text-right text-xs font-medium text-slate-700 dark:text-slate-200">{contact.compras}</td>
                       <td className="px-5 py-3.5 text-right text-xs font-bold text-slate-900 dark:text-white">{contact.totalGasto ? currency(contact.totalGasto) : "—"}</td>
                     </tr>
@@ -416,7 +454,7 @@ export default function ContatosPage() {
                     onChange={(e) => {
                       const size = Number(e.target.value);
                       setPagination((prev) => ({ ...prev, pageSize: size, page: 1 }));
-                      fetchContacts(1, searchTerm, activeFilter, size);
+                      fetchContacts(1, searchTerm, activeFilter, size, sortConfig);
                     }}
                     className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 cursor-pointer"
                   >
@@ -431,7 +469,7 @@ export default function ContatosPage() {
                 <button
                   type="button"
                   disabled={pagination.page <= 1 || contactsLoading}
-                  onClick={() => fetchContacts(pagination.page - 1, searchTerm, activeFilter)}
+                  onClick={() => fetchContacts(pagination.page - 1, searchTerm, activeFilter, undefined, sortConfig)}
                   className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
                 >
                   Anterior
@@ -440,7 +478,7 @@ export default function ContatosPage() {
                 <button
                   type="button"
                   disabled={pagination.page >= pagination.totalPages || contactsLoading}
-                  onClick={() => fetchContacts(pagination.page + 1, searchTerm, activeFilter)}
+                  onClick={() => fetchContacts(pagination.page + 1, searchTerm, activeFilter, undefined, sortConfig)}
                   className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
                 >
                   Próxima
@@ -468,8 +506,8 @@ export default function ContatosPage() {
                   setFormError(!isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
                   return false;
                 }
-                if (step === 2 && !segmentOptions.some((segment) => segment === form.segmento)) {
-                  setFormError("Selecione um segmento existente.");
+                if (step === 2 && form.segmento.length === 0) {
+                  setFormError("Selecione pelo menos um segmento.");
                   return false;
                 }
                 if (step === 2 && !isValidEmail(form.email.trim())) {
@@ -515,10 +553,10 @@ export default function ContatosPage() {
                     options={contactCategoryOptions.map((category) => contactCategoryNames[category])}
                     onChange={(value) => setForm({ ...form, categoria: contactCategoryOptions.find((category) => contactCategoryNames[category] === value) ?? "lead" })}
                   />
-                  <FormSelect
+                  <FormMultiSelect
                     label="Segmento"
                     ariaLabel="Segmento"
-                    value={form.segmento || "Selecione um segmento"}
+                    selected={form.segmento}
                     options={segmentOptions}
                     onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }}
                     required
@@ -534,7 +572,7 @@ export default function ContatosPage() {
                   <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white px-4 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Nome</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "Não informado"}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Telefone</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{form.telefone || "Não informado"}</dd></div>
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Categoria e segmento</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{contactCategoryNames[form.categoria]} · {form.segmento || "Não selecionado"}</dd></div>
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Categoria e segmento</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{contactCategoryNames[form.categoria]} · {form.segmento.length > 0 ? form.segmento.join(", ") : "Não selecionado"}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">E-mail</dt><dd className="mt-1 break-all text-xs text-slate-700 dark:text-slate-200">{form.email || "Não informado"}</dd></div>
                   </dl>
                   {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
@@ -547,7 +585,7 @@ export default function ContatosPage() {
                 <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
                   <span className={`grid h-11 w-11 place-items-center rounded-full text-xs font-bold ${categoryStyles[form.categoria]}`}>{form.nome.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
                   <div className="min-w-0 flex-1">
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${categoryStyles[form.categoria]}`}>{form.segmento || contactCategoryNames[form.categoria]}</span>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${categoryStyles[form.categoria]}`}>{form.segmento.length > 0 ? form.segmento.join(", ") : contactCategoryNames[form.categoria]}</span>
                     <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{form.telefone}</p>
                   </div>
                 </div>
@@ -556,7 +594,7 @@ export default function ContatosPage() {
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="tel" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <FormSelect label="Categoria" value={contactCategoryNames[form.categoria]} options={contactCategoryOptions.map((category) => contactCategoryNames[category])} onChange={(value) => setForm({ ...form, categoria: contactCategoryOptions.find((category) => contactCategoryNames[category] === value) ?? "lead" })} />
                 </div>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Perfil / segmento</span><input value={form.segmento} onChange={(event) => setForm({ ...form, segmento: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                <FormMultiSelect label="Perfil / segmento" ariaLabel="Segmento" selected={form.segmento} options={segmentOptions} onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }} />
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">Nascimento<input type="date" value={form.dataNascimento} onChange={(event) => setForm({ ...form, dataNascimento: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 <dl className="grid grid-cols-2 gap-3">
@@ -567,7 +605,7 @@ export default function ContatosPage() {
                 <a href={`https://wa.me/55${form.telefone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[#051647] text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"><WhatsAppIcon className="h-4 w-4 fill-current" />Conversar no WhatsApp<ArrowUpRight className="h-3.5 w-3.5" /></a>
               </div>
               <footer className="mt-4 flex shrink-0 justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-                <button type="button" onClick={() => { setFormError(""); setForm({ nome: selectedContact.nome, telefone: selectedContact.telefone, email: selectedContact.email, dataNascimento: toDateInput(selectedContact.dataNascimento), categoria: selectedContact.categoria, segmento: selectedContact.segmento }); }} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Descartar alterações</button>
+                <button type="button" onClick={() => { setFormError(""); setForm({ nome: selectedContact.nome, telefone: selectedContact.telefone, email: selectedContact.email, dataNascimento: toDateInput(selectedContact.dataNascimento), categoria: selectedContact.categoria, segmento: selectedContact.segmento ? selectedContact.segmento.split(",").map((s) => s.trim()).filter(Boolean) : [] }); }} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Descartar alterações</button>
                 <button type="button" onClick={saveContact} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"><Check className="h-3.5 w-3.5" />Salvar alterações</button>
               </footer>
             </div>

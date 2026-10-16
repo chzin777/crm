@@ -32,6 +32,6 @@ export async function POST(request: Request) {
     data: { ...parsed.data, createdBy: user.id },
     include: { contact: { select: { name: true } } },
   });
-  await invalidateCache("dashboard");
+  await invalidateCache("dashboard", "audience:store:");
   return Response.json({ data: response }, { status: 201 });
 }

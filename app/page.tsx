@@ -12,6 +12,14 @@ import { SendMessageDialog } from "@/components/SendMessageDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+
+const generateId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+};
+import { useToast } from "@/components/ToastProvider";
 import type { Contact } from "@/lib/contacts";
 import {
   STAGE_DEFINITIONS,
@@ -30,6 +38,7 @@ import {
   Bell,
   CheckCircle2,
   Pencil,
+  Paperclip,
   Plus,
   Search,
   UserCheck,
@@ -41,6 +50,7 @@ import {
   ShoppingBag,
   X,
 } from "lucide-react";
+import Stepper, { Step } from "@/components/Stepper";
 
 type ColumnId = StageId;
 const CARD_PAGE_SIZES = [10, 20, 30, 50] as const;
@@ -59,6 +69,13 @@ function formatPhone(value: string) {
   return value;
 }
 
+interface DealObservation {
+  id: string;
+  texto: string;
+  autor: string;
+  criadoEm: string;
+}
+
 interface PipelineCard {
   id: string;
   pipelineId: PipelineId;
@@ -72,6 +89,8 @@ interface PipelineCard {
   tag: string;
   tagColor: string;
   valor: string;
+  observacoes?: DealObservation[];
+  imagem?: string;
   progresso: number;
   progressoCor: string;
   diasNaEtapa: string;
@@ -79,6 +98,27 @@ interface PipelineCard {
   coluna: ColumnId;
   mensagem: string;
   entrouEmEtapaEm?: string;
+}
+
+function migrateCards(cards: PipelineCard[]): { cards: PipelineCard[]; changed: boolean } {
+  let changed = false;
+  const migrated = cards.map((card) => {
+    const raw = card.observacoes as unknown;
+    if (typeof raw === "string") {
+      changed = true;
+      const text = raw.trim();
+      return {
+        ...card,
+        observacoes: text ? [{ id: generateId(), texto: text, autor: "Sistema", criadoEm: new Date().toISOString() }] : [],
+      };
+    }
+    if (!Array.isArray(raw)) {
+      changed = true;
+      return { ...card, observacoes: [] };
+    }
+    return card;
+  });
+  return { cards: migrated, changed };
 }
 
 interface PipelineConfig {
@@ -103,8 +143,18 @@ const normalizeSearchText = (value: string) =>
 
 export default function Home() {
   const { isDark, toggleTheme } = useCrmTheme();
+  const toast = useToast();
   const [periodo, setPeriodo] = useState<"mes" | "tri" | "ano">("tri");
-  const [activePipelineId, setActivePipelineId] = useState<PipelineId>("novos");
+  const [activePipelineId, setActivePipelineIdState] = useState<PipelineId>("novos");
+  const setActivePipelineId = (id: PipelineId) => {
+    setActivePipelineIdState(id);
+    window.localStorage.setItem("crm-active-pipeline", id);
+  };
+  useEffect(() => {
+    const saved = window.localStorage.getItem("crm-active-pipeline");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (saved === "novos" || saved === "relacionamento") setActivePipelineIdState(saved);
+  }, []);
   const [cardsPerPage, setCardsPerPage] = useState<number>(10);
   const [stagePages, setStagePages] = useState<Partial<Record<ColumnId, number>>>({});
   const [searchQuery, setSearchQuery] = useState("");
@@ -120,11 +170,92 @@ export default function Home() {
   const [contactsError, setContactsError] = useState("");
   const [isCreateDealOpen, setIsCreateDealOpen] = useState(false);
   const [dealContactId, setDealContactId] = useState("");
+  const [dealContactSearch, setDealContactSearch] = useState("");
+  const [isDealContactOpen, setIsDealContactOpen] = useState(false);
+  const dealContactRef = useRef<HTMLDivElement>(null);
+  const [dealContactResults, setDealContactResults] = useState<Contact[]>([]);
+  const [dealContactSearching, setDealContactSearching] = useState(false);
+  const dealContactSearchRef = useRef(dealContactSearch);
+  dealContactSearchRef.current = dealContactSearch;
+
+  useEffect(() => {
+    const term = dealContactSearch.trim();
+    if (!term) {
+      setDealContactResults(contacts);
+      setDealContactSearching(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setDealContactSearching(true);
+      fetch(`/api/contacts/search?q=${encodeURIComponent(term)}&limit=50`, { signal: controller.signal })
+        .then(async (response) => {
+          const result = await response.json() as { data?: Contact[]; error?: string };
+          if (!response.ok) throw new Error(result.error || "Erro ao buscar contatos.");
+          if (dealContactSearchRef.current === term) {
+            setDealContactResults(result.data ?? []);
+          }
+        })
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.name !== "AbortError" && dealContactSearchRef.current === term) {
+            setDealContactResults([]);
+          }
+        })
+        .finally(() => {
+          if (dealContactSearchRef.current === term) setDealContactSearching(false);
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [dealContactSearch, contacts]);
+
+  // Click-outside handler for deal contact dropdown
+  useEffect(() => {
+    if (!isDealContactOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dealContactRef.current && !dealContactRef.current.contains(event.target as Node)) {
+        setIsDealContactOpen(false);
+        if (dealContactId) {
+          const selected = contacts.find((c) => c.id === dealContactId) ?? dealContactResults.find((c) => c.id === dealContactId);
+          setDealContactSearch(selected?.nome ?? "");
+        } else {
+          setDealContactSearch("");
+        }
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isDealContactOpen, dealContactId, contacts, dealContactResults]);
+
+  const filteredDealContacts = dealContactSearch.trim() ? dealContactResults : contacts;
   const [dealTitle, setDealTitle] = useState("");
+  const [dealValue, setDealValue] = useState("");
+  const [dealNotes, setDealNotes] = useState("");
+  const [newObservations, setNewObservations] = useState<DealObservation[]>([]);
+  const [newObservationText, setNewObservationText] = useState("");
+  const [newDealImage, setNewDealImage] = useState<string | null>(null);
+  const dealImageInputRef = useRef<HTMLInputElement>(null);
   const [dealPipelineId, setDealPipelineId] = useState<PipelineId>("novos");
   const [dealStageId, setDealStageId] = useState<ColumnId>("novo-lead");
   const [contactsLoading, setContactsLoading] = useState(true);
   const [dealError, setDealError] = useState("");
+  const [editingCard, setEditingCard] = useState<PipelineCard | null>(null);
+  const [detailTab, setDetailTab] = useState<"dados" | "compras" | "observacoes">("dados");
+  const migratedRef = useRef(false);
+
+  // Migrate old string observacoes to DealObservation[] on first load
+  useEffect(() => {
+    if (migratedRef.current || cards.length === 0) return;
+    const result = migrateCards(cards);
+    if (result.changed) {
+      migratedRef.current = true;
+      setCards(result.cards);
+    } else {
+      migratedRef.current = true;
+    }
+  }, [cards, setCards]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const closeDialogButtonRef = useRef<HTMLButtonElement>(null);
@@ -155,12 +286,13 @@ export default function Home() {
     const next: StageConfigStore = { stages };
     await saveStageStore(next);
     setStageStore(next);
+    toast.success("Etapa atualizada", `"${config.titulo}" foi salva.`);
   };
   const editingStage = editingStageId ? STAGE_DEFINITIONS.find((stage) => stage.id === editingStageId) : undefined;
 
   useEffect(() => {
     let active = true;
-    fetch("/api/contacts/search?limit=50")
+    fetch("/api/contacts/search?limit=500")
       .then(async (response) => {
         const result = await response.json() as { data?: Contact[]; error?: string };
         if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
@@ -249,6 +381,7 @@ export default function Home() {
         ];
       });
     }
+    toast.success("Oportunidade movida", "A etapa da oportunidade foi atualizada.");
     setDraggedCardId(null);
     setDragOverColumn(null);
     setDragOverCard(null);
@@ -289,6 +422,7 @@ export default function Home() {
         });
         return remaining;
       });
+      toast.success("Oportunidade movida", "A posição da oportunidade foi atualizada.");
     }
 
     setDraggedCardId(null);
@@ -307,12 +441,17 @@ export default function Home() {
     setDealPipelineId(pipelineId);
     setDealStageId(stageId ?? pipelinesConfig[pipelineId].stages[0].id);
     setDealContactId("");
+    setDealContactSearch("");
+    setDealContactResults([]);
     setDealTitle("");
+    setDealValue("");
+    setDealNotes("");
     setDealError("");
+    setEditingCard(null);
     setIsCreateDealOpen(true);
   };
   const createDeal = () => {
-    const contact = contacts.find((item) => item.id === dealContactId);
+    const contact = contacts.find((item) => item.id === dealContactId) ?? dealContactResults.find((item) => item.id === dealContactId);
     if (!contact) {
       setDealError(contactsError || "Selecione um contato existente para criar a oportunidade.");
       return;
@@ -329,31 +468,79 @@ export default function Home() {
       : contact.categoria === "cliente"
         ? "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]"
         : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
-    const card: PipelineCard = {
-      id: crypto.randomUUID(),
-      pipelineId: dealPipelineId,
-      titulo: dealTitle.trim() || `Acompanhar ${contact.nome}`,
-      cliente: contact.nome,
-      telefone: contact.telefone,
-      email: contact.email,
-      dataNascimento: contact.dataNascimento,
-      ultimasCompras: [],
-      contactId: contact.id,
-      tag: contact.segmento || categoryLabel[contact.categoria],
-      tagColor,
-      valor: "Valor a definir",
-      progresso: STAGE_PROGRESS[selectedStage.id],
-      progressoCor: "bg-[#C4D600]",
-      diasNaEtapa: "Novo",
-      entrouEmEtapaEm: new Date().toISOString(),
-      iniciais: contact.iniciais,
-      coluna: selectedStage.id,
-      mensagem: "",
-    };
-    setCards((current) => [card, ...current]);
-    setActivePipelineId(dealPipelineId);
-    setDealError("");
-    setIsCreateDealOpen(false);
+    const allObservations = [...newObservations];
+    if (dealNotes.trim()) {
+      allObservations.push({ id: generateId(), texto: dealNotes.trim(), autor: "Usuário", criadoEm: new Date().toISOString() });
+    }
+    if (editingCard) {
+      // Edit existing card
+      setCards((current) => current.map((c) => c.id === editingCard.id ? {
+        ...c,
+        pipelineId: dealPipelineId,
+        titulo: dealTitle.trim() || c.titulo,
+        cliente: contact.nome,
+        telefone: contact.telefone,
+        email: contact.email,
+        dataNascimento: contact.dataNascimento,
+        contactId: contact.id,
+        tag: contact.segmento || categoryLabel[contact.categoria],
+        tagColor,
+        valor: dealValue.trim() || "Valor a definir",
+        observacoes: allObservations.length > 0 ? allObservations : c.observacoes,
+        imagem: newDealImage ?? c.imagem,
+        progresso: STAGE_PROGRESS[selectedStage.id],
+        iniciais: contact.iniciais,
+        coluna: selectedStage.id,
+      } : c));
+      toast.success("Oportunidade atualizada", `"${dealTitle.trim() || editingCard.titulo}" foi editada.`);
+    } else {
+      // Create new card
+      const card: PipelineCard = {
+        id: generateId(),
+        pipelineId: dealPipelineId,
+        titulo: dealTitle.trim() || `Acompanhar ${contact.nome}`,
+        cliente: contact.nome,
+        telefone: contact.telefone,
+        email: contact.email,
+        dataNascimento: contact.dataNascimento,
+        ultimasCompras: [],
+        contactId: contact.id,
+        tag: contact.segmento || categoryLabel[contact.categoria],
+        tagColor,
+        valor: dealValue.trim() || "Valor a definir",
+        observacoes: allObservations,
+        imagem: newDealImage ?? undefined,
+        progresso: STAGE_PROGRESS[selectedStage.id],
+        progressoCor: "bg-[#C4D600]",
+        diasNaEtapa: "Novo",
+        entrouEmEtapaEm: new Date().toISOString(),
+        iniciais: contact.iniciais,
+        coluna: selectedStage.id,
+        mensagem: "",
+      };
+      setCards((current) => [card, ...current]);
+      setActivePipelineId(dealPipelineId);
+      setDealError("");
+      setIsCreateDealOpen(false);
+      toast.success("Oportunidade criada", `"${card.titulo}" foi adicionada.`);
+    }
+    setNewObservations([]);
+    setNewObservationText("");
+    setNewDealImage(null);
+  }
+
+  const updateSelectedCardField = (field: keyof PipelineCard, value: string) => {
+    if (!selectedCard) return;
+    setCards((current) => current.map((c) => c.id === selectedCard.id ? { ...c, [field]: value } : c));
+    setSelectedCard((prev) => prev && prev.id === selectedCard.id ? { ...prev, [field]: value } : prev);
+  };
+
+  const addObservationToCard = (texto: string) => {
+    if (!selectedCard || !texto.trim()) return;
+    const obs: DealObservation = { id: generateId(), texto: texto.trim(), autor: "Usuário", criadoEm: new Date().toISOString() };
+    setCards((current) => current.map((c) => c.id === selectedCard.id ? { ...c, observacoes: [...(c.observacoes ?? []), obs] } : c));
+    setSelectedCard((prev) => prev && prev.id === selectedCard.id ? { ...prev, observacoes: [...(prev.observacoes ?? []), obs] } : prev);
+  };
   };
   const activePipeline = pipelinesConfig[activePipelineId];
   const normalizedSearchQuery = useMemo(() => normalizeSearchText(searchQuery.trim()), [searchQuery]);
@@ -540,6 +727,7 @@ export default function Home() {
                     type: "success",
                     text: `Sincronização concluída: ${totalCreated} cards novos gravados, ${totalCards} cards na pipeline.`,
                   });
+                  toast.success("Sincronização concluída", `${totalCreated} cards novos gravados.`);
                 } catch (error: unknown) {
                   setSyncMessage({
                     type: "error",
@@ -547,6 +735,7 @@ export default function Home() {
                       ? `Falha ao sincronizar: ${error.message}`
                       : "Falha de conexão ao sincronizar.",
                   });
+                  toast.error("Falha ao sincronizar", error instanceof Error ? error.message : undefined);
                 } finally {
                   setIsSyncing(false);
                 }
@@ -782,7 +971,7 @@ export default function Home() {
                           }}
                           className="absolute inset-0 z-0 rounded-xl cursor-pointer hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#002187] dark:focus-visible:outline-[#C4D600]"
                         />
-                        <div className="relative z-10 pointer-events-none space-y-3">
+                                                <div className="relative z-10 pointer-events-none space-y-3">
                         {/* Título e Tag */}
                         <div className="flex items-start justify-between gap-2">
                           <div>
@@ -920,6 +1109,7 @@ export default function Home() {
               const data = await response.json().catch(() => null);
               throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
             }
+            toast.success("Mensagem enviada", `Enviada para ${messageCard.cliente}.`);
           }}
         />
       )}
@@ -927,175 +1117,424 @@ export default function Home() {
       {isCreateDealOpen && (
         <EntityDialog
           titleId="create-deal-title"
-          title="Nova oportunidade"
-          description="Vincule uma oportunidade a um contato existente no banco."
+          title={editingCard ? "Editar oportunidade" : "Nova oportunidade"}
+          description={editingCard ? "Atualize os dados desta oportunidade." : "Vincule uma oportunidade a um contato existente no banco."}
           onClose={() => setIsCreateDealOpen(false)}
+          size="lg"
         >
-          <div className="flex h-full flex-col gap-4">
-            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Contato
-              <select
-                value={dealContactId}
-                onChange={(event) => setDealContactId(event.target.value)}
-                disabled={contactsLoading || contacts.length === 0}
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-              >
-                <option value="">{contactsLoading ? "Carregando contatos..." : "Selecione um contato"}</option>
-                {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.nome} · {contact.telefone}</option>)}
-              </select>
-            </label>
-            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Nome da oportunidade
-              <input
-                value={dealTitle}
-                onChange={(event) => setDealTitle(event.target.value)}
-                placeholder="Ex.: Orçamento de lentes"
-                maxLength={200}
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-              />
-            </label>
-            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Pipeline
-              <select
-                value={dealPipelineId}
-                onChange={(event) => {
-                  const pipelineId = event.target.value === "relacionamento" ? "relacionamento" : "novos";
-                  setDealPipelineId(pipelineId);
-                  setDealStageId(pipelinesConfig[pipelineId].stages[0].id);
-                }}
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-              >
-                <option value="novos">Novos clientes</option>
-                <option value="relacionamento">Relacionamento</option>
-              </select>
-            </label>
-            <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Etapa
-              <select
-                value={dealStageId}
-                onChange={(event) => {
-                  const stage = pipelinesConfig[dealPipelineId].stages.find((item) => item.id === event.target.value);
-                  if (stage) setDealStageId(stage.id);
-                }}
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-              >
-                {pipelinesConfig[dealPipelineId].stages.map((stage) => <option key={stage.id} value={stage.id}>{stageTitle(stage.id)}</option>)}
-              </select>
-            </label>
-            {contacts.length === 0 && !contactsLoading && !contactsError && (
-              <p className="text-xs text-slate-500">Cadastre um contato antes de criar uma oportunidade.</p>
-            )}
-            {dealError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{dealError}</p>}
-            <div className="mt-auto flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-              <button type="button" onClick={() => setIsCreateDealOpen(false)} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
-              <button type="button" onClick={createDeal} disabled={contactsLoading || contacts.length === 0} className="h-9 rounded-lg bg-[#051647] px-3 text-xs font-bold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">Criar oportunidade</button>
+          <div className="flex h-full min-h-0 flex-col">
+            <Stepper
+              indicator="numbers"
+              transition="slide"
+              linear
+              validateStep={(step) => {
+                if (step === 1) return !!dealContactId;
+                if (step === 2) return !!dealTitle.trim();
+                return true;
+              }}
+              onFinalStepCompleted={createDeal}
+              backButtonText="Voltar"
+              nextButtonText="Continuar"
+              completeButtonText={editingCard ? "Salvar alterações" : "Criar oportunidade"}
+              accentColor="#C4D600"
+              theme="light"
+            >
+              <Step title="Contato" description="Selecione o contato vinculado">
+                <div className="space-y-4 py-2">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300" htmlFor="deal-contact-search">Contato</label>
+                    <div className="relative" ref={dealContactRef}>
+                      <input
+                        id="deal-contact-search"
+                        type="text"
+                        role="combobox"
+                        aria-expanded={isDealContactOpen}
+                        aria-controls="deal-contact-listbox"
+                        autoComplete="off"
+                        placeholder={contactsLoading ? "Carregando contatos..." : dealContactId ? ((contacts.find((c) => c.id === dealContactId) ?? dealContactResults.find((c) => c.id === dealContactId))?.nome ?? "Selecione um contato") : "Pesquisar contato..."}
+                        value={dealContactSearch}
+                        onChange={(event) => {
+                          setDealContactSearch(event.target.value);
+                          if (!isDealContactOpen) setIsDealContactOpen(true);
+                        }}
+                        onFocus={() => {
+                          if (dealContactId) {
+                            const selected = contacts.find((c) => c.id === dealContactId) ?? dealContactResults.find((c) => c.id === dealContactId);
+                            setDealContactSearch(selected?.nome ?? "");
+                          }
+                          setIsDealContactOpen(true);
+                        }}
+                        disabled={contactsLoading || contacts.length === 0}
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] cursor-pointer hover:cursor-pointer"
+                      />
+                      <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      {isDealContactOpen && (
+                        <ul
+                          id="deal-contact-listbox"
+                          role="listbox"
+                          className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                        >
+                          {filteredDealContacts.length === 0 && (
+                            <li className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhum contato encontrado.</li>
+                          )}
+                          {filteredDealContacts.map((contact) => {
+                            const isSelected = contact.id === dealContactId;
+                            return (
+                              <li
+                                key={contact.id}
+                                role="option"
+                                aria-selected={isSelected}
+                                onClick={() => {
+                                  setDealContactId(contact.id);
+                                  setDealContactSearch(contact.nome);
+                                  setIsDealContactOpen(false);
+                                }}
+                                className={`flex cursor-pointer flex-col gap-0.5 px-3 py-2 text-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-700 ${isSelected ? "bg-slate-100 dark:bg-slate-700" : ""}`}
+                              >
+                                <span className="font-medium text-slate-900 dark:text-white">{contact.nome}</span>
+                                <span className="text-xs text-slate-500 dark:text-slate-400">{contact.telefone}{contact.email ? ` · ${contact.email}` : ""}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                  {contacts.length === 0 && !contactsLoading && !contactsError && (
+                    <p className="text-xs text-slate-500">Cadastre um contato antes de criar uma oportunidade.</p>
+                  )}
+                  {dealError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{dealError}</p>}
+                </div>
+              </Step>
+              <Step title="Detalhes" description="Dados da oportunidade">
+                <div className="space-y-4 py-2">
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Nome da oportunidade
+                    <input
+                      value={dealTitle}
+                      onChange={(event) => setDealTitle(event.target.value)}
+                      placeholder="Ex.: Orçamento de lentes"
+                      maxLength={200}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    />
+                  </label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Valor estimado
+                    <input
+                      type="text"
+                      value={dealValue}
+                      onChange={(event) => setDealValue(event.target.value)}
+                      placeholder="Ex: R$ 1.500,00"
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    />
+                  </label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Pipeline
+                    <select
+                      value={dealPipelineId}
+                      onChange={(event) => {
+                        const pipelineId = event.target.value === "relacionamento" ? "relacionamento" : "novos";
+                        setDealPipelineId(pipelineId);
+                        setDealStageId(pipelinesConfig[pipelineId].stages[0].id);
+                      }}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    >
+                      <option value="novos">Novos clientes</option>
+                      <option value="relacionamento">Relacionamento</option>
+                    </select>
+                  </label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Etapa
+                    <select
+                      value={dealStageId}
+                      onChange={(event) => {
+                        const stage = pipelinesConfig[dealPipelineId].stages.find((item) => item.id === event.target.value);
+                        if (stage) setDealStageId(stage.id);
+                      }}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    >
+                      {pipelinesConfig[dealPipelineId].stages.map((stage) => <option key={stage.id} value={stage.id}>{stageTitle(stage.id)}</option>)}
+                    </select>
+                  </label>
+                </div>
+              </Step>
+              <Step title="Observações" description="Anotações e anexos">
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Adicionar observação</label>
+                    <div className="flex gap-2">
+                      <textarea
+                        value={newObservationText}
+                        onChange={(event) => setNewObservationText(event.target.value)}
+                        placeholder="Escreva uma observação..."
+                        rows={2}
+                        className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] resize-none"
+                      ></textarea>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!newObservationText.trim()) return;
+                          setNewObservations((prev) => [...prev, { id: generateId(), texto: newObservationText.trim(), autor: "Usuário", criadoEm: new Date().toISOString() }]);
+                          setNewObservationText("");
+                        }}
+                        disabled={!newObservationText.trim()}
+                        className="self-end rounded-lg bg-[#051647] px-3 py-2 text-xs font-bold text-white hover:bg-[#002187] disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
+                      >
+                        Adicionar
+                      </button>
+                    </div>
+                  </div>
+                  {newObservations.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">Observações adicionadas ({newObservations.length})</p>
+                      <div className="max-h-32 space-y-1.5 overflow-y-auto">
+                        {newObservations.map((obs) => (
+                          <div key={obs.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800/50">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{obs.autor}</span>
+                              <button type="button" onClick={() => setNewObservations((prev) => prev.filter((o) => o.id !== obs.id))} className="text-slate-400 hover:text-red-500 cursor-pointer hover:cursor-pointer"><X className="h-3 w-3" /></button>
+                            </div>
+                            <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">{obs.texto}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-700">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Imagem (opcional)</label>
+                    <input type="file" accept="image/*" ref={dealImageInputRef} className="hidden" onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 16 * 1024 * 1024) { toast.error("Imagem muito grande", "Máximo 16MB."); return; }
+                      const reader = new FileReader();
+                      reader.onload = () => setNewDealImage(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }} />
+                    {newDealImage ? (
+                      <div className="relative inline-block">
+                        <img src={newDealImage} alt="Preview" className="h-24 w-24 rounded-lg border border-slate-200 object-cover dark:border-slate-700" />
+                        <button type="button" onClick={() => { setNewDealImage(null); if (dealImageInputRef.current) dealImageInputRef.current.value = ""; }} className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow cursor-pointer hover:cursor-pointer"><X className="h-3 w-3" /></button>
+                      </div>
+                    ) : (
+                      <button type="button" onClick={() => dealImageInputRef.current?.click()} className="inline-flex h-10 items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 text-xs font-medium text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-600 dark:text-slate-400 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer">
+                        <Paperclip className="h-3.5 w-3.5" /> Anexar imagem
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </Step>
+            </Stepper>
+            <div className="mt-2 flex justify-end border-t border-slate-100 pt-2 dark:border-slate-800">
+              <button type="button" onClick={() => setIsCreateDealOpen(false)} className="h-8 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
             </div>
           </div>
         </EntityDialog>
       )}
 
       {selectedCard && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setSelectedCard(null);
-          }}
+        <EntityDialog
+          titleId="customer-details-title"
+          title={selectedCard.cliente}
+          description={selectedCard.tag}
+          onClose={() => setSelectedCard(null)}
+          size="lg"
         >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="customer-details-title"
-            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-7"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
-                  {selectedCard.iniciais}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Detalhes do cliente</p>
-                  <h2 id="customer-details-title" className="truncate text-lg font-bold text-slate-900 dark:text-white">
-                    {selectedCard.cliente}
-                  </h2>
-                  <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${selectedCard.tagColor}`}>
-                    {selectedCard.tag}
-                  </span>
-                </div>
+          <div className="flex h-full min-h-0 flex-col">
+            {/* Fixed header with avatar and tag */}
+            <div className="flex shrink-0 items-center gap-3 border-b border-slate-100 pb-4 dark:border-slate-700">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#051647] text-xs font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
+                {selectedCard.iniciais}
               </div>
-              <button
-                ref={closeDialogButtonRef}
-                type="button"
-                onClick={() => setSelectedCard(null)}
-                aria-label="Fechar detalhes do cliente"
-                title="Fechar"
-                className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer hover:cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-base font-bold text-slate-900 dark:text-white">{selectedCard.cliente}</h2>
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${selectedCard.tagColor}`}>{selectedCard.tag}</span>
+              </div>
             </div>
 
-            <div className="mt-6 grid gap-6 sm:grid-cols-2">
-              <section>
-                <h3 className="mb-3 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Dados do cliente</h3>
-                <dl className="space-y-3 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                    <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Telefone</dt><dd>{formatPhone(selectedCard.telefone)}</dd></div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Mail className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                    <div className="min-w-0"><dt className="text-[10px] text-slate-500 dark:text-slate-400">E-mail</dt><dd className="break-all">{selectedCard.email}</dd></div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                    <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Data de nascimento</dt><dd>{selectedCard.dataNascimento}</dd></div>
-                  </div>
-                </dl>
-              </section>
-
-              <section>
-                <h3 className="mb-3 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">Negócio atual</h3>
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                  <div className="col-span-2"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Deal</dt><dd className="font-semibold">{selectedCard.titulo}</dd></div>
-                  <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Etapa</dt><dd>{stageTitle(selectedCard.coluna)}</dd></div>
-                  <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Na etapa</dt><dd>{selectedCard.diasNaEtapa}</dd></div>
-                  <div className="col-span-2"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Valor / situação</dt><dd className="font-bold">{selectedCard.valor}</dd></div>
-                </dl>
-              </section>
+            {/* Tab bar */}
+            <div className="mt-3 flex shrink-0 gap-1 border-b border-slate-200 dark:border-slate-700">
+              {([
+                { key: "dados", label: "Dados" },
+                { key: "compras", label: "Compras" },
+                { key: "observacoes", label: "Observações" },
+              ] as const).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setDetailTab(tab.key)}
+                  className={`relative px-4 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${
+                    detailTab === tab.key
+                      ? "text-[#002187] dark:text-[#C4D600]"
+                      : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  }`}
+                >
+                  {tab.label}
+                  {detailTab === tab.key && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C4D600] dark:bg-[#C4D600]" />
+                  )}
+                </button>
+              ))}
             </div>
 
-            <section className="mt-6 border-t border-slate-200 pt-5 dark:border-slate-700">
-              <h3 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
-                <ShoppingBag className="h-4 w-4" /> Últimas compras
-              </h3>
-              <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {(() => {
-                const purchases = selectedCard.ultimasCompras.length > 0
-                  ? selectedCard.ultimasCompras
-                  : loadedPurchases && loadedPurchases.contactId === selectedCard.contactId ? loadedPurchases.items ?? [] : null;
-                if (purchases === null) {
-                  return selectedCard.contactId
-                    ? <LoadingSpinner label="Carregando compras..." size={32} className="py-3" />
-                    : <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas para esta oportunidade.</p>;
-                }
-                if (purchases.length === 0) {
-                  return <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas para esta oportunidade.</p>;
-                }
-                return purchases.map((purchase, index) => (
-                  <div key={`${purchase.data}-${purchase.produto}-${index}`} className="flex items-center justify-between gap-4 py-3 text-sm">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-800 dark:text-slate-100">{purchase.produto}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{purchase.data}</p>
+            {/* Tab content — scrollable area */}
+            <div className="min-h-0 flex-1 overflow-y-auto py-4">
+              {detailTab === "dados" && (
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <section>
+                    <h3 className="mb-3 text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Dados do cliente</h3>
+                    <dl className="space-y-3 text-sm">
+                      <InlineField label="Telefone" value={formatPhone(selectedCard.telefone)} onSave={(v) => updateSelectedCardField("telefone", v)} icon={<Phone className="h-3.5 w-3.5" />} />
+                      <InlineField label="E-mail" value={selectedCard.email} onSave={(v) => updateSelectedCardField("email", v)} icon={<Mail className="h-3.5 w-3.5" />} />
+                      <InlineField label="Data de nascimento" value={selectedCard.dataNascimento} onSave={(v) => updateSelectedCardField("dataNascimento", v)} icon={<CalendarDays className="h-3.5 w-3.5" />} />
+                    </dl>
+                  </section>
+                  <section>
+                    <h3 className="mb-3 text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Negócio atual</h3>
+                    <dl className="space-y-3 text-sm">
+                      <InlineField label="Título" value={selectedCard.titulo} onSave={(v) => updateSelectedCardField("titulo", v)} />
+                      <InlineField label="Valor" value={selectedCard.valor} onSave={(v) => updateSelectedCardField("valor", v)} />
+                      <div>
+                        <dt className="text-[10px] text-slate-500 dark:text-slate-400">Etapa</dt>
+                        <dd className="font-medium text-slate-900 dark:text-white">{stageTitle(selectedCard.coluna)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[10px] text-slate-500 dark:text-slate-400">Dias na etapa</dt>
+                        <dd className="font-medium text-slate-900 dark:text-white">{selectedCard.diasNaEtapa}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                </div>
+              )}
+
+              {detailTab === "compras" && (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(() => {
+                    const purchases = selectedCard.ultimasCompras.length > 0
+                      ? selectedCard.ultimasCompras
+                      : loadedPurchases && loadedPurchases.contactId === selectedCard.contactId ? loadedPurchases.items ?? [] : null;
+                    if (purchases === null) {
+                      return selectedCard.contactId
+                        ? <LoadingSpinner label="Carregando compras..." size={32} className="py-3" />
+                        : <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas.</p>;
+                    }
+                    if (purchases.length === 0) {
+                      return <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas.</p>;
+                    }
+                    return purchases.map((purchase, index) => (
+                      <div key={`${purchase.data}-${purchase.produto}-${index}`} className="flex items-center justify-between gap-4 py-3 text-sm">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-slate-800 dark:text-slate-100">{purchase.produto}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{purchase.data}</p>
+                        </div>
+                        <span className="shrink-0 font-bold text-slate-900 dark:text-white">{purchase.valor}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
+
+              {detailTab === "observacoes" && (
+                <div className="space-y-4">
+                  {selectedCard.imagem && (
+                    <div className="mb-3">
+                      <img src={selectedCard.imagem} alt="Anexo do card" className="max-h-40 rounded-lg border border-slate-200 object-cover dark:border-slate-700" />
                     </div>
-                    <span className="shrink-0 font-bold text-slate-900 dark:text-white">{purchase.valor}</span>
+                  )}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Nova observação</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Escreva uma observação..."
+                        className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const val = e.currentTarget.value.trim();
+                            if (!val) return;
+                            addObservationToCard(val);
+                            e.currentTarget.value = "";
+                          }
+                        }}
+                        onBlur={(e) => {
+                          // no-op; Enter is the trigger
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                          const val = input?.value.trim();
+                          if (!val) return;
+                          addObservationToCard(val);
+                          input.value = "";
+                        }}
+                        className="rounded-lg bg-[#051647] px-3 py-2 text-xs font-bold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
+                      >
+                        Adicionar
+                      </button>
+                    </div>
                   </div>
-                ));
-              })()}
-              </div>
-            </section>
-          </section>
-        </div>
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">Histórico ({(selectedCard.observacoes ?? []).length})</p>
+                    {(selectedCard.observacoes ?? []).length === 0 ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Nenhuma observação registrada.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {(selectedCard.observacoes ?? []).map((obs) => (
+                          <div key={obs.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800/50">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{obs.autor}</span>
+                              <span className="text-[9px] text-slate-400">{new Date(obs.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                            </div>
+                            <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">{obs.texto}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+        </EntityDialog>
       )}
+    </div>
+  );
+}
+
+function InlineField({ label, value, onSave, icon, type = "text" }: { label: string; value: string; onSave: (v: string) => void; icon?: React.ReactNode; type?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  if (!editing) {
+    return (
+      <div onClick={() => { setDraft(value); setEditing(true); }} className="group flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">
+        {icon && <span className="shrink-0 text-[#002187] dark:text-[#C4D600]">{icon}</span>}
+        <div className="min-w-0">
+          <dt className="text-[10px] text-slate-500 dark:text-slate-400">{label}</dt>
+          <dd className="truncate font-medium text-slate-900 dark:text-white">{value || "—"}</dd>
+        </div>
+        </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {icon && <span className="shrink-0 text-[#002187] dark:text-[#C4D600]">{icon}</span>}
+      <div className="min-w-0 flex-1">
+        <dt className="text-[10px] text-slate-500 dark:text-slate-400">{label}</dt>
+        <input
+          autoFocus
+          type={type}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => { onSave(draft); setEditing(false); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { onSave(draft); setEditing(false); }
+            if (e.key === "Escape") { setDraft(value); setEditing(false); }
+          }}
+          className="w-full rounded border border-[#002187] bg-white px-1.5 py-0.5 text-sm font-medium outline-none dark:border-[#C4D600] dark:bg-slate-800 dark:text-white"
+        />
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, Plus, Search, Store as StoreIcon, Trash2 } from "lucide-react";
+import { Bell, ChevronUp, ChevronsUpDown, Plus, RefreshCw, Search, Store as StoreIcon, Trash2 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import Stepper, { Step } from "@/components/Stepper";
@@ -9,6 +9,7 @@ import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { useToast } from "@/components/ToastProvider";
 
 interface StoreRecord {
   id: string;
@@ -47,6 +48,7 @@ const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3
 
 export default function LojasPage() {
   const { isDark, toggleTheme } = useCrmTheme();
+  const toast = useToast();
   const [stores, setStores] = useState<StoreRecord[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -63,33 +65,76 @@ export default function LojasPage() {
   const [citiesLoading, setCitiesLoading] = useState(false);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [neighborhoodsLoading, setNeighborhoodsLoading] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "number", order: "asc" });
 
-  const loadCounts = async (list: StoreRecord[]) => {
-    const groups = Object.fromEntries(list.map((store) => [String(store.number), [{ id: `store-${store.number}`, nome: `Loja ${store.number}`, tipo: "loja" }]]));
-    const response = await fetch("/api/segments/audience", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groups }),
+  const [countsLoading, setCountsLoading] = useState(false);
+
+  const handleSort = (field: string) => {
+    setSortConfig((prev) => {
+      const nextOrder = prev.field === field && prev.order === "asc" ? "desc" : "asc";
+      return { field, order: nextOrder };
     });
-    const result = await response.json().catch(() => ({})) as { counts?: Record<string, number> };
-    if (response.ok && result.counts) setCounts(result.counts);
+  };
+
+  const SortIndicator = ({ field }: { field: string }) => {
+    const isActive = sortConfig.field === field;
+    if (!isActive) return <ChevronsUpDown className="h-3 w-3 text-slate-300 dark:text-slate-600" />;
+    return <ChevronUp className={`h-3 w-3 transition-transform ${sortConfig.order === "desc" ? "rotate-180" : ""} text-[#002187] dark:text-[#C4D600]`} />;
+  };
+
+  const loadCounts = async (list: StoreRecord[], signal?: AbortSignal) => {
+    if (list.length === 0) {
+      setCounts({});
+      return;
+    }
+    setCountsLoading(true);
+    try {
+      const groups = Object.fromEntries(list.map((store) => [String(store.number), [{ id: `store-${store.number}`, nome: `Loja ${store.number}`, tipo: "loja" }]]));
+      const response = await fetch("/api/segments/audience", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups }),
+        signal,
+      });
+      const result = await response.json().catch(() => ({})) as { counts?: Record<string, number> };
+      if (response.ok && result.counts) setCounts(result.counts);
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+    } finally {
+      setCountsLoading(false);
+    }
+  };
+
+  const refreshStores = async (signal?: AbortSignal, sort?: { field: string; order: "asc" | "desc" }) => {
+    setIsLoading(true);
+    setError("");
+    try {
+      const activeSort = sort ?? sortConfig;
+      const params = new URLSearchParams();
+      params.set("sortBy", activeSort.field);
+      params.set("sortOrder", activeSort.order);
+      const response = await fetch(`/api/stores?${params.toString()}`, { signal });
+      const result = await response.json().catch(() => ({})) as { data?: StoreRecord[]; error?: string };
+      if (!response.ok) throw new Error(result.error || "Não foi possível carregar as lojas.");
+      const list = result.data ?? [];
+      if (signal?.aborted) return;
+      setStores(list);
+      setPage(1);
+      // Carrega os counts em background — a lista já aparece sem precisar esperar
+      void loadCounts(list, signal);
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setError(reason instanceof Error ? reason.message : "Não foi possível carregar as lojas.");
+    } finally {
+      if (!signal?.aborted) setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    let active = true;
-    fetch("/api/stores")
-      .then(async (response) => {
-        const result = await response.json().catch(() => ({})) as { data?: StoreRecord[]; error?: string };
-        if (!response.ok) throw new Error(result.error || "Não foi possível carregar as lojas.");
-        const list = result.data ?? [];
-        if (!active) return;
-        setStores(list);
-        await loadCounts(list).catch(() => undefined);
-      })
-      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "Não foi possível carregar as lojas."); })
-      .finally(() => { if (active) setIsLoading(false); });
-    return () => { active = false; };
-  }, []);
+    const controller = new AbortController();
+    void refreshStores(controller.signal, sortConfig);
+    return () => { controller.abort(); };
+  }, [sortConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadLocations = (type: "cities" | "neighborhoods", params: Record<string, string>, apply: (names: string[]) => void, setLoading: (value: boolean) => void, isActive: () => boolean) => {
     setLoading(true);
@@ -194,9 +239,13 @@ export default function LojasPage() {
         if (!located) setError("Não foi possível localizar o bairro da loja no mapa; o raio não será aplicado.");
       }
       closeForm();
-      await loadCounts(next).catch(() => undefined);
+      toast.success(isNew ? "Loja adicionada" : "Loja atualizada", `${saved.name} foi salva.`);
+      // Recarrega a lista e os counts do servidor para refletir o cache invalidado
+      void refreshStores(undefined, sortConfig);
     } catch (reason) {
-      setFormError(reason instanceof Error ? reason.message : "Não foi possível salvar a loja.");
+      const message = reason instanceof Error ? reason.message : "Não foi possível salvar a loja.";
+      setFormError(message);
+      toast.error("Erro ao salvar loja", message);
     } finally {
       setProgress("");
       setIsSaving(false);
@@ -207,9 +256,13 @@ export default function LojasPage() {
     if (!window.confirm(`Remover a loja ${store.number} - ${store.name}?`)) return;
     const response = await fetch(`/api/stores?id=${encodeURIComponent(store.id)}`, { method: "DELETE" });
     if (response.ok) {
-      setStores((current) => current.filter((item) => item.id !== store.id));
       closeForm();
-    } else setError("Não foi possível remover a loja.");
+      toast.success("Loja excluída", `${store.name} foi removida.`);
+      void refreshStores(undefined, sortConfig);
+    } else {
+      setError("Não foi possível remover a loja.");
+      toast.error("Erro ao excluir loja", "Não foi possível remover a loja.");
+    }
   };
 
   const term = search.trim().toLocaleLowerCase("pt-BR");
@@ -333,6 +386,9 @@ export default function LojasPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
               <Bell className="h-4 w-4" />
             </button>
+            <button type="button" onClick={() => void refreshStores(undefined, sortConfig)} disabled={isLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            </button>
             <button type="button" onClick={() => openForm("new")} className="topbar-action-button cursor-pointer bg-[#051647] text-white hover:cursor-pointer hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D]">
               <Plus className="h-4 w-4" /> Cadastrar loja
             </button>
@@ -355,10 +411,10 @@ export default function LojasPage() {
               <table className="w-full min-w-[820px] border-collapse text-left">
                 <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
                   <tr>
-                    <th className="px-5 py-3">Loja</th>
-                    <th className="px-4 py-3">Cidade</th>
+                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("number")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Loja<SortIndicator field="number" /></button></th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("name")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Cidade<SortIndicator field="name" /></button></th>
                     <th className="px-4 py-3">Bairro / raio</th>
-                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("active")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status<SortIndicator field="active" /></button></th>
                     <th className="px-5 py-3 text-right">Contatos</th>
                   </tr>
                 </thead>
@@ -399,7 +455,9 @@ export default function LojasPage() {
                         <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${store.active ? "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]" : "bg-slate-100 text-slate-500 dark:bg-slate-800"}`}>{store.active ? "Ativa" : "Inativa"}</span>
                       </td>
                       <td className="px-5 py-3.5 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                        {counts[String(store.number)] === undefined ? "…" : counts[String(store.number)].toLocaleString("pt-BR")}
+                        {countsLoading && counts[String(store.number)] === undefined ? (
+                          <span className="inline-block h-3 w-8 animate-pulse rounded bg-slate-200 dark:bg-slate-700" aria-label="Carregando contagem" />
+                        ) : counts[String(store.number)] === undefined ? "—" : counts[String(store.number)].toLocaleString("pt-BR")}
                       </td>
                     </tr>
                   ))}

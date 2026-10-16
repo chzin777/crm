@@ -1,0 +1,2 @@
+@echo off\r
+node "%%USERPROFILE%%\\.claude\\plugins\\cache\	hedotmack\\claude-mem\\13.39.0\\scripts\\claude-mem-launcher.cjs" %%*\r

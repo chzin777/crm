@@ -45,7 +45,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/contac
       totalSpent: true,
     },
   });
-  await invalidateCache("dashboard");
+  await invalidateCache("dashboard", "audience:store:");
   return Response.json({
     data: {
       id: contact.id,

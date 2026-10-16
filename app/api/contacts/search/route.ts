@@ -8,14 +8,22 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.trim() || "";
-  const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 20));
+  const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
 
+  // Word-start matching: split query into words and match each against name parts
+  // This allows searching by first name alone (e.g., "joão" matches "João Silva")
+  const words = q.split(/\s+/).filter(Boolean);
   const where = q
     ? {
         OR: [
+          // Match full query as substring (existing behavior)
           { name: { contains: q, mode: "insensitive" as const } },
           { phone: { contains: q, mode: "insensitive" as const } },
           { email: { contains: q, mode: "insensitive" as const } },
+          // Match each word individually for partial name searches
+          ...words.map((word) => ({
+            name: { contains: word, mode: "insensitive" as const },
+          })),
         ],
       }
     : {};

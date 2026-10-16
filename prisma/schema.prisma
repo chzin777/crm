@@ -89,6 +89,7 @@ model Contact {
   segment            String?
   category           String         @default("cliente")
   lastPurchaseDate   String?
+  prescriptionExpiry String?
   purchases          Int            @default(0)
   totalSpent         Decimal        @default(0) @db.Decimal(14, 2)
   createdAt          DateTime       @default(now())

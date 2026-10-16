@@ -309,7 +309,7 @@ export async function POST() {
       );
     }
 
-    await invalidateCache("dashboard");
+    await invalidateCache("dashboard", "audience:store:");
 
     return NextResponse.json({
       ...result,

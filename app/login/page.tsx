@@ -1,12 +1,82 @@
 "use client";
 
-import { Suspense, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
-import { Eye, EyeOff, LoaderCircle, LockKeyhole, Mail } from "lucide-react";
+import {
+  BadgeCheck,
+  Bot,
+  Clock,
+  Eye,
+  EyeOff,
+  Headset,
+  LoaderCircle,
+  LockKeyhole,
+  Mail,
+  MessageSquare,
+  Ticket,
+} from "lucide-react";
 import Grainient from "@/components/Grainient";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { authClient } from "@/lib/auth-client";
+
+/* -------------------------------------------------------------------------- */
+/*                                   Styles                                   */
+/* -------------------------------------------------------------------------- */
+
+const floatKeyframes = `
+@keyframes flutua {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes radar-pulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+`;
+
+/* -------------------------------------------------------------------------- */
+/*                              Floating Chips                                */
+/* -------------------------------------------------------------------------- */
+
+const CHIPS = [
+  {
+    icon: MessageSquare,
+    title: "Nova conversa",
+    detail: "WhatsApp · agora",
+    delay: "0s",
+    top: "12%",
+    right: "8%",
+  },
+  {
+    icon: Bot,
+    title: "IA respondeu",
+    detail: "Resolução automática",
+    delay: "1.2s",
+    top: "34%",
+    right: "28%",
+  },
+  {
+    icon: Clock,
+    title: "Tempo de resposta",
+    detail: "Dentro da meta",
+    delay: "2.4s",
+    top: "58%",
+    right: "6%",
+  },
+  {
+    icon: Ticket,
+    title: "Negócio atualizado",
+    detail: "Óticas Centro · R$ 1.240",
+    delay: "3.6s",
+    top: "76%",
+    right: "24%",
+  },
+] as const;
+
+/* -------------------------------------------------------------------------- */
+/*                               Login Content                                */
+/* -------------------------------------------------------------------------- */
 
 function LoginContent() {
   const router = useRouter();
@@ -14,8 +84,17 @@ function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    const stored = localStorage.getItem("crm_remembered_email");
+    if (stored) {
+      setEmail(stored);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -23,15 +102,22 @@ function LoginContent() {
     setErrorMessage("");
 
     try {
+      if (rememberMe) {
+        localStorage.setItem("crm_remembered_email", email.trim());
+      } else {
+        localStorage.removeItem("crm_remembered_email");
+      }
+
       const result = await authClient.signIn.email({ email: email.trim(), password });
       if (result.error) {
         setErrorMessage("E-mail ou senha inválidos. Confira seus dados e tente novamente.");
         return;
       }
       const callbackUrl = searchParams.get("callbackUrl");
-      const destination = callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
-        ? callbackUrl
-        : "/painel";
+      const destination =
+        callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
+          ? callbackUrl
+          : "/painel";
       router.replace(destination);
       router.refresh();
     } catch {
@@ -42,7 +128,11 @@ function LoginContent() {
   };
 
   return (
-    <main className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-[#051647] p-4 sm:p-8">
+    <main className="relative isolate min-h-dvh overflow-hidden bg-[#051647]">
+      {/* Inject keyframes */}
+      <style>{floatKeyframes}</style>
+
+      {/* Background grainient */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
         <Grainient
           colors={["#051647", "#002187", "#051647", "#002187", "#C4D600"]}
@@ -70,117 +160,221 @@ function LoginContent() {
         />
       </div>
 
-      <section className="relative z-10 grid w-full max-w-6xl overflow-hidden rounded-[2rem] bg-white shadow-2xl shadow-black/25 md:min-h-[650px] md:grid-cols-[1.2fr_0.8fr]">
-        <div className="relative flex min-h-64 flex-col justify-between overflow-hidden bg-[linear-gradient(145deg,#002187_0%,#051647_78%)] p-8 text-white sm:p-10 md:min-h-[650px] md:p-14">
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute -left-36 -top-40 h-[26rem] w-[26rem] rounded-full border border-[#C4D600]/20" />
-            <div className="absolute -left-20 -top-24 h-[22rem] w-[22rem] rounded-full border border-white/10" />
-            <div className="absolute -bottom-36 -right-28 h-[34rem] w-[34rem] rounded-full bg-[#002187]/70" />
-            <div className="absolute -bottom-20 -right-12 h-[25rem] w-[25rem] rounded-full border border-[#C4D600]/20" />
-            <div className="absolute right-10 top-10 h-24 w-10 opacity-45 [background-image:radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px]" />
-            <svg className="absolute inset-0 h-full w-full opacity-25" viewBox="0 0 720 650" fill="none">
-              <path d="M0 155C98 129 35 71 134 0M0 185C120 156 61 92 163 0M0 216C145 184 84 116 193 0" stroke="#C4D600" />
-              <path d="M720 382C613 347 684 291 575 272C509 261 504 322 463 354C430 380 395 367 380 344M720 415C602 375 662 329 567 307C514 294 500 356 455 387C418 413 376 397 361 372M720 449C592 403 644 363 555 342C512 331 486 390 442 423C405 450 358 430 340 400" stroke="#C4D600" />
-              <path d="M120 90V124M103 107H137M410 490V530M390 510H430" stroke="white" strokeWidth="2" />
-              <circle cx="300" cy="116" r="10" stroke="white" strokeWidth="2" />
-              <circle cx="94" cy="535" r="8" stroke="#C4D600" strokeWidth="2" />
-            </svg>
-          </div>
+      {/* -------------------------------------------------------------- */}
+      {/* RIGHT SIDE — Vitrine Operacional Flutuante (behind half-moon)  */}
+      {/* -------------------------------------------------------------- */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[1] hidden lg:block"
+      >
+        {/* Subtle radial glow on the right half */}
+        <div className="absolute right-0 top-0 h-full w-1/2 bg-[radial-gradient(ellipse_at_center,_rgba(196,214,0,0.08)_0%,_transparent_70%)]" />
 
-          <Image
-            src="/logos/simbolo-oticas-brasil.png"
-            alt="Símbolo Óticas Brasil"
-            width={390}
-            height={230}
-            priority
-            className="relative z-10 mx-auto h-20 w-auto self-center object-contain sm:h-24"
-          />
-          <div className="relative z-10 max-w-lg py-8">
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">Bem-vindo de volta!</h1>
-            <p className="mt-4 max-w-md text-base leading-relaxed text-white/80 sm:text-lg">
-              Acesse sua conta para continuar cuidando dos relacionamentos com seus clientes.
-            </p>
+        {/* Radar center icon */}
+        <div className="absolute left-[62%] top-1/2 -translate-x-1/2 -translate-y-1/2">
+          {/* Pulse rings */}
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="absolute inset-0 rounded-full border border-[#C4D600]/30"
+              style={{
+                animation: `radar-pulse 3s ease-out ${i * 1}s infinite`,
+              }}
+            />
+          ))}
+          <div className="relative flex size-40 items-center justify-center rounded-[28%] border border-white/10 bg-white/5 shadow-2xl backdrop-blur-xl">
+            <Headset className="size-16 text-[#C4D600]" strokeWidth={1.4} />
           </div>
-          <p className="relative z-10 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-white/70">
-            <span className="h-2 w-2 rounded-full bg-[#C4D600]" />
-            CRM Óticas Brasil
-          </p>
         </div>
 
-        <div className="flex items-center justify-center bg-white px-7 py-10 sm:px-12 md:px-14">
-          <div className="w-full max-w-sm">
-            <header className="mb-9">
-              <h2 className="text-3xl font-bold tracking-tight text-slate-800">Acesse sua conta</h2>
-              <p className="mt-2 text-sm text-slate-500">Entre para continuar no CRM.</p>
-            </header>
-
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <label className="block space-y-2 text-sm font-semibold text-slate-700">
-                E-mail
-                <span className="relative block">
-                  <Mail aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    name="email"
-                    autoComplete="username"
-                    required
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="voce@oticasbrasil.com.br"
-                    className="h-12 w-full rounded-full border border-slate-200 bg-white pl-11 pr-4 text-sm font-normal text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/10"
-                  />
-                </span>
-              </label>
-
-              <label className="block space-y-2 text-sm font-semibold text-slate-700">
-                Senha
-                <span className="relative block">
-                  <LockKeyhole aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    name="password"
-                    autoComplete="current-password"
-                    required
-                    minLength={12}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="Sua senha"
-                    className="h-12 w-full rounded-full border border-slate-200 bg-white pl-11 pr-12 text-sm font-normal text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/10"
-                  />
-                  <button
-                    type="button"
-                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 cursor-pointer hover:cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </span>
-              </label>
-
-              {errorMessage && (
-                <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
-                  {errorMessage}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[linear-gradient(100deg,#002187,#051647)] px-4 text-sm font-bold text-white shadow-md shadow-[#051647]/20 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70 cursor-pointer hover:cursor-pointer"
-              >
-                {isSubmitting && <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />}
-                {isSubmitting ? "Entrando..." : "Entrar"}
-              </button>
-            </form>
-
-            <p className="mt-7 text-center text-xs leading-relaxed text-slate-500">
-              O acesso é gerenciado pelo administrador da sua equipe.
-            </p>
-            <div className="mt-7 flex items-center justify-center gap-2 border-t border-slate-100 pt-5 text-[10px] font-medium uppercase tracking-wider text-slate-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#C4D600]" />
-              Óticas Brasil
+        {/* Floating chips */}
+        {CHIPS.map((chip) => (
+          <div
+            key={chip.title}
+            className="absolute flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] px-5 py-3.5 shadow-lg backdrop-blur-xl"
+            style={{
+              top: chip.top,
+              right: chip.right,
+              animation: `flutua 4s ease-in-out ${chip.delay} infinite`,
+            }}
+          >
+            <chip.icon className="size-5 shrink-0 text-[#C4D600]" strokeWidth={1.6} />
+            <div className="leading-tight">
+              <p className="text-[13px] font-semibold text-white">{chip.title}</p>
+              <p className="text-[11px] text-white/60">{chip.detail}</p>
             </div>
+          </div>
+        ))}
+
+        {/* Value proposition — bottom-right */}
+        <div className="absolute bottom-12 right-12 max-w-xs text-right">
+          <h3 className="text-[26px] font-semibold leading-tight tracking-tight text-white">
+            Relacionamento inteligente
+          </h3>
+          <p className="mt-2 text-[14px] leading-relaxed text-white/60">
+            Centralize conversas, automações e métricas da sua operação ótica em um único painel.
+          </p>
+        </div>
+      </div>
+
+      {/* -------------------------------------------------------------- */}
+      {/* LEFT HALF-MOON PANEL (desktop) / centered card (mobile)         */}
+      {/* -------------------------------------------------------------- */}
+      <section
+        className={[
+          /* Mobile: centered glass card */
+          "relative z-10 mx-auto my-auto max-w-[440px] rounded-[28px] border border-white/10 bg-[#051647]/75 p-7 shadow-2xl backdrop-blur-[26px] backdrop-saturate-[1.4] sm:p-8",
+          /* Desktop: half-moon anchored left */
+          "lg:absolute lg:left-0 lg:top-1/2 lg:mx-0 lg:max-w-none lg:-translate-y-1/2 lg:rounded-none lg:border-r lg:border-white/10 lg:border-t-0 lg:border-b-0 lg:border-l-0 lg:bg-[#051647]/75 lg:p-0 lg:shadow-[8px_0_40px_-12px_rgba(0,0,0,0.45)]",
+          "lg:w-[min(63vw,1020px)] lg:h-[138dvh]",
+          "lg:rounded-tr-[69dvh] lg:rounded-br-[69dvh]",
+          "flex items-center",
+        ].join(" ")}
+      >
+        {/* Inner form wrapper — vertically centered inside the half-moon */}
+        <div className="mx-auto flex w-full max-w-[310px] flex-col gap-6 lg:ml-[clamp(48px,8vw,140px)]">
+          {/* Logo login (7.png) + badge */}
+          <div className="flex flex-col items-start gap-2">
+            <Image
+              src="/logos/logo-login-oticas-brasil.png"
+              alt="Óticas Brasil"
+              width={600}
+              height={172}
+              priority
+              className="h-28 w-auto object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.35)]"
+            />
+            <span className="text-[10.5px] font-medium uppercase tracking-[0.25em] text-[#C4D600]">
+              CRM · Painel Operacional
+            </span>
+          </div>
+
+          {/* Heading */}
+          <div>
+            <h1 className="text-[21px] font-semibold tracking-tight text-white">
+              Acesse sua conta
+            </h1>
+            <p className="mt-1 text-[13px] text-white/60">
+              Entre para continuar no CRM.
+            </p>
+          </div>
+
+          {/* Form */}
+          <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+            {/* Email */}
+            <label className="block space-y-1.5 text-[13px] font-medium text-white/80">
+              E-mail
+              <span className="relative block">
+                <Mail
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"
+                />
+                <input
+                  type="email"
+                  name="email"
+                  autoComplete="username"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="voce@oticasbrasil.com.br"
+                  className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.06] pl-10 pr-4 text-sm text-white outline-none transition-all placeholder:text-white/30 focus:border-[#C4D600]/60 focus:bg-white/[0.09] focus:ring-2 focus:ring-[#C4D600]/20"
+                />
+              </span>
+            </label>
+
+            {/* Password */}
+            <label className="block space-y-1.5 text-[13px] font-medium text-white/80">
+              Senha
+              <span className="relative block">
+                <LockKeyhole
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"
+                />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  autoComplete="current-password"
+                  required
+                  minLength={12}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Sua senha"
+                  className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.06] pl-10 pr-12 text-sm text-white outline-none transition-all placeholder:text-white/30 focus:border-[#C4D600]/60 focus:bg-white/[0.09] focus:ring-2 focus:ring-[#C4D600]/20"
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-white/40 transition-colors hover:bg-white/10 hover:text-white cursor-pointer hover:cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </span>
+            </label>
+
+            {/* Error */}
+            {errorMessage && (
+              <p
+                role="alert"
+                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-[13px] text-red-200"
+              >
+                {errorMessage}
+              </p>
+            )}
+
+            {/* Remember me */}
+            <label className="flex items-center gap-2.5 select-none cursor-pointer group">
+              <div className="relative flex items-center">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="peer sr-only"
+                />
+                <div className="h-5 w-5 rounded-md border-2 border-white/25 bg-transparent transition-all peer-checked:border-[#C4D600] peer-checked:bg-[#C4D600] peer-focus-visible:ring-2 peer-focus-visible:ring-[#C4D600]/50 peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-[#051647] group-hover:border-white/40" />
+                <svg
+                  className="pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 scale-0 text-[#051647] transition-transform peer-checked:scale-100"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={3.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <span className="text-[13px] font-medium text-white/60 transition-colors group-hover:text-white/80">
+                Lembrar de mim
+              </span>
+            </label>
+
+            {/* Submit button — 3D tactile */}
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#C4D600] px-4 text-sm font-bold text-[#051647] shadow-[0_4px_0_0_rgb(142,156,0),0_6px_16px_-4px_rgba(196,214,0,0.4)] transition-all active:translate-y-[2px] active:shadow-[0_2px_0_0_rgb(142,156,0),0_3px_8px_-2px_rgba(196,214,0,0.3)] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:translate-y-0 disabled:active:shadow-[0_4px_0_0_rgb(142,156,0),0_6px_16px_-4px_rgba(196,214,0,0.4)] cursor-pointer hover:cursor-pointer"
+            >
+              {isSubmitting && <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />}
+              {isSubmitting ? "Entrando..." : "Entrar"}
+            </button>
+          </form>
+
+          {/* Forgot password link */}
+          <a
+            href="/recuperar-senha"
+            className="text-center text-[12px] font-medium text-white/50 transition-colors hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+          >
+            Esqueci minha senha
+          </a>
+
+          {/* Footer */}
+          <div className="space-y-1 border-t border-white/[0.06] pt-4 text-center">
+            <p className="text-[10px] text-white/35">
+              Ambiente interno · Acesso restrito
+            </p>
+            <p className="text-[10px] text-white/35">
+              suporte@oticasbrasil.com.br
+            </p>
           </div>
         </div>
       </section>

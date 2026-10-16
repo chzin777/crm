@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 
 interface FormSelectProps {
@@ -15,11 +16,49 @@ interface FormSelectProps {
 export function FormSelect({ label, value, options, onChange, ariaLabel, required = false }: FormSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const dropdownHeight = Math.min(options.length * 40 + 12, 224);
+    const margin = 8;
+
+    let left = rect.left;
+    const width = rect.width;
+    if (left + width > viewportWidth - margin) {
+      left = viewportWidth - width - margin;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+
+    const spaceBelow = viewportHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    let top: number;
+
+    if (spaceBelow >= dropdownHeight) {
+      top = rect.bottom + 8;
+    } else if (spaceAbove >= dropdownHeight) {
+      top = rect.top - dropdownHeight - 8;
+    } else {
+      top = spaceBelow >= spaceAbove ? rect.bottom + 8 : Math.max(margin, rect.top - spaceAbove);
+    }
+
+    setDropdownPosition({ top, left, width });
+  }, [isOpen, options.length]);
 
   useEffect(() => {
     if (!isOpen) return;
     const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setIsOpen(false);
@@ -38,6 +77,7 @@ export function FormSelect({ label, value, options, onChange, ariaLabel, require
         {label}{required && <> <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></>}
       </span>
       <button
+        ref={buttonRef}
         type="button"
         aria-label={ariaLabel ?? label}
         aria-haspopup="listbox"
@@ -48,25 +88,36 @@ export function FormSelect({ label, value, options, onChange, ariaLabel, require
         <span>{value}</span>
         <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
-      {isOpen && (
-        <div role="listbox" aria-label={ariaLabel ?? label} className="absolute left-0 right-0 top-full z-[120] mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-[#07194f]">
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="option"
-              aria-selected={value === option}
-              onClick={() => {
-                onChange(option);
-                setIsOpen(false);
-              }}
-              className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
-            >
-              {option}
-              {value === option && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
-            </button>
-          ))}
-        </div>
+      {isOpen && dropdownPosition && typeof document !== "undefined" && createPortal(
+        <div
+          ref={dropdownRef}
+          role="listbox"
+          aria-label={ariaLabel ?? label}
+          className="fixed z-[9999] max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-[#07194f]"
+          style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
+        >
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Nenhuma opção disponível</div>
+          ) : (
+            options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="option"
+                aria-selected={value === option}
+                onClick={() => {
+                  onChange(option);
+                  setIsOpen(false);
+                }}
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+              >
+                {option}
+                {value === option && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
+              </button>
+            ))
+          )}
+        </div>,
+        document.body
       )}
     </div>
   );

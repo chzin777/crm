@@ -1,14 +1,15 @@
-"use client";
+﻿"use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormSelect } from "@/components/FormSelect";
 import { WhatsAppConnection } from "@/components/WhatsAppConnection";
-import { Bell, CheckCircle2, Clock3, MessageSquare, Save, Store, TrendingUp, Users, Wifi } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, MessageSquare, Save, TrendingUp, Users, Wifi } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { useToast } from "@/components/ToastProvider";
 
 interface PipelineRules {
   posVenda: { minCompras: number; maxDiasDesdeUltimaCompra: number };
@@ -17,11 +18,6 @@ interface PipelineRules {
 }
 
 interface CrmSettings {
-  storeName: string;
-  contactEmail: string;
-  timezone: string;
-  language: string;
-  currency: string;
   npsServiceDelay: string;
   npsProductDelay: string;
   inactiveCustomerDays: string;
@@ -38,12 +34,7 @@ interface CrmSettings {
 }
 
 const defaultSettings: CrmSettings = {
-  storeName: "Óticas Brasil",
-  contactEmail: "",
-  timezone: "America/Sao_Paulo",
-  language: "pt-BR",
-  currency: "BRL",
-  npsServiceDelay: "30",
+    npsServiceDelay: "30",
   npsProductDelay: "30",
   inactiveCustomerDays: "180",
   defaultCampaignDuration: "7",
@@ -62,13 +53,12 @@ const defaultSettings: CrmSettings = {
   },
 };
 
-const timezones = ["America/Sao_Paulo", "America/Manaus", "America/Rio_Branco", "America/Noronha"];
 const durationUnits: CrmSettings["defaultCampaignUnit"][] = ["horas", "dias", "semanas", "meses"];
 
 function SettingsCard({ title, description, icon: Icon, children }: {
   title: string;
   description: string;
-  icon: typeof Store;
+  icon: React.ComponentType<{ className?: string }>;
   children: ReactNode;
 }) {
   return (
@@ -132,9 +122,25 @@ function SettingsToggle({ label, description, checked, onChange }: {
 
 export default function ConfiguracoesPage() {
   const { isDark, toggleTheme } = useCrmTheme();
+  const toast = useToast();
   const { data: settings, setData: setSettings, isLoading: settingsLoading, isSaving: settingsSaving, error: settingsError, saveData: saveSettingsToDatabase } = useCrmData<CrmSettings>("settings", defaultSettings, { autoSave: false });
   const [saveMessage, setSaveMessage] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [hasChanges, setHasChanges] = useState(false);
+  const initialSettingsRef = useRef<CrmSettings | null>(null);
+
+  useEffect(() => {
+    if (!settingsLoading && !initialSettingsRef.current) {
+      initialSettingsRef.current = JSON.parse(JSON.stringify(settings));
+    }
+  }, [settingsLoading, settings]);
+
+  useEffect(() => {
+    if (initialSettingsRef.current) {
+      const changed = JSON.stringify(settings) !== JSON.stringify(initialSettingsRef.current);
+      setHasChanges(changed);
+    }
+  }, [settings]);
 
   const updateSetting = <K extends keyof CrmSettings>(key: K, value: CrmSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -153,18 +159,16 @@ export default function ConfiguracoesPage() {
       setLoadError("Os intervalos e durações devem ser números inteiros maiores que zero.");
       return;
     }
-    if (settings.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.contactEmail)) {
-      setSaveMessage("");
-      setLoadError("Informe um e-mail de contato válido.");
-      return;
-    }
     setLoadError("");
     setSaveMessage("");
     try {
       await saveSettingsToDatabase(settings);
       setSaveMessage("Configurações salvas com sucesso.");
+      toast.success("Configurações salvas", "As alterações foram aplicadas.");
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Não foi possível salvar as configurações.");
+      const message = error instanceof Error ? error.message : "Não foi possível salvar as configurações.";
+      setLoadError(message);
+      toast.error("Erro ao salvar configurações", message);
     }
   };
 
@@ -197,18 +201,6 @@ export default function ConfiguracoesPage() {
 
           {loadError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{loadError}</p>}
 
-          <SettingsCard title="Perfil da loja" description="Informações principais da sua unidade e preferências regionais." icon={Store}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SettingsTextField label="Nome da loja" value={settings.storeName} onChange={(value) => updateSetting("storeName", value)} />
-              <SettingsTextField label="E-mail de contato" value={settings.contactEmail} type="email" placeholder="contato@empresa.com.br" onChange={(value) => updateSetting("contactEmail", value)} />
-              <FormSelect label="Fuso horário" value={settings.timezone} options={timezones} onChange={(value) => updateSetting("timezone", value)} />
-              <div className="grid grid-cols-2 gap-3">
-                <FormSelect label="Idioma" value={settings.language} options={["pt-BR", "en-US", "es-ES"]} onChange={(value) => updateSetting("language", value)} />
-                <FormSelect label="Moeda" value={settings.currency} options={["BRL", "USD", "EUR"]} onChange={(value) => updateSetting("currency", value)} />
-              </div>
-            </div>
-          </SettingsCard>
-
           <SettingsCard title="Automações e pesquisas NPS" description="Defina os intervalos para pesquisas e regras usadas pela base de clientes." icon={Clock3}>
             <div className="grid gap-4 sm:grid-cols-3">
               <SettingsTextField label="Enviar NPS de atendimento após (minutos)" value={settings.npsServiceDelay} type="number" onChange={(value) => updateSetting("npsServiceDelay", value)} />
@@ -222,7 +214,7 @@ export default function ConfiguracoesPage() {
               <SettingsToggle
                 label="Manter campanhas ativas por tempo indeterminado"
                 description="Quando desativado, novas campanhas começam com o período definido abaixo."
-                checked={settings.campaignDurationIndefinite}
+                checked={Boolean(settings.campaignDurationIndefinite)}
                 onChange={(checked) => updateSetting("campaignDurationIndefinite", checked)}
               />
               {!settings.campaignDurationIndefinite && (
@@ -244,9 +236,9 @@ export default function ConfiguracoesPage() {
 
           <SettingsCard title="Notificações" description="Escolha quais eventos devem chamar sua atenção no CRM." icon={Bell}>
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              <SettingsToggle label="Novos contatos" description="Avisar quando um contato for adicionado à base." checked={settings.notifyNewContacts} onChange={(checked) => updateSetting("notifyNewContacts", checked)} />
-              <SettingsToggle label="Campanhas" description="Avisar sobre mudanças de status e campanhas concluídas." checked={settings.notifyCampaigns} onChange={(checked) => updateSetting("notifyCampaigns", checked)} />
-              <SettingsToggle label="Avaliações NPS baixas" description="Avisar quando uma pesquisa receber nota detratora (0 a 6)." checked={settings.notifyLowNps} onChange={(checked) => updateSetting("notifyLowNps", checked)} />
+              <SettingsToggle label="Novos contatos" description="Avisar quando um contato for adicionado à base." checked={Boolean(settings.notifyNewContacts)} onChange={(checked) => updateSetting("notifyNewContacts", checked)} />
+              <SettingsToggle label="Campanhas" description="Avisar sobre mudanças de status e campanhas concluídas." checked={Boolean(settings.notifyCampaigns)} onChange={(checked) => updateSetting("notifyCampaigns", checked)} />
+              <SettingsToggle label="Avaliações NPS baixas" description="Avisar quando uma pesquisa receber nota detratora (0 a 6)." checked={Boolean(settings.notifyLowNps)} onChange={(checked) => updateSetting("notifyLowNps", checked)} />
             </div>
           </SettingsCard>
 
@@ -255,7 +247,7 @@ export default function ConfiguracoesPage() {
               <SettingsToggle
                 label="Habilitar sincronização automática"
                 description="Quando desativado, o botão 'Sincronizar contatos' na página de Pipelines retornará erro."
-                checked={settings.pipelineAutoSyncEnabled}
+                checked={settings.pipelineAutoSyncEnabled ?? true}
                 onChange={(checked) => updateSetting("pipelineAutoSyncEnabled", checked)}
               />
               <SettingsTextField label="Limite de cards por etapa" value={String(settings.pipelineMaxCardsPerStage)} type="number" onChange={(value) => updateSetting("pipelineMaxCardsPerStage", Number(value))} />
@@ -268,27 +260,54 @@ export default function ConfiguracoesPage() {
               <SettingsToggle
                 label="Habilitar canal WhatsApp"
                 description="Preferência salva no banco; não conecta um provedor nem habilita o envio de mensagens."
-                checked={settings.whatsappEnabled}
+                checked={Boolean(settings.whatsappEnabled)}
                 onChange={(checked) => updateSetting("whatsappEnabled", checked)}
               />
               <WhatsAppConnection />
-              <div className="flex items-start gap-2 rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-[11px] text-slate-600 dark:text-slate-300">
-                <Users className="mt-0.5 h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                O envio usa a Evolution API. Escaneie o QR Code com o WhatsApp do número da loja.
-              </div>
             </div>
           </SettingsCard>
 
-          <footer className="flex flex-col-reverse items-start justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800 sm:flex-row sm:items-center">
+          <footer className="border-t border-slate-200 pt-4 dark:border-slate-800">
             <div aria-live="polite" className="text-xs">
               {saveMessage && <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-4 w-4" />{saveMessage}</span>}
-              {loadError && !saveMessage && <span role="alert" className="text-red-700 dark:text-red-300">{loadError}</span>}
             </div>
-            <button type="button" onClick={saveSettings} disabled={settingsLoading || settingsSaving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#051647] px-4 text-xs font-bold text-white shadow-xs transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-              <Save className="h-4 w-4" />{settingsSaving ? "Salvando..." : "Salvar configurações"}
-            </button>
           </footer>
         </main>
+      </div>
+
+      {/* Floating save bar — Discord style */}
+      <div
+        className={[
+          "fixed inset-x-0 bottom-0 z-50 flex items-center justify-between gap-4 border-t border-slate-200 bg-white/95 px-6 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur-sm transition-all duration-300 dark:border-slate-700 dark:bg-slate-900/95",
+          hasChanges ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-full opacity-0",
+        ].join(" ")}
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Você tem alterações não salvas
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              if (initialSettingsRef.current) {
+                setSettings(JSON.parse(JSON.stringify(initialSettingsRef.current)));
+                setHasChanges(false);
+              }
+            }}
+            className="inline-flex h-9 items-center rounded-lg px-4 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+          >
+            Descartar
+          </button>
+          <button
+            type="button"
+            onClick={saveSettings}
+            disabled={settingsSaving}
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#C4D600] px-5 text-sm font-bold text-[#051647] shadow-sm transition-all hover:brightness-105 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer hover:cursor-pointer"
+          >
+            <Save className="h-4 w-4" />
+            {settingsSaving ? "Salvando..." : "Salvar alterações"}
+          </button>
+        </div>
       </div>
     </div>
   );

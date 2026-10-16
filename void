@@ -1,0 +1,76 @@
+import zlib, base64
+# Compressed and base64-encoded Stepper component to avoid shell escaping
+# Generated from the user-provided Hugeicons-based Stepper
+raw = open('/dev/null','r').read() if False else ''
+# We'll build it in chunks to stay within heredoc limits
+chunk1 = b\"\"\"'use client';
+
+import {
+  Children,
+  isValidElement,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactElement,
+  type ReactNode
+} from 'react';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { ArrowLeft01Icon, ArrowRight01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+export interface StepProps {
+  children?: ReactNode;
+  title?: ReactNode;
+  description?: ReactNode;
+  icon?: ReactNode;
+}
+
+interface StepIndicatorProps {
+  step: number;
+  currentStep: number;
+  onStepClick: (step: number) => void;
+}
+
+interface StepperProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'className' | 'style'> {
+  children?: ReactNode;
+  step?: number;
+  initialStep?: number;
+  onStepChange?: (step: number) => void;
+  onFinalStepCompleted?: () => void;
+  indicator?: 'numbers' | 'dots' | 'bars';
+  orientation?: 'horizontal' | 'vertical';
+  transition?: 'slide' | 'fade' | 'none';
+  linear?: boolean;
+  disableStepIndicators?: boolean;
+  renderStepIndicator?: (props: StepIndicatorProps) => ReactNode;
+  showFooter?: boolean;
+  backButtonText?: string;
+  nextButtonText?: string;
+  completeButtonText?: string;
+  backButtonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  nextButtonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
+  completedContent?: ReactNode;
+  theme?: 'dark' | 'light';
+  accentColor?: string;
+  frame?: boolean;
+  radius?: number;
+  width?: number | string;
+  className?: string;
+  stepCircleContainerClassName?: string;
+  stepContainerClassName?: string;
+  contentClassName?: string;
+  footerClassName?: string;
+  style?: CSSProperties;
+  validateStep?: (step: number) => boolean;
+}
+\"\"\"
+compressed = zlib.compress(chunk1)
+encoded = base64.b64encode(compressed).decode()
+with open('/tmp/stepper_chunk1.b64', 'w') as f:
+    f.write(encoded)
+print('CHUNK1_SAVED')

@@ -10,6 +10,7 @@ export async function GET() {
   const denied = await guard();
   if (denied) return denied;
   try {
+    await ensureInstance();
     const state = await getConnectionState();
     const number = state === "open" ? await getConnectedNumber() : null;
     return NextResponse.json({ state, number });

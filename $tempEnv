@@ -1,0 +1,1 @@
+DATABASE_URL=postgres://crm_user:CrmSecure2024!Pass@postgres:5432/crm`nWEBHOOK_SECRET=vmset-webhook-secret-2026`nCRM_BASE_URL=http://crm:3000`nCRM_API_TOKEN=placeholder-token

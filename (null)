@@ -1,0 +1,181 @@
+import re
+
+file_path = '/opt/crm/crm/app/campanhas/page.tsx'
+
+with open(file_path, 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# 1. Add activeDetailTab state
+if 'const [activeDetailTab,' not in content:
+    content = content.replace(
+        'const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);',
+        'const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);\n  const [activeDetailTab, setActiveDetailTab] = useState<\"geral\" | \"mensagem\" | \"publico\">(\"geral\");'
+    )
+
+# 2. Reset tab when opening a campaign
+content = content.replace(
+    'const startEditingCampaign = (campaign: Campaign) => {\n    setSelectedCampaign(campaign);',
+    'const startEditingCampaign = (campaign: Campaign) => {\n    setSelectedCampaign(campaign);\n    setActiveDetailTab(\"geral\");'
+)
+
+# 3. Update EntityDialog to use size lg for details and reset tab on close
+old_dialog = '''      {(selectedCampaign || isCreateOpen) && (
+        <EntityDialog
+          titleId=\"campaign-dialog-title\"
+          title={isCreateOpen ? \"Nova campanha\" : selectedCampaign?.nome ?? \"Campanha\"}
+          description={isCreateOpen ? \"Crie um rascunho para configurar o próximo envio.\" : \"Edite os dados e a mensagem da campanha.\"}
+          onClose={() => { setSelectedCampaign(null); setIsCreateOpen(false); clearSelectedAttachments(); setUploadedAttachments([]); setFormError(\"\"); }}
+        >'''
+
+new_dialog = '''      {(selectedCampaign || isCreateOpen) && (
+        <EntityDialog
+          titleId=\"campaign-dialog-title\"
+          title={isCreateOpen ? \"Nova campanha\" : selectedCampaign?.nome ?? \"Campanha\"}
+          description={isCreateOpen ? \"Crie um rascunho para configurar o próximo envio.\" : \"Edite os dados e a mensagem da campanha.\"}
+          size={isCreateOpen ? \"md\" : \"lg\"}
+          onClose={() => { setSelectedCampaign(null); setIsCreateOpen(false); clearSelectedAttachments(); setUploadedAttachments([]); setFormError(\"\"); setActiveDetailTab(\"geral\"); }}
+        >'''
+
+content = content.replace(old_dialog, new_dialog)
+
+# 4. Replace detail view with tabbed layout
+old_detail = '''          ) : selectedCampaign && (
+            <div className=\"flex h-full min-h-0 flex-col\">
+              <div className=\"min-h-0 flex-1 space-y-4 overflow-y-auto pr-1\">
+                <div className=\"grid grid-cols-3 gap-3\">
+                  <div className=\"rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60\"><p className=\"text-[10px] text-slate-500 dark:text-slate-400\">Envios aceitos</p><p className=\"mt-1 text-sm font-bold text-slate-900 dark:text-white\">{selectedCampaign.disparos.toLocaleString(\"pt-BR\")}</p></div>
+                  <div className=\"rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60\"><p className=\"text-[10px] text-slate-500 dark:text-slate-400\">Respostas</p><p className=\"mt-1 text-sm font-bold text-slate-900 dark:text-white\">Indisponível</p></div>
+                  <div className=\"rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60\"><p className=\"text-[10px] text-slate-500 dark:text-slate-400\">Status</p><p className={`mt-1 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedCampaign.status]}`}>{selectedCampaign.status}</p></div>
+                </div>
+                <div className=\"space-y-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700\">
+                  <CampaignDurationFields settings={durationSettings} onChange={setDurationSettings} />
+                  <p className=\"text-[11px] text-slate-500 dark:text-slate-400\">
+                    Duração configurada: <span className=\"font-semibold text-slate-700 dark:text-slate-200\">{durationSummary(selectedCampaign.activeDuration)}</span>
+                  </p>
+                  {selectedCampaign.activeUntil && selectedCampaign.status === \"Ativa\" && (
+                    <p className=\"text-[11px] text-slate-500 dark:text-slate-400\">
+                      Ativa até {new Intl.DateTimeFormat(\"pt-BR\", { dateStyle: \"short\", timeStyle: \"short\" }).format(new Date(selectedCampaign.activeUntil))}
+                    </p>
+                  )}
+                </div>
+                <label className=\"block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300\"><span>Nome da campanha <span aria-hidden=\"true\" className=\"text-red-600 dark:text-red-400\">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(\"\"); }} className=\"h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]\" /></label>
+                <FormMultiSelect
+                  label=\"Público-alvo\"
+                  selected={selectedAudienceSegments}
+                  options={segmentOptions}
+                  onChange={(segments) => { setSelectedAudienceSegments(segments); setFormError(\"\"); }}
+                  placeholder=\"Selecione os segmentos\"
+                  required
+                />
+                <label className=\"block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300\"><span>Mensagem <span aria-hidden=\"true\" className=\"text-red-600 dark:text-red-400\">*</span></span><textarea rows={5} value={form.mensagem} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(\"\"); }} className=\"min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]\" /></label>
+                {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
+                  <div className=\"space-y-2\">
+                    <p className=\"text-xs font-semibold text-slate-600 dark:text-slate-300\">Arquivos da campanha</p>
+                    {selectedCampaign.anexos.map((file, index) => (
+                      <p key={`${file.name}-${index}`} className=\"truncate text-xs text-slate-500 dark:text-slate-400\" title={file.name}>{file.name} · {formatFileSize(file.size)}</p>
+                    ))}
+                  </div>
+                )}
+                {formError && <p role=\"alert\" className=\"text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]\">{formError}</p>}
+              </div>'''
+
+new_detail = '''          ) : selectedCampaign && (
+            <div className=\"flex h-full min-h-0 flex-col\">
+              {/* Abas de navegação */}
+              <div role=\"tablist\" aria-label=\"Abas de detalhes da campanha\" className=\"mb-4 flex shrink-0 gap-1 border-b border-slate-200 dark:border-slate-700\">
+                {([
+                  { key: \"geral\" as const, label: \"Geral\" },
+                  { key: \"mensagem\" as const, label: \"Mensagem\" },
+                  { key: \"publico\" as const, label: \"Público\" },
+                ]).map((tab) => (
+                  <button
+                    key={tab.key}
+                    type=\"button\"
+                    role=\"tab\"
+                    aria-selected={activeDetailTab === tab.key}
+                    onClick={() => setActiveDetailTab(tab.key)}
+                    className={`relative px-4 py-2.5 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${
+                      activeDetailTab === tab.key
+                        ? \"text-[#002187] dark:text-[#C4D600]\"
+                        : \"text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200\"
+                    }`}
+                  >
+                    {tab.label}
+                    {activeDetailTab === tab.key && (
+                      <span className=\"absolute bottom-0 left-0 right-0 h-0.5 bg-[#002187] dark:bg-[#C4D600]\" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              <div className=\"min-h-0 flex-1 overflow-y-auto pr-1\">
+                {/* ABA GERAL */}
+                {activeDetailTab === \"geral\" && (
+                  <div className=\"space-y-4\">
+                    <div className=\"grid grid-cols-3 gap-3\">
+                      <div className=\"rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60\"><p className=\"text-[10px] text-slate-500 dark:text-slate-400\">Envios aceitos</p><p className=\"mt-1 text-sm font-bold text-slate-900 dark:text-white\">{selectedCampaign.disparos.toLocaleString(\"pt-BR\")}</p></div>
+                      <div className=\"rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60\"><p className=\"text-[10px] text-slate-500 dark:text-slate-400\">Respostas</p><p className=\"mt-1 text-sm font-bold text-slate-900 dark:text-white\">Indisponível</p></div>
+                      <div className=\"rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60\"><p className=\"text-[10px] text-slate-500 dark:text-slate-400\">Status</p><p className={`mt-1 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedCampaign.status]}`}>{selectedCampaign.status}</p></div>
+                    </div>
+                    <div className=\"space-y-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700\">
+                      <CampaignDurationFields settings={durationSettings} onChange={setDurationSettings} />
+                      <p className=\"text-[11px] text-slate-500 dark:text-slate-400\">
+                        Duração configurada: <span className=\"font-semibold text-slate-700 dark:text-slate-200\">{durationSummary(selectedCampaign.activeDuration)}</span>
+                      </p>
+                      {selectedCampaign.activeUntil && selectedCampaign.status === \"Ativa\" && (
+                        <p className=\"text-[11px] text-slate-500 dark:text-slate-400\">
+                          Ativa até {new Intl.DateTimeFormat(\"pt-BR\", { dateStyle: \"short\", timeStyle: \"short\" }).format(new Date(selectedCampaign.activeUntil))}
+                        </p>
+                      )}
+                    </div>
+                    <label className=\"block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300\"><span>Nome da campanha <span aria-hidden=\"true\" className=\"text-red-600 dark:text-red-400\">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(\"\"); }} className=\"h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]\" /></label>
+                    {formError && <p role=\"alert\" className=\"text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]\">{formError}</p>}
+                  </div>
+                )}
+
+                {/* ABA MENSAGEM */}
+                {activeDetailTab === \"mensagem\" && (
+                  <div className=\"space-y-4\">
+                    <label className=\"block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300\"><span>Mensagem <span aria-hidden=\"true\" className=\"text-red-600 dark:text-red-400\">*</span></span><textarea rows={8} value={form.mensagem} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(\"\"); }} className=\"min-h-40 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]\" /></label>
+                    {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
+                      <div className=\"space-y-2\">
+                        <p className=\"text-xs font-semibold text-slate-600 dark:text-slate-300\">Arquivos da campanha</p>
+                        {selectedCampaign.anexos.map((file, index) => (
+                          <p key={`${file.name}-${index}`} className=\"truncate text-xs text-slate-500 dark:text-slate-400\" title={file.name}>{file.name} · {formatFileSize(file.size)}</p>
+                        ))}
+                      </div>
+                    )}
+                    {formError && <p role=\"alert\" className=\"text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]\">{formError}</p>}
+                  </div>
+                )}
+
+                {/* ABA PÚBLICO */}
+                {activeDetailTab === \"publico\" && (
+                  <div className=\"space-y-4\">
+                    <FormMultiSelect
+                      label=\"Público-alvo\"
+                      selected={selectedAudienceSegments}
+                      options={segmentOptions}
+                      onChange={(segments) => { setSelectedAudienceSegments(segments); setFormError(\"\"); }}
+                      placeholder=\"Selecione os segmentos\"
+                      required
+                    />
+                    {formError && <p role=\"alert\" className=\"text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]\">{formError}</p>}
+                  </div>
+                )}
+              </div>'''
+
+if old_detail in content:
+    content = content.replace(old_detail, new_detail)
+    print('PATCH_OK')
+else:
+    print('PATCH_FAIL: old_detail block not found')
+    # Debug: show what we have around the detail section
+    idx = content.find('selectedCampaign && (')
+    if idx >= 0:
+        print('CONTEXT:', repr(content[idx:idx+200]))
+    else:
+        print('NO_MATCH_AT_ALL')
+
+with open(file_path, 'w', encoding='utf-8') as f:
+    f.write(content)
