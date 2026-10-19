@@ -112,7 +112,8 @@ services:
       TNS_ADMIN: /tmp/oracletest/network/admin
       PORT: 3000
       BETTER_AUTH_SECRET: fyxYszaRyn2UT0NXuiK3oFVgjXruvCt3ZLkGK_Q9LWa7n6eevE4Pee5Q8T6ZV7rZ
-      BETTER_AUTH_URL: http://172.30.20.15:3000
+      BETTER_AUTH_URL: https://crm.oticasbrasil.com.br
+      NEXT_PUBLIC_APP_URL: https://crm.oticasbrasil.com.br
       DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@pgbouncer:5432/crm
       REDIS_URL: redis://redis:6379/0
       EVOLUTION_API_URL: http://evolution-api:8080

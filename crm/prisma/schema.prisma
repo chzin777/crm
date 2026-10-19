@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id               String     @id
+  name             String
+  email            String     @unique
+  jobTitle         String?
+  teamLevel        String     @default("Operador")
+  emailVerified    Boolean    @default(false)
+  image            String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  role             String     @default("user")
+  banned           Boolean    @default(false)
+  banReason        String?
+  banExpires       DateTime?
+  sessions         Session[]
+  accounts         Account[]
+  npsResponses     NpsResponse[]
+}
+
+model Session {
+  id             String   @id
+  expiresAt      DateTime
+  token          String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatedBy String?
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+model Contact {
+  id                 String         @id @default(cuid())
+  sourceKey          String         @unique
+  name               String
+  cpf                String?
+  phone              String?
+  email              String?
+  birthDate          String?
+  gender             String?
+  occupation         String?
+  city               String?
+  neighborhood       String?
+  state              String?
+  store              String?
+  segment            String?
+  category           String         @default("cliente")
+  lastPurchaseDate   String?
+  prescriptionExpiry String?
+  purchases          Int            @default(0)
+  totalSpent         Decimal        @default(0) @db.Decimal(14, 2)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  importedSales      ImportedSale[]
+  npsResponses       NpsResponse[]
+
+  @@index([cpf])
+  @@index([phone])
+  @@index([email])
+  @@index([name])
+}
+
+model Store {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  address       String?
+  addressNumber String?
+  complement    String?
+  postalCode    String?
+  city          String?
+  state         String?
+  neighborhoods String[]
+  active        Boolean  @default(true)
+  kind          String?
+  startDate     String?
+  unitIds       String[]
+  radiusKm      Float    @default(20)
+  lat           Float?
+  lng           Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model PlaceGeo {
+  key       String   @id
+  lat       Float?
+  lng       Float?
+  updatedAt DateTime @updatedAt
+}
+
+model ImportedSale {
+  id         BigInt   @id @default(autoincrement())
+  sourceFile String
+  sourceRow  Int
+  sourceKey  String
+  data       Json     @db.JsonB
+  contact    Contact  @relation(fields: [sourceKey], references: [sourceKey], onDelete: Cascade)
+
+  @@unique([sourceFile, sourceRow])
+  @@index([sourceKey])
+}
+
+model CrmWorkspaceData {
+  key       String   @id
+  value     Json     @db.JsonB
+  updatedAt DateTime @updatedAt
+}
+
+model NpsResponse {
+  id        String   @id @default(cuid())
+  surveyKey String
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  createdBy String?
+  user      User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([surveyKey, createdAt])
+  @@index([contactId])
+}
