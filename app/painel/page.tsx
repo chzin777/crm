@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -19,6 +19,7 @@ import {
   Bell,
   CalendarDays,
   CircleDollarSign,
+  Plus,
   RefreshCw,
   ShoppingBag,
   Star,
@@ -71,23 +72,25 @@ export default function PainelPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
 
-  useEffect(() => {
-    let active = true;
+  const reloadDashboard = useCallback(() => {
+    setIsLoading(true);
+    setDashboardError("");
     fetch("/api/dashboard")
       .then(async (response) => {
         const result = await response.json() as { data?: DashboardData; error?: string };
         if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível carregar os indicadores.");
-        if (active) {
-          setCurrentDate(new Date());
-          setDashboardData(result.data);
-        }
+        setCurrentDate(new Date());
+        setDashboardData(result.data);
       })
       .catch((error: unknown) => {
-        if (active) setDashboardError(error instanceof Error ? error.message : "Não foi possível carregar os indicadores.");
+        setDashboardError(error instanceof Error ? error.message : "Não foi possível carregar os indicadores.");
       })
-      .finally(() => { if (active) setIsLoading(false); });
-    return () => { active = false; };
+      .finally(() => setIsLoading(false));
   }, []);
+
+  useEffect(() => {
+    reloadDashboard();
+  }, [reloadDashboard]);
 
   const today = currentDate ?? new Date("2000-01-01T12:00:00");
   const periodDays = period === "7d" ? 7 : period === "30d" ? 30 : 365;
@@ -155,6 +158,10 @@ export default function PainelPage() {
   };
   const revenueColor = isDark ? "#C4D600" : "#002187";
 
+  if (isLoading) {
+    return <LoadingSpinner fullScreen label="Carregando dados reais do banco..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
@@ -175,11 +182,20 @@ export default function PainelPage() {
 
         <main className="space-y-5 px-6 pb-10 pt-8 sm:px-8">
           {dashboardError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{dashboardError}</p>}
-          {isLoading && <LoadingSpinner label="Carregando dados reais do banco..." />}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Painel</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Visão geral do desempenho e relacionamento com clientes.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={reloadDashboard} disabled={isLoading} aria-label="Atualizar painel" title="Atualizar painel" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Novo negócio
+              </button>
             </div>
             <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-300">
               <CalendarDays className="h-4 w-4 text-slate-400" />

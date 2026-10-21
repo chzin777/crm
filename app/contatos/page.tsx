@@ -292,6 +292,10 @@ export default function ContatosPage() {
     { label: "Valor comprado", value: currency(totalSpent), detail: "acumulado na base", icon: ArrowUpRight, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   ];
 
+  if (contactsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando contatos..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
       <Sidebar />
@@ -306,24 +310,27 @@ export default function ContatosPage() {
             <button type="button" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig)} disabled={contactsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-              <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
-            </button>
-            <button type="button" onClick={() => { setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: [] }); setFormError(""); setIsCreateOpen(true); }} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-              <Plus className="w-4 h-4" /> Novo Contato
-            </button>
-          </div>
+                      </div>
         </header>
 
         {/* Conteúdo */}
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
           {dataError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{dataError}</p>}
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Contatos</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Clientes, leads e oportunidades de relacionamento.</p>
             </div>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Base atualizada hoje</span>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig)} disabled={contactsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={() => { setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: [] }); setFormError(""); setIsCreateOpen(true); }} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Novo Contato
+              </button>
+            </div>
           </div>
 
           <section aria-label="Resumo da base" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">

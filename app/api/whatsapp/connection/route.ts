@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { connectInstance, ensureInstance, getConnectedNumber, getConnectionState, logoutInstance } from "@/lib/evolution";
+import { connectInstance, ensureInstance, getConnectedNumber, getConnectionState, logoutInstance } from "@/lib/meta-whatsapp";
 
 async function guard() {
   return (await requireApiSession()) ? null : NextResponse.json({ error: "Não autorizado" }, { status: 401 });

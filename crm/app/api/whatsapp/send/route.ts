@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { ensureInstance, sendMedia, sendText } from "@/lib/evolution";
+import { ensureInstance, sendMedia, sendText } from "@/lib/meta-whatsapp";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 16 * 1024 * 1024;

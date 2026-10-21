@@ -245,6 +245,13 @@ export default function Home() {
   const [detailTab, setDetailTab] = useState<"dados" | "compras" | "observacoes">("dados");
   const migratedRef = useRef(false);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const closeDialogButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const { data: cards, setData: setCards, isLoading: cardsLoading, isSaving: cardsSaving, error: cardsError, reloadData: reloadPipeline } = useCrmData<PipelineCard[]>("pipeline", []);
+
   // Migrate old string observacoes to DealObservation[] on first load
   useEffect(() => {
     if (migratedRef.current || cards.length === 0) return;
@@ -256,12 +263,6 @@ export default function Home() {
       migratedRef.current = true;
     }
   }, [cards, setCards]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const closeDialogButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogReturnFocusRef = useRef<HTMLElement | null>(null);
-
-  const { data: cards, setData: setCards, isLoading: cardsLoading, isSaving: cardsSaving, error: cardsError, reloadData: reloadPipeline } = useCrmData<PipelineCard[]>("pipeline", []);
   const { data: settingsData } = useCrmData<{ pipelineRules?: LegacyPipelineRules }>("settings", {}, { autoSave: false });
   const { data: stageStore, setData: setStageStore, saveData: saveStageStore } = useCrmData<StageConfigStore>("pipeline-stages", { stages: {} }, { autoSave: false });
   const [editingStageId, setEditingStageId] = useState<StageId | null>(null);
@@ -541,7 +542,6 @@ export default function Home() {
     setCards((current) => current.map((c) => c.id === selectedCard.id ? { ...c, observacoes: [...(c.observacoes ?? []), obs] } : c));
     setSelectedCard((prev) => prev && prev.id === selectedCard.id ? { ...prev, observacoes: [...(prev.observacoes ?? []), obs] } : prev);
   };
-  };
   const activePipeline = pipelinesConfig[activePipelineId];
   const normalizedSearchQuery = useMemo(() => normalizeSearchText(searchQuery.trim()), [searchQuery]);
   const searchActive = normalizedSearchQuery.length > 0;
@@ -604,237 +604,69 @@ export default function Home() {
             </strong>
           </div>
 
-          {/* Controles da direita */}
-          <div className="flex items-center gap-3 sm:gap-4">
-            {/* Toggle Uiverse por alexruix */}
+          <div className="flex items-center gap-3">
             <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-
-            {/* Botão de Alertas com Dropdown */}
-            <div ref={notificationAreaRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setShowNotifications((isOpen) => !isOpen)}
-                aria-label="Alertas"
-                title="Alertas"
-                aria-expanded={showNotifications}
-                className={`topbar-icon-button relative cursor-pointer hover:cursor-pointer ${
-                  showNotifications
-                    ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]"
-                    : "text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700"
-                }`}
-              >
-                <Bell className="h-4 w-4" />
-              </button>
-
-              <NotificationDropdown
-                isOpen={showNotifications}
-                onClose={() => setShowNotifications(false)}
-              />
-            </div>
-
-            {/* Botão Criar estilo Dribbble */}
-            <button
-              type="button"
-              onClick={() => openDealDialog()}
-              className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 stroke-[3]" />
-              <span>Criar</span>
-            </button>
-
+            <NotificationDropdown />
           </div>
         </header>
 
         {/* Cabeçalho do Pipeline estilo Dribbble */}
         <div className="px-6 sm:px-8 pt-8 pb-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                {searchActive ? "Resultados da busca" : activePipeline.titulo}
-              </h1>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {searchActive
-                  ? `${matchingCards.length} resultados em todas as pipelines`
-                  : `${activePipeline.descricao} · ${activeCards.length} deals`}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-start gap-2.5 xl:justify-end">
-            <button
-              type="button"
-              className="px-3.5 py-1.5 bg-white dark:bg-[#07194f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-full text-xs font-semibold shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer hover:cursor-pointer"
-            >
-              Todos os responsáveis
-            </button>
-            <div className="inline-flex shrink-0 rounded-full bg-slate-100 p-1 text-xs font-semibold dark:bg-slate-800/80">
-              <button
-                type="button"
-                onClick={() => setPeriodo("mes")}
-                aria-pressed={periodo === "mes"}
-                className={`relative rounded-full px-3 py-1 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "mes" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
-              >
-                {periodo === "mes" && <motion.span layoutId="periodo-ativo" className="pointer-events-none absolute inset-0 rounded-full bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
-                <span className="relative z-10">Mês</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPeriodo("tri")}
-                aria-pressed={periodo === "tri"}
-                className={`relative rounded-full px-3 py-1 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "tri" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
-              >
-                {periodo === "tri" && <motion.span layoutId="periodo-ativo" className="pointer-events-none absolute inset-0 rounded-full bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
-                <span className="relative z-10">Trimestre</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPeriodo("ano")}
-                aria-pressed={periodo === "ano"}
-                className={`relative rounded-full px-3 py-1 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "ano" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
-              >
-                {periodo === "ano" && <motion.span layoutId="periodo-ativo" className="pointer-events-none absolute inset-0 rounded-full bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
-                <span className="relative z-10">Ano</span>
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={async () => {
-                setSyncMessage(null);
-                setIsSyncing(true);
-                try {
-                  let totalCreated = 0;
-                  let totalCards = 0;
-                  // Each call syncs one batch; columns are refreshed between calls.
-                  for (let batch = 0; batch < 100; batch++) {
-                    const res = await fetch("/api/pipeline/sync", { method: "POST" });
-                    const data = await res.json() as { error?: string; done?: boolean; created?: number; total?: number };
-                    if (!res.ok) {
-                      await reloadPipeline().catch(() => undefined);
-                      setSyncMessage({
-                        type: totalCreated > 0 ? "success" : "error",
-                        text: totalCreated > 0
-                          ? `${totalCreated} cards foram gravados na pipeline.`
-                          : data.error || "Erro ao sincronizar.",
-                      });
-                      return;
-                    }
-                    totalCreated += data.created ?? 0;
-                    totalCards = data.total ?? totalCards;
-                    if ((data.created ?? 0) > 0) await reloadPipeline();
-                    if (data.done) break;
-                    setSyncMessage({ type: "success", text: `Sincronizando... ${totalCards} cards na pipeline até agora.` });
-                  }
-                  setSyncMessage({
-                    type: "success",
-                    text: `Sincronização concluída: ${totalCreated} cards novos gravados, ${totalCards} cards na pipeline.`,
-                  });
-                  toast.success("Sincronização concluída", `${totalCreated} cards novos gravados.`);
-                } catch (error: unknown) {
-                  setSyncMessage({
-                    type: "error",
-                    text: error instanceof Error
-                      ? `Falha ao sincronizar: ${error.message}`
-                      : "Falha de conexão ao sincronizar.",
-                  });
-                  toast.error("Falha ao sincronizar", error instanceof Error ? error.message : undefined);
-                } finally {
-                  setIsSyncing(false);
-                }
-              }}
-              disabled={isSyncing}
-              className="flex items-center gap-1.5 bg-white dark:bg-[#07194f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
-              <span>{isSyncing ? "Sincronizando..." : "Sincronizar contatos"}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => openDealDialog()}
-              className="flex items-center gap-1.5 bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] px-4 py-1.5 rounded-full text-xs font-bold shadow-xs hover:opacity-95 transition-all cursor-pointer hover:cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Novo Deal</span>
-            </button>
-            </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {searchActive ? "Resultados da busca" : activePipeline.titulo}
+            </h1>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {searchActive
+                ? `${matchingCards.length} resultados em todas as pipelines`
+                : `${activePipeline.descricao} · ${activeCards.length} deals`}
+            </p>
           </div>
 
-          {syncMessage && (
-            <div className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${syncMessage.type === "success" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300"}`}>
-              {syncMessage.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-              {syncMessage.text}
-            </div>
-          )}
-
+          
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div role="tablist" aria-label="Pipelines de clientes" className={`${searchActive ? "hidden" : "inline-flex"} rounded-xl bg-slate-100 p-1 dark:bg-slate-800/80`}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activePipelineId === "novos"}
-              onClick={() => setActivePipelineId("novos")}
-              className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activePipelineId === "novos" ? "text-white dark:text-[#051647]" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
-            >
-              {activePipelineId === "novos" && <motion.span layoutId="pipeline-tab-ativo" className="pointer-events-none absolute inset-0 rounded-lg bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
-              <span className="relative z-10 flex items-center gap-2"><UserCheck className="h-4 w-4" />Novos clientes</span>
-              <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{novosCount}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activePipelineId === "relacionamento"}
-              onClick={() => setActivePipelineId("relacionamento")}
-              className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activePipelineId === "relacionamento" ? "text-white dark:text-[#051647]" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
-            >
-              {activePipelineId === "relacionamento" && <motion.span layoutId="pipeline-tab-ativo" className="pointer-events-none absolute inset-0 rounded-lg bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
-              <span className="relative z-10 flex items-center gap-2"><RefreshCw className="h-4 w-4" />Relacionamento</span>
-              <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{relacionamentoCount}</span>
-            </button>
-          </div>
-          <label className="relative block w-full sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Buscar cliente em todas as pipelines"
-              placeholder="Buscar cliente em todas as pipelines"
-              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-10 text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-white dark:focus:border-[#C4D600]"
-            />
-            {searchQuery && (
+            <div role="tablist" aria-label="Pipelines de clientes" className={`${searchActive ? "hidden" : "inline-flex"} rounded-xl bg-slate-100 p-1 dark:bg-slate-800/80`}>
               <button
                 type="button"
-                onClick={() => setSearchQuery("")}
-                aria-label="Limpar busca"
-                title="Limpar busca"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer hover:cursor-pointer"
+                role="tab"
+                aria-selected={activePipelineId === "novos"}
+                onClick={() => setActivePipelineId("novos")}
+                className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activePipelineId === "novos" ? "text-white dark:text-[#051647]" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
               >
-                <X className="h-3.5 w-3.5" />
+                {activePipelineId === "novos" && <motion.span layoutId="pipeline-tab-ativo" className="pointer-events-none absolute inset-0 rounded-lg bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
+                <span className="relative z-10 flex items-center gap-2"><UserCheck className="h-4 w-4" />Novos clientes</span>
+                <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{novosCount}</span>
               </button>
-            )}
-          </label>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activePipelineId === "relacionamento"}
+                onClick={() => setActivePipelineId("relacionamento")}
+                className={`relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activePipelineId === "relacionamento" ? "text-white dark:text-[#051647]" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
+              >
+                {activePipelineId === "relacionamento" && <motion.span layoutId="pipeline-tab-ativo" className="pointer-events-none absolute inset-0 rounded-lg bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
+                <span className="relative z-10 flex items-center gap-2"><RefreshCw className="h-4 w-4" />Relacionamento</span>
+                <span className="relative z-10 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">{relacionamentoCount}</span>
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void reloadPipeline()} disabled={cardsLoading} aria-label="Atualizar pipeline" title="Atualizar pipeline" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${cardsLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={openDealDialog} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Novo negócio
+              </button>
+            </div>
           </div>
-        </div>
 
         {/* Etapas do funil */}
         <main className="flex-1 px-6 sm:px-8 pb-10">
           {cardsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{cardsError}</p>}
           {cardsSaving && <LoadingSpinner label="Salvando alterações no banco..." size={32} className="mb-4" />}
           {contactsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{contactsError}</p>}
-          {!searchActive && (
-            <label className="mb-4 flex w-fit items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-              Cards por página
-              <select
-                value={cardsPerPage}
-                onChange={(event) => {
-                  setCardsPerPage(Number(event.target.value));
-                  setStagePages({});
-                }}
-                className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-white dark:focus:border-[#C4D600] cursor-pointer hover:cursor-pointer"
-              >
-                {CARD_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
-              </select>
-            </label>
-          )}
-          {searchActive ? (
+                    {searchActive ? (
             cardsLoading ? (
               <div className="max-w-4xl border-y border-slate-200 py-8 dark:border-slate-800">
                 <LoadingSpinner label="Carregando oportunidades..." className="w-full justify-center" />
@@ -1495,6 +1327,7 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
         </EntityDialog>
       )}
     </div>

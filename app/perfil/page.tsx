@@ -25,6 +25,14 @@ export default function PerfilPage() {
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
+        if (isPending) {
+    return <LoadingSpinner fullScreen label="Carregando dados da sessão..." size={96} />;
+  }
+
+  return (
+    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
             Workspace <span className="text-slate-300 dark:text-slate-600">/</span>{" "}

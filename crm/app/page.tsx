@@ -662,16 +662,16 @@ export default function Home() {
             <div className="flex flex-wrap items-center justify-start gap-2.5 xl:justify-end">
             <button
               type="button"
-              className="px-3.5 py-1.5 bg-white dark:bg-[#07194f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-full text-xs font-semibold shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer hover:cursor-pointer"
+              className="px-4 py-2.5 bg-white dark:bg-[#07194f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-full text-xs font-semibold shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer hover:cursor-pointer"
             >
               Todos os responsáveis
             </button>
-            <div className="inline-flex shrink-0 rounded-full bg-slate-100 p-1 text-xs font-semibold dark:bg-slate-800/80">
+            <div className="inline-flex shrink-0 rounded-full bg-slate-100 p-1.5 text-xs font-semibold dark:bg-slate-800/80">
               <button
                 type="button"
                 onClick={() => setPeriodo("mes")}
                 aria-pressed={periodo === "mes"}
-                className={`relative rounded-full px-3 py-1 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "mes" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
+                className={`relative rounded-full px-4 py-2 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "mes" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
               >
                 {periodo === "mes" && <motion.span layoutId="periodo-ativo" className="pointer-events-none absolute inset-0 rounded-full bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
                 <span className="relative z-10">Mês</span>
@@ -680,7 +680,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setPeriodo("tri")}
                 aria-pressed={periodo === "tri"}
-                className={`relative rounded-full px-3 py-1 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "tri" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
+                className={`relative rounded-full px-4 py-2 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "tri" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
               >
                 {periodo === "tri" && <motion.span layoutId="periodo-ativo" className="pointer-events-none absolute inset-0 rounded-full bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
                 <span className="relative z-10">Trimestre</span>
@@ -689,7 +689,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setPeriodo("ano")}
                 aria-pressed={periodo === "ano"}
-                className={`relative rounded-full px-3 py-1 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "ano" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
+                className={`relative rounded-full px-4 py-2 transition-colors cursor-pointer hover:cursor-pointer ${periodo === "ano" ? "text-white dark:text-[#051647]" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"}`}
               >
                 {periodo === "ano" && <motion.span layoutId="periodo-ativo" className="pointer-events-none absolute inset-0 rounded-full bg-[#051647] shadow-xs dark:bg-[#C4D600]" transition={{ type: "spring", stiffness: 500, damping: 36 }} />}
                 <span className="relative z-10">Ano</span>
@@ -741,7 +741,7 @@ export default function Home() {
                 }
               }}
               disabled={isSyncing}
-              className="flex items-center gap-1.5 bg-white dark:bg-[#07194f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-2xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] px-4 py-2.5 rounded-full text-xs font-bold shadow-xs hover:opacity-95 transition-all cursor-pointer hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
               <span>{isSyncing ? "Sincronizando..." : "Sincronizar contatos"}</span>
@@ -749,10 +749,10 @@ export default function Home() {
             <button
               type="button"
               onClick={() => openDealDialog()}
-              className="flex items-center gap-1.5 bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] px-4 py-1.5 rounded-full text-xs font-bold shadow-xs hover:opacity-95 transition-all cursor-pointer hover:cursor-pointer"
+              className="flex items-center gap-1.5 bg-[#051647] dark:bg-[#C4D600] text-white dark:text-[#051647] px-4 py-2.5 rounded-full text-xs font-bold shadow-xs hover:opacity-95 transition-all cursor-pointer hover:cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Novo Deal</span>
+              <span>Nova oportunidade</span>
             </button>
             </div>
           </div>

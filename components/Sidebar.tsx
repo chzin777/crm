@@ -114,7 +114,11 @@ export function Sidebar() {
       <div className={`h-28 flex items-center border-b border-slate-200 dark:border-slate-800/80 ${isCollapsed ? "justify-center px-0" : "px-5"}`}>
         <Link href="/" aria-label="Óticas Brasil" className="flex items-center gap-2.5 cursor-pointer hover:cursor-pointer">
           {isCollapsed ? (
-            <span className="grid h-14 w-14 place-items-center rounded-full bg-[#051647] text-base font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">OB</span>
+            <img
+              src="/logos/logo512.png"
+              alt="Óticas Brasil"
+              className="h-14 w-14 rounded-full object-contain"
+            />
           ) : (
             <>
               <img

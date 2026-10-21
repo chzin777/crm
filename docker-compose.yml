@@ -57,40 +57,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  evolution-api:
-    image: evoapicloud/evolution-api:latest
-    container_name: crm-evolution-api
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    environment:
-      SERVER_PORT: 8080
-      SERVER_URL: http://localhost:8080
-      AUTHENTICATION_API_KEY: EvoApiSecure2024!Key
-      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: 'true'
-      DATABASE_ENABLED: 'true'
-      DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgres://crm_user:CrmSecure2024!Pass@postgres:5432/evolution_db?schema=public
-      CACHE_REDIS_ENABLED: 'true'
-      CACHE_REDIS_URI: redis://redis:6379/1
-      STORE_MESSAGES: 'true'
-      STORE_MESSAGE_UP: 'true'
-      STORE_CONTACTS: 'true'
-      STORE_CHATS: 'true'
-      CLEAN_STORE_CLEANING_INTERVAL: 7200
-      CLEAN_STORE_MESSAGES: 'true'
-      CLEAN_STORE_MESSAGE_UP: 'true'
-      CLEAN_STORE_CONTACTS: 'true'
-      CLEAN_STORE_CHATS: 'true'
-    ports:
-    - 8080:8080
-    volumes:
-    - ./evolution-api/instances:/evolution/instances
-    networks:
-    - crm-network
   crm-app:
     build:
       context: ./crm
@@ -102,8 +68,6 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-      evolution-api:
-        condition: service_started
     env_file:
     - ./crm/.env
     environment:
@@ -116,8 +80,6 @@ services:
       NEXT_PUBLIC_APP_URL: https://crm.oticasbrasil.com.br
       DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@pgbouncer:5432/crm
       REDIS_URL: redis://redis:6379/0
-      EVOLUTION_API_URL: http://evolution-api:8080
-      EVOLUTION_API_KEY: EvoApiSecure2024!Key
       MINIO_ENDPOINT: 172.30.20.15
     ports:
     - 3000:3000

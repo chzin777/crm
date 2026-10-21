@@ -373,6 +373,10 @@ export default function LojasPage() {
     </button>
   );
 
+  if (isLoading) {
+    return <LoadingSpinner fullScreen label="Carregando lojas..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
@@ -386,19 +390,25 @@ export default function LojasPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void refreshStores(undefined, sortConfig)} disabled={isLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
-              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            </button>
-            <button type="button" onClick={() => openForm("new")} className="topbar-action-button cursor-pointer bg-[#051647] text-white hover:cursor-pointer hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D]">
-              <Plus className="h-4 w-4" /> Cadastrar loja
-            </button>
-          </div>
+                      </div>
         </header>
 
         <main className="space-y-6 p-8">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lojas</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Cada loja recebe automaticamente os clientes que compraram nela. Cadastrar bairros é opcional e inclui também clientes próximos.</p>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lojas</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Cada loja recebe automaticamente os clientes que compraram nela. Cadastrar bairros é opcional e inclui também clientes próximos.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void refreshStores(undefined, sortConfig)} disabled={isLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={() => openForm("new")} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Cadastrar loja
+              </button>
+            </div>
           </div>
           {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
           <label className="relative block max-w-md">

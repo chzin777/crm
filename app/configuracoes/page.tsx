@@ -172,6 +172,10 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  if (settingsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando configurações..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />

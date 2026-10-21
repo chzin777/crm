@@ -739,6 +739,10 @@ export default function CampanhasPage() {
     }
   };
 
+  if (campaignsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando campanhas..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
@@ -752,13 +756,7 @@ export default function CampanhasPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void reloadCampaigns()} disabled={campaignsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-              <RefreshCw className={`h-4 w-4 ${campaignsLoading ? "animate-spin" : ""}`} />
-            </button>
-            <button type="button" onClick={openCreateCampaign} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-              <Plus className="h-4 w-4" /> Nova campanha
-            </button>
-          </div>
+                      </div>
         </header>
 
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
@@ -766,10 +764,20 @@ export default function CampanhasPage() {
           <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
             Campanhas e status são salvos no banco. Os disparos usam o WhatsApp conectado; o rastreamento de respostas ainda não está disponível.
           </p>
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Crie e organize campanhas segmentadas para relacionamento e conversão.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void reloadCampaigns()} disabled={campaignsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${campaignsLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={openCreateCampaign} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Nova campanha
+              </button>
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />{scheduledCampaigns} campanhas aguardando ação

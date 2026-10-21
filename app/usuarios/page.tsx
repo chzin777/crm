@@ -157,6 +157,10 @@ export default function UsuariosPage() {
     setIsCreateOpen(true);
   };
 
+  if (isLoading) {
+    return <LoadingSpinner fullScreen label="Carregando usuários..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
       <Sidebar />
