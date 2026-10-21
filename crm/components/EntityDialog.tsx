@@ -38,7 +38,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
             </svg>
           </button>
         </header>
-        <div className="relative min-h-0 flex-1 overflow-visible">{children}</div>
+        <div className="relative overflow-visible">{children}</div>
       </section>
     </div>
   );

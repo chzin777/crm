@@ -164,3 +164,31 @@ model NpsResponse {
   @@index([surveyKey, createdAt])
   @@index([contactId])
 }
+
+model CampaignMessage {
+  id              String                @id @default(cuid())
+  campaignId      String
+  contactId       String?
+  phone           String
+  whatsappMsgId   String?               @unique
+  status          CampaignMessageStatus @default(queued)
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  readAt          DateTime?
+  failedAt        DateTime?
+  failureReason   String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([campaignId])
+  @@index([whatsappMsgId])
+  @@index([status])
+}
+
+enum CampaignMessageStatus {
+  queued
+  sent
+  delivered
+  read
+  failed
+}
