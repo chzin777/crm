@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, Bell, CheckCircle2, ChevronUp, ChevronsUpDown, Plus, RefreshCw, Search, Store as StoreIcon, Trash2, XCircle } from "lucide-react";
+import { Bell, ChevronUp, ChevronsUpDown, Plus, RefreshCw, Search, Store as StoreIcon, Trash2 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import Stepper, { Step } from "@/components/Stepper";
@@ -13,6 +13,7 @@ import { useToast } from "@/components/ToastProvider";
 
 interface StoreRecord {
   id: string;
+  number: number;
   name: string;
   address: string;
   addressNumber: string;
@@ -30,6 +31,7 @@ interface StoreRecord {
 const BRAZIL_STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
 
 const emptyForm = {
+  number: "",
   name: "",
   address: "",
   addressNumber: "",
@@ -63,7 +65,7 @@ export default function LojasPage() {
   const [citiesLoading, setCitiesLoading] = useState(false);
   const [neighborhoodOptions, setNeighborhoodOptions] = useState<string[]>([]);
   const [neighborhoodsLoading, setNeighborhoodsLoading] = useState(false);
-  const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "name", order: "asc" });
+  const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "number", order: "asc" });
 
   const [countsLoading, setCountsLoading] = useState(false);
 
@@ -87,7 +89,7 @@ export default function LojasPage() {
     }
     setCountsLoading(true);
     try {
-      const groups = Object.fromEntries(list.map((store) => [store.name, [{ id: store.id, nome: store.name, tipo: "loja" }]]));
+      const groups = Object.fromEntries(list.map((store) => [String(store.number), [{ id: `store-${store.number}`, nome: `Loja ${store.number}`, tipo: "loja" }]]));
       const response = await fetch("/api/segments/audience", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -166,9 +168,9 @@ export default function LojasPage() {
     setEditing(store);
     setForm(store === "new" ? {
       ...emptyForm,
-      
+      number: String(Math.max(0, ...stores.map((item) => item.number)) + 1),
     } : {
-      
+      number: String(store.number),
       name: store.name,
       address: store.address,
       addressNumber: store.addressNumber,
@@ -185,9 +187,13 @@ export default function LojasPage() {
     setNeighborhoodOptions([]);
   };
 
+  const updateStoreNumber = (value: string) => setForm((current) => ({ ...current, number: value }));
+
   const closeForm = () => setEditing(null);
 
   const saveStore = async () => {
+    const number = Number(form.number);
+    if (!Number.isInteger(number) || number < 1) return setFormError("Informe o número da loja.");
     if (!form.name.trim()) return setFormError("Informe o nome da loja.");
     setIsSaving(true);
     try {
@@ -197,6 +203,7 @@ export default function LojasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(isNew ? {} : { id: (editing as StoreRecord).id }),
+          number,
           name: form.name,
           address: form.address,
           addressNumber: form.addressNumber,
@@ -212,7 +219,7 @@ export default function LojasPage() {
       const result = await response.json().catch(() => ({})) as { data?: StoreRecord; error?: string };
       if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível salvar a loja.");
       const saved = result.data;
-      const next = [...stores.filter((store) => store.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name));
+      const next = [...stores.filter((store) => store.id !== saved.id), saved].sort((a, b) => a.number - b.number);
       setStores(next);
       if (saved.radiusKm > 0) {
         setProgress("Localizando bairros...");
@@ -246,7 +253,7 @@ export default function LojasPage() {
   };
 
   const removeStore = async (store: StoreRecord) => {
-    if (!window.confirm(`Remover a loja ${store.name}?`)) return;
+    if (!window.confirm(`Remover a loja ${store.number} - ${store.name}?`)) return;
     const response = await fetch(`/api/stores?id=${encodeURIComponent(store.id)}`, { method: "DELETE" });
     if (response.ok) {
       closeForm();
@@ -260,13 +267,15 @@ export default function LojasPage() {
 
   const term = search.trim().toLocaleLowerCase("pt-BR");
   const visibleStores = stores.filter((store) =>
-    `${store.name} ${store.address} ${store.city} ${store.neighborhoods.join(" ")}`.toLocaleLowerCase("pt-BR").includes(term));
+    `${store.number} ${store.name} ${store.address} ${store.city} ${store.neighborhoods.join(" ")}`.toLocaleLowerCase("pt-BR").includes(term));
   const totalPages = Math.max(1, Math.ceil(visibleStores.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pagedStores = visibleStores.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const validateStoreStep = (step: number) => {
     if (step === 1) {
+      const number = Number(form.number);
+      if (!Number.isInteger(number) || number < 1) return setFormError("Informe o número da loja."), false;
       if (!form.name.trim()) return setFormError("Informe o nome da loja."), false;
     }
     if (step === 2 && (!form.state || !form.city || !form.neighborhoods[0])) {
@@ -279,6 +288,9 @@ export default function LojasPage() {
 
   const identityFields = (
     <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
+      <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Número
+        <input type="number" min={1} value={form.number} onChange={(event) => updateStoreNumber(event.target.value)} className={`${inputClass} mt-1`} />
+      </label>
       <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Nome
         <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Ex.: Loja Centro" className={`${inputClass} mt-1`} />
       </label>
@@ -361,6 +373,10 @@ export default function LojasPage() {
     </button>
   );
 
+  if (isLoading) {
+    return <LoadingSpinner fullScreen label="Carregando lojas..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
@@ -374,45 +390,27 @@ export default function LojasPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void refreshStores(undefined, sortConfig)} disabled={isLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
-              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            </button>
-            <button type="button" onClick={() => openForm("new")} className="topbar-action-button cursor-pointer bg-[#051647] text-white hover:cursor-pointer hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D]">
-              <Plus className="h-4 w-4" /> Cadastrar loja
-            </button>
-          </div>
+                      </div>
         </header>
 
         <main className="space-y-6 p-8">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lojas</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Cada loja recebe automaticamente os clientes que compraram nela. Cadastrar bairros é opcional e inclui também clientes próximos.</p>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Lojas</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Cada loja recebe automaticamente os clientes que compraram nela. Cadastrar bairros é opcional e inclui também clientes próximos.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void refreshStores(undefined, sortConfig)} disabled={isLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={() => openForm("new")} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Cadastrar loja
+              </button>
+            </div>
           </div>
           {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-
-          <section aria-label="Resumo das lojas" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-            {[
-              { label: "Lojas cadastradas", value: stores.length.toString(), detail: "na base", icon: StoreIcon, color: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
-              { label: "Lojas ativas", value: stores.filter((store) => store.active).length.toString(), detail: "operacionais", icon: CheckCircle2, color: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
-              { label: "Lojas inativas", value: stores.filter((store) => !store.active).length.toString(), detail: "desativadas", icon: XCircle, color: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]" },
-              { label: "Contatos atendidos", value: countsLoading ? "—" : Object.values(counts).reduce((sum, count) => sum + count, 0).toLocaleString("pt-BR"), detail: "vinculados às lojas", icon: Activity, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
-            ].map((metric) => {
-              const Icon = metric.icon;
-              return (
-                <article key={metric.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{metric.label}</p>
-                      <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{metric.value}</p>
-                      <p className="mt-1 text-[11px] text-slate-400">{metric.detail}</p>
-                    </div>
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${metric.color}`}><Icon className="h-4 w-4" /></span>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-
           <label className="relative block max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Buscar por número, nome, endereço, cidade ou bairro" className={`${inputClass} pl-9`} />
@@ -425,7 +423,7 @@ export default function LojasPage() {
                   <tr>
                     <th className="px-5 py-3"><button type="button" onClick={() => handleSort("number")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Loja<SortIndicator field="number" /></button></th>
                     <th className="px-4 py-3"><button type="button" onClick={() => handleSort("name")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Cidade<SortIndicator field="name" /></button></th>
-                    <th className="px-4 py-3">BAIRRO</th>
+                    <th className="px-4 py-3">Bairro / raio</th>
                     <th className="px-4 py-3"><button type="button" onClick={() => handleSort("active")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status<SortIndicator field="active" /></button></th>
                     <th className="px-5 py-3 text-right">Contatos</th>
                   </tr>
@@ -440,7 +438,7 @@ export default function LojasPage() {
                     <tr
                       key={store.id}
                       tabIndex={0}
-                      aria-label={`Abrir detalhes da loja ${store.name}`}
+                      aria-label={`Abrir detalhes da loja ${store.number}`}
                       onClick={() => openForm(store)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -455,7 +453,7 @@ export default function LojasPage() {
                           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><StoreIcon className="h-4 w-4" /></span>
                           <span className="min-w-0">
                             <span className="block truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">
-                              {store.name}
+                              Loja {store.number}{store.name !== `Loja ${store.number}` ? ` · ${store.name}` : ""}
                             </span>
                             <span className="mt-0.5 block text-[10px] text-slate-400">{store.kind || "Loja"}{store.startDate ? ` · Desde ${store.startDate}` : ""}</span>
                           </span>
@@ -467,9 +465,9 @@ export default function LojasPage() {
                         <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${store.active ? "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]" : "bg-slate-100 text-slate-500 dark:bg-slate-800"}`}>{store.active ? "Ativa" : "Inativa"}</span>
                       </td>
                       <td className="px-5 py-3.5 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                        {countsLoading && counts[store.name] === undefined ? (
+                        {countsLoading && counts[String(store.number)] === undefined ? (
                           <span className="inline-block h-3 w-8 animate-pulse rounded bg-slate-200 dark:bg-slate-700" aria-label="Carregando contagem" />
-                        ) : counts[store.name] === undefined ? "—" : counts[store.name].toLocaleString("pt-BR")}
+                        ) : counts[String(store.number)] === undefined ? "—" : counts[String(store.number)].toLocaleString("pt-BR")}
                       </td>
                     </tr>
                   ))}
@@ -499,7 +497,7 @@ export default function LojasPage() {
       </div>
 
       {editing && (
-        <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar loja ${editing.name}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm} size="lg">
+        <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar loja ${editing.number}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm} size="lg">
           {editing === "new" ? (
             <Stepper
               initialStep={1}
@@ -559,7 +557,7 @@ export default function LojasPage() {
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ao salvar com raio, os bairros dos contatos são localizados no mapa.</p>
                   </div>
                   <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white px-4 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Loja</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{form.name || "Sem nome"}{form.active ? "" : " (inativa)"}</dd></div>
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Loja</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">Loja {form.number} · {form.name || "Sem nome"}{form.active ? "" : " (inativa)"}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Endereço</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{[[form.address, form.addressNumber].filter(Boolean).join(", "), form.complement, form.neighborhoods[0], [form.city, form.state].filter(Boolean).join("/"), form.postalCode].filter(Boolean).join(" · ") || "Não informado"}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Raio de atendimento</dt><dd className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-200">{Number(form.radiusKm) > 0 ? `${Number(form.radiusKm)} km` : "Somente o bairro da loja"}</dd></div>
                   </dl>

@@ -292,6 +292,10 @@ export default function ContatosPage() {
     { label: "Valor comprado", value: currency(totalSpent), detail: "acumulado na base", icon: ArrowUpRight, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   ];
 
+  if (contactsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando contatos..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
       <Sidebar />
@@ -306,24 +310,27 @@ export default function ContatosPage() {
             <button type="button" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig)} disabled={contactsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-              <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
-            </button>
-            <button type="button" onClick={() => { setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: [] }); setFormError(""); setIsCreateOpen(true); }} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-              <Plus className="w-4 h-4" /> Novo Contato
-            </button>
-          </div>
+                      </div>
         </header>
 
         {/* Conteúdo */}
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
           {dataError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{dataError}</p>}
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Contatos</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Clientes, leads e oportunidades de relacionamento.</p>
             </div>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Base atualizada hoje</span>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig)} disabled={contactsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={() => { setForm({ nome: "", telefone: "", email: "", dataNascimento: "", categoria: "lead", segmento: [] }); setFormError(""); setIsCreateOpen(true); }} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Novo Contato
+              </button>
+            </div>
           </div>
 
           <section aria-label="Resumo da base" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
@@ -502,30 +509,19 @@ export default function ContatosPage() {
               onStepChange={() => setFormError("")}
               onFinalStepCompleted={addContact}
               validateStep={(step) => {
-                if (step === 1) {
-                  if (!form.nome.trim()) {
-                    setFormError("Informe o nome do contato.");
-                    document.getElementById("new-contact-nome")?.focus();
-                    return false;
-                  }
-                  if (!isValidBrazilianPhone(form.telefone)) {
-                    setFormError("Informe um telefone brasileiro válido com DDD.");
-                    document.getElementById("new-contact-telefone")?.focus();
-                    return false;
-                  }
+                if (step === 1 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
+                  setFormError(!isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
+                  return false;
                 }
-                if (step === 2) {
-                  if (form.segmento.length === 0) {
-                    setFormError("Selecione pelo menos um segmento.");
-                    return false;
-                  }
-                  if (form.email.trim() && !isValidEmail(form.email.trim())) {
-                    setFormError("Informe um e-mail válido.");
-                    document.getElementById("new-contact-email")?.focus();
-                    return false;
-                  }
+                if (step === 2 && form.segmento.length === 0) {
+                  setFormError("Selecione pelo menos um segmento.");
+                  return false;
                 }
-                if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone))) {
+                if (step === 2 && !isValidEmail(form.email.trim())) {
+                  setFormError("Informe um e-mail válido.");
+                  return false;
+                }
+                if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
                   setFormError(!isValidBrazilianPhone(form.telefone) ? "Informe um telefone brasileiro válido com DDD." : "Confira o nome e os dados do contato.");
                   return false;
                 }
@@ -546,25 +542,18 @@ export default function ContatosPage() {
               radius={16}
               width="100%"
               className="min-h-0 flex-1"
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) {
-                  event.preventDefault();
-                  const nextBtn = document.querySelector('[data-stepper="next"]') as HTMLButtonElement | null;
-                  nextBtn?.click();
-                }
-              }}
             >
               <Step title="Identificação" description="Dados pessoais">
                 <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-[#051647] dark:text-white">Dados do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Informe como podemos identificar e falar com essa pessoa.</p></div>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-[#F7915E]">*</span></span><input id="new-contact-nome" value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none transition-all focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/20" /></label>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone <span aria-hidden="true" className="text-[#F7915E]">*</span></span><input id="new-contact-telefone" type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={15} placeholder="(11) 91234-5678" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: formatBrazilianPhone(event.target.value) }); setFormError(""); }} aria-describedby="new-contact-phone-hint" className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/20" /><span id="new-contact-phone-hint" className="text-[10px] font-normal text-slate-400">Formato brasileiro com DDD. Ex.: (11) 91234-5678</span></label>
-                  {formError && <p role="alert" className="rounded-md bg-[#F7915E]/10 px-3 py-2 text-xs font-medium text-[#9a3d12] dark:bg-[#F7915E]/15 dark:text-[#F7915E]">{formError}</p>}
+                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Dados do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Informe como podemos identificar e falar com essa pessoa.</p></div>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={15} placeholder="(11) 91234-5678" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: formatBrazilianPhone(event.target.value) }); setFormError(""); }} aria-describedby="new-contact-phone-hint" className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /><span id="new-contact-phone-hint" className="text-[10px] font-normal text-slate-400">Formato brasileiro com DDD. Ex.: (11) 91234-5678</span></label>
+                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
               </Step>
               <Step title="Perfil" description="Classificação e contato">
                 <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-[#051647] dark:text-white">Perfil do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Classifique a categoria e escolha um segmento existente.</p></div>
+                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Perfil do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Classifique a categoria e escolha um segmento existente.</p></div>
                   <FormSelect
                     label="Categoria"
                     value={contactCategoryNames[form.categoria]}
@@ -579,21 +568,21 @@ export default function ContatosPage() {
                     onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }}
                     required
                   />
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input id="new-contact-email" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none transition-all focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/20" /></label>
+                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <BirthdayDatePicker value={form.dataNascimento} onChange={(dataNascimento) => setForm({ ...form, dataNascimento })} />
-                  {formError && <p role="alert" className="rounded-md bg-[#F7915E]/10 px-3 py-2 text-xs font-medium text-[#9a3d12] dark:bg-[#F7915E]/15 dark:text-[#F7915E]">{formError}</p>}
+                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
               </Step>
               <Step title="Revisão" description="Confira os dados">
                 <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-[#051647] dark:text-white">Revise o contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Confirme os dados antes de adicionar à base.</p></div>
-                  <dl className="divide-y divide-slate-200 rounded-xl border border-[#002187]/10 bg-gradient-to-br from-white to-slate-50 px-4 dark:divide-slate-700 dark:border-[#C4D600]/10 dark:from-slate-800/50 dark:to-slate-800/30">
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase tracking-wider text-[#002187] dark:text-[#C4D600]">Nome</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "Não informado"}</dd></div>
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase tracking-wider text-[#002187] dark:text-[#C4D600]">Telefone</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{form.telefone || "Não informado"}</dd></div>
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase tracking-wider text-[#002187] dark:text-[#C4D600]">Categoria e segmento</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{contactCategoryNames[form.categoria]} · {form.segmento.length > 0 ? form.segmento.join(", ") : "Não selecionado"}</dd></div>
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase tracking-wider text-[#002187] dark:text-[#C4D600]">E-mail</dt><dd className="mt-1 break-all text-xs text-slate-700 dark:text-slate-200">{form.email || "Não informado"}</dd></div>
+                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Revise o contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Confirme os dados antes de adicionar à base.</p></div>
+                  <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white px-4 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Nome</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "Não informado"}</dd></div>
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Telefone</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{form.telefone || "Não informado"}</dd></div>
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Categoria e segmento</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{contactCategoryNames[form.categoria]} · {form.segmento.length > 0 ? form.segmento.join(", ") : "Não selecionado"}</dd></div>
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">E-mail</dt><dd className="mt-1 break-all text-xs text-slate-700 dark:text-slate-200">{form.email || "Não informado"}</dd></div>
                   </dl>
-                  {formError && <p role="alert" className="rounded-md bg-[#F7915E]/10 px-3 py-2 text-xs font-medium text-[#9a3d12] dark:bg-[#F7915E]/15 dark:text-[#F7915E]">{formError}</p>}
+                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
               </Step>
             </Stepper>

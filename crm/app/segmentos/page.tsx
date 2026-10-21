@@ -598,6 +598,10 @@ export default function SegmentosPage() {
     if (event.target === event.currentTarget) closeSegmentModals();
   };
 
+  if (segmentsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando segmentos..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
@@ -611,26 +615,30 @@ export default function SegmentosPage() {
             <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" onClick={() => void segmentsReload()} disabled={segmentsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-              <RefreshCw className={`h-4 w-4 ${segmentsLoading ? "animate-spin" : ""}`} />
-            </button>
-            <button type="button" onClick={() => { resetCriterionForm(); setCollapsedKinds(criterionKinds); setIsCriteriaManagerOpen(true); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
-              <Tags className="h-3.5 w-3.5" />Gerenciar critérios
-            </button>
-            <button type="button" onClick={() => setIsCreateOpen(true)} className="topbar-action-button bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-              <Plus className="h-4 w-4" /> Criar segmento
-            </button>
           </div>
         </header>
 
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
           {(segmentsError || criteriaDataError || contactsError || campaignsError) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{segmentsError || criteriaDataError || contactsError || campaignsError}</p>}
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Segmentos</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Organize públicos por comportamento, compra e relacionamento.</p>
             </div>
-            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"><Sparkles className="h-3.5 w-3.5 text-[#F7915E]" />Públicos vinculados aos contatos reais</span>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => void segmentsReload()} disabled={segmentsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-4 w-4 ${segmentsLoading ? "animate-spin" : ""}`} />
+                Atualizar
+              </button>
+              <button type="button" onClick={() => { resetCriterionForm(); setCollapsedKinds(criterionKinds); setIsCriteriaManagerOpen(true); }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+                <Tags className="h-4 w-4" />
+                Gerenciar critérios
+              </button>
+              <button type="button" onClick={() => setIsCreateOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                <Plus className="h-4 w-4" />
+                Criar segmento
+              </button>
+            </div>
           </div>
 
           <section aria-label="Resumo dos segmentos" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
