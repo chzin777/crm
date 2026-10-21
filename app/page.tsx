@@ -948,14 +948,11 @@ export default function Home() {
       )}
 
       {isCreateDealOpen && (
-        <EntityDialog
-          titleId="create-deal-title"
-          title={editingCard ? "Editar oportunidade" : "Nova oportunidade"}
-          description={editingCard ? "Atualize os dados desta oportunidade." : "Vincule uma oportunidade a um contato existente no banco."}
-          onClose={() => setIsCreateDealOpen(false)}
-          size="lg"
-        >
           <Stepper
+              modalTitle={editingCard ? "Editar oportunidade" : "Nova oportunidade"}
+              modalDescription={editingCard ? "Atualize os dados desta oportunidade." : "Vincule uma oportunidade a um contato existente no banco."}
+              cancelButtonText="Cancelar"
+              onCancel={() => setIsCreateDealOpen(false)}
               indicator="numbers"
               transition="slide"
               linear
@@ -1156,10 +1153,6 @@ export default function Home() {
                 </div>
               </Step>
             </Stepper>
-            <div className="mt-2 flex justify-end border-t border-slate-100 pt-2 dark:border-slate-800">
-              <button type="button" onClick={() => setIsCreateDealOpen(false)} className="h-8 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
-            </div>
-        </EntityDialog>
       )}
 
       {selectedCard && (

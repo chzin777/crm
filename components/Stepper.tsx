@@ -43,6 +43,10 @@ showFooter?: boolean;
 backButtonText?: string;
 nextButtonText?: string;
 completeButtonText?: string;
+cancelButtonText?: string;
+onCancel?: () => void;
+modalTitle?: string;
+modalDescription?: string;
 backButtonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 nextButtonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 completedContent?: ReactNode;
@@ -212,6 +216,10 @@ showFooter = true,
 backButtonText = 'Back',
 nextButtonText = 'Continue',
 completeButtonText = 'Complete',
+cancelButtonText,
+onCancel,
+modalTitle,
+modalDescription,
 backButtonProps = {},
 nextButtonProps = {},
 completedContent,
@@ -557,7 +565,140 @@ const isLast = current === total;
 const nextLabel = isLast ? completeButtonText : nextButtonText;
 const { className: backClass = '', onClick: onBackClick, ...backRest } = backButtonProps;
 const { className: nextClass = '', onClick: onNextClick, ...nextRest } = nextButtonProps;
-return (
+const isModal = !!modalTitle;
+const modalContent = (
+<>
+{isModal && (
+<header className="mb-5 flex shrink-0 items-start justify-between gap-4 px-[var(--stepper-inset)] pt-[var(--stepper-inset)]">
+<div>
+<h2 className="text-base font-bold text-slate-900 dark:text-white">{modalTitle}</h2>
+{modalDescription && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{modalDescription}</p>}
+</div>
+{onCancel && (
+<button
+type="button"
+onClick={onCancel}
+aria-label="Fechar"
+title="Fechar"
+className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+<path d="m18 6-12 12M6 6l12 12" />
+</svg>
+</button>
+)}
+</header>
+)}
+<div
+className={`${kind === 'numbers' ? '' : 'px-[var(--stepper-inset)] pt-[var(--stepper-inset)]'} ${rail ? 'flex w-[212px] max-w-[42%] flex-none' : ''} ${stepContainerClassName} ${isModal ? 'px-[var(--stepper-inset)]' : ''}`
+.replace(/\s+/g, ' ')
+.trim()}
+>
+{header()}
+</div>
+</>
+);
+return isModal ? (
+<div
+className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm"
+onMouseDown={(event) => {
+if (event.target === event.currentTarget) onCancel?.();
+}}
+>
+<section
+role="dialog"
+aria-modal="true"
+aria-label={modalTitle}
+className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
+>
+<div
+{...rest}
+ref={rootRef}
+className={`${ROOT_CLASS} ${rail ? 'flex-row items-stretch' : 'flex-col'} ${BARE_CLASS} ${stepCircleContainerClassName} ${className}`
+.replace(/\s+/g, ' ')
+.trim()}
+data-completed={completed ? '' : undefined}
+style={
+{
+...(THEMES[theme] ?? THEMES.dark),
+'--stepper-radius': `${Math.max(0, radius)}px`,
+'--stepper-spring': SPRING,
+'--stepper-width': size(width),
+...accentVars,
+...style
+} as CSSProperties
+}
+onKeyDown={handleKeyDown}
+>
+{modalContent}
+<div
+className={`flex min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
+>
+<div ref={viewportRef} className={`${VIEWPORT_CLASS} ${contentClassName}`.trim()} aria-live="polite">
+{view.previous !== null && (
+<div key={view.id - 1} ref={leavingRef} className={`${PANE_CLASS} ${LEAVING_CLASS}`} aria-hidden="true">
+{paneContent(view.previous)}
+</div>
+)}
+<div key={view.id} ref={paneRef} className={PANE_CLASS} tabIndex={-1}>
+{paneContent(view.step)}
+</div>
+</div>
+{showFooter && (
+<div
+className={FOOTER_WRAP_CLASS}
+data-hidden={completed ? '' : undefined}
+aria-hidden={completed ? true : undefined}
+>
+<div className={FOOTER_CLIP_CLASS}>
+<div className={`${FOOTER_CLASS} ${footerClassName}`.trim()}>
+{cancelButtonText && onCancel && (
+<button
+type="button"
+onClick={onCancel}
+className="mr-auto h-8 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+>
+{cancelButtonText}
+</button>
+)}
+<button
+type="button"
+{...backRest}
+className={`${BUTTON_CLASS} ${BACK_CLASS} ${backClass}`.trim()}
+data-hidden={current <= 1 ? '' : undefined}
+tabIndex={completed ? -1 : backRest.tabIndex}
+onClick={event => {
+onBackClick?.(event);
+if (!event.defaultPrevented) go(current - 1);
+}}
+>
+<HugeiconsIcon icon={ArrowLeft01Icon} size={16} strokeWidth={2} />
+<span>{backButtonText}</span>
+</button>
+<button
+ref={nextBtnRef}
+type="button"
+{...nextRest}
+data-stepper="next"
+className={`${BUTTON_CLASS} ${NEXT_CLASS} ${nextClass}`.trim()}
+tabIndex={completed ? -1 : nextRest.tabIndex}
+onClick={event => {
+onNextClick?.(event);
+if (!event.defaultPrevented) go(current + 1);
+}}
+>
+<span>{nextLabel}</span>
+<HugeiconsIcon icon={isLast ? Tick02Icon : ArrowRight01Icon} size={16} strokeWidth={2} />
+</button>
+</div>
+</div>
+</div>
+)}
+</div>
+</div>
+</section>
+</div>
+) : (
 <div
 {...rest}
 ref={rootRef}
@@ -577,13 +718,7 @@ style={
 }
 onKeyDown={handleKeyDown}
 >
-<div
-className={`${kind === 'numbers' ? '' : 'px-[var(--stepper-inset)] pt-[var(--stepper-inset)]'} ${rail ? 'flex w-[212px] max-w-[42%] flex-none' : ''} ${stepContainerClassName}`
-.replace(/\s+/g, ' ')
-.trim()}
->
-{header()}
-</div>
+{modalContent}
 <div
 className={`flex min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
 >
