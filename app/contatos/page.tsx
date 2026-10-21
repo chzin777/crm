@@ -150,6 +150,10 @@ export default function ContatosPage() {
       params.set("sortOrder", activeSort.order);
 
       const response = await fetch(`/api/contacts?${params.toString()}`);
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+      }
       const result = await response.json() as { data?: Contact[]; error?: string; pagination?: typeof pagination };
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
       setContacts(result.data ?? []);

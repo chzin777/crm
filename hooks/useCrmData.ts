@@ -19,6 +19,10 @@ export function useCrmData<T>(resource: string, fallback: T, options: { autoSave
     let loaded = false;
     fetch(`/api/crm/${resource}`)
       .then(async (response) => {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+        }
         const result = await response.json() as { data?: T; revision?: string | null; error?: string };
         if (!response.ok) throw new Error(result.error || "Não foi possível carregar os dados.");
         if (active && result.data !== undefined) {
@@ -42,6 +46,10 @@ export function useCrmData<T>(resource: string, fallback: T, options: { autoSave
 
   const reloadData = useCallback(async () => {
     const response = await fetch(`/api/crm/${resource}`);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+    }
     const result = await response.json() as { data?: T; revision?: string | null; error?: string };
     if (!response.ok) throw new Error(result.error || "Não foi possível atualizar os dados.");
     if (result.data !== undefined) {
@@ -64,6 +72,10 @@ export function useCrmData<T>(resource: string, fallback: T, options: { autoSave
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: value, revision: revisionRef.current }),
       });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+      }
       const result = await response.json() as { revision?: string | null; error?: string };
       if (!response.ok) throw new Error(result.error || "Não foi possível salvar os dados.");
       revisionRef.current = result.revision ?? null;

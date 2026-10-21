@@ -77,6 +77,10 @@ export default function PainelPage() {
     setDashboardError("");
     fetch("/api/dashboard")
       .then(async (response) => {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+        }
         const result = await response.json() as { data?: DashboardData; error?: string };
         if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível carregar os indicadores.");
         setCurrentDate(new Date());

@@ -99,6 +99,10 @@ export default function NpsPage() {
     setResponsesError("");
     try {
       const response = await fetch("/api/nps");
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+      }
       const result = await response.json() as { data?: NpsResponse[]; error?: string };
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar as respostas.");
       setCurrentDate(new Date());
