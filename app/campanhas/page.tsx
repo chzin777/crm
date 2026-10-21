@@ -229,6 +229,47 @@ export default function CampanhasPage() {
   const { data: campaigns, setData: setCampaigns, saveData: persistCampaigns, isLoading: campaignsLoading, error: campaignsError, reloadData: reloadCampaigns } = useCrmData<Campaign[]>("campaigns", []);
   const { data: segments, isLoading: segmentsLoading } = useCrmData<CampaignAudienceSegment[]>("segments", []);
   const { data: savedAudienceCriteria, isLoading: criteriaLoading } = useCrmData<AudienceCriterion[]>("criteria", []);
+  const [globalMetrics, setGlobalMetrics] = useState({ total: 0, sent: 0, delivered: 0, read: 0, failed: 0 });
+
+  useEffect(() => {
+    let active = true;
+    async function loadMetrics() {
+      try {
+        const ids = campaigns.filter((c) => c.disparos && c.disparos > 0).map((c) => c.id);
+        if (ids.length === 0) {
+          if (active) setGlobalMetrics({ total: 0, sent: 0, delivered: 0, read: 0, failed: 0 });
+          return;
+        }
+        const results = await Promise.all(
+          ids.map((id) =>
+            fetch(`/api/campaigns/${encodeURIComponent(id)}/metrics`)
+              .then(async (r) => {
+                const ct = r.headers.get("content-type") ?? "";
+                if (!ct.includes("application/json")) return null;
+                return r.json() as Promise<{ data?: typeof globalMetrics }>;
+              })
+              .catch(() => null),
+          ),
+        );
+        if (!active) return;
+        const agg = { total: 0, sent: 0, delivered: 0, read: 0, failed: 0 };
+        for (const res of results) {
+          if (res?.data) {
+            agg.total += res.data.total;
+            agg.sent += res.data.sent;
+            agg.delivered += res.data.delivered;
+            agg.read += res.data.read;
+            agg.failed += res.data.failed;
+          }
+        }
+        setGlobalMetrics(agg);
+      } catch {
+        // silently ignore metrics errors
+      }
+    }
+    if (!campaignsLoading && campaigns.length > 0) void loadMetrics();
+    return () => { active = false; };
+  }, [campaigns, campaignsLoading]);
   const segmentOptions = segments.map((segment) => segment.nome);
   const segmentOptionSet = new Set(segmentOptions);
   const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
@@ -703,6 +744,8 @@ export default function CampanhasPage() {
             const formData = new FormData();
             formData.set("phone", recipient.telefone);
             formData.set("text", text);
+            formData.set("campaignId", campaign.id);
+            if ("id" in recipient && typeof recipient.id === "string") formData.set("contactId", recipient.id);
             if (campaign.anexos && campaign.anexos.length > 0) {
               formData.set("mediaUrls", JSON.stringify(campaign.anexos.filter((a) => a.url).map((a) => ({ url: a.url, fileName: a.name, mimetype: a.type }))));
             }
@@ -773,9 +816,22 @@ export default function CampanhasPage() {
 
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
           {campaignsError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{campaignsError}</p>}
-          <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
-            Campanhas e status são salvos no banco. Os disparos usam o WhatsApp conectado; o rastreamento de respostas ainda não está disponível.
-          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: "Entregues", value: globalMetrics.delivered, total: globalMetrics.total, color: "text-emerald-600 dark:text-emerald-400" },
+              { label: "Visualizados", value: globalMetrics.read, total: globalMetrics.total, color: "text-blue-600 dark:text-blue-400" },
+              { label: "Falhas", value: globalMetrics.failed, total: globalMetrics.total, color: "text-red-600 dark:text-red-400" },
+              { label: "Taxa de leitura", value: `${globalMetrics.total > 0 ? Math.round((globalMetrics.read / globalMetrics.total) * 100) : 0}%`, total: null, color: "text-[#051647] dark:text-[#C4D600]" },
+            ].map((m) => (
+              <div key={m.label} className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{m.label}</p>
+                <p className={`mt-1 text-xl font-bold tracking-tight ${m.color}`}>
+                  {typeof m.value === "number" ? m.value.toLocaleString("pt-BR") : m.value}
+                </p>
+                {m.total !== null && <p className="text-[10px] text-slate-400">de {m.total.toLocaleString("pt-BR")} envios</p>}
+              </div>
+            ))}
+          </div>
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas</h1>
