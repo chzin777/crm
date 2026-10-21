@@ -5,6 +5,7 @@ import { cached, invalidateCache } from "@/lib/cache";
 import { normalizePlace, normalizePlaceList } from "@/lib/store-places";
 
 const storeSchema = z.object({
+  number: z.number().int().positive(),
   name: z.string().trim().min(1).max(120),
   address: z.string().trim().max(200).optional().default(""),
   addressNumber: z.string().trim().max(40).optional().default(""),
@@ -39,6 +40,7 @@ function serialize(store: { id: string; name: string; address: string | null; ad
 
 function toData(input: z.infer<typeof storeSchema>) {
   return {
+    number: input.number,
     name: input.name,
     address: input.address || null,
     addressNumber: input.addressNumber || null,
@@ -98,8 +100,8 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = storeSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Dados da loja inválidos." }, { status: 400 });
-  if (await prisma.store.findUnique({ where: { name: parsed.data.name } })) {
-    return Response.json({ error: `Já existe a loja "${parsed.data.name}".` }, { status: 409 });
+  if (await prisma.store.findUnique({ where: { number: parsed.data.number } })) {
+    return Response.json({ error: `Já existe a loja ${parsed.data.number}.` }, { status: 409 });
   }
   const store = await prisma.store.create({ data: toData(parsed.data) });
   await invalidateCache("stores", "audience:store:");
@@ -113,9 +115,9 @@ export async function PATCH(request: Request) {
   const id = typeof body?.id === "string" ? body.id : "";
   const parsed = storeSchema.safeParse(body);
   if (!id || !parsed.success) return Response.json({ error: "Dados da loja inválidos." }, { status: 400 });
-  const duplicate = await prisma.store.findUnique({ where: { name: parsed.data.name } });
+  const duplicate = await prisma.store.findUnique({ where: { number: parsed.data.number } });
   if (duplicate && duplicate.id !== id) {
-    return Response.json({ error: `Já existe a loja "${parsed.data.name}".` }, { status: 409 });
+    return Response.json({ error: `Já existe a loja ${parsed.data.number}.` }, { status: 409 });
   }
   const store = await prisma.store.update({ where: { id }, data: toData(parsed.data) }).catch(() => null);
   if (!store) return Response.json({ error: "Loja não encontrada." }, { status: 404 });

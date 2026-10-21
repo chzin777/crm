@@ -606,7 +606,7 @@ export default function Home() {
 
           <div className="flex items-center gap-3">
             <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <NotificationDropdown />
+            <NotificationDropdown isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
           </div>
         </header>
 
@@ -654,12 +654,13 @@ export default function Home() {
                 <RefreshCw className={`h-4 w-4 ${cardsLoading ? "animate-spin" : ""}`} />
                 Atualizar
               </button>
-              <button type="button" onClick={openDealDialog} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+              <button type="button" onClick={() => openDealDialog()} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
                 <Plus className="h-4 w-4" />
                 Novo negócio
               </button>
             </div>
           </div>
+        </div>
 
         {/* Etapas do funil */}
         <main className="flex-1 px-6 sm:px-8 pb-10">

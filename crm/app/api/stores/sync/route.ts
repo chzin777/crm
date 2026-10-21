@@ -5,14 +5,14 @@ import { invalidateCache } from "@/lib/cache";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, address, addressNumber, complement, postalCode, city, state, neighborhoods, active, kind, unitIds } = body;
+    const { number, name, address, addressNumber, complement, postalCode, city, state, neighborhoods, active, kind, unitIds } = body;
 
-    if (!name) {
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
+    if (typeof number !== "number") {
+      return NextResponse.json({ error: "number is required" }, { status: 400 });
     }
 
     const store = await prisma.store.upsert({
-      where: { name },
+      where: { number },
       update: {
         name,
         address: address ?? null,
@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
         unitIds: unitIds ?? [],
       },
       create: {
+        number,
         name,
         address: address ?? null,
         addressNumber: addressNumber ?? null,

@@ -21,11 +21,7 @@ export default function PerfilPage() {
     .join("")
     .toUpperCase();
 
-  return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        if (isPending) {
+  if (isPending) {
     return <LoadingSpinner fullScreen label="Carregando dados da sessão..." size={96} />;
   }
 
