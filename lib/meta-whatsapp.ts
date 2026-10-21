@@ -105,7 +105,7 @@ async function uploadMedia(file: { mimetype: string; fileName: string; base64?: 
 
   // Build multipart form data for Meta upload endpoint
   const formData = new FormData();
-  const blob = new Blob([buffer], { type: file.mimetype });
+  const blob = new Blob([new Uint8Array(buffer)], { type: file.mimetype });
   formData.append("file", blob, file.fileName);
   formData.append("messaging_product", "whatsapp");
   formData.append("type", file.mimetype);
