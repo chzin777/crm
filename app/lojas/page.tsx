@@ -114,6 +114,10 @@ export default function LojasPage() {
       params.set("sortBy", activeSort.field);
       params.set("sortOrder", activeSort.order);
       const response = await fetch(`/api/stores?${params.toString()}`, { signal });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+      }
       const result = await response.json().catch(() => ({})) as { data?: StoreRecord[]; error?: string };
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar as lojas.");
       const list = result.data ?? [];

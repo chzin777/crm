@@ -538,6 +538,10 @@ export default function CampanhasPage() {
     setFormError("");
     try {
       const response = await fetch("/api/crm/settings");
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
+      }
       const result = await response.json() as { data?: Partial<{
           campaignDurationIndefinite: boolean;
           defaultCampaignDuration: string;
@@ -585,6 +589,10 @@ export default function CampanhasPage() {
       if (blocked) throw new Error(`"${blocked.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`);
 
       const connectionResponse = await fetch("/api/whatsapp/connection", { cache: "no-store" });
+      const connectionCt = connectionResponse.headers.get("content-type") ?? "";
+      if (!connectionCt.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${connectionResponse.status}). Verifique se o servidor está rodando.`);
+      }
       const connection = await connectionResponse.json() as { state?: string; error?: string };
       if (!connectionResponse.ok) throw new Error(connection.error || "Não foi possível verificar a conexão do WhatsApp.");
       if (connection.state !== "open") throw new Error("WhatsApp desconectado. Conecte a conta em Configurações antes de disparar a campanha.");
@@ -631,6 +639,10 @@ export default function CampanhasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groups, contactGroups, includeRecipients: true }),
       });
+      const audienceCt = audienceResponse.headers.get("content-type") ?? "";
+      if (!audienceCt.includes("application/json")) {
+        throw new Error(`Resposta inválida da API (${audienceResponse.status}). Verifique se o servidor está rodando.`);
+      }
       const audience = await audienceResponse.json() as {
         recipients?: Record<string, CampaignRecipient[]>;
         error?: string;
@@ -779,10 +791,7 @@ export default function CampanhasPage() {
                 Nova campanha
               </button>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />{scheduledCampaigns} campanhas aguardando ação
-            </div>
-          </div>
+                      </div>
 
           <section aria-label="Resumo das campanhas" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
             {metrics.map((metric) => {
