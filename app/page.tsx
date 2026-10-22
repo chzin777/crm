@@ -965,7 +965,7 @@ export default function Home() {
               nextButtonText="Continuar"
               completeButtonText={editingCard ? "Salvar alterações" : "Criar oportunidade"}
               accentColor="#C4D600"
-              theme="light"
+              theme="dark"
             >
               <Step title="Contato" description="Selecione o contato vinculado">
                 <div className="space-y-4 py-2">
