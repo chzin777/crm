@@ -609,12 +609,12 @@ if (event.target === event.currentTarget) onCancel?.();
 role="dialog"
 aria-modal="true"
 aria-label={modalTitle}
-className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
+className="flex h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
 >
 <div
 {...rest}
 ref={rootRef}
-className={`${ROOT_CLASS} ${rail ? 'flex-row items-stretch' : 'flex-col'} ${BARE_CLASS} ${stepCircleContainerClassName} ${className}`
+className={`${ROOT_CLASS} flex-1 min-h-0 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${BARE_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}
@@ -632,9 +632,9 @@ onKeyDown={handleKeyDown}
 >
 {modalContent}
 <div
-className={`flex min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
+className={`flex min-h-0 min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'flex-1 px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
 >
-<div ref={viewportRef} className={`${VIEWPORT_CLASS} ${contentClassName}`.trim()} aria-live="polite">
+<div ref={viewportRef} className={`${VIEWPORT_CLASS} flex-1 min-h-0 overflow-y-auto ${contentClassName}`.trim()} aria-live="polite">
 {view.previous !== null && (
 <div key={view.id - 1} ref={leavingRef} className={`${PANE_CLASS} ${LEAVING_CLASS}`} aria-hidden="true">
 {paneContent(view.previous)}
