@@ -950,6 +950,8 @@ export default function Home() {
 
       {isCreateDealOpen && (
         <Stepper
+          modalTitle={editingCard ? "Editar oportunidade" : "Nova oportunidade"}
+          modalDescription="Preencha os dados para criar uma nova oportunidade no pipeline."
           cancelButtonText="Cancelar"
           onCancel={() => setIsCreateDealOpen(false)}
           indicator="numbers"
