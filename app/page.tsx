@@ -949,6 +949,12 @@ export default function Home() {
       )}
 
       {isCreateDealOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsCreateDealOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="deal-dialog-title" className="flex h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6">
+            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+              <div><h2 id="deal-dialog-title" className="text-base font-bold text-slate-900 dark:text-white">{editingCard ? "Editar oportunidade" : "Nova oportunidade"}</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{editingCard ? "Atualize os dados desta oportunidade." : "Vincule uma oportunidade a um contato existente no banco."}</p></div>
+              <button type="button" onClick={() => setIsCreateDealOpen(false)} aria-label="Fechar" title="Fechar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-4 w-4" /></button>
+            </div>
             <Stepper
               initialStep={1}
               onStepChange={() => {}}
@@ -1159,6 +1165,8 @@ export default function Home() {
                 </div>
               </Step>
             </Stepper>
+          </section>
+        </div>
       )}
 
       {selectedCard && (
