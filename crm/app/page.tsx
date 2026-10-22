@@ -949,26 +949,24 @@ export default function Home() {
       )}
 
       {isCreateDealOpen && (
-          <Stepper
-              modalTitle={editingCard ? "Editar oportunidade" : "Nova oportunidade"}
-              modalDescription={editingCard ? "Atualize os dados desta oportunidade." : "Vincule uma oportunidade a um contato existente no banco."}
-              cancelButtonText="Cancelar"
-              onCancel={() => setIsCreateDealOpen(false)}
-              indicator="numbers"
-              transition="slide"
-              linear
-              validateStep={(step) => {
-                if (step === 1) return !!dealContactId;
-                if (step === 2) return !!dealTitle.trim();
-                return true;
-              }}
-              onFinalStepCompleted={createDeal}
-              backButtonText="Voltar"
-              nextButtonText="Continuar"
-              completeButtonText={editingCard ? "Salvar alterações" : "Criar oportunidade"}
-              accentColor="#C4D600"
-              theme="light"
-            >
+        <Stepper
+          cancelButtonText="Cancelar"
+          onCancel={() => setIsCreateDealOpen(false)}
+          indicator="numbers"
+          transition="slide"
+          linear
+          validateStep={(step) => {
+            if (step === 1) return !!dealContactId;
+            if (step === 2) return !!dealTitle.trim();
+            return true;
+          }}
+          onFinalStepCompleted={createDeal}
+          backButtonText="Voltar"
+          nextButtonText="Continuar"
+          completeButtonText={editingCard ? "Salvar alterações" : "Criar oportunidade"}
+          accentColor="#C4D600"
+          theme="light"
+        >
               <Step title="Contato" description="Selecione o contato vinculado">
                 <div className="space-y-4 py-2">
                   <div className="space-y-1.5">
