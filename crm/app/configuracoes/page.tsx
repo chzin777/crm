@@ -5,8 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormSelect } from "@/components/FormSelect";
-import { WhatsAppConnection } from "@/components/WhatsAppConnection";
-import { Bell, CheckCircle2, Clock3, MessageSquare, Save, TrendingUp, Users, Wifi } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, MessageSquare, Save, TrendingUp, Users } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
@@ -27,10 +26,10 @@ interface CrmSettings {
   notifyNewContacts: boolean;
   notifyCampaigns: boolean;
   notifyLowNps: boolean;
-  whatsappEnabled: boolean;
   pipelineAutoSyncEnabled: boolean;
   pipelineMaxCardsPerStage: number;
   pipelineRules: PipelineRules;
+  whatsappEnabled?: boolean;
 }
 
 const defaultSettings: CrmSettings = {
@@ -43,7 +42,6 @@ const defaultSettings: CrmSettings = {
   notifyNewContacts: true,
   notifyCampaigns: true,
   notifyLowNps: true,
-  whatsappEnabled: false,
   pipelineAutoSyncEnabled: true,
   pipelineMaxCardsPerStage: 200,
   pipelineRules: {
@@ -172,6 +170,10 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  if (settingsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando configurações..." size={96} />;
+  }
+
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
@@ -252,18 +254,6 @@ export default function ConfiguracoesPage() {
               />
               <SettingsTextField label="Limite de cards por etapa" value={String(settings.pipelineMaxCardsPerStage)} type="number" onChange={(value) => updateSetting("pipelineMaxCardsPerStage", Number(value))} />
               <p className="text-xs text-slate-500 dark:text-slate-400">As regras de cada etapa (filtros, posição, prazo e nome) são editadas na página Pipelines, pelo ícone de lápis no cabeçalho de cada etapa.</p>
-            </div>
-          </SettingsCard>
-
-          <SettingsCard title="Canal WhatsApp" description="Preferências do canal usado para mensagens e pesquisas." icon={Wifi}>
-            <div className="space-y-4">
-              <SettingsToggle
-                label="Habilitar canal WhatsApp"
-                description="Preferência salva no banco; não conecta um provedor nem habilita o envio de mensagens."
-                checked={Boolean(settings.whatsappEnabled)}
-                onChange={(checked) => updateSetting("whatsappEnabled", checked)}
-              />
-              <WhatsAppConnection />
             </div>
           </SettingsCard>
 

@@ -26,8 +26,7 @@ const defaultValues: Record<string, Prisma.InputJsonValue> = {
     notifyNewContacts: true,
     notifyCampaigns: true,
     notifyLowNps: true,
-    whatsappEnabled: false,
-  },
+      },
   nps: {
     messages: {
       atendimento: "Olá, {{nome}}! Como foi sua experiência com nosso atendimento? De 0 a 10, quanto você recomendaria nossa loja? Sua opinião nos ajuda a melhorar.",
