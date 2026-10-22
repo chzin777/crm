@@ -10,6 +10,7 @@ import { EntityDialog } from "@/components/EntityDialog";
 import { StageEditorDialog } from "@/components/StageEditorDialog";
 import { SendMessageDialog } from "@/components/SendMessageDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { CustomSelect } from "@/components/CustomSelect";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 
@@ -1060,34 +1061,32 @@ export default function Home() {
                       className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
                     />
                   </label>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Pipeline
-                    <select
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Pipeline</label>
+                    <CustomSelect
                       value={dealPipelineId}
-                      onChange={(event) => {
-                        const pipelineId = event.target.value === "relacionamento" ? "relacionamento" : "novos";
-                        setDealPipelineId(pipelineId);
+                      options={[
+                        { value: "novos", label: "Novos clientes" },
+                        { value: "relacionamento", label: "Relacionamento" },
+                      ]}
+                      onChange={(val) => {
+                        const pipelineId = val === "relacionamento" ? "relacionamento" : "novos";
+                        setDealPipelineId(pipelineId as PipelineId);
                         setDealStageId(pipelinesConfig[pipelineId].stages[0].id);
                       }}
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                    >
-                      <option value="novos">Novos clientes</option>
-                      <option value="relacionamento">Relacionamento</option>
-                    </select>
-                  </label>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Etapa
-                    <select
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Etapa</label>
+                    <CustomSelect
                       value={dealStageId}
-                      onChange={(event) => {
-                        const stage = pipelinesConfig[dealPipelineId].stages.find((item) => item.id === event.target.value);
+                      options={pipelinesConfig[dealPipelineId].stages.map((stage) => ({ value: stage.id, label: stageTitle(stage.id) }))}
+                      onChange={(val) => {
+                        const stage = pipelinesConfig[dealPipelineId].stages.find((item) => item.id === val);
                         if (stage) setDealStageId(stage.id);
                       }}
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                    >
-                      {pipelinesConfig[dealPipelineId].stages.map((stage) => <option key={stage.id} value={stage.id}>{stageTitle(stage.id)}</option>)}
-                    </select>
-                  </label>
+                    />
+                  </div>
                 </div>
               </Step>
               <Step title="Observações" description="Anotações e anexos">

@@ -271,11 +271,14 @@ const placedRef = useRef(false);
 const nextBtnRef = useRef<HTMLButtonElement>(null);
 const go = useCallback((target: number) => {
 if (target > current && validateStep && !validateStep(current)) return;
-const next = clamp(target, 1, total + 1);
+if (target > total) {
+onFinalStepCompleted();
+return;
+}
+const next = clamp(target, 1, total);
 if (next === current) return;
 if (!controlled) setInternal(next);
-if (next > total) onFinalStepCompleted();
-else onStepChange(next);
+onStepChange(next);
 }, [current, controlled, total, validateStep, onFinalStepCompleted, onStepChange]);
 const reachable = (number: number) =>
 !disableStepIndicators && number !== current && (!linear || number <= Math.min(reached, total));

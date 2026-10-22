@@ -26,6 +26,7 @@ import {
   Check,
   ChevronUp,
   ChevronsUpDown,
+  X,
 } from "lucide-react";
 
 type ContactFilter = "Todos" | "Clientes" | "Leads" | "NPS" | "Inativos";
@@ -501,52 +502,52 @@ export default function ContatosPage() {
       </div>
 
       {(selectedContact || isCreateOpen) && (
-        <EntityDialog
-          titleId="contact-dialog-title"
-          title={isCreateOpen ? "Novo contato" : selectedContact?.nome ?? "Contato"}
-          description={isCreateOpen ? "Cadastre um cliente ou lead na base." : "Edite os dados e o perfil deste contato ou cliente."}
-          onClose={() => { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); }}
-        >
-          {isCreateOpen ? (
-            <Stepper
-              initialStep={1}
-              onStepChange={() => setFormError("")}
-              onFinalStepCompleted={addContact}
-              validateStep={(step) => {
-                if (step === 1 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
-                  setFormError(!isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
-                  return false;
-                }
-                if (step === 2 && form.segmento.length === 0) {
-                  setFormError("Selecione pelo menos um segmento.");
-                  return false;
-                }
-                if (step === 2 && !isValidEmail(form.email.trim())) {
-                  setFormError("Informe um e-mail válido.");
-                  return false;
-                }
-                if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
-                  setFormError(!isValidBrazilianPhone(form.telefone) ? "Informe um telefone brasileiro válido com DDD." : "Confira o nome e os dados do contato.");
-                  return false;
-                }
-                setFormError("");
-                return true;
-              }}
-              backButtonText="Voltar"
-              nextButtonText="Continuar"
-              completeButtonText="Salvar contato"
-              indicator="numbers"
-              orientation="horizontal"
-              transition="slide"
-              linear
-              showFooter
-              theme={isDark ? "dark" : "light"}
-              accentColor="#C4D600"
-              frame={false}
-              radius={16}
-              width="100%"
-              className="min-h-0 flex-1"
-            >
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); } }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="contact-dialog-title" className={`w-full ${isCreateOpen ? "max-w-xl flex h-[min(640px,90vh)] max-h-[90vh] flex-col overflow-hidden" : "max-w-lg"} rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6`}>
+            <div className={`flex items-start justify-between gap-4 ${isCreateOpen ? "mb-5 shrink-0" : "mb-5"}`}>
+              <div><h2 id="contact-dialog-title" className="text-base font-bold text-slate-900 dark:text-white">{isCreateOpen ? "Novo contato" : selectedContact?.nome ?? "Contato"}</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{isCreateOpen ? "Cadastre um cliente ou lead na base." : "Edite os dados e o perfil deste contato ou cliente."}</p></div>
+              <button type="button" onClick={() => { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); }} aria-label="Fechar" title="Fechar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-4 w-4" /></button>
+            </div>
+            {isCreateOpen ? (
+              <Stepper
+                initialStep={1}
+                onStepChange={() => setFormError("")}
+                onFinalStepCompleted={addContact}
+                validateStep={(step) => {
+                  if (step === 1 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone))) {
+                    setFormError(!form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
+                    return false;
+                  }
+                  if (step === 2 && !isValidEmail(form.email.trim())) {
+                    setFormError("Informe um e-mail válido.");
+                    return false;
+                  }
+                  if (step === 2 && !form.dataNascimento) {
+                    setFormError("Informe a data de nascimento.");
+                    return false;
+                  }
+                  if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()) || !form.dataNascimento)) {
+                    setFormError(!form.nome.trim() ? "Informe o nome do contato." : !isValidBrazilianPhone(form.telefone) ? "Informe um telefone brasileiro válido com DDD." : !isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.dataNascimento ? "Informe a data de nascimento." : "Confira o nome e os dados do contato.");
+                    return false;
+                  }
+                  setFormError("");
+                  return true;
+                }}
+                backButtonText="Voltar"
+                nextButtonText="Continuar"
+                completeButtonText="Salvar contato"
+                indicator="numbers"
+                orientation="horizontal"
+                transition="slide"
+                linear
+                showFooter
+                theme={isDark ? "dark" : "light"}
+                accentColor="#C4D600"
+                frame={false}
+                radius={16}
+                width="100%"
+                className="min-h-0 flex-1"
+              >
               <Step title="Identificação" description="Dados pessoais">
                 <div className="space-y-4">
                   <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Dados do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Informe como podemos identificar e falar com essa pessoa.</p></div>
@@ -570,7 +571,6 @@ export default function ContatosPage() {
                     selected={form.segmento}
                     options={segmentOptions}
                     onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }}
-                    required
                   />
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <BirthdayDatePicker value={form.dataNascimento} onChange={(dataNascimento) => setForm({ ...form, dataNascimento })} />
@@ -621,7 +621,8 @@ export default function ContatosPage() {
               </footer>
             </div>
           )}
-        </EntityDialog>
+          </section>
+        </div>
       )}
     </div>
   );
