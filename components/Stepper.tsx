@@ -617,7 +617,7 @@ className="flex h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl flex-col overfl
 <div
 {...rest}
 ref={rootRef}
-className={`${ROOT_CLASS} flex-1 min-h-0 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${BARE_CLASS} ${stepCircleContainerClassName} ${className}`
+className={`${ROOT_CLASS} h-full flex-1 min-h-0 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${BARE_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}
