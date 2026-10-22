@@ -29,8 +29,7 @@ interface CrmSettings {
   pipelineAutoSyncEnabled: boolean;
   pipelineMaxCardsPerStage: number;
   pipelineRules: PipelineRules;
-  whatsappEnabled?: boolean;
-}
+  }
 
 const defaultSettings: CrmSettings = {
     npsServiceDelay: "30",
