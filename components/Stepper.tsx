@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 import {
 Children,
 isValidElement,
@@ -608,16 +608,13 @@ onMouseDown={(event) => {
 if (event.target === event.currentTarget) onCancel?.();
 }}
 >
-<section
-role="dialog"
-aria-modal="true"
-aria-label={modalTitle}
-className="flex h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
->
 <div
 {...rest}
 ref={rootRef}
-className={`${ROOT_CLASS} flex-1 min-h-0 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${FRAMED_CLASS} ${stepCircleContainerClassName} ${className}`
+role="dialog"
+aria-modal="true"
+aria-label={modalTitle}
+className={`${ROOT_CLASS} h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl min-h-0 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${FRAMED_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}
@@ -699,7 +696,6 @@ if (!event.defaultPrevented) go(current + 1);
 )}
 </div>
 </div>
-</section>
 </div>
 ) : (
 <div
