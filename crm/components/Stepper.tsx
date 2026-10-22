@@ -609,12 +609,12 @@ if (event.target === event.currentTarget) onCancel?.();
 role="dialog"
 aria-modal="true"
 aria-label={modalTitle}
-className="flex h-fit max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
+className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6"
 >
 <div
 {...rest}
 ref={rootRef}
-className={`${ROOT_CLASS} ${rail ? 'flex-row items-stretch' : 'flex-col'} ${FRAMED_CLASS} ${stepCircleContainerClassName} ${className}`
+className={`${ROOT_CLASS} ${rail ? 'flex-row items-stretch' : 'flex-col'} ${BARE_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}
