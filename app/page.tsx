@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
@@ -624,7 +625,7 @@ export default function Home() {
             </p>
           </div>
 
-          
+
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div role="tablist" aria-label="Pipelines de clientes" className={`${searchActive ? "hidden" : "inline-flex"} rounded-xl bg-slate-100 p-1 dark:bg-slate-800/80`}>
               <button
@@ -668,7 +669,7 @@ export default function Home() {
           {cardsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{cardsError}</p>}
           {cardsSaving && <LoadingSpinner label="Salvando alterações no banco..." size={32} className="mb-4" />}
           {contactsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{contactsError}</p>}
-                    {searchActive ? (
+          {searchActive ? (
             cardsLoading ? (
               <div className="max-w-4xl border-y border-slate-200 py-8 dark:border-slate-800">
                 <LoadingSpinner label="Carregando oportunidades..." className="w-full justify-center" />
@@ -709,209 +710,207 @@ export default function Home() {
               </div>
             )
           ) : (
-          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3 xl:gap-5">
-            {activePipeline.stages.map((coluna, stageIndex) => {
-              const cardsDaColuna = cardsByStage[coluna.id];
-              const pageCount = Math.max(1, Math.ceil(cardsDaColuna.length / cardsPerPage));
-              const currentPage = Math.min(stagePages[coluna.id] ?? 1, pageCount);
-              const visibleCards = cardsDaColuna.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
-              const isOver = dragOverColumn === coluna.id;
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3 xl:gap-5">
+              {activePipeline.stages.map((coluna, stageIndex) => {
+                const cardsDaColuna = cardsByStage[coluna.id];
+                const pageCount = Math.max(1, Math.ceil(cardsDaColuna.length / cardsPerPage));
+                const currentPage = Math.min(stagePages[coluna.id] ?? 1, pageCount);
+                const visibleCards = cardsDaColuna.slice((currentPage - 1) * cardsPerPage, currentPage * cardsPerPage);
+                const isOver = dragOverColumn === coluna.id;
 
-              return (
-                <div
-                  key={coluna.id}
-                  onDragOver={(e) => handleDragOver(e, coluna.id)}
-                  onDrop={(e) => handleDrop(e, coluna.id)}
-                  className={`relative flex flex-col rounded-2xl p-3 transition-all duration-200 ${cardsDaColuna.length === 0 ? "min-h-[309px]" : ""} ${coluna.bgColuna} ${
-                    isOver ? "ring-2 ring-[#002187] dark:ring-[#C4D600] bg-blue-50/50 dark:bg-blue-950/40" : ""
-                  }`}
-                >
-                  {stageIndex < activePipeline.stages.length - 1 && (
-                    <motion.span
-                      aria-hidden="true"
-                      initial={{ opacity: 0, scale: 0.75, x: -4 }}
-                      animate={{ opacity: 1, scale: 1, x: 0 }}
-                      transition={{ type: "spring", stiffness: 450, damping: 26, delay: stageIndex * 0.08 }}
-                      className="pointer-events-none absolute -right-[18px] top-[3.25rem] z-30 hidden h-9 w-9 items-center justify-center rounded-full border-4 border-[#f4f5f8] bg-[#051647] text-[#C4D600] shadow-md dark:border-[#030d29] dark:bg-[#C4D600] dark:text-[#051647] xl:flex"
-                    >
-                      <ArrowRight className="h-4 w-4" strokeWidth={2.75} />
-                    </motion.span>
-                  )}
-                  <div className="mb-3 flex min-h-14 items-start justify-between gap-2 px-2 py-2">
-                    <div className="flex min-w-0 items-start gap-2.5">
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white text-[10px] font-bold text-[#002187] shadow-xs dark:bg-[#051647] dark:text-[#C4D600]">{String(stageIndex + 1).padStart(2, "0")}</span>
-                      <div className="min-w-0">
-                        <h2 className="font-bold text-sm text-slate-900 dark:text-white">{stageConfigs[coluna.id].titulo}</h2>
-                        <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{stageConfigs[coluna.id].descricao}</p>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditingStageId(coluna.id)}
-                        aria-label={`Editar etapa ${stageConfigs[coluna.id].titulo}`}
-                        title="Editar etapa"
-                        className="grid h-6 w-6 place-items-center rounded-full text-slate-500 hover:bg-white/80 hover:text-[#002187] dark:text-slate-400 dark:hover:bg-[#051647] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+                return (
+                  <div
+                    key={coluna.id}
+                    onDragOver={(e) => handleDragOver(e, coluna.id)}
+                    onDrop={(e) => handleDrop(e, coluna.id)}
+                    className={`relative flex flex-col rounded-2xl p-3 transition-all duration-200 ${cardsDaColuna.length === 0 ? "min-h-[309px]" : ""} ${coluna.bgColuna} ${isOver ? "ring-2 ring-[#002187] dark:ring-[#C4D600] bg-blue-50/50 dark:bg-blue-950/40" : ""
+                      }`}
+                  >
+                    {stageIndex < activePipeline.stages.length - 1 && (
+                      <motion.span
+                        aria-hidden="true"
+                        initial={{ opacity: 0, scale: 0.75, x: -4 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        transition={{ type: "spring", stiffness: 450, damping: 26, delay: stageIndex * 0.08 }}
+                        className="pointer-events-none absolute -right-[18px] top-[3.25rem] z-30 hidden h-9 w-9 items-center justify-center rounded-full border-4 border-[#f4f5f8] bg-[#051647] text-[#C4D600] shadow-md dark:border-[#030d29] dark:bg-[#C4D600] dark:text-[#051647] xl:flex"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-[#002187] dark:bg-[#051647] dark:text-[#C4D600]">
-                        {cardsDaColuna.length}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Fila de Cartões */}
-                  <div className="flex flex-1 flex-col gap-3">
-                    {cardsLoading ? (
-                      <div className="flex min-h-32 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/80 px-4 dark:border-slate-700">
-                        <LoadingSpinner label={`Carregando etapa ${stageConfigs[coluna.id].titulo}...`} />
+                        <ArrowRight className="h-4 w-4" strokeWidth={2.75} />
+                      </motion.span>
+                    )}
+                    <div className="mb-3 flex min-h-14 items-start justify-between gap-2 px-2 py-2">
+                      <div className="flex min-w-0 items-start gap-2.5">
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white text-[10px] font-bold text-[#002187] shadow-xs dark:bg-[#051647] dark:text-[#C4D600]">{String(stageIndex + 1).padStart(2, "0")}</span>
+                        <div className="min-w-0">
+                          <h2 className="font-bold text-sm text-slate-900 dark:text-white">{stageConfigs[coluna.id].titulo}</h2>
+                          <p className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{stageConfigs[coluna.id].descricao}</p>
+                        </div>
                       </div>
-                    ) : cardsDaColuna.length === 0 ? (
-                      <div className="flex min-h-32 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/80 px-4 text-center text-xs text-slate-400 dark:border-slate-700">
-                        Nenhum deal nesta etapa
-                      </div>
-                    ) : visibleCards.map((card) => (
-                      <div
-                        key={card.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, card.id)}
-                        onDragEnd={() => {
-                          setDraggedCardId(null);
-                          setDragOverCard(null);
-                        }}
-                        onDragOver={(e) => handleDragOverCard(e, card.id)}
-                        onDragLeave={(e) => {
-                          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverCard(null);
-                        }}
-                        onDrop={(e) => handleDropOnCard(e, card.id)}
-                        className={`relative bg-white dark:bg-[#07194f] rounded-xl p-4 shadow-xs border border-slate-200/80 dark:border-slate-700/80 transition-all hover:shadow-md cursor-grab active:cursor-grabbing hover:cursor-grab ${
-                          draggedCardId === card.id ? "opacity-50 scale-95" : "opacity-100"
-                        }`}
-                      >
-                        {dragOverCard?.id === card.id && (
-                          <span
-                            aria-hidden="true"
-                            className={`pointer-events-none absolute left-3 right-3 z-30 h-0.5 rounded-full bg-[#C4D600] ${dragOverCard.position === "before" ? "top-0" : "bottom-0"}`}
-                          />
-                        )}
+                      <div className="flex shrink-0 items-center gap-1.5">
                         <button
                           type="button"
-                          aria-label={`Ver detalhes de ${card.cliente}`}
-                          title={`Ver detalhes de ${card.cliente}`}
-                          onClick={(event) => {
-                            dialogReturnFocusRef.current = event.currentTarget;
-                            setSelectedCard(card);
+                          onClick={() => setEditingStageId(coluna.id)}
+                          aria-label={`Editar etapa ${stageConfigs[coluna.id].titulo}`}
+                          title="Editar etapa"
+                          className="grid h-6 w-6 place-items-center rounded-full text-slate-500 hover:bg-white/80 hover:text-[#002187] dark:text-slate-400 dark:hover:bg-[#051647] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="rounded-full bg-white/80 px-2 py-1 text-[10px] font-bold text-[#002187] dark:bg-[#051647] dark:text-[#C4D600]">
+                          {cardsDaColuna.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Fila de Cartões */}
+                    <div className="flex flex-1 flex-col gap-3">
+                      {cardsLoading ? (
+                        <div className="flex min-h-32 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/80 px-4 dark:border-slate-700">
+                          <LoadingSpinner label={`Carregando etapa ${stageConfigs[coluna.id].titulo}...`} />
+                        </div>
+                      ) : cardsDaColuna.length === 0 ? (
+                        <div className="flex min-h-32 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/80 px-4 text-center text-xs text-slate-400 dark:border-slate-700">
+                          Nenhum deal nesta etapa
+                        </div>
+                      ) : visibleCards.map((card) => (
+                        <div
+                          key={card.id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, card.id)}
+                          onDragEnd={() => {
+                            setDraggedCardId(null);
+                            setDragOverCard(null);
                           }}
-                          className="absolute inset-0 z-0 rounded-xl cursor-pointer hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#002187] dark:focus-visible:outline-[#C4D600]"
-                        />
-                                                <div className="relative z-10 pointer-events-none space-y-3">
-                        {/* Título e Tag */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h3 className="font-bold text-sm text-slate-900 dark:text-white leading-tight">
-                              {card.titulo}
-                            </h3>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                              {card.cliente}
-                            </p>
-                          </div>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${card.tagColor}`}>
-                            {card.tag}
-                          </span>
-                        </div>
-
-                        {/* Valor e Porcentagem */}
-                        <div>
-                          <div className="flex items-baseline justify-between">
-                            <span className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
-                              {card.valor}
-                            </span>
-                            <span className="text-[11px] font-semibold text-slate-400">
-                              {card.progresso}%
-                            </span>
-                          </div>
-                          {/* Barra de Progresso estilo Dribbble */}
-                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
-                            <div
-                              className={`h-1.5 rounded-full ${card.progressoCor}`}
-                              style={{ width: `${card.progresso}%` }}
+                          onDragOver={(e) => handleDragOverCard(e, card.id)}
+                          onDragLeave={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverCard(null);
+                          }}
+                          onDrop={(e) => handleDropOnCard(e, card.id)}
+                          className={`relative bg-white dark:bg-[#07194f] rounded-xl p-4 shadow-xs border border-slate-200/80 dark:border-slate-700/80 transition-all hover:shadow-md cursor-grab active:cursor-grabbing hover:cursor-grab ${draggedCardId === card.id ? "opacity-50 scale-95" : "opacity-100"
+                            }`}
+                        >
+                          {dragOverCard?.id === card.id && (
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none absolute left-3 right-3 z-30 h-0.5 rounded-full bg-[#C4D600] ${dragOverCard.position === "before" ? "top-0" : "bottom-0"}`}
                             />
-                          </div>
-                        </div>
-
-                        {/* Rodapé do Card com Avatar, Tempo e Botão WhatsApp Oficial */}
-                        <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold flex items-center justify-center">
-                              {card.iniciais}
-                            </div>
-                            <span className="text-[10px] text-slate-400">
-                              {card.diasNaEtapa}
-                            </span>
-                            {isStageOverdue(card, stageConfigs[card.coluna]) && (
-                              <span className="rounded-full bg-[#F7915E]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#9a3d12] dark:text-[#F7915E]" title={`Limite da etapa: ${stageConfigs[card.coluna].maxDiasNaEtapa} dias`}>
-                                Prazo excedido
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Botão Oficial do WhatsApp com Logotipo Real */}
+                          )}
                           <button
                             type="button"
+                            aria-label={`Ver detalhes de ${card.cliente}`}
+                            title={`Ver detalhes de ${card.cliente}`}
                             onClick={(event) => {
-                              event.stopPropagation();
-                              setMessageCard(card);
+                              dialogReturnFocusRef.current = event.currentTarget;
+                              setSelectedCard(card);
                             }}
-                            className="relative z-20 pointer-events-auto flex items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
-                            title="Enviar mensagem"
+                            className="absolute inset-0 z-0 rounded-xl cursor-pointer hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#002187] dark:focus-visible:outline-[#C4D600]"
+                          />
+                          <div className="relative z-10 pointer-events-none space-y-3">
+                            {/* Título e Tag */}
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <h3 className="font-bold text-sm text-slate-900 dark:text-white leading-tight">
+                                  {card.titulo}
+                                </h3>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {card.cliente}
+                                </p>
+                              </div>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${card.tagColor}`}>
+                                {card.tag}
+                              </span>
+                            </div>
+
+                            {/* Valor e Porcentagem */}
+                            <div>
+                              <div className="flex items-baseline justify-between">
+                                <span className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+                                  {card.valor}
+                                </span>
+                                <span className="text-[11px] font-semibold text-slate-400">
+                                  {card.progresso}%
+                                </span>
+                              </div>
+                              {/* Barra de Progresso estilo Dribbble */}
+                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
+                                <div
+                                  className={`h-1.5 rounded-full ${card.progressoCor}`}
+                                  style={{ width: `${card.progresso}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Rodapé do Card com Avatar, Tempo e Botão WhatsApp Oficial */}
+                            <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold flex items-center justify-center">
+                                  {card.iniciais}
+                                </div>
+                                <span className="text-[10px] text-slate-400">
+                                  {card.diasNaEtapa}
+                                </span>
+                                {isStageOverdue(card, stageConfigs[card.coluna]) && (
+                                  <span className="rounded-full bg-[#F7915E]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#9a3d12] dark:text-[#F7915E]" title={`Limite da etapa: ${stageConfigs[card.coluna].maxDiasNaEtapa} dias`}>
+                                    Prazo excedido
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Botão Oficial do WhatsApp com Logotipo Real */}
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setMessageCard(card);
+                                }}
+                                className="relative z-20 pointer-events-auto flex items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
+                                title="Enviar mensagem"
+                              >
+                                <WhatsAppIcon className="w-3.5 h-3.5 fill-white" />
+                                <span>Enviar mensagem</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {cardsDaColuna.length > 0 && (
+                        <div className="mt-1 flex items-center justify-between gap-2 border-t border-slate-200/70 px-1 pt-3 dark:border-slate-700/70">
+                          <button
+                            type="button"
+                            onClick={() => setStagePages((current) => ({ ...current, [coluna.id]: Math.max(1, currentPage - 1) }))}
+                            disabled={currentPage === 1}
+                            className="rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800/70 cursor-pointer hover:cursor-pointer"
                           >
-                            <WhatsAppIcon className="w-3.5 h-3.5 fill-white" />
-                            <span>Enviar mensagem</span>
+                            Anterior
+                          </button>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Página {currentPage} de {pageCount}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setStagePages((current) => ({ ...current, [coluna.id]: Math.min(pageCount, currentPage + 1) }))}
+                            disabled={currentPage === pageCount}
+                            className="rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800/70 cursor-pointer hover:cursor-pointer"
+                          >
+                            Próxima
                           </button>
                         </div>
-                        </div>
-                      </div>
-                    ))}
+                      )}
 
-                    {cardsDaColuna.length > 0 && (
-                      <div className="mt-1 flex items-center justify-between gap-2 border-t border-slate-200/70 px-1 pt-3 dark:border-slate-700/70">
-                        <button
-                          type="button"
-                          onClick={() => setStagePages((current) => ({ ...current, [coluna.id]: Math.max(1, currentPage - 1) }))}
-                          disabled={currentPage === 1}
-                          className="rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800/70 cursor-pointer hover:cursor-pointer"
-                        >
-                          Anterior
-                        </button>
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Página {currentPage} de {pageCount}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setStagePages((current) => ({ ...current, [coluna.id]: Math.min(pageCount, currentPage + 1) }))}
-                          disabled={currentPage === pageCount}
-                          className="rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800/70 cursor-pointer hover:cursor-pointer"
-                        >
-                          Próxima
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Botão Dribbble "+ Add deal" pontilhado */}
-                    <button
-                      type="button"
-                      onClick={() => openDealDialog(coluna.id)}
-                      className="mt-auto w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer hover:cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Adicionar deal</span>
-                    </button>
+                      {/* Botão Dribbble "+ Add deal" pontilhado */}
+                      <button
+                        type="button"
+                        onClick={() => openDealDialog(coluna.id)}
+                        className="mt-auto w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-white/80 dark:hover:bg-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer hover:cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Adicionar deal</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
           )}
         </main>
       </div>
@@ -949,78 +948,107 @@ export default function Home() {
       )}
 
       {isCreateDealOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsCreateDealOpen(false); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="deal-dialog-title" className="flex h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6">
-            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-              <div><h2 id="deal-dialog-title" className="text-base font-bold text-slate-900 dark:text-white">{editingCard ? "Editar oportunidade" : "Nova oportunidade"}</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{editingCard ? "Atualize os dados desta oportunidade." : "Vincule uma oportunidade a um contato existente no banco."}</p></div>
-              <button type="button" onClick={() => setIsCreateDealOpen(false)} aria-label="Fechar" title="Fechar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-4 w-4" /></button>
-            </div>
-            <Stepper
-              initialStep={1}
-              onStepChange={() => {}}
-              onFinalStepCompleted={createDeal}
-              backButtonText="Voltar"
-              nextButtonText="Continuar"
-              completeButtonText={editingCard ? "Salvar alterações" : "Criar oportunidade"}
-              indicator="numbers"
-              orientation="horizontal"
-              transition="slide"
-              linear
-              showFooter
-              theme="dark"
-              accentColor="#C4D600"
-              frame={false}
-              radius={16}
-              width="100%"
-              className="min-h-0 flex-1"
-              validateStep={(step) => {
-                if (step === 1) return !!dealContactId;
-                if (step === 2) return !!dealTitle.trim();
-                return true;
-              }}
-            >
-              <Step title="Contato" description="Selecione o contato vinculado">
-                <div className="space-y-4 py-2">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300" htmlFor="deal-contact-search">Contato</label>
-                    <div className="relative" ref={dealContactRef}>
-                      <input
-                        id="deal-contact-search"
-                        type="text"
-                        role="combobox"
-                        aria-expanded={isDealContactOpen}
-                        aria-controls="deal-contact-listbox"
-                        autoComplete="off"
-                        placeholder={contactsLoading ? "Carregando contatos..." : dealContactId ? ((contacts.find((c) => c.id === dealContactId) ?? dealContactResults.find((c) => c.id === dealContactId))?.nome ?? "Selecione um contato") : "Pesquisar contato..."}
-                        value={dealContactSearch}
-                        onChange={(event) => {
-                          setDealContactSearch(event.target.value);
-                          if (!isDealContactOpen) setIsDealContactOpen(true);
-                        }}
-                        onFocus={() => {
-                          if (dealContactId) {
-                            const selected = contacts.find((c) => c.id === dealContactId) ?? dealContactResults.find((c) => c.id === dealContactId);
-                            setDealContactSearch(selected?.nome ?? "");
-                          }
-                          setIsDealContactOpen(true);
-                        }}
-                        disabled={contactsLoading || contacts.length === 0}
-                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] cursor-pointer hover:cursor-pointer"
-                      />
-                      <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      {isDealContactOpen && (
-                        <ul
-                          id="deal-contact-listbox"
-                          role="listbox"
-                          className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
-                        >
-                          {dealContactSearching ? (
-                            <li className="px-3 py-1">
-                              <LoadingSpinner label="Pesquisando..." size={24} />
-                            </li>
-                          ) : filteredDealContacts.length === 0 ? (
-                            <li className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhum contato encontrado.</li>
-                          ) : filteredDealContacts.map((contact) => {
+        <div className="w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-[#07194f] sm:p-6">
+          {/* Cabeçalho */}
+          <div className="mb-6">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              {editingCard ? "Editar oportunidade" : "Nova oportunidade"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {editingCard
+                ? "Atualize os dados desta oportunidade."
+                : "Vincule uma oportunidade a um contato existente no banco."}
+            </p>
+          </div>
+
+          <Stepper
+            initialStep={1}
+            onStepChange={() => setDealError("")}
+            onFinalStepCompleted={createDeal}
+            backButtonText="Voltar"
+            nextButtonText="Continuar"
+            completeButtonText={editingCard ? "Salvar alterações" : "Criar oportunidade"}
+            indicator="numbers"
+            orientation="horizontal"
+            transition="slide"
+            linear={false}
+            disableStepIndicators={false}
+            showFooter
+            theme="dark"
+            accentColor="#C4D600"
+            frame={false}
+            radius={16}
+            width="100%"
+            className="w-full"
+            validateStep={(step) => {
+              if (step === 1) return !!dealContactId;
+              if (step === 2) return !!dealTitle.trim();
+              return true;
+            }}
+          >
+            <Step title="Contato" description="Selecione o contato vinculado">
+              <div className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <label
+                    className="block text-xs font-semibold text-slate-600 dark:text-slate-300"
+                    htmlFor="deal-contact-search"
+                  >
+                    Contato
+                  </label>
+                  <div className="relative" ref={dealContactRef}>
+                    <input
+                      id="deal-contact-search"
+                      type="text"
+                      role="combobox"
+                      aria-expanded={isDealContactOpen}
+                      aria-controls="deal-contact-listbox"
+                      autoComplete="off"
+                      placeholder={
+                        contactsLoading
+                          ? "Carregando contatos..."
+                          : dealContactId
+                            ? (
+                              contacts.find((c) => c.id === dealContactId) ??
+                              dealContactResults.find((c) => c.id === dealContactId)
+                            )?.nome ?? "Selecione um contato"
+                            : "Pesquisar contato..."
+                      }
+                      value={dealContactSearch}
+                      onChange={(event) => {
+                        setDealContactSearch(event.target.value);
+                        if (!isDealContactOpen) setIsDealContactOpen(true);
+                      }}
+                      onFocus={() => {
+                        if (dealContactId) {
+                          const selected =
+                            contacts.find((c) => c.id === dealContactId) ??
+                            dealContactResults.find((c) => c.id === dealContactId);
+                          setDealContactSearch(selected?.nome ?? "");
+                        }
+                        setIsDealContactOpen(true);
+                      }}
+                      disabled={contactsLoading || contacts.length === 0}
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    />
+                    <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+                    {/* Dropdown ancorado de forma relativa (evita quebrar no scroll da página) */}
+                    {isDealContactOpen && (
+                      <ul
+                        id="deal-contact-listbox"
+                        role="listbox"
+                        className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                      >
+                        {dealContactSearching ? (
+                          <li className="px-3 py-2">
+                            <LoadingSpinner label="Pesquisando..." size={20} />
+                          </li>
+                        ) : filteredDealContacts.length === 0 ? (
+                          <li className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                            Nenhum contato encontrado.
+                          </li>
+                        ) : (
+                          filteredDealContacts.map((contact) => {
                             const isSelected = contact.id === dealContactId;
                             return (
                               <li
@@ -1032,140 +1060,224 @@ export default function Home() {
                                   setDealContactSearch(contact.nome);
                                   setIsDealContactOpen(false);
                                 }}
-                                className={`flex cursor-pointer flex-col gap-0.5 px-3 py-2 text-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-700 ${isSelected ? "bg-slate-100 dark:bg-slate-700" : ""}`}
+                                className={`flex cursor-pointer flex-col gap-0.5 px-3 py-2 text-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-700 ${isSelected ? "bg-slate-100 dark:bg-slate-700" : ""
+                                  }`}
                               >
-                                <span className="font-medium text-slate-900 dark:text-white">{contact.nome}</span>
-                                <span className="text-xs text-slate-500 dark:text-slate-400">{contact.telefone}{contact.email ? ` · ${contact.email}` : ""}</span>
+                                <span className="font-medium text-slate-900 dark:text-white">
+                                  {contact.nome}
+                                </span>
+                                <span className="text-xs text-slate-500 dark:text-slate-400">
+                                  {contact.telefone}
+                                  {contact.email ? ` · ${contact.email}` : ""}
+                                </span>
                               </li>
                             );
-                          })}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                  {contacts.length === 0 && !contactsLoading && !contactsError && (
-                    <p className="text-xs text-slate-500">Cadastre um contato antes de criar uma oportunidade.</p>
-                  )}
-                  {dealError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{dealError}</p>}
-                </div>
-              </Step>
-              <Step title="Detalhes" description="Dados da oportunidade">
-                <div className="space-y-4 py-2">
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Nome da oportunidade
-                    <input
-                      value={dealTitle}
-                      onChange={(event) => setDealTitle(event.target.value)}
-                      placeholder="Ex.: Orçamento de lentes"
-                      maxLength={200}
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                    />
-                  </label>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Valor estimado
-                    <input
-                      type="text"
-                      value={dealValue}
-                      onChange={(event) => setDealValue(event.target.value)}
-                      placeholder="Ex: R$ 1.500,00"
-                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                    />
-                  </label>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Pipeline</label>
-                    <CustomSelect
-                      value={dealPipelineId}
-                      options={[
-                        { value: "novos", label: "Novos clientes" },
-                        { value: "relacionamento", label: "Relacionamento" },
-                      ]}
-                      onChange={(val) => {
-                        const pipelineId = val === "relacionamento" ? "relacionamento" : "novos";
-                        setDealPipelineId(pipelineId as PipelineId);
-                        setDealStageId(pipelinesConfig[pipelineId].stages[0].id);
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Etapa</label>
-                    <CustomSelect
-                      value={dealStageId}
-                      options={pipelinesConfig[dealPipelineId].stages.map((stage) => ({ value: stage.id, label: stageTitle(stage.id) }))}
-                      onChange={(val) => {
-                        const stage = pipelinesConfig[dealPipelineId].stages.find((item) => item.id === val);
-                        if (stage) setDealStageId(stage.id);
-                      }}
-                    />
-                  </div>
-                </div>
-              </Step>
-              <Step title="Observações" description="Anotações e anexos">
-                <div className="space-y-4 py-2">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Adicionar observação</label>
-                    <div className="flex gap-2">
-                      <textarea
-                        value={newObservationText}
-                        onChange={(event) => setNewObservationText(event.target.value)}
-                        placeholder="Escreva uma observação..."
-                        rows={2}
-                        className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] resize-none"
-                      ></textarea>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!newObservationText.trim()) return;
-                          setNewObservations((prev) => [...prev, { id: generateId(), texto: newObservationText.trim(), autor: "Usuário", criadoEm: new Date().toISOString() }]);
-                          setNewObservationText("");
-                        }}
-                        disabled={!newObservationText.trim()}
-                        className="self-end rounded-lg bg-[#051647] px-3 py-2 text-xs font-bold text-white hover:bg-[#002187] disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
-                      >
-                        Adicionar
-                      </button>
-                    </div>
-                  </div>
-                  {newObservations.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">Observações adicionadas ({newObservations.length})</p>
-                      <div className="max-h-32 space-y-1.5 overflow-y-auto">
-                        {newObservations.map((obs) => (
-                          <div key={obs.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800/50">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{obs.autor}</span>
-                              <button type="button" onClick={() => setNewObservations((prev) => prev.filter((o) => o.id !== obs.id))} className="text-slate-400 hover:text-red-500 cursor-pointer hover:cursor-pointer"><X className="h-3 w-3" /></button>
-                            </div>
-                            <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">{obs.texto}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-700">
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Imagem (opcional)</label>
-                    <input type="file" accept="image/*" ref={dealImageInputRef} className="hidden" onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      if (file.size > 16 * 1024 * 1024) { toast.error("Imagem muito grande", "Máximo 16MB."); return; }
-                      const reader = new FileReader();
-                      reader.onload = () => setNewDealImage(reader.result as string);
-                      reader.readAsDataURL(file);
-                    }} />
-                    {newDealImage ? (
-                      <div className="relative inline-block">
-                        <img src={newDealImage} alt="Preview" className="h-24 w-24 rounded-lg border border-slate-200 object-cover dark:border-slate-700" />
-                        <button type="button" onClick={() => { setNewDealImage(null); if (dealImageInputRef.current) dealImageInputRef.current.value = ""; }} className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white shadow cursor-pointer hover:cursor-pointer"><X className="h-3 w-3" /></button>
-                      </div>
-                    ) : (
-                      <button type="button" onClick={() => dealImageInputRef.current?.click()} className="inline-flex h-10 items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 text-xs font-medium text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-600 dark:text-slate-400 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer">
-                        <Paperclip className="h-3.5 w-3.5" /> Anexar imagem
-                      </button>
+                          })
+                        )}
+                      </ul>
                     )}
                   </div>
                 </div>
-              </Step>
-            </Stepper>
-          </section>
+
+                {contacts.length === 0 && !contactsLoading && !contactsError && (
+                  <p className="text-xs text-slate-500">
+                    Cadastre um contato antes de criar uma oportunidade.
+                  </p>
+                )}
+                {dealError && (
+                  <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">
+                    {dealError}
+                  </p>
+                )}
+              </div>
+            </Step>
+
+            <Step title="Detalhes" description="Dados da oportunidade">
+              <div className="space-y-4 py-2">
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Nome da oportunidade
+                  <input
+                    value={dealTitle}
+                    onChange={(event) => setDealTitle(event.target.value)}
+                    placeholder="Ex.: Orçamento de lentes"
+                    maxLength={200}
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                  />
+                </label>
+
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Valor estimado
+                  <input
+                    type="text"
+                    value={dealValue}
+                    onChange={(event) => setDealValue(event.target.value)}
+                    placeholder="Ex: R$ 1.500,00"
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                  />
+                </label>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Pipeline
+                  </label>
+                  <CustomSelect
+                    value={dealPipelineId}
+                    options={[
+                      { value: "novos", label: "Novos clientes" },
+                      { value: "relacionamento", label: "Relacionamento" },
+                    ]}
+                    onChange={(val) => {
+                      const pipelineId = val === "relacionamento" ? "relacionamento" : "novos";
+                      setDealPipelineId(pipelineId as PipelineId);
+                      setDealStageId(pipelinesConfig[pipelineId].stages[0].id);
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Etapa
+                  </label>
+                  <CustomSelect
+                    value={dealStageId}
+                    options={pipelinesConfig[dealPipelineId].stages.map((stage) => ({
+                      value: stage.id,
+                      label: stageTitle(stage.id),
+                    }))}
+                    onChange={(val) => {
+                      const stage = pipelinesConfig[dealPipelineId].stages.find(
+                        (item) => item.id === val
+                      );
+                      if (stage) setDealStageId(stage.id);
+                    }}
+                  />
+                </div>
+              </div>
+            </Step>
+
+            <Step title="Observações" description="Anotações e anexos">
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Adicionar observação
+                  </label>
+                  <div className="flex gap-2">
+                    <textarea
+                      value={newObservationText}
+                      onChange={(event) => setNewObservationText(event.target.value)}
+                      placeholder="Escreva uma observação..."
+                      rows={2}
+                      className="flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newObservationText.trim()) return;
+                        setNewObservations((prev) => [
+                          ...prev,
+                          {
+                            id: generateId(),
+                            texto: newObservationText.trim(),
+                            autor: "Usuário",
+                            criadoEm: new Date().toISOString(),
+                          },
+                        ]);
+                        setNewObservationText("");
+                      }}
+                      disabled={!newObservationText.trim()}
+                      className="cursor-pointer self-end rounded-lg bg-[#051647] px-3 py-2 text-xs font-bold text-white hover:bg-[#002187] disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D]"
+                    >
+                      Adicionar
+                    </button>
+                  </div>
+                </div>
+
+                {newObservations.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      Observações adicionadas ({newObservations.length})
+                    </p>
+                    <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                      {newObservations.map((obs) => (
+                        <div
+                          key={obs.id}
+                          className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800/50"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">
+                              {obs.autor}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setNewObservations((prev) => prev.filter((o) => o.id !== obs.id))
+                              }
+                              className="cursor-pointer text-slate-400 hover:text-red-500"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">
+                            {obs.texto}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2 border-t border-slate-100 pt-3 dark:border-slate-700">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Imagem (opcional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={dealImageInputRef}
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 16 * 1024 * 1024) {
+                        toast.error("Imagem muito grande", "Máximo 16MB.");
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = () => setNewDealImage(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                  {newDealImage ? (
+                    <div className="relative inline-block">
+                      <img
+                        src={newDealImage}
+                        alt="Preview"
+                        className="h-24 w-24 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewDealImage(null);
+                          if (dealImageInputRef.current) dealImageInputRef.current.value = "";
+                        }}
+                        className="absolute -right-2 -top-2 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-red-500 text-white shadow"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => dealImageInputRef.current?.click()}
+                      className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 text-xs font-medium text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-600 dark:text-slate-400 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600]"
+                    >
+                      <Paperclip className="h-3.5 w-3.5" /> Anexar imagem
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Step>
+          </Stepper>
         </div>
       )}
 
@@ -1200,11 +1312,10 @@ export default function Home() {
                   key={tab.key}
                   type="button"
                   onClick={() => setDetailTab(tab.key)}
-                  className={`relative px-4 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${
-                    detailTab === tab.key
+                  className={`relative px-4 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${detailTab === tab.key
                       ? "text-[#002187] dark:text-[#C4D600]"
                       : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   {tab.label}
                   {detailTab === tab.key && (
@@ -1352,7 +1463,7 @@ function InlineField({ label, value, onSave, icon, type = "text" }: { label: str
           <dt className="text-[10px] text-slate-500 dark:text-slate-400">{label}</dt>
           <dd className="truncate font-medium text-slate-900 dark:text-white">{value || "—"}</dd>
         </div>
-        </div>
+      </div>
     );
   }
 
