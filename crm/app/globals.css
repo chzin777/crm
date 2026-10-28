@@ -11,25 +11,9 @@
   --color-otb-orange: #F7915E;
 }
 
-/* Graphik Typography System */
-.font-graphik-title {
-  font-family: var(--font-graphik-semibold);
-  font-weight: 600;
-}
-
-.font-graphik-highlight {
-  font-family: var(--font-graphik-medium);
-  font-weight: 500;
-}
-
-.font-graphik-body {
-  font-family: var(--font-graphik-regular);
-  font-weight: 400;
-}
-
-.font-graphik-light {
-  font-family: var(--font-graphik-light);
-  font-weight: 300;
+/* Inter Typography System */
+body {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
 :root {
