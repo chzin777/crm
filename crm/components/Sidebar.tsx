@@ -142,14 +142,14 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                   aria-expanded={expanded}
                   title={isCollapsed ? group.label : undefined}
                   onClick={() => toggleGroup(group.id)}
-                  className={`group flex w-full items-center rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
+                  className={`group flex w-full items-center justify-start rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                     isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                   } ${
                     groupActive ? "text-[#142344] dark:text-white" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
                   }`}
                 >
                   <GroupIcon className={`h-[19px] w-[19px] shrink-0 ${groupActive ? "text-[#4156b8] dark:text-[#C4D600]" : "text-[#8992a4] group-hover:text-[#58657c] dark:text-slate-500 dark:group-hover:text-slate-300"}`} />
-                  <span className={`truncate transition-[opacity,width,flex] duration-200 ${isCollapsed ? "w-0 flex-none overflow-hidden opacity-0" : "min-w-0 flex-1 opacity-100"}`}>{group.label}</span>
+                  <span className={`truncate text-left transition-[opacity,width,flex] duration-200 ${isCollapsed ? "w-0 flex-none overflow-hidden opacity-0" : "min-w-0 flex-1 opacity-100"}`}>{group.label}</span>
                   <ChevronDown className={`h-[17px] w-[17px] text-[#929bad] transition-[transform,opacity,width] duration-200 ${expanded ? "rotate-180" : ""} ${isCollapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100"}`} />
                 </button>
                 {!isCollapsed && (
