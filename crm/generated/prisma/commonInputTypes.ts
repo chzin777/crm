@@ -334,6 +334,23 @@ export type JsonWithAggregatesFilterBase<$PrismaModel = never> = {
   _max?: Prisma.NestedJsonFilter<$PrismaModel>
 }
 
+export type EnumCampaignMessageStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.CampaignMessageStatus | Prisma.EnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumCampaignMessageStatusFilter<$PrismaModel> | $Enums.CampaignMessageStatus
+}
+
+export type EnumCampaignMessageStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.CampaignMessageStatus | Prisma.EnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumCampaignMessageStatusWithAggregatesFilter<$PrismaModel> | $Enums.CampaignMessageStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumCampaignMessageStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumCampaignMessageStatusFilter<$PrismaModel>
+}
+
 export type NestedStringFilter<$PrismaModel = never> = {
   equals?: string | Prisma.StringFieldRefInput<$PrismaModel>
   in?: string[] | Prisma.ListStringFieldRefInput<$PrismaModel>
@@ -627,6 +644,23 @@ export type NestedJsonFilterBase<$PrismaModel = never> = {
   gt?: runtime.InputJsonValue | Prisma.JsonFieldRefInput<$PrismaModel>
   gte?: runtime.InputJsonValue | Prisma.JsonFieldRefInput<$PrismaModel>
   not?: runtime.InputJsonValue | Prisma.JsonFieldRefInput<$PrismaModel> | Prisma.JsonNullValueFilter
+}
+
+export type NestedEnumCampaignMessageStatusFilter<$PrismaModel = never> = {
+  equals?: $Enums.CampaignMessageStatus | Prisma.EnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumCampaignMessageStatusFilter<$PrismaModel> | $Enums.CampaignMessageStatus
+}
+
+export type NestedEnumCampaignMessageStatusWithAggregatesFilter<$PrismaModel = never> = {
+  equals?: $Enums.CampaignMessageStatus | Prisma.EnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  in?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  notIn?: $Enums.CampaignMessageStatus[] | Prisma.ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel>
+  not?: Prisma.NestedEnumCampaignMessageStatusWithAggregatesFilter<$PrismaModel> | $Enums.CampaignMessageStatus
+  _count?: Prisma.NestedIntFilter<$PrismaModel>
+  _min?: Prisma.NestedEnumCampaignMessageStatusFilter<$PrismaModel>
+  _max?: Prisma.NestedEnumCampaignMessageStatusFilter<$PrismaModel>
 }
 
 

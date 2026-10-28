@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm_user
+      POSTGRES_PASSWORD: CrmSecure2024!Pass
+    volumes:
+    - ./postgres/data:/var/lib/postgresql/data
+    networks:
+    - crm-network
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U crm_user -d crm
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: crm-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@postgres:5432/crm
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 25
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+      RESERVE_POOL_TIMEOUT: 3
+      SERVER_IDLE_TIMEOUT: 600
+      SERVER_LIFETIME: 3600
+      AUTH_TYPE: scram-sha-256
+    ports:
+    - 6432:6432
+    networks:
+    - crm-network
+  redis:
+    image: redis:7-alpine
+    container_name: crm-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+    - "6379:6379"
+    volumes:
+    - ./redis/data:/data
+    networks:
+    - crm-network
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  crm-app:
+    build:
+      context: ./crm
+      dockerfile: Dockerfile
+    container_name: crm-app
+    restart: unless-stopped
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    env_file:
+    - ./crm/.env
+    environment:
+      NODE_ENV: production
+      LD_LIBRARY_PATH: /opt/oracle/instantclient_19_26
+      TNS_ADMIN: /tmp/oracletest/network/admin
+      PORT: 3000
+      BETTER_AUTH_SECRET: fyxYszaRyn2UT0NXuiK3oFVgjXruvCt3ZLkGK_Q9LWa7n6eevE4Pee5Q8T6ZV7rZ
+      BETTER_AUTH_URL: https://crm.oticasbrasil.com.br
+      NEXT_PUBLIC_APP_URL: https://crm.oticasbrasil.com.br
+      DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@pgbouncer:5432/crm
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: 172.30.20.15
+    ports:
+    - 3000:3000
+    networks:
+    - crm-network
+networks:
+  crm-network:
+    driver: bridge

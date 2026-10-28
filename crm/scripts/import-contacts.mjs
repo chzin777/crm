@@ -204,6 +204,7 @@ try {
   await importContacts();
   const importedRows = await importSales();
   await updateContactAggregates();
+  await pgClient.query('REFRESH MATERIALIZED VIEW CONCURRENTLY "DailySalesSummary"');
   console.log(`Import complete: ${importedRows.toLocaleString("en-US")} sale rows (${(inputSize / 1024 / 1024).toFixed(1)} MB) and unique contacts loaded.`);
 } catch (error) {
   console.error("Import failed. No CSV contents or database credentials were logged.");

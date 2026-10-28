@@ -25,19 +25,19 @@ import {
   SquareCheck,
   X,
 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
+import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/CampaignTemplatePicker";
 import Stepper, { Step } from "@/components/Stepper";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { useCrmData } from "@/hooks/useCrmData";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
 
-type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Enviada" | "Envio parcial" | "Falha no envio";
+type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio";
+const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
 type CampaignFilter = "Todas" | CampaignStatus;
 type CampaignDurationUnit = "horas" | "dias" | "semanas" | "meses";
 
@@ -73,6 +73,18 @@ interface CampaignDispatchResult {
   errors: string[];
 }
 
+interface DispatchJobView {
+  campaignId: string;
+  campaignName: string;
+  status: "running" | "paused" | "completed" | "cancelled";
+  total: number;
+  cursor: number;
+  sent: number;
+  failed: number;
+  errors: string[];
+  pause?: { kind: string; code?: number; message: string };
+}
+
 interface CampaignDurationSettings {
   indefinite: boolean;
   amount: string;
@@ -96,6 +108,7 @@ interface Campaign {
   dataAtualizacao: string;
   mensagem: string;
   anexos?: { name: string; size: number; type: string; key?: string; url?: string }[];
+  modelo?: CampaignTemplate | null;
   activeDuration?: ActiveCampaignDuration | null;
   activeUntil?: string;
 }
@@ -207,12 +220,13 @@ const statusStyles: Record<CampaignStatus, string> = {
   Pausada: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   Rascunho: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
   Enviando: "bg-[#002187]/10 text-[#002187] dark:bg-[#002187]/30 dark:text-[#C4D600]",
+  "Envio pausado": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
   Enviada: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
   "Envio parcial": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
   "Falha no envio": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
 };
 
-const filters: CampaignFilter[] = ["Todas", "Ativa", "Pronta para envio", "Agendada", "Pausada", "Rascunho", "Enviando", "Enviada", "Envio parcial", "Falha no envio"];
+const filters: CampaignFilter[] = ["Todas", "Ativa", "Pronta para envio", "Agendada", "Pausada", "Rascunho", "Enviando", "Envio pausado", "Enviada", "Envio parcial", "Falha no envio"];
 const presetAudienceCriteria: AudienceCriterion[] = [
   { id: "criteria-30d", nome: "Comprou nos últimos 30 dias", tipo: "geral" },
   { id: "criteria-90d", nome: "Comprou nos últimos 90 dias", tipo: "geral" },
@@ -224,9 +238,9 @@ const presetAudienceCriteria: AudienceCriterion[] = [
 ];
 
 export default function CampanhasPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
+  const { isDark } = useCrmTheme();
   const toast = useToast();
-  const { data: campaigns, setData: setCampaigns, saveData: persistCampaigns, isLoading: campaignsLoading, error: campaignsError, reloadData: reloadCampaigns } = useCrmData<Campaign[]>("campaigns", []);
+  const { data: campaigns, setData: setCampaigns, isLoading: campaignsLoading, error: campaignsError, reloadData: reloadCampaigns } = useCrmData<Campaign[]>("campaigns", []);
   const { data: segments, isLoading: segmentsLoading } = useCrmData<CampaignAudienceSegment[]>("segments", []);
   const { data: savedAudienceCriteria, isLoading: criteriaLoading } = useCrmData<AudienceCriterion[]>("criteria", []);
   const segmentOptions = segments.map((segment) => segment.nome);
@@ -245,6 +259,12 @@ export default function CampanhasPage() {
   const attachmentPreviewUrlsRef = useRef(new Map<File, string>());
   const [durationSettings, setDurationSettings] = useState<CampaignDurationSettings>(initialDurationSettings);
   const [form, setForm] = useState({ nome: "", publico: "", mensagem: "" });
+  const [campaignTemplate, setCampaignTemplate] = useState<CampaignTemplate | null>(null);
+  const changeCampaignTemplate = (template: CampaignTemplate | null) => {
+    setForm((current) => ({ ...current, mensagem: template ? template.body : campaignTemplate ? "" : current.mensagem }));
+    setCampaignTemplate(template);
+    setFormError("");
+  };
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
@@ -253,6 +273,66 @@ export default function CampanhasPage() {
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchProgress, setDispatchProgress] = useState<{ completed: number; total: number } | null>(null);
   const [dispatchResult, setDispatchResult] = useState<CampaignDispatchResult | null>(null);
+  const [dispatchJobs, setDispatchJobs] = useState<DispatchJobView[]>([]);
+  const [jobBusy, setJobBusy] = useState<string | null>(null);
+  const jobStatusRef = useRef<Map<string, string> | null>(null);
+  const toastRef = useRef(toast);
+  useEffect(() => { toastRef.current = toast; });
+
+  const loadDispatchJobs = useCallback(async () => {
+    try {
+      const response = await fetch("/api/campaigns/dispatch", { cache: "no-store" });
+      if (!response.ok) return;
+      const { jobs } = await response.json() as { jobs: DispatchJobView[] };
+      const previous = jobStatusRef.current;
+      const next = new Map(jobs.map((job) => [job.campaignId, job.status]));
+      jobStatusRef.current = next;
+      setDispatchJobs(jobs);
+      if (!previous) return;
+      let changed = false;
+      for (const job of jobs) {
+        const before = previous.get(job.campaignId);
+        if (before === job.status || (before === undefined && job.status === "completed")) continue;
+        changed = true;
+        if (job.status === "paused" && job.pause?.kind !== "manual") toastRef.current.error(`Disparo pausado: ${job.campaignName}`, job.pause?.message ?? "O disparo foi pausado.");
+        if (job.status === "completed") toastRef.current.success(`Disparo concluído: ${job.campaignName}`, `${job.sent} enviadas, ${job.failed} falhas.`);
+      }
+      if (changed) {
+        const refreshed = await reloadCampaigns().catch(() => null);
+        if (refreshed) setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
+      }
+    } catch {
+      // A próxima consulta tenta de novo.
+    }
+  }, [reloadCampaigns]);
+
+  const hasActiveJob = dispatchJobs.some((job) => job.status === "running");
+  useEffect(() => {
+    if (campaignsLoading) return;
+    const first = window.setTimeout(() => void loadDispatchJobs(), 0);
+    const timer = window.setInterval(() => void loadDispatchJobs(), hasActiveJob ? 3000 : 15000);
+    return () => { window.clearTimeout(first); window.clearInterval(timer); };
+  }, [campaignsLoading, hasActiveJob, loadDispatchJobs]);
+
+  const controlDispatch = async (campaignId: string, action: "pause" | "resume" | "cancel") => {
+    setJobBusy(campaignId);
+    try {
+      const response = await fetch("/api/campaigns/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, campaignId }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Não foi possível executar a ação.");
+      await loadDispatchJobs();
+      const refreshed = await reloadCampaigns().catch(() => null);
+      if (refreshed) setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
+    } catch (error) {
+      toast.error("Ação não concluída", error instanceof Error ? error.message : "Tente novamente.");
+    } finally {
+      setJobBusy(null);
+    }
+  };
   const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "atualizacao", order: "desc" });
   const handleSort = (field: string) => {
     setSortConfig((prev) => {
@@ -388,6 +468,7 @@ export default function CampanhasPage() {
     const campaign: Campaign = {
       id: `camp-${Date.now()}`,
       nome,
+      modelo: campaignTemplate,
       publico: selectedAudienceSegments.join(", "),
       audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
       status: "Rascunho",
@@ -403,6 +484,7 @@ export default function CampanhasPage() {
     setActiveFilter("Todas");
     setSearchTerm("");
     setForm({ nome: "", publico: "", mensagem: "" });
+    setCampaignTemplate(null);
     setSelectedAudienceSegments([]);
     clearSelectedAttachments();
     setDurationSettings(initialDurationSettings);
@@ -419,6 +501,7 @@ export default function CampanhasPage() {
       ? { indefinite: false, amount: String(campaign.activeDuration.amount), unit: campaign.activeDuration.unit }
       : initialDurationSettings);
     setForm({ nome: campaign.nome, publico: campaign.publico, mensagem: campaign.mensagem });
+    setCampaignTemplate(campaign.modelo ?? null);
     setFormError("");
   };
 
@@ -496,6 +579,7 @@ export default function CampanhasPage() {
     const updatedCampaign = {
       ...selectedCampaign,
       nome,
+      modelo: campaignTemplate,
       publico,
       audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
       mensagem,
@@ -515,7 +599,7 @@ export default function CampanhasPage() {
   const toggleCampaign = (campaignId: string) => {
     const updateStatus = (campaign: Campaign): Campaign => {
       if (campaign.id !== campaignId) return campaign;
-      if (campaign.status === "Enviando" || campaign.status === "Enviada" || campaign.status === "Envio parcial") return campaign;
+      if (isDispatchLocked(campaign.status)) return campaign;
       if (campaign.status === "Ativa") {
         return { ...campaign, status: "Pausada", activeUntil: undefined, dataAtualizacao: "Pausada agora" };
       }
@@ -532,6 +616,7 @@ export default function CampanhasPage() {
 
   const openCreateCampaign = async () => {
     setForm({ nome: "", publico: "", mensagem: "" });
+    setCampaignTemplate(null);
     setSelectedAudienceSegments([]);
     clearSelectedAttachments();
     setDurationSettings(initialDurationSettings);
@@ -581,11 +666,11 @@ export default function CampanhasPage() {
       }
       if (storesError) throw new Error(`Não foi possível carregar as lojas usadas nos públicos: ${storesError}`);
 
-      let currentCampaigns = campaigns;
+      const currentCampaigns = campaigns;
       const targetCampaigns = dispatchTarget.ids.map((id) => currentCampaigns.find((campaign) => campaign.id === id));
       if (targetCampaigns.some((campaign) => !campaign)) throw new Error("Uma das campanhas selecionadas não foi encontrada. Atualize a página e tente novamente.");
       const readyCampaigns = targetCampaigns as Campaign[];
-      const blocked = readyCampaigns.find((campaign) => campaign.status === "Enviando" || campaign.status === "Enviada" || campaign.status === "Envio parcial");
+      const blocked = readyCampaigns.find((campaign) => isDispatchLocked(campaign.status));
       if (blocked) throw new Error(`"${blocked.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`);
 
       const connectionResponse = await fetch("/api/whatsapp/connection", { cache: "no-store" });
@@ -660,87 +745,30 @@ export default function CampanhasPage() {
         recipientsByCampaign.set(campaign.id, [...recipients.values()]);
       }
 
-      const totalRecipients = [...recipientsByCampaign.values()].reduce((total, recipients) => total + recipients.length, 0);
-      let completed = 0;
-      let totalSent = 0;
-      let totalFailed = 0;
-      const results: CampaignDispatchResult["campaigns"] = [];
-      const recipientErrors: string[] = [];
-      setDispatchProgress({ completed, total: totalRecipients });
-
-      for (const campaign of readyCampaigns) {
-        const recipients = recipientsByCampaign.get(campaign.id) ?? [];
-        const sendingCampaigns = currentCampaigns.map((item) => item.id === campaign.id
-          ? { ...item, status: "Enviando" as const, dataAtualizacao: "Disparo em andamento" }
-          : item);
-        setCampaigns(sendingCampaigns);
-        setSelectedCampaign((current) => current?.id === campaign.id ? sendingCampaigns.find((item) => item.id === campaign.id) ?? current : current);
-        try {
-          await persistCampaigns(sendingCampaigns);
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : "erro desconhecido";
-          throw new Error(`A campanha não foi enviada porque não foi possível registrar o início do disparo: ${reason}`);
+      const started: string[] = [];
+      try {
+        for (const campaign of readyCampaigns) {
+          const startResponse = await fetch("/api/campaigns/dispatch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients: recipientsByCampaign.get(campaign.id) ?? [] }),
+          });
+          const startResult = await startResponse.json().catch(() => ({})) as { error?: string };
+          if (!startResponse.ok) throw new Error(startResult.error || `Não foi possível iniciar o disparo de "${campaign.nome}".`);
+          started.push(campaign.nome);
         }
-        currentCampaigns = sendingCampaigns;
-
-        let sent = 0;
-        let failed = 0;
-        const templateValues = (recipient: CampaignRecipient): Record<string, string> => ({
-          nome: recipient.nome,
-          email: recipient.email,
-          telefone: recipient.telefone,
-          segmento: recipient.segmento,
-          data_nascimento: recipient.dataNascimento,
-        });
-
-        for (const recipient of recipients) {
-          if (!recipient.telefone.trim()) {
-            failed += 1;
-            recipientErrors.push(`${recipient.nome}: telefone não cadastrado.`);
-          } else {
-            const values = templateValues(recipient);
-            const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento)\}\}/g, (_match, key: string) => values[key] ?? "");
-            const formData = new FormData();
-            formData.set("phone", recipient.telefone);
-            formData.set("text", text);
-            if (campaign.anexos && campaign.anexos.length > 0) {
-              formData.set("mediaUrls", JSON.stringify(campaign.anexos.filter((a) => a.url).map((a) => ({ url: a.url, fileName: a.name, mimetype: a.type }))));
-            }
-            try {
-              const sendResponse = await fetch("/api/whatsapp/send", { method: "POST", body: formData });
-              const result = await sendResponse.json() as { error?: string };
-              if (!sendResponse.ok) throw new Error(result.error || "O WhatsApp recusou o envio.");
-              sent += 1;
-            } catch (error) {
-              failed += 1;
-              recipientErrors.push(`${recipient.nome}: ${error instanceof Error ? error.message : "falha no envio."}`);
-            }
-          }
-          completed += 1;
-          setDispatchProgress({ completed, total: totalRecipients });
-        }
-
-        const status: CampaignStatus = failed === 0 ? "Enviada" : sent > 0 ? "Envio parcial" : "Falha no envio";
-        const updated = currentCampaigns.map((item) => item.id === campaign.id
-          ? { ...item, status, disparos: (item.disparos ?? 0) + sent, dataAtualizacao: `${new Date().toLocaleString("pt-BR")} · ${sent} enviados, ${failed} falhas` }
-          : item);
-        setCampaigns(updated);
-        setSelectedCampaign((current) => current?.id === campaign.id ? updated.find((item) => item.id === campaign.id) ?? current : current);
-        try {
-          await persistCampaigns(updated);
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : "erro desconhecido";
-          throw new Error(`${sent} mensagens foram aceitas, mas não foi possível salvar o status da campanha: ${reason}`);
-        }
-        currentCampaigns = updated;
-        totalSent += sent;
-        totalFailed += failed;
-        results.push({ nome: campaign.nome, sent, failed, status });
+      } finally {
+        // O servidor altera o status das campanhas; recarrega para não salvar uma versão antiga.
+        const refreshed = await reloadCampaigns().catch(() => null);
+        if (refreshed) setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
       }
 
-      setDispatchResult({ sent: totalSent, failed: totalFailed, campaigns: results, errors: recipientErrors.slice(0, 5) });
-      if (totalFailed === 0) toast.success("Campanha enviada", `${totalSent} mensagem${totalSent === 1 ? "" : "s"} aceita${totalSent === 1 ? "" : "s"} pelo WhatsApp.`);
-      else toast.error("Envio concluído com falhas", `${totalSent} mensagem${totalSent === 1 ? "" : "s"} enviada${totalSent === 1 ? "" : "s"}; ${totalFailed} falha${totalFailed === 1 ? "" : "s"}.`);
+      setDispatchConfirmOpen(false);
+      setDispatchResult(null);
+      toast.success(
+        started.length === 1 ? "Disparo iniciado" : "Disparos iniciados",
+        "O envio continua em segundo plano no servidor. Você pode fechar esta página; o andamento aparece na lista de campanhas.",
+      );
       if (dispatchTarget.mode === "batch") setSelectedCampaignIds(new Set());
     } catch (error) {
       const message = error instanceof Error ? error.message : "Não foi possível disparar a campanha.";
@@ -756,20 +784,8 @@ export default function CampanhasPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Campanhas</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
-              <Bell className="h-4 w-4" />
-            </button>
-                      </div>
-        </header>
+    <div>
+      <div>
 
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
           {campaignsError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{campaignsError}</p>}
@@ -810,6 +826,46 @@ export default function CampanhasPage() {
               );
             })}
           </section>
+
+          {dispatchJobs.filter((job) => job.status === "running" || job.status === "paused").length > 0 && (
+            <section aria-label="Envios em andamento" className="space-y-3">
+              {dispatchJobs.filter((job) => job.status === "running" || job.status === "paused").map((job) => {
+                const percent = job.total > 0 ? Math.round((job.cursor / job.total) * 100) : 0;
+                const paused = job.status === "paused";
+                const busy = jobBusy === job.campaignId;
+                return (
+                  <article key={job.campaignId} className={`rounded-xl border p-4 shadow-xs ${paused ? "border-[#F7915E]/50 bg-[#F7915E]/10" : "border-slate-200 bg-white dark:border-slate-800 dark:bg-[#07194f]"}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{job.campaignName}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          {paused ? "Envio pausado" : "Enviando em segundo plano"} · {job.cursor} de {job.total} contatos · {job.sent} enviadas · {job.failed} falhas
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {paused ? (
+                          <button type="button" disabled={busy} onClick={() => void controlDispatch(job.campaignId, "resume")} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer hover:cursor-pointer"><Play className="h-3.5 w-3.5" />Retomar</button>
+                        ) : (
+                          <button type="button" disabled={busy} onClick={() => void controlDispatch(job.campaignId, "pause")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><Pause className="h-3.5 w-3.5" />Pausar</button>
+                        )}
+                        <button type="button" disabled={busy} onClick={() => { if (window.confirm("Cancelar este disparo? Os contatos restantes não receberão a mensagem.")) void controlDispatch(job.campaignId, "cancel"); }} className="inline-flex h-8 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar disparo</button>
+                      </div>
+                    </div>
+                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+                      <div className="h-full rounded-full bg-[#C4D600] transition-all" style={{ width: `${percent}%` }} />
+                    </div>
+                    {paused && job.pause && <p role="alert" className="mt-3 text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{job.pause.message}</p>}
+                    {job.errors.length > 0 && (
+                      <details className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <summary className="cursor-pointer">Ver falhas ({job.failed})</summary>
+                        <ul className="mt-1 list-inside list-disc space-y-0.5">{job.errors.slice(0, 5).map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul>
+                      </details>
+                    )}
+                  </article>
+                );
+              })}
+            </section>
+          )}
 
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
             <div className="flex flex-col gap-4 border-b border-slate-100 p-4 dark:border-slate-800 sm:p-5">
@@ -932,9 +988,9 @@ export default function CampanhasPage() {
                               setDispatchProgress(null);
                               setDispatchConfirmOpen(true);
                             }}
-                            disabled={isDispatching || campaign.status === "Enviando" || campaign.status === "Enviada" || campaign.status === "Envio parcial"}
+                            disabled={isDispatching || isDispatchLocked(campaign.status)}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-[#002187] transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer"
-                            title={campaign.status === "Enviando" ? "Esta campanha já está em envio" : campaign.status === "Enviada" || campaign.status === "Envio parcial" ? "Esta campanha já possui envios registrados" : "Disparar campanha"}
+                            title={campaign.status === "Enviando" ? "Esta campanha já está em envio" : campaign.status === "Envio pausado" ? "Disparo pausado: retome pelo painel de envios" : campaign.status === "Enviada" || campaign.status === "Envio parcial" ? "Esta campanha já possui envios registrados" : "Disparar campanha"}
                           >
                             <Send className="h-3.5 w-3.5" />
                           </button>
@@ -1019,6 +1075,8 @@ export default function CampanhasPage() {
               <Step title="Mensagem" description="Revise e salve">
                 <div className="space-y-3">
                   <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Escreva a mensagem</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">A campanha será criada como rascunho.</p></div>
+                  <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
+                  {!campaignTemplate && (
                   <div className="space-y-1.5">
                     <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Variáveis de personalização</p>
                     <div className="flex flex-wrap gap-1.5">
@@ -1037,9 +1095,10 @@ export default function CampanhasPage() {
                     </div>
                     <p className="text-[10px] text-slate-400">Clique em uma variável para inseri-la no ponto selecionado da mensagem.</p>
                   </div>
+                  )}
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                     <span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
-                    <textarea ref={messageInputRef} rows={4} value={form.mensagem} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+                    <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
                   </label>
                   <div className="space-y-2">
                     <input
@@ -1169,7 +1228,8 @@ export default function CampanhasPage() {
                   placeholder="Selecione os segmentos"
                   required
                 />
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos da campanha</p>
@@ -1183,12 +1243,12 @@ export default function CampanhasPage() {
               <footer className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
                 <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />{selectedCampaign.dataAtualizacao}</span>
                 <div className="flex items-center gap-2">
-                  {selectedCampaign.status !== "Enviando" && selectedCampaign.status !== "Enviada" && selectedCampaign.status !== "Envio parcial" && (
+                  {!isDispatchLocked(selectedCampaign.status) && (
                     <button type="button" onClick={() => toggleCampaign(selectedCampaign.id)} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">{selectedCampaign.status === "Ativa" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}{selectedCampaign.status === "Ativa" ? "Pausar no CRM" : "Ativar no CRM"}</button>
                   )}
                   <button
                     type="button"
-                    disabled={isDispatching || selectedCampaign.status === "Enviando" || selectedCampaign.status === "Enviada" || selectedCampaign.status === "Envio parcial"}
+                    disabled={isDispatching || isDispatchLocked(selectedCampaign.status)}
                     onClick={() => {
                       setDispatchTarget({ mode: "single", ids: [selectedCampaign.id] });
                       setDispatchResult(null);
@@ -1258,7 +1318,7 @@ export default function CampanhasPage() {
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {dispatchTarget.mode === "single"
                     ? "A campanha será enviada imediatamente para o público configurado."
-                    : "As campanhas selecionadas serão enviadas imediatamente para seus respectivos públicos."}
+                    : "As campanhas selecionadas serão enviadas imediatamente para seus respectivos públicos."} O envio roda no servidor: você pode fechar a página e acompanhar depois.
                 </p>
               </div>
             </div>

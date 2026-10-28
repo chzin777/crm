@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { ensureInstance, sendMedia, sendText } from "@/lib/meta-whatsapp";
+import { ensureInstance, listTemplates, sendMedia, sendTemplate, sendText } from "@/lib/meta-whatsapp";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
@@ -24,6 +24,42 @@ export async function POST(request: Request) {
       } catch {
         return NextResponse.json({ error: "mediaUrls inválido." }, { status: 400 });
       }
+    }
+
+    const templateName = String(form.get("templateName") ?? "").trim();
+    if (templateName) {
+      const templateLanguage = String(form.get("templateLanguage") ?? "pt_BR");
+      let templateParams: string[] = [];
+      try {
+        templateParams = JSON.parse(String(form.get("templateParams") ?? "[]"));
+      } catch {
+        return NextResponse.json({ error: "templateParams inválido." }, { status: 400 });
+      }
+      const headerFile = form.get("headerImage");
+      const headerImageUrl = String(form.get("headerImageUrl") ?? "").trim();
+      let headerImage = headerFile instanceof File && headerFile.size > 0
+        ? { mimetype: headerFile.type, fileName: headerFile.name, base64: Buffer.from(await headerFile.arrayBuffer()).toString("base64") }
+        : headerImageUrl
+          ? { mimetype: String(form.get("headerImageType") ?? "image/jpeg"), fileName: "header", url: headerImageUrl }
+          : undefined;
+      if (!headerImage) {
+        // Sem imagem informada: usa a imagem de exemplo que o modelo guarda na Meta.
+        const template = (await listTemplates()).find((item) => item.name === templateName && item.language === templateLanguage);
+        if (template?.headerFormat === "IMAGE") {
+          if (!template.headerImageUrl) {
+            return NextResponse.json({ error: "Este modelo exige uma imagem e a Meta não retornou a do modelo. Anexe uma imagem (JPG ou PNG)." }, { status: 400 });
+          }
+          const downloaded = await fetch(template.headerImageUrl);
+          if (!downloaded.ok) {
+            return NextResponse.json({ error: "Não foi possível carregar a imagem do modelo. Anexe uma imagem (JPG ou PNG)." }, { status: 400 });
+          }
+          const mimetype = downloaded.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+          headerImage = { mimetype, fileName: "header", base64: Buffer.from(await downloaded.arrayBuffer()).toString("base64") };
+        }
+      }
+      const result = await sendTemplate(phone, templateName, templateLanguage, templateParams.map(String), headerImage);
+      console.log("[whatsapp/send] modelo aceito pela Meta:", JSON.stringify(result));
+      return NextResponse.json({ ok: true });
     }
 
     if (!text && files.length === 0 && mediaUrls.length === 0) {
@@ -53,7 +89,8 @@ export async function POST(request: Request) {
     }
 
     if (files.length === 0) {
-      await sendText(phone, text);
+      const result = await sendText(phone, text);
+      console.log("[whatsapp/send] texto aceito pela Meta:", JSON.stringify(result));
     } else {
       for (const [index, file] of files.entries()) {
         const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
@@ -62,6 +99,12 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao enviar." }, { status: 502 });
+    console.error("[whatsapp/send] falha:", error);
+    const message = error instanceof Error ? error.message : "Falha ao enviar.";
+    const friendly = message.includes("#131058")
+      ? "O modelo hello_world só pode ser enviado a partir dos números de teste públicos da Meta. Crie e aprove um modelo próprio para enviar deste número."
+      : message;
+    // 502 é substituído pela página de erro do Cloudflare; 422 preserva a mensagem para o usuário.
+    return NextResponse.json({ error: friendly }, { status: 422 });
   }
 }

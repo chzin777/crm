@@ -1,13 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Sidebar } from "@/components/Sidebar";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, RefreshCw, Star, TrendingUp, Users, X } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
 
 type SurveyKey = "atendimento" | "produto";
@@ -78,7 +75,6 @@ const getLinePoints = (values: number[]) =>
   values.map((value, index) => `${42 + index * 106},${102 - value * 0.72}`).join(" ");
 
 export default function NpsPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
   const toast = useToast();
   const [currentDate, setCurrentDate] = useState<Date | null>(null);
   const { data: npsConfig, setData: setNpsConfig, isSaving: configSaving, error: configError } = useCrmData<NpsConfig>("nps", { messages: initialMessages });
@@ -224,23 +220,8 @@ export default function NpsPage() {
   const editedSurvey = surveys.find((survey) => survey.key === editingSurvey);
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Pesquisas NPS</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
-              <Bell className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => void reloadResponses()} disabled={responsesLoading} aria-label="Atualizar lista" title="Atualizar lista" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-              <RefreshCw className={`h-4 w-4 ${responsesLoading ? "animate-spin" : ""}`} />
-            </button>
-          </div>
-        </header>
+    <div>
+      <div>
 
         <main className="space-y-6 p-6 sm:p-8">
           {(configError || responsesError) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{configError || responsesError}</p>}

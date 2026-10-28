@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { Bell, ChevronUp, ChevronsUpDown, Plus, RefreshCw, Search, Store as StoreIcon, Trash2 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import Stepper, { Step } from "@/components/Stepper";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
 
 interface StoreRecord {
@@ -47,7 +45,7 @@ const RADIUS_PRESETS = [5, 10, 20, 30, 50];
 const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#051647] dark:text-white";
 
 export default function LojasPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
+  const { isDark } = useCrmTheme();
   const toast = useToast();
   const [stores, setStores] = useState<StoreRecord[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -378,20 +376,8 @@ export default function LojasPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Lojas</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button cursor-pointer bg-slate-100 text-slate-500 hover:cursor-pointer hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700">
-              <Bell className="h-4 w-4" />
-            </button>
-                      </div>
-        </header>
+    <div>
+      <div>
 
         <main className="space-y-6 p-8">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">

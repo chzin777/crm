@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { connectInstance, ensureInstance, getConnectedNumber, getConnectionState, logoutInstance } from "@/lib/meta-whatsapp";
+import { connectInstance, ensureInstance, getConnectedNumber, getConnectionState, getMessagingInfo, getPhoneInfo, logoutInstance } from "@/lib/meta-whatsapp";
 
 async function guard() {
   return (await requireApiSession()) ? null : NextResponse.json({ error: "Não autorizado" }, { status: 401 });
@@ -13,7 +13,9 @@ export async function GET() {
     await ensureInstance();
     const state = await getConnectionState();
     const number = state === "open" ? await getConnectedNumber() : null;
-    return NextResponse.json({ state, number });
+    const info = await getPhoneInfo().catch(() => null);
+    const messaging = state === "open" ? await getMessagingInfo().catch(() => null) : null;
+    return NextResponse.json({ state, number, verifiedName: info?.verifiedName ?? null, status: info?.status ?? null, quality: info?.quality ?? null, messaging });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao consultar a conexão." }, { status: 502 });
   }

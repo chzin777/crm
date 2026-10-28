@@ -203,6 +203,14 @@ export async function POST() {
       const pipelineRow = await tx.crmWorkspaceData.findUnique({ where: { key: "pipeline" } });
       const existingCards: PipelineCard[] = pipelineRow ? (pipelineRow.value as unknown as PipelineCard[]) : [];
 
+      // Contacts removed by the user must not be re-added by the automatic classification.
+      const dismissedRow = await tx.crmWorkspaceData.findUnique({ where: { key: "pipeline-dismissed" } });
+      const dismissed = (dismissedRow?.value ?? {}) as Partial<Record<PipelineId, unknown>>;
+      const dismissedIds = (pipelineId: PipelineId): string[] => {
+        const list = dismissed[pipelineId];
+        return Array.isArray(list) ? list.filter((id): id is string => typeof id === "string") : [];
+      };
+
       const now = new Date();
       const nowIso = now.toISOString();
       const categoryLabel: Record<string, string> = {
@@ -219,7 +227,10 @@ export async function POST() {
       for (const pipelineId of ["novos", "relacionamento"] as const) {
         const pipelineCards = existingCards.filter((card) => card.pipelineId === pipelineId);
         // A contact appears only once per pipeline, in the most advanced stage it qualifies for.
-        const excludedIds = pipelineCards.map((card) => card.contactId).filter((id): id is string => Boolean(id));
+        const excludedIds = [
+          ...pipelineCards.map((card) => card.contactId).filter((id): id is string => Boolean(id)),
+          ...dismissedIds(pipelineId),
+        ];
         const stages = orderedStages(pipelineId, stageConfigs).reverse();
 
         for (const stage of stages) {

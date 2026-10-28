@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Sidebar } from "@/components/Sidebar";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
@@ -12,7 +11,6 @@ import Stepper, { Step } from "@/components/Stepper";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
 import {
   ArrowUpRight,
@@ -95,7 +93,7 @@ const isValidBrazilianPhone = (value: string) => {
 };
 
 export default function ContatosPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
+  const { isDark } = useCrmTheme();
   const toast = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ContactFilter>("Todos");
@@ -297,21 +295,8 @@ export default function ContatosPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
-      <Sidebar />
+    <div>
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar estilo Dribbble */}
-        <header className="h-16 mx-4 mt-4 bg-white dark:bg-[#051647] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm px-6 flex items-center justify-between gap-4">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Contatos & Clientes</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
-              <Bell className="h-4 w-4" />
-            </button>
-                      </div>
-        </header>
 
         {/* Conteúdo */}
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">

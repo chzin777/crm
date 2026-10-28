@@ -91,3 +91,8 @@ export type CrmWorkspaceData = Prisma.CrmWorkspaceDataModel
  * 
  */
 export type NpsResponse = Prisma.NpsResponseModel
+/**
+ * Model CampaignMessage
+ * 
+ */
+export type CampaignMessage = Prisma.CampaignMessageModel

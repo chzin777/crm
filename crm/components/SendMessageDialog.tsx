@@ -11,7 +11,26 @@ const ACCEPT = "image/*,video/*,application/pdf";
 export interface OutgoingMessage {
   text: string;
   files: File[];
+  template?: { name: string; language: string; params: string[]; image?: File | null };
 }
+
+type ApiTemplate = {
+  id: string;
+  name: string;
+  status: string;
+  language: string;
+  body: string;
+  footer: string;
+  headerFormat: string | null;
+  headerImageUrl?: string | null;
+  buttons?: { type: string; text: string }[];
+};
+
+function variableCount(body: string) {
+  return new Set(body.match(/\{\{\d+\}\}/g) ?? []).size;
+}
+
+const fieldClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 
 interface SendMessageDialogProps {
   recipientName: string;
@@ -103,6 +122,52 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [mode, setMode] = useState<"free" | "template">("free");
+  const [templates, setTemplates] = useState<ApiTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templateKey, setTemplateKey] = useState("");
+  const [params, setParams] = useState<string[]>([]);
+  const [templateImage, setTemplateImage] = useState<File | null>(null);
+  const templateImageRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/whatsapp/templates", { cache: "no-store" })
+      .then(async (response) => {
+        const result = (await response.json().catch(() => ({}))) as { data?: ApiTemplate[] };
+        if (active && response.ok) setTemplates((result.data ?? []).filter((item) => item.status === "APPROVED"));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setTemplatesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selected = templates.find((item) => `${item.name}|${item.language}` === templateKey) ?? null;
+  const selectedVariables = selected ? variableCount(selected.body) : 0;
+  const needsImage = selected?.headerFormat === "IMAGE";
+  const filledBody = selected ? selected.body.replace(/\{\{(\d+)\}\}/g, (match, index: string) => params[Number(index) - 1]?.trim() || match) : "";
+
+  function selectTemplate(key: string) {
+    const template = templates.find((item) => `${item.name}|${item.language}` === key);
+    setTemplateKey(key);
+    setTemplateImage(null);
+    setError("");
+    const count = template ? variableCount(template.body) : 0;
+    setParams(Array.from({ length: count }, (_, index) => (index === 0 ? recipientName.split(" ")[0] ?? "" : "")));
+  }
+
+  function pickTemplateImage(file: File | undefined) {
+    if (!file) return;
+    if (!["image/jpeg", "image/png"].includes(file.type)) return setError("A imagem do modelo deve ser JPG ou PNG.");
+    if (file.size > MAX_FILE_SIZE) return setError(`"${file.name}" excede o limite de 16 MB.`);
+    setError("");
+    setTemplateImage(file);
+  }
+
   function addFiles(list: FileList | null) {
     if (!list) return;
     const incoming = Array.from(list);
@@ -117,11 +182,21 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
   }
 
   async function submit() {
-    if (!text.trim() && files.length === 0) return setError("Escreva uma mensagem ou anexe um arquivo.");
+    if (mode === "template") {
+      if (!selected) return setError("Selecione um modelo.");
+      if (params.slice(0, selectedVariables).some((value) => !value?.trim())) return setError("Preencha todas as variáveis do modelo.");
+      if (needsImage && !templateImage && !selected?.headerImageUrl) return setError("Este modelo exige uma imagem (JPG ou PNG).");
+    } else if (!text.trim() && files.length === 0) {
+      return setError("Escreva uma mensagem ou anexe um arquivo.");
+    }
     setSending(true);
     setError("");
     try {
-      await onSend({ text: text.trim(), files });
+      if (mode === "template" && selected) {
+        await onSend({ text: "", files: [], template: { name: selected.name, language: selected.language, params: params.slice(0, selectedVariables).map((value) => value.trim()), image: templateImage } });
+      } else {
+        await onSend({ text: text.trim(), files });
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível enviar a mensagem.");
@@ -138,9 +213,85 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
       onClose={onClose}
     >
       <div className="flex h-full min-h-0 flex-col gap-3">
-        <ChatPreview text={text} files={files} />
+        <div role="tablist" aria-label="Tipo de mensagem" className="flex shrink-0 gap-1.5">
+          {([["free", "Mensagem livre"], ["template", "Usar modelo"]] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={mode === value}
+              onClick={() => { setMode(value); setError(""); }}
+              className={`h-8 rounded-full px-3 text-xs font-semibold cursor-pointer hover:cursor-pointer ${mode === value ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {files.length > 0 && (
+        {mode === "template" ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+            <label className="flex shrink-0 flex-col gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Modelo aprovado
+              <select value={templateKey} onChange={(event) => selectTemplate(event.target.value)} disabled={templatesLoading} className={`${fieldClass} cursor-pointer`}>
+                <option value="">{templatesLoading ? "Carregando modelos..." : templates.length === 0 ? "Nenhum modelo aprovado" : "Selecione um modelo"}</option>
+                {templates.map((item) => (
+                  <option key={item.id} value={`${item.name}|${item.language}`}>{item.name} ({item.language})</option>
+                ))}
+              </select>
+            </label>
+
+            {selected && (
+              <>
+                <div className="rounded-lg bg-[#efeae2] p-3 dark:bg-[#0b141a]" aria-label="Prévia do modelo">
+                  <div className="ml-auto w-fit max-w-[85%] space-y-1">
+                    <Bubble time={new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}>
+                      {needsImage && selected.headerImageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={selected.headerImageUrl} alt="Imagem do cabeçalho" className="max-h-44 w-full rounded-md object-cover" />
+                      )}
+                      {needsImage && !selected.headerImageUrl && (
+                        <div className="grid h-24 w-56 max-w-full place-items-center rounded-md bg-black/10 text-[#667781]"><ImageIcon className="h-6 w-6" /></div>
+                      )}
+                      <Caption text={filledBody} />
+                      {selected.footer && <p className="px-1.5 pt-1 text-[11px] text-[#667781] dark:text-[#8fb5ab]">{selected.footer}</p>}
+                    </Bubble>
+                    {selected.buttons?.map((button, index) => (
+                      <div key={index} className="rounded-lg bg-[#d9fdd3] px-3 py-1.5 text-center text-[13px] font-medium text-[#00a5f4] shadow-sm dark:bg-[#005c4b]">{button.text}</div>
+                    ))}
+                  </div>
+                </div>
+
+                {needsImage && (
+                  <div className="space-y-1.5">
+                    <input ref={templateImageRef} type="file" accept="image/jpeg,image/png" hidden onChange={(event) => { pickTemplateImage(event.target.files?.[0]); event.target.value = ""; }} />
+                    {templateImage ? (
+                      <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs dark:border-slate-700">
+                        <ImageIcon className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+                        <span className="min-w-0 flex-1 truncate text-slate-800 dark:text-slate-100">{templateImage.name}</span>
+                        <button type="button" aria-label="Remover imagem" onClick={() => setTemplateImage(null)} className="rounded p-0.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-3.5 w-3.5" /></button>
+                      </div>
+                    ) : (
+                      <button type="button" onClick={() => templateImageRef.current?.click()} className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 text-xs font-semibold text-slate-500 hover:border-[#002187] hover:text-[#002187] dark:border-slate-600 dark:text-slate-400 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer">
+                        <ImageIcon className="h-4 w-4" /> {selected.headerImageUrl ? "Trocar imagem (opcional)" : "Imagem do cabeçalho (JPG ou PNG)"}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {Array.from({ length: selectedVariables }, (_, index) => (
+                  <label key={index} className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    <span className="w-12 shrink-0">{`{{${index + 1}}}`}</span>
+                    <input value={params[index] ?? ""} onChange={(event) => setParams((current) => { const next = [...current]; next[index] = event.target.value; return next; })} placeholder={`Valor para {{${index + 1}}}`} className={fieldClass} />
+                  </label>
+                ))}
+              </>
+            )}
+          </div>
+        ) : (
+          <ChatPreview text={text} files={files} />
+        )}
+
+        {mode === "free" && files.length > 0 && (
           <ul className="max-h-20 shrink-0 space-y-1 overflow-y-auto">
             {files.map((file, index) => (
               <li key={`${file.name}-${index}`} className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1 text-xs dark:border-slate-700">
@@ -160,6 +311,7 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
           </ul>
         )}
 
+        {mode === "free" && (
         <label className="flex shrink-0 flex-col gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
           {files.length > 0 ? "Legenda" : "Mensagem"}
           <textarea
@@ -170,13 +322,15 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
             className="h-20 resize-none rounded-lg border border-slate-200 bg-white p-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
           />
         </label>
+        )}
 
-        {error && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
+        {error &&  <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
 
         <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
           <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(event) => addFiles(event.target.files)} />
           <button
             type="button"
+            disabled={mode === "template"}
             onClick={() => inputRef.current?.click()}
             className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
           >

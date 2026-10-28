@@ -406,7 +406,8 @@ export const ModelName = {
   PlaceGeo: 'PlaceGeo',
   ImportedSale: 'ImportedSale',
   CrmWorkspaceData: 'CrmWorkspaceData',
-  NpsResponse: 'NpsResponse'
+  NpsResponse: 'NpsResponse',
+  CampaignMessage: 'CampaignMessage'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -422,7 +423,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "session" | "account" | "verification" | "contact" | "store" | "placeGeo" | "importedSale" | "crmWorkspaceData" | "npsResponse"
+    modelProps: "user" | "session" | "account" | "verification" | "contact" | "store" | "placeGeo" | "importedSale" | "crmWorkspaceData" | "npsResponse" | "campaignMessage"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1166,6 +1167,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    CampaignMessage: {
+      payload: Prisma.$CampaignMessagePayload<ExtArgs>
+      fields: Prisma.CampaignMessageFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.CampaignMessageFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.CampaignMessageFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>
+        }
+        findFirst: {
+          args: Prisma.CampaignMessageFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.CampaignMessageFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>
+        }
+        findMany: {
+          args: Prisma.CampaignMessageFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>[]
+        }
+        create: {
+          args: Prisma.CampaignMessageCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>
+        }
+        createMany: {
+          args: Prisma.CampaignMessageCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.CampaignMessageCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>[]
+        }
+        delete: {
+          args: Prisma.CampaignMessageDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>
+        }
+        update: {
+          args: Prisma.CampaignMessageUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>
+        }
+        deleteMany: {
+          args: Prisma.CampaignMessageDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.CampaignMessageUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.CampaignMessageUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>[]
+        }
+        upsert: {
+          args: Prisma.CampaignMessageUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$CampaignMessagePayload>
+        }
+        aggregate: {
+          args: Prisma.CampaignMessageAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateCampaignMessage>
+        }
+        groupBy: {
+          args: Prisma.CampaignMessageGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.CampaignMessageGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.CampaignMessageCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.CampaignMessageCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1299,6 +1374,7 @@ export type ContactScalarFieldEnum = (typeof ContactScalarFieldEnum)[keyof typeo
 
 export const StoreScalarFieldEnum = {
   id: 'id',
+  number: 'number',
   name: 'name',
   address: 'address',
   addressNumber: 'addressNumber',
@@ -1362,6 +1438,25 @@ export const NpsResponseScalarFieldEnum = {
 } as const
 
 export type NpsResponseScalarFieldEnum = (typeof NpsResponseScalarFieldEnum)[keyof typeof NpsResponseScalarFieldEnum]
+
+
+export const CampaignMessageScalarFieldEnum = {
+  id: 'id',
+  campaignId: 'campaignId',
+  contactId: 'contactId',
+  phone: 'phone',
+  whatsappMsgId: 'whatsappMsgId',
+  status: 'status',
+  sentAt: 'sentAt',
+  deliveredAt: 'deliveredAt',
+  readAt: 'readAt',
+  failedAt: 'failedAt',
+  failureReason: 'failureReason',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type CampaignMessageScalarFieldEnum = (typeof CampaignMessageScalarFieldEnum)[keyof typeof CampaignMessageScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -1512,6 +1607,20 @@ export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'J
  * Reference to a field of type 'QueryMode'
  */
 export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
+    
+
+
+/**
+ * Reference to a field of type 'CampaignMessageStatus'
+ */
+export type EnumCampaignMessageStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'CampaignMessageStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'CampaignMessageStatus[]'
+ */
+export type ListEnumCampaignMessageStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'CampaignMessageStatus[]'>
     
 
 /**
@@ -1675,6 +1784,7 @@ export type GlobalOmitConfig = {
   importedSale?: Prisma.ImportedSaleOmit
   crmWorkspaceData?: Prisma.CrmWorkspaceDataOmit
   npsResponse?: Prisma.NpsResponseOmit
+  campaignMessage?: Prisma.CampaignMessageOmit
 }
 
 /* Types for Logging */

@@ -27,12 +27,14 @@ export type AggregateStore = {
 }
 
 export type StoreAvgAggregateOutputType = {
+  number: number | null
   radiusKm: number | null
   lat: number | null
   lng: number | null
 }
 
 export type StoreSumAggregateOutputType = {
+  number: number | null
   radiusKm: number | null
   lat: number | null
   lng: number | null
@@ -40,6 +42,7 @@ export type StoreSumAggregateOutputType = {
 
 export type StoreMinAggregateOutputType = {
   id: string | null
+  number: number | null
   name: string | null
   address: string | null
   addressNumber: string | null
@@ -59,6 +62,7 @@ export type StoreMinAggregateOutputType = {
 
 export type StoreMaxAggregateOutputType = {
   id: string | null
+  number: number | null
   name: string | null
   address: string | null
   addressNumber: string | null
@@ -78,6 +82,7 @@ export type StoreMaxAggregateOutputType = {
 
 export type StoreCountAggregateOutputType = {
   id: number
+  number: number
   name: number
   address: number
   addressNumber: number
@@ -100,12 +105,14 @@ export type StoreCountAggregateOutputType = {
 
 
 export type StoreAvgAggregateInputType = {
+  number?: true
   radiusKm?: true
   lat?: true
   lng?: true
 }
 
 export type StoreSumAggregateInputType = {
+  number?: true
   radiusKm?: true
   lat?: true
   lng?: true
@@ -113,6 +120,7 @@ export type StoreSumAggregateInputType = {
 
 export type StoreMinAggregateInputType = {
   id?: true
+  number?: true
   name?: true
   address?: true
   addressNumber?: true
@@ -132,6 +140,7 @@ export type StoreMinAggregateInputType = {
 
 export type StoreMaxAggregateInputType = {
   id?: true
+  number?: true
   name?: true
   address?: true
   addressNumber?: true
@@ -151,6 +160,7 @@ export type StoreMaxAggregateInputType = {
 
 export type StoreCountAggregateInputType = {
   id?: true
+  number?: true
   name?: true
   address?: true
   addressNumber?: true
@@ -259,6 +269,7 @@ export type StoreGroupByArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
 
 export type StoreGroupByOutputType = {
   id: string
+  number: number
   name: string
   address: string | null
   addressNumber: string | null
@@ -303,6 +314,7 @@ export type StoreWhereInput = {
   OR?: Prisma.StoreWhereInput[]
   NOT?: Prisma.StoreWhereInput | Prisma.StoreWhereInput[]
   id?: Prisma.StringFilter<"Store"> | string
+  number?: Prisma.IntFilter<"Store"> | number
   name?: Prisma.StringFilter<"Store"> | string
   address?: Prisma.StringNullableFilter<"Store"> | string | null
   addressNumber?: Prisma.StringNullableFilter<"Store"> | string | null
@@ -324,6 +336,7 @@ export type StoreWhereInput = {
 
 export type StoreOrderByWithRelationInput = {
   id?: Prisma.SortOrder
+  number?: Prisma.SortOrder
   name?: Prisma.SortOrder
   address?: Prisma.SortOrderInput | Prisma.SortOrder
   addressNumber?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -345,10 +358,11 @@ export type StoreOrderByWithRelationInput = {
 
 export type StoreWhereUniqueInput = Prisma.AtLeast<{
   id?: string
-  name?: string
+  number?: number
   AND?: Prisma.StoreWhereInput | Prisma.StoreWhereInput[]
   OR?: Prisma.StoreWhereInput[]
   NOT?: Prisma.StoreWhereInput | Prisma.StoreWhereInput[]
+  name?: Prisma.StringFilter<"Store"> | string
   address?: Prisma.StringNullableFilter<"Store"> | string | null
   addressNumber?: Prisma.StringNullableFilter<"Store"> | string | null
   complement?: Prisma.StringNullableFilter<"Store"> | string | null
@@ -365,10 +379,11 @@ export type StoreWhereUniqueInput = Prisma.AtLeast<{
   lng?: Prisma.FloatNullableFilter<"Store"> | number | null
   createdAt?: Prisma.DateTimeFilter<"Store"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Store"> | Date | string
-}, "id" | "name">
+}, "id" | "number">
 
 export type StoreOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
+  number?: Prisma.SortOrder
   name?: Prisma.SortOrder
   address?: Prisma.SortOrderInput | Prisma.SortOrder
   addressNumber?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -398,6 +413,7 @@ export type StoreScalarWhereWithAggregatesInput = {
   OR?: Prisma.StoreScalarWhereWithAggregatesInput[]
   NOT?: Prisma.StoreScalarWhereWithAggregatesInput | Prisma.StoreScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"Store"> | string
+  number?: Prisma.IntWithAggregatesFilter<"Store"> | number
   name?: Prisma.StringWithAggregatesFilter<"Store"> | string
   address?: Prisma.StringNullableWithAggregatesFilter<"Store"> | string | null
   addressNumber?: Prisma.StringNullableWithAggregatesFilter<"Store"> | string | null
@@ -419,6 +435,7 @@ export type StoreScalarWhereWithAggregatesInput = {
 
 export type StoreCreateInput = {
   id?: string
+  number: number
   name: string
   address?: string | null
   addressNumber?: string | null
@@ -440,6 +457,7 @@ export type StoreCreateInput = {
 
 export type StoreUncheckedCreateInput = {
   id?: string
+  number: number
   name: string
   address?: string | null
   addressNumber?: string | null
@@ -461,6 +479,7 @@ export type StoreUncheckedCreateInput = {
 
 export type StoreUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  number?: Prisma.IntFieldUpdateOperationsInput | number
   name?: Prisma.StringFieldUpdateOperationsInput | string
   address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   addressNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -482,6 +501,7 @@ export type StoreUpdateInput = {
 
 export type StoreUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  number?: Prisma.IntFieldUpdateOperationsInput | number
   name?: Prisma.StringFieldUpdateOperationsInput | string
   address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   addressNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -503,6 +523,7 @@ export type StoreUncheckedUpdateInput = {
 
 export type StoreCreateManyInput = {
   id?: string
+  number: number
   name: string
   address?: string | null
   addressNumber?: string | null
@@ -524,6 +545,7 @@ export type StoreCreateManyInput = {
 
 export type StoreUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  number?: Prisma.IntFieldUpdateOperationsInput | number
   name?: Prisma.StringFieldUpdateOperationsInput | string
   address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   addressNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -545,6 +567,7 @@ export type StoreUpdateManyMutationInput = {
 
 export type StoreUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
+  number?: Prisma.IntFieldUpdateOperationsInput | number
   name?: Prisma.StringFieldUpdateOperationsInput | string
   address?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   addressNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -574,6 +597,7 @@ export type StringNullableListFilter<$PrismaModel = never> = {
 
 export type StoreCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
+  number?: Prisma.SortOrder
   name?: Prisma.SortOrder
   address?: Prisma.SortOrder
   addressNumber?: Prisma.SortOrder
@@ -594,6 +618,7 @@ export type StoreCountOrderByAggregateInput = {
 }
 
 export type StoreAvgOrderByAggregateInput = {
+  number?: Prisma.SortOrder
   radiusKm?: Prisma.SortOrder
   lat?: Prisma.SortOrder
   lng?: Prisma.SortOrder
@@ -601,6 +626,7 @@ export type StoreAvgOrderByAggregateInput = {
 
 export type StoreMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
+  number?: Prisma.SortOrder
   name?: Prisma.SortOrder
   address?: Prisma.SortOrder
   addressNumber?: Prisma.SortOrder
@@ -620,6 +646,7 @@ export type StoreMaxOrderByAggregateInput = {
 
 export type StoreMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
+  number?: Prisma.SortOrder
   name?: Prisma.SortOrder
   address?: Prisma.SortOrder
   addressNumber?: Prisma.SortOrder
@@ -638,6 +665,7 @@ export type StoreMinOrderByAggregateInput = {
 }
 
 export type StoreSumOrderByAggregateInput = {
+  number?: Prisma.SortOrder
   radiusKm?: Prisma.SortOrder
   lat?: Prisma.SortOrder
   lng?: Prisma.SortOrder
@@ -681,6 +709,7 @@ export type NullableFloatFieldUpdateOperationsInput = {
 
 export type StoreSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
+  number?: boolean
   name?: boolean
   address?: boolean
   addressNumber?: boolean
@@ -702,6 +731,7 @@ export type StoreSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
 
 export type StoreSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
+  number?: boolean
   name?: boolean
   address?: boolean
   addressNumber?: boolean
@@ -723,6 +753,7 @@ export type StoreSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensi
 
 export type StoreSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
+  number?: boolean
   name?: boolean
   address?: boolean
   addressNumber?: boolean
@@ -744,6 +775,7 @@ export type StoreSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensi
 
 export type StoreSelectScalar = {
   id?: boolean
+  number?: boolean
   name?: boolean
   address?: boolean
   addressNumber?: boolean
@@ -763,13 +795,14 @@ export type StoreSelectScalar = {
   updatedAt?: boolean
 }
 
-export type StoreOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "address" | "addressNumber" | "complement" | "postalCode" | "city" | "state" | "neighborhoods" | "active" | "kind" | "startDate" | "unitIds" | "radiusKm" | "lat" | "lng" | "createdAt" | "updatedAt", ExtArgs["result"]["store"]>
+export type StoreOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "number" | "name" | "address" | "addressNumber" | "complement" | "postalCode" | "city" | "state" | "neighborhoods" | "active" | "kind" | "startDate" | "unitIds" | "radiusKm" | "lat" | "lng" | "createdAt" | "updatedAt", ExtArgs["result"]["store"]>
 
 export type $StorePayload<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   name: "Store"
   objects: {}
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
+    number: number
     name: string
     address: string | null
     addressNumber: string | null
@@ -1211,6 +1244,7 @@ export interface Prisma__StoreClient<T, Null = never, ExtArgs extends runtime.Ty
  */
 export interface StoreFieldRefs {
   readonly id: Prisma.FieldRef<"Store", 'String'>
+  readonly number: Prisma.FieldRef<"Store", 'Int'>
   readonly name: Prisma.FieldRef<"Store", 'String'>
   readonly address: Prisma.FieldRef<"Store", 'String'>
   readonly addressNumber: Prisma.FieldRef<"Store", 'String'>

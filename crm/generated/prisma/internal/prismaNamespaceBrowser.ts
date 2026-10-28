@@ -60,7 +60,8 @@ export const ModelName = {
   PlaceGeo: 'PlaceGeo',
   ImportedSale: 'ImportedSale',
   CrmWorkspaceData: 'CrmWorkspaceData',
-  NpsResponse: 'NpsResponse'
+  NpsResponse: 'NpsResponse',
+  CampaignMessage: 'CampaignMessage'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -173,6 +174,7 @@ export type ContactScalarFieldEnum = (typeof ContactScalarFieldEnum)[keyof typeo
 
 export const StoreScalarFieldEnum = {
   id: 'id',
+  number: 'number',
   name: 'name',
   address: 'address',
   addressNumber: 'addressNumber',
@@ -236,6 +238,25 @@ export const NpsResponseScalarFieldEnum = {
 } as const
 
 export type NpsResponseScalarFieldEnum = (typeof NpsResponseScalarFieldEnum)[keyof typeof NpsResponseScalarFieldEnum]
+
+
+export const CampaignMessageScalarFieldEnum = {
+  id: 'id',
+  campaignId: 'campaignId',
+  contactId: 'contactId',
+  phone: 'phone',
+  whatsappMsgId: 'whatsappMsgId',
+  status: 'status',
+  sentAt: 'sentAt',
+  deliveredAt: 'deliveredAt',
+  readAt: 'readAt',
+  failedAt: 'failedAt',
+  failureReason: 'failureReason',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type CampaignMessageScalarFieldEnum = (typeof CampaignMessageScalarFieldEnum)[keyof typeof CampaignMessageScalarFieldEnum]
 
 
 export const SortOrder = {

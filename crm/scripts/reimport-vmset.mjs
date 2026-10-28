@@ -324,6 +324,8 @@ async function main() {
       WHERE contact."sourceKey" = amounts."sourceKey"
     `);
     console.log("Agregados atualizados");
+    await pgClient.query('REFRESH MATERIALIZED VIEW CONCURRENTLY "DailySalesSummary"');
+    console.log("Resumo diário de vendas atualizado");
 
     console.log("\n=== REIMPORTAÇÃO CONCLUÍDA ===");
     console.log(`Lojas: ${storesImported}`);

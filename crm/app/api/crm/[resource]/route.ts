@@ -3,12 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
 
-const allowedResources = new Set(["segments", "campaigns", "pipeline", "pipeline-stages", "settings", "criteria", "nps"]);
+const allowedResources = new Set(["segments", "campaigns", "pipeline", "pipeline-stages", "pipeline-dismissed", "settings", "criteria", "nps"]);
 
 const defaultValues: Record<string, Prisma.InputJsonValue> = {
   segments: [],
   campaigns: [],
   pipeline: [],
+  "pipeline-dismissed": { novos: [], relacionamento: [] },
   "pipeline-stages": { stages: {} },
   criteria: [],
   settings: {

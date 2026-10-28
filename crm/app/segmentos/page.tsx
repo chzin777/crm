@@ -19,8 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 import Stepper, { Step } from "@/components/Stepper";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
@@ -29,7 +28,6 @@ import { FormSelect } from "@/components/FormSelect";
 import { describeRule, validateRule, type SegmentRule } from "@/lib/segment-rules";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 
 const generateId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -95,7 +93,7 @@ const criterionKindLabels: Record<CriterionKind, string> = {
   loja: "Loja",
 };
 export default function SegmentosPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
+  const { isDark } = useCrmTheme();
   const toast = useToast();
   const { data: segments, setData: setSegments, isLoading: segmentsLoading, error: segmentsError, reloadData: segmentsReload } = useCrmData<Segment[]>("segments", []);
   const { data: savedCriteriaOptions, setData: setSavedCriteriaOptions, error: criteriaDataError } = useCrmData<SegmentCriterion[]>("criteria", []);
@@ -603,20 +601,8 @@ export default function SegmentosPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Segmentos</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
-              <Bell className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
+    <div>
+      <div>
 
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
           {(segmentsError || criteriaDataError || contactsError || campaignsError) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{segmentsError || criteriaDataError || contactsError || campaignsError}</p>}

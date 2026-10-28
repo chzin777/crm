@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ToastProvider } from "@/components/ToastProvider";
+import { ConditionalShell } from "@/components/ConditionalShell";
 
 const graphikRegular = localFont({
   src: "../public/fonts/Graphik-Regular-Trial.otf",
@@ -43,7 +44,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${graphikRegular.variable} ${graphikLight.variable} ${graphikMedium.variable} ${graphikSemibold.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <ConditionalShell>{children}</ConditionalShell>
+        </ToastProvider>
       </body>
     </html>
   );

@@ -37,7 +37,7 @@ services:
       SERVER_LIFETIME: 3600
       AUTH_TYPE: scram-sha-256
     ports:
-    - 6432:6432
+    - 6432:5432
     networks:
     - crm-network
   redis:

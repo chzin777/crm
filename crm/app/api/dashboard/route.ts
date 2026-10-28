@@ -17,31 +17,12 @@ async function loadDashboard() {
       _sum: { purchases: true, totalSpent: true },
     }),
     prisma.contact.groupBy({ by: ["category"], _count: { id: true } }),
+    // Pre-aggregated by prisma/daily-sales-summary.sql; refreshed after each import.
     prisma.$queryRaw<DailySale[]>`
-      WITH normalized AS (
-        SELECT
-          CASE
-            WHEN "data"->>'DATA_PEDIDO' ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date("data"->>'DATA_PEDIDO', 'DD/MM/YYYY')
-            WHEN "data"->>'DATA_PEDIDO' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN to_date(left("data"->>'DATA_PEDIDO', 10), 'YYYY-MM-DD')
-            ELSE NULL
-          END AS purchased_on,
-          regexp_replace(COALESCE("data"->>'VALOR_ITEM_VENDA', ''), '[^0-9,.-]', '', 'g') AS raw_amount
-        FROM "ImportedSale"
-      ), parsed AS (
-        SELECT purchased_on,
-          CASE
-            WHEN raw_amount ~ '^-?[0-9][0-9.]*,[0-9]{1,2}$' THEN replace(replace(raw_amount, '.', ''), ',', '.')::numeric
-            WHEN raw_amount ~ '^-?[0-9]+(\\.[0-9]{1,2})?$' THEN raw_amount::numeric
-            ELSE 0
-          END AS amount
-        FROM normalized
-        WHERE purchased_on IS NOT NULL
-      )
-      SELECT to_char(purchased_on::date, 'YYYY-MM-DD') AS day, SUM(amount) AS revenue, COUNT(*) AS sales
-      FROM parsed
-      WHERE purchased_on >= CURRENT_DATE - INTERVAL '364 days'
-        AND purchased_on <= CURRENT_DATE
-      GROUP BY purchased_on::date
+      SELECT to_char(day, 'YYYY-MM-DD') AS day, revenue, sales
+      FROM "DailySalesSummary"
+      WHERE day >= CURRENT_DATE - INTERVAL '364 days'
+        AND day <= CURRENT_DATE
       ORDER BY day
     `,
     prisma.npsResponse.findMany({ select: { surveyKey: true, rating: true } }),
