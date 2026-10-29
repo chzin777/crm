@@ -99,7 +99,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
           {isCollapsed ? (
             <img src="/logos/logo-no-text.png" alt="Óticas Brasil" className="h-20 w-20 rounded-full object-contain" />
           ) : (
-            <img src="/logos/admin-logo.png" alt="Óticas Brasil" className="h-[180px] w-auto object-contain" />
+            <img src="/logos/principal-logo.png" alt="Óticas Brasil" className="h-[180px] w-auto object-contain" />
           )}
         </div>
 
