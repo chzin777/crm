@@ -180,25 +180,25 @@ export default function PainelPage() {
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Painel</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Visão geral do desempenho e relacionamento com clientes.</p>
             </div>
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={reloadDashboard} disabled={isLoading} aria-label="Atualizar painel" title="Atualizar painel" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-300">
+                <CalendarDays className="h-4 w-4 text-slate-400" />
+                <span className="sr-only">Período do painel</span>
+                <select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="bg-transparent outline-none">
+                  <option value="7d">Últimos 7 dias</option>
+                  <option value="30d">Últimos 30 dias</option>
+                  <option value="12m">Últimos 12 meses</option>
+                </select>
+              </label>
+              <button type="button" onClick={reloadDashboard} disabled={isLoading} aria-label="Atualizar painel" title="Atualizar painel" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                 Atualizar
               </button>
-              <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+              <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#051647] px-3 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
                 <Plus className="h-4 w-4" />
                 Novo negócio
               </button>
             </div>
-            <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-300">
-              <CalendarDays className="h-4 w-4 text-slate-400" />
-              <span className="sr-only">Período do painel</span>
-              <select value={period} onChange={(event) => setPeriod(event.target.value as Period)} className="bg-transparent outline-none">
-                <option value="7d">Últimos 7 dias</option>
-                <option value="30d">Últimos 30 dias</option>
-                <option value="12m">Últimos 12 meses</option>
-              </select>
-            </label>
           </div>
 
           <section aria-label="Indicadores do período" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
