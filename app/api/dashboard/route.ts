@@ -4,13 +4,17 @@ import { cached } from "@/lib/cache";
 
 type DailySale = { day: string; revenue: number | string; sales: number | bigint };
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
-  return Response.json({ data: await cached("dashboard", 60, loadDashboard) });
+  const url = new URL(request.url);
+  const period = url.searchParams.get("period") ?? "30d";
+  const cacheKey = `dashboard:${period}`;
+  return Response.json({ data: await cached(cacheKey, 60, () => loadDashboard(period)) });
 }
 
-async function loadDashboard() {
+async function loadDashboard(period: string) {
+  const intervalDays = period === "7d" ? 6 : period === "12m" ? 364 : 29;
   const [contacts, categoryCounts, sales, npsResponses, pipelineRecord, recentContacts] = await Promise.all([
     prisma.contact.aggregate({
       _count: { id: true },
@@ -39,7 +43,7 @@ async function loadDashboard() {
       )
       SELECT to_char(purchased_on::date, 'YYYY-MM-DD') AS day, SUM(amount) AS revenue, COUNT(*) AS sales
       FROM parsed
-      WHERE purchased_on >= CURRENT_DATE - INTERVAL '364 days'
+      WHERE purchased_on >= CURRENT_DATE - (${intervalDays}::int * INTERVAL '1 day')
         AND purchased_on <= CURRENT_DATE
       GROUP BY purchased_on::date
       ORDER BY day

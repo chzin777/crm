@@ -74,8 +74,6 @@ services:
     - ./crm/.env
     environment:
       NODE_ENV: production
-      LD_LIBRARY_PATH: /opt/oracle/instantclient_19_26
-      TNS_ADMIN: /tmp/oracletest/network/admin
       PORT: 3000
       BETTER_AUTH_SECRET: fyxYszaRyn2UT0NXuiK3oFVgjXruvCt3ZLkGK_Q9LWa7n6eevE4Pee5Q8T6ZV7rZ
       BETTER_AUTH_URL: https://crm.oticasbrasil.com.br

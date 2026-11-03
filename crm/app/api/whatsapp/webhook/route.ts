@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
 export async function GET(request: Request) {
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
 
 function validSignature(body: string, header: string | null) {
   const secret = process.env.META_APP_SECRET;
-  if (!secret) return true;
+  if (!secret) return false;
   if (!header?.startsWith("sha256=")) return false;
   const expected = createHmac("sha256", secret).update(body).digest();
   const received = Buffer.from(header.slice(7), "hex");
@@ -23,9 +24,34 @@ function validSignature(body: string, header: string | null) {
 type StatusEvent = {
   id?: string;
   status?: string;
+  timestamp?: string;
   recipient_id?: string;
   errors?: { code?: number; title?: string; message?: string; error_data?: { details?: string } }[];
 };
+
+const statusRank = { queued: 0, sent: 1, delivered: 2, read: 3 } as const;
+
+// Atualiza o registro da mensagem da campanha; nunca retrocede o status (ex.: read não volta para delivered).
+async function updateMessageStatus(event: StatusEvent) {
+  if (!event.id || !event.status) return;
+  const message = await prisma.campaignMessage.findUnique({ where: { whatsappMsgId: event.id }, select: { id: true, status: true } });
+  if (!message) return;
+  const at = event.timestamp ? new Date(Number(event.timestamp) * 1000) : new Date();
+  if (event.status === "failed") {
+    const error = event.errors?.[0];
+    await prisma.campaignMessage.update({
+      where: { id: message.id },
+      data: { status: "failed", failedAt: at, failureReason: (error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta").slice(0, 500) },
+    });
+    return;
+  }
+  if (event.status !== "sent" && event.status !== "delivered" && event.status !== "read") return;
+  if (message.status !== "failed" && statusRank[message.status as keyof typeof statusRank] >= statusRank[event.status]) return;
+  await prisma.campaignMessage.update({
+    where: { id: message.id },
+    data: { status: event.status, ...(event.status === "sent" ? { sentAt: at } : event.status === "delivered" ? { deliveredAt: at } : { readAt: at }) },
+  });
+}
 
 // Registra o status de entrega (sent/delivered/read/failed) e o motivo das falhas nos logs.
 export async function POST(request: Request) {
@@ -38,6 +64,7 @@ export async function POST(request: Request) {
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         for (const status of change.value?.statuses ?? []) {
+          await updateMessageStatus(status).catch((failure) => console.error("[whatsapp/webhook] atualizar status:", failure));
           const error = status.errors?.[0];
           console.log(
             `[whatsapp/webhook] ${status.status} para ${status.recipient_id} (${status.id})` +

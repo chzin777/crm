@@ -176,7 +176,7 @@ async function sendToRecipient(
   campaign: CampaignRecord,
   recipient: DispatchRecipient,
   header: Awaited<ReturnType<typeof resolveHeader>>,
-) {
+): Promise<string | null> {
   const values: Record<string, string> = {
     nome: recipient.nome,
     email: recipient.email,
@@ -186,17 +186,38 @@ async function sendToRecipient(
   };
   if (campaign.modelo) {
     const params = campaign.modelo.params.map((field) => values[field] || "-");
-    await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header);
-    return;
+    const sent = await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header);
+    return sent.messages?.[0]?.id ?? null;
   }
   const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento)\}\}/g, (_match, key: string) => values[key] ?? "");
   const media = (campaign.anexos ?? []).filter((file) => file.url);
   if (media.length === 0) {
-    await sendText(recipient.telefone, text);
-    return;
+    const sent = await sendText(recipient.telefone, text);
+    return sent.messages?.[0]?.id ?? null;
   }
+  let firstMessageId: string | null = null;
   for (const [index, file] of media.entries()) {
-    await sendMedia(recipient.telefone, { mimetype: file.type, fileName: file.name, url: file.url }, index === 0 ? text : undefined);
+    const sent = await sendMedia(recipient.telefone, { mimetype: file.type, fileName: file.name, url: file.url }, index === 0 ? text : undefined);
+    if (index === 0) firstMessageId = sent.messages?.[0]?.id ?? null;
+  }
+  return firstMessageId;
+}
+
+// O registro de entrega nunca pode interromper o disparo.
+async function recordMessage(campaignId: string, recipient: DispatchRecipient, result: { messageId: string | null } | { failure: string }) {
+  try {
+    await prisma.campaignMessage.create({
+      data: {
+        campaignId,
+        contactId: recipient.id,
+        phone: recipient.telefone,
+        ...("failure" in result
+          ? { status: "failed" as const, failedAt: new Date(), failureReason: result.failure.slice(0, 500) }
+          : { status: "sent" as const, whatsappMsgId: result.messageId, sentAt: new Date() }),
+      },
+    });
+  } catch (error) {
+    console.error("[campaign-dispatch] registrar mensagem:", error);
   }
 }
 
@@ -244,7 +265,8 @@ async function runJob(campaignId: string) {
         let attempt = 0;
         for (;;) {
           try {
-            await sendToRecipient(campaign, recipient, header);
+            const messageId = await sendToRecipient(campaign, recipient, header);
+            await recordMessage(campaignId, recipient, { messageId });
             job.sent += 1;
             consecutiveApiFailures = 0;
             break;
@@ -269,6 +291,7 @@ async function runJob(campaignId: string) {
             job.failed += 1;
             consecutiveApiFailures += 1;
             addError(job, `${recipient.nome}: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}`);
+            await recordMessage(campaignId, recipient, { failure: error.message });
             if (consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES) {
               pause = { kind: "consecutive", code: error.code, message: `${MAX_CONSECUTIVE_API_FAILURES} envios seguidos falharam. Último erro: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}` };
             }

@@ -6,6 +6,10 @@ import { withCache } from "./cache.js";
 export function createRouter(env: Env): Router {
   const router = Router();
 
+  router.get("/health", (_req, res) => {
+    res.json({ status: "ok", service: "oticas-integration-service" });
+  });
+
   router.use((req: Request, res: Response, next: NextFunction) => {
     const provided = req.header("x-api-key");
     if (!provided || provided !== env.API_KEY) {
@@ -13,10 +17,6 @@ export function createRouter(env: Env): Router {
       return;
     }
     next();
-  });
-
-  router.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "oticas-integration-service" });
   });
 
   // ---------- Customers ----------

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { requireModule } from "@/lib/api-auth";
 
 export async function GET() {
+  const guard = await requireModule("usuarios", "cargos", "permissoes");
+  if (guard.response) return guard.response;
   try {
     const roles = await prisma.role.findMany({
       orderBy: { name: "asc" },
@@ -15,9 +18,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const guard = await requireModule("cargos");
+  if (guard.response) return guard.response;
   try {
     const body = await request.json();
-    const { name, description, permissions } = body;
+    const { name, description } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Nome do cargo é obrigatório." }, { status: 400 });
@@ -33,7 +38,6 @@ export async function POST(request: NextRequest) {
         id: randomUUID(),
         name: name.trim(),
         description: description?.trim() || null,
-        permissions: permissions ?? {},
       },
     });
 
@@ -48,6 +52,8 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
     const { id, name, description, permissions } = body;
+    const guard = await requireModule(...(permissions !== undefined ? (["permissoes"] as const) : (["cargos"] as const)));
+    if (guard.response) return guard.response;
 
     if (!id) {
       return NextResponse.json({ error: "ID do cargo é obrigatório." }, { status: 400 });
@@ -71,6 +77,8 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const guard = await requireModule("cargos");
+  if (guard.response) return guard.response;
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");

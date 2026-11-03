@@ -5,6 +5,8 @@ import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { authClient } from "@/lib/auth-client";
+import { usePermissions } from "@/hooks/usePermissions";
+import { moduleForPath } from "@/lib/permissions";
 import {
   Kanban,
   LayoutDashboard,
@@ -21,6 +23,7 @@ import {
   LogOut,
   User as UserIcon,
   Shield,
+  KeyRound,
 } from "lucide-react";
 
 export function Sidebar({ collapsed }: { collapsed?: boolean }) {
@@ -31,6 +34,11 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const { data: session } = authClient.useSession();
+  const { modules } = usePermissions();
+  const canAccess = (href: string) => {
+    const key = moduleForPath(href);
+    return key === null || modules?.[key] === true;
+  };
 
   const userName = session?.user?.name ?? "Usuário";
   const userEmail = session?.user?.email ?? "";
@@ -74,6 +82,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Pesquisas NPS", href: "/nps", icon: Award },
     { title: "Usuários", href: "/usuarios", icon: UserCog },
     { title: "Cargos", href: "/cargos", icon: Shield },
+    { title: "Permissões", href: "/permissoes", icon: KeyRound },
     { title: "Configurações", href: "/configuracoes", icon: Settings },
   ];
 
@@ -82,8 +91,10 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const navGroups = [
     { id: "vendas", label: "Vendas", icon: Kanban, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos")] },
     { id: "marketing", label: "Marketing", icon: Megaphone, items: [byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
-    { id: "gestao", label: "Gestão", icon: Store, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos")] },
-  ];
+    { id: "gestao", label: "Gestão", icon: Store, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
+  ]
+    .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))
+    .filter((group) => group.items.length > 0);
 
   const activeGroupId = navGroups.find((group) => group.items.some((item) => item.href === pathname))?.id;
   const isGroupExpanded = (id: string) => expandedGroups[id] ?? id === activeGroupId;
@@ -109,7 +120,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
 
         <nav aria-label="Navegação principal" className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
           {/* Painel (overview) */}
-          {(() => {
+          {canAccess("/painel") && (() => {
             const item = byHref("/painel");
             const Icon = item.icon;
             const isActive = pathname === item.href;
@@ -197,7 +208,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
           })}
 
           {/* Configurações */}
-          {(() => {
+          {canAccess("/configuracoes") && (() => {
             const item = byHref("/configuracoes");
             const Icon = item.icon;
             const isActive = pathname === item.href;

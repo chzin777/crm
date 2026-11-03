@@ -13,6 +13,7 @@ import {
   Award,
   UserCog,
   Shield,
+  KeyRound,
   Settings,
   X,
 } from "lucide-react";
@@ -35,6 +36,7 @@ const TABS: TabDef[] = [
   { id: "nps", label: "NPS", href: "/nps", icon: Award },
   { id: "usuarios", label: "Usuários", href: "/usuarios", icon: UserCog },
   { id: "cargos", label: "Cargos", href: "/cargos", icon: Shield },
+  { id: "permissoes", label: "Permissões", href: "/permissoes", icon: KeyRound },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 

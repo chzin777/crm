@@ -27,6 +27,7 @@ const emptyForm = {
   email: "",
   roleId: "",
   banned: false,
+  password: "",
 };
 
 const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#051647] dark:text-white";
@@ -108,6 +109,7 @@ export default function UsuariosPage() {
       email: user.email,
       roleId: user.roleId ?? "",
       banned: user.banned,
+      password: "",
     });
     setFormError("");
   };
@@ -118,6 +120,9 @@ export default function UsuariosPage() {
     if (!form.name.trim()) return setFormError("Informe o nome do usuário.");
     if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
       return setFormError("Informe um e-mail válido.");
+    }
+    if ((editing === "new" || form.password) && form.password.length < 12) {
+      return setFormError("A senha deve ter pelo menos 12 caracteres.");
     }
     setIsSaving(true);
     try {
@@ -131,6 +136,7 @@ export default function UsuariosPage() {
           email: form.email.trim(),
           roleId: form.roleId || null,
           banned: form.banned,
+          ...(form.password ? { password: form.password } : {}),
         }),
       });
       const result = await response.json().catch(() => ({})) as { data?: UserRecord; error?: string };
@@ -289,6 +295,10 @@ export default function UsuariosPage() {
             <label className="block space-y-1.5">
               <span className={labelClass}>E-mail *</span>
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputClass} placeholder="email@exemplo.com" />
+            </label>
+            <label className="block space-y-1.5">
+              <span className={labelClass}>{editing === "new" ? "Senha inicial *" : "Nova senha (opcional)"}</span>
+              <input type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className={inputClass} placeholder="Mínimo de 12 caracteres" />
             </label>
             <label className="block space-y-1.5">
               <span className={labelClass}>Cargo</span>
