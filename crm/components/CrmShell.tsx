@@ -13,7 +13,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { isLoading, modules } = usePermissions();
   const moduleKey = moduleForPath(pathname);
-  const allowed = moduleKey === null || modules?.[moduleKey] === true;
+  // Enquanto modules estiver null (carregando ou falha), não bloquear — tratar como loading
+  const allowed = moduleKey === null || modules === null || modules[moduleKey] === true;
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] dark:bg-[#030d29]">
