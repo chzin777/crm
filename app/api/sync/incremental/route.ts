@@ -4,7 +4,7 @@ import path from "node:path";
 
 const ORACLE_LIB_DIR = "/opt/oracle/instantclient_19_26";
 const ORACLE_CONFIG_DIR = "/tmp/oracletest/network/admin";
-const CURSOR_FILE = "/tmp/oracletest/last_rowid.txt";
+const CURSOR_FILE = "/tmp/oracletest/last_data_pedido.txt";
 const BATCH_SIZE = 500;
 const MAX_ITERATIONS = 200;
 const CRM_API = "http://localhost:3000";
@@ -133,17 +133,17 @@ export async function POST(request: NextRequest) {
         connectString: "172.30.20.100:1521/horus",
       });
 
-      let lastRowId = loadCursor();
-      if (!lastRowId) {
+      let lastCursor = loadCursor();
+      if (!lastCursor) {
         const minR = await conn.execute(
-          "SELECT MIN(ROWID) as MIN_RID FROM tab_dados_dinamicos WHERE NOME_CLIENTE IS NOT NULL",
+          "SELECT TO_CHAR(MIN(DATA_PEDIDO), 'YYYY-MM-DD HH24:MI:SS') as MIN_DT FROM tab_dados_dinamicos WHERE NOME_CLIENTE IS NOT NULL AND STATUS NOT IN ('CANCELADO','ESTORNO','TESTE')",
           [],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
-        lastRowId = minR.rows?.[0]?.MIN_RID ?? null;
+        lastCursor = minR.rows?.[0]?.MIN_DT ?? null;
       }
 
-      if (!lastRowId) {
+      if (!lastCursor) {
         return NextResponse.json({ ok: true, synced: 0, message: "No data found" });
       }
 
@@ -155,9 +155,9 @@ export async function POST(request: NextRequest) {
         iteration++;
 
         const sql =
-          "SELECT * FROM (SELECT ROWID as RID, LOJA, NOME_CLIENTE, TELEFONE, CELULAR, EMAIL, NASCIMENTO, SEXO, PROFISSAO, NOME_CIDADE, NOME_BAIRRO, UF, DATA_PEDIDO, VALOR_TOTAL, VENDEDOR, UNIDADE_EMPRESARIAL_ID, PARCEIRO_ID, STATUS, TIPO_CLIENTE FROM tab_dados_dinamicos WHERE NOME_CLIENTE IS NOT NULL AND ROWID > :cursor ORDER BY ROWID) WHERE ROWNUM <= :batchSize";
+          "SELECT * FROM (SELECT ROWID as RID, LOJA, NOME_CLIENTE, TELEFONE, CELULAR, EMAIL, NASCIMENTO, SEXO, PROFISSAO, NOME_CIDADE, NOME_BAIRRO, UF, DATA_PEDIDO, VALOR_TOTAL, VENDEDOR, UNIDADE_EMPRESARIAL_ID, PARCEIRO_ID, STATUS, TIPO_CLIENTE FROM tab_dados_dinamicos WHERE NOME_CLIENTE IS NOT NULL AND STATUS NOT IN ('CANCELADO','ESTORNO','TESTE') AND TO_CHAR(DATA_PEDIDO, 'YYYY-MM-DD HH24:MI:SS') >= :cursor ORDER BY DATA_PEDIDO ASC, ROWID ASC) WHERE ROWNUM <= :batchSize";
 
-        const queryResult = await conn.execute(sql, { cursor: lastRowId, batchSize: BATCH_SIZE }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const queryResult = await conn.execute(sql, { cursor: lastCursor, batchSize: BATCH_SIZE }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
         const rows: OracleRow[] = queryResult.rows ?? [];
 
         if (rows.length === 0) break;
@@ -218,10 +218,30 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        lastRowId = rows[rows.length - 1].RID || lastRowId;
-        saveCursor(lastRowId);
+        const lastRow = rows[rows.length - 1];
+        lastCursor = lastRow.DATA_PEDIDO
+          ? new Date(lastRow.DATA_PEDIDO).toISOString().replace("T", " ").substring(0, 19)
+          : lastCursor;
+        saveCursor(lastCursor);
 
         if (rows.length < BATCH_SIZE) break;
+      }
+
+      let refreshed = false;
+      if (totalSynced > 0) {
+        try {
+          await fetch(`${CRM_API}/api/db/refresh-materialized-view`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              authorization: `Bearer ${process.env.SYNC_API_TOKEN || "vmset-sync-token-2026"}`,
+            },
+            body: JSON.stringify({ view: "DailySalesSummary", concurrently: true }),
+          });
+          refreshed = true;
+        } catch {
+          // non-fatal: dashboard will refresh on next successful call
+        }
       }
 
       return NextResponse.json({
@@ -229,7 +249,8 @@ export async function POST(request: NextRequest) {
         synced: totalSynced,
         errors: totalErrors,
         iterations: iteration,
-        finalCursor: lastRowId,
+        finalCursor: lastCursor,
+        refreshed,
       });
     } finally {
       if (conn) {

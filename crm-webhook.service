@@ -1,0 +1,13 @@
+[Unit]
+Description=CRM Deploy Webhook
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/crm
+ExecStart=/usr/bin/python3 /opt/crm/deploy-webhook.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

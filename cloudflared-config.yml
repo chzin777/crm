@@ -1,0 +1,9 @@
+tunnel: cf6feee7-edf4-46ac-a012-65c7708b5639
+credentials-file: /root/.cloudflared/cf6feee7-edf4-46ac-a012-65c7708b5639.json
+
+ingress:
+  - hostname: crm.oticasbrasil.com.br
+    service: http://localhost:3000
+  - hostname: crm-webhook.oticasbrasil.com.br
+    service: http://localhost:9003
+  - service: http_status:404
