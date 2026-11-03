@@ -12,3 +12,7 @@ Dockerfile
 .dockerignore
 docker-compose*.yml
 README.md*
+
+postgres/
+backups/
+crm/
