@@ -359,13 +359,7 @@ export function SidebarWithTabs({
     return () => clearTimeout(handler);
   }, [tabs, activeTabId, isClient]);
 
-  // Ensure at least one tab exists
-  useEffect(() => {
-    if (isClient && tabs.length === 0) {
-      setTabs([{ id: "tab-1", activeNavId: defaultNav }]);
-      setActiveTabId("tab-1");
-    }
-  }, [isClient, tabs.length, defaultNav]);
+  // No longer auto-create tabs — show empty state instead
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const activeNavId = activeTab?.activeNavId || defaultNav;
@@ -384,14 +378,17 @@ export function SidebarWithTabs({
   }, [defaultNav]);
 
   const closeTab = useCallback((tabId: string) => {
-    if (tabs.length === 1) return;
     const tabIndex = tabs.findIndex((t) => t.id === tabId);
     const newTabs = tabs.filter((t) => t.id !== tabId);
     setTabs(newTabs);
     if (activeTabId === tabId) {
-      const newActiveIndex = tabIndex === newTabs.length ? tabIndex - 1 : tabIndex;
-      const safeIndex = Math.max(0, newActiveIndex);
-      if (newTabs[safeIndex]) setActiveTabId(newTabs[safeIndex].id);
+      if (newTabs.length === 0) {
+        setActiveTabId("");
+      } else {
+        const newActiveIndex = tabIndex === newTabs.length ? tabIndex - 1 : tabIndex;
+        const safeIndex = Math.max(0, newActiveIndex);
+        if (newTabs[safeIndex]) setActiveTabId(newTabs[safeIndex].id);
+      }
     }
   }, [tabs, activeTabId]);
 
@@ -524,17 +521,37 @@ export function SidebarWithTabs({
           <div className={cn(
             "h-full bg-white overflow-auto transition-all duration-300 ease-in-out",
             "md:rounded-br-3xl md:rounded-bl-3xl md:rounded-tr-3xl",
-            activeTabIndex !== 0 && "md:rounded-tl-3xl"
+            tabs.length > 0 && activeTabIndex !== 0 && "md:rounded-tl-3xl"
           )}>
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={`${activeTabId}-${activeNavId}`}
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }} className="h-full"
-              >
-                {renderContent(activeNavId)}
-              </motion.div>
-            </AnimatePresence>
+            {tabs.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-4 text-center px-6">
+                <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#C4D600]/15 text-[#051647]">
+                  <Plus className="h-7 w-7" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-lg font-bold text-slate-900">Nenhuma guia aberta</p>
+                  <p className="text-sm text-slate-500">Abra uma guia para continuar navegando pelo sistema.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => addTab()}
+                  className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#002187]"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nova guia
+                </button>
+              </div>
+            ) : (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`${activeTabId}-${activeNavId}`}
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }} className="h-full"
+                >
+                  {renderContent(activeNavId)}
+                </motion.div>
+              </AnimatePresence>
+            )}
           </div>
         </main>
       </div>
