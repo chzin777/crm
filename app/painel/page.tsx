@@ -52,6 +52,7 @@ const stageLabels: Record<string, string> = {
   recompra: "Recompra",
   reativacao: "Reativação",
 };
+const stageColors = ["#002187", "#051647", "#C4D600", "#F7915E", "#002187", "#051647"];
 const categoryLabels: Record<string, { label: string; color: string }> = {
   cliente: { label: "Clientes", color: "#002187" },
   lead: { label: "Leads", color: "#F7915E" },
@@ -264,19 +265,30 @@ export default function PainelPage() {
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f] sm:p-5 xl:col-span-4" aria-label="Funil de novos clientes">
-              <div className="mb-3">
-                <h2 className="text-sm font-bold text-slate-900 dark:text-white">Oportunidades por etapa</h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{totalPipeline} oportunidades registradas</p>
+              <div className="mb-4 flex items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">Oportunidades por etapa</h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Distribuição do funil de vendas</p>
+                </div>
+                <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">{totalPipeline} total</span>
               </div>
               <div className="h-[250px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={pipelineData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 4 }}>
+                  <BarChart data={pipelineData} layout="vertical" margin={{ top: 4, right: 28, left: 4, bottom: 4 }}>
                     <CartesianGrid stroke={isDark ? "#1e335b" : "#e2e8f0"} horizontal={false} strokeDasharray="3 4" />
-                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                    <YAxis type="category" dataKey="etapa" axisLine={false} tickLine={false} tick={{ fill: isDark ? "#cbd5e1" : "#475569", fontSize: 10 }} width={104} />
-                    <Tooltip contentStyle={tooltipStyle} formatter={(value) => `${value} deals`} />
-                    <Bar isAnimationActive={false} dataKey="deals" radius={[0, 6, 6, 0]} barSize={18}>
-                      {pipelineData.map((entry, index) => <Cell key={entry.etapa} fill={index === 2 ? "#C4D600" : "#002187"} />)}
+                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} allowDecimals={false} />
+                    <YAxis type="category" dataKey="etapa" axisLine={false} tickLine={false} tick={{ fill: isDark ? "#cbd5e1" : "#475569", fontSize: 11, fontWeight: 500 }} width={108} />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      cursor={{ fill: isDark ? "rgba(196,214,0,0.08)" : "rgba(0,33,135,0.06)" }}
+                      formatter={(value, _name, props) => {
+                        const num = Number(value);
+                        if (!Number.isFinite(num)) return ["0 oportunidades", "Etapa"];
+                        return [`${num} oportunidade${num === 1 ? "" : "s"}`, (props as { payload?: { etapa?: string } }).payload?.etapa ?? "Etapa"];
+                      }}
+                    />
+                    <Bar isAnimationActive={false} dataKey="deals" radius={[0, 4, 4, 0]} barSize={20} label={{ position: "right", fill: isDark ? "#e2e8f0" : "#334155", fontSize: 11, fontWeight: 600, offset: 6 }}>
+                      {pipelineData.map((_entry, index) => <Cell key={`stage-${index}`} fill={stageColors[index % stageColors.length]} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
