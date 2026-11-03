@@ -19,7 +19,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="pt-BR"
-      className={`${inter.variable} h-full antialiased`}
+      className={`${inter.variable} h-dvh antialiased`}
     >
       <body className="h-dvh overflow-hidden" suppressHydrationWarning>
         <ToastProvider>
