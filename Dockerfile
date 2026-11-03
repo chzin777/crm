@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 
 # Stage 1: dependências completas (cacheadas enquanto os manifests não mudam)
 FROM node:20-alpine AS deps
