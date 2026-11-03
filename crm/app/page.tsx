@@ -3,10 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { Sidebar } from "@/components/Sidebar";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
-import { NotificationDropdown } from "@/components/NotificationDropdown";
 import { EntityDialog } from "@/components/EntityDialog";
 import { StageEditorDialog } from "@/components/StageEditorDialog";
 import { SendMessageDialog } from "@/components/SendMessageDialog";
@@ -645,28 +642,7 @@ export default function Home() {
   const relacionamentoCount = useMemo(() => cards.filter((card) => card.pipelineId === "relacionamento").length, [cards]);
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
-      {/* Sidebar de Navegação */}
-      <Sidebar />
-
-      {/* Conteúdo Central */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar estilo Dribbble */}
-        <header className="h-16 mx-4 mt-4 bg-white dark:bg-[#051647] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm px-6 sm:px-8 flex items-center justify-between gap-4 transition-colors">
-          {/* Breadcrumb à esquerda */}
-          <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 font-medium">
-            <span>Workspace</span>
-            <span className="text-slate-300 dark:text-slate-600">/</span>
-            <strong className="text-slate-900 dark:text-white font-semibold">
-              Pipelines
-            </strong>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <NotificationDropdown isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
-          </div>
-        </header>
+    <div className="flex flex-col min-w-0 text-slate-800 dark:text-slate-100 transition-colors">
 
         {/* Cabeçalho do Pipeline estilo Dribbble */}
         <div className="px-6 sm:px-8 pt-8 pb-4">
@@ -975,7 +951,6 @@ export default function Home() {
             </div>
           )}
         </main>
-      </div>
 
       {editingStage && (
         <StageEditorDialog
