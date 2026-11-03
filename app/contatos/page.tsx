@@ -297,10 +297,6 @@ export default function ContatosPage() {
     { label: "Valor comprado", value: currency(totalSpent), detail: "acumulado na base", icon: ArrowUpRight, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   ];
 
-  if (contactsLoading) {
-    return <LoadingSpinner fullScreen label="Carregando contatos..." size={96} />;
-  }
-
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
       <Sidebar />

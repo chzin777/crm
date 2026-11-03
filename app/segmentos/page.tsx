@@ -598,10 +598,6 @@ export default function SegmentosPage() {
     if (event.target === event.currentTarget) closeSegmentModals();
   };
 
-  if (segmentsLoading) {
-    return <LoadingSpinner fullScreen label="Carregando segmentos..." size={96} />;
-  }
-
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />

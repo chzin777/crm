@@ -794,10 +794,6 @@ export default function CampanhasPage() {
     }
   };
 
-  if (campaignsLoading) {
-    return <LoadingSpinner fullScreen label="Carregando campanhas..." size={96} />;
-  }
-
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />

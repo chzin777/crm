@@ -377,10 +377,6 @@ export default function LojasPage() {
     </button>
   );
 
-  if (isLoading) {
-    return <LoadingSpinner fullScreen label="Carregando lojas..." size={96} />;
-  }
-
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
       <Sidebar />
