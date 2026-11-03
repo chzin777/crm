@@ -1,21 +1,26 @@
 "use client";
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { TabSystem } from "@/components/TabSystem";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { usePermissions } from "@/hooks/usePermissions";
+import { moduleForPath } from "@/lib/permissions";
 
 export function CrmShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const pathname = usePathname();
+  const { isLoading, modules } = usePermissions();
+  const moduleKey = moduleForPath(pathname);
+  const allowed = moduleKey === null || modules?.[moduleKey] === true;
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] dark:bg-[#030d29]">
       <div className="mx-auto flex min-h-screen max-w-[1920px] items-start gap-0 overflow-visible px-0 py-4 sm:px-4 lg:pl-8 lg:pr-6">
-        {/* Sidebar flutuante estilo ecommerce admin — sticky, rounded-2xl, com toggle na borda */}
-        <aside
-          className={`sticky top-4 relative z-30 hidden h-[calc(100vh-2rem)] shrink-0 flex-col overflow-visible rounded-2xl border border-[#e2e6ee] bg-white shadow-sm transition-[width] duration-200 ease-out lg:flex dark:border-slate-800 dark:bg-[#051647] ${sidebarCollapsed ? "w-20" : "w-64"}`}
-        >
+        {/* Sidebar — componente único com toggle integrado */}
+        <div className="relative hidden lg:block">
           <Sidebar collapsed={sidebarCollapsed} />
-          {/* Botão de expandir/colapsar na borda direita, alinhado à logo */}
           <button
             type="button"
             onClick={() => setSidebarCollapsed((v) => !v)}
@@ -25,11 +30,6 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
           >
             <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${sidebarCollapsed ? "" : "rotate-180"}`} />
           </button>
-        </aside>
-
-        {/* Mobile sidebar placeholder */}
-        <div className="lg:hidden">
-          <Sidebar collapsed={false} />
         </div>
 
         {/* Main content area with tab strip */}
@@ -40,7 +40,16 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
           </div>
           {/* Page content */}
           <div className="mx-auto w-full max-w-[1680px] px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
-            {children}
+            {isLoading && moduleKey !== null ? (
+              <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Verificando permissões..." /></div>
+            ) : allowed ? (
+              children
+            ) : (
+              <div className="flex h-64 flex-col items-center justify-center gap-1 text-center">
+                <p className="text-base font-semibold text-[#051647] dark:text-white">Sem permissão para acessar esta tela</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Peça a um administrador para liberar o acesso ao seu cargo.</p>
+              </div>
+            )}
           </div>
         </main>
       </div>
