@@ -18,7 +18,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] dark:bg-[#030d29]">
-      <div className="mx-auto flex min-h-screen max-w-[1920px] items-start gap-0 overflow-visible px-0 py-4 sm:px-4 lg:pl-8 lg:pr-6">
+      <div className="mx-auto flex h-screen max-w-[1920px] items-start gap-0 overflow-hidden px-0 py-4 sm:px-4 lg:pl-8 lg:pr-6">
         {/* Sidebar — componente único com toggle integrado */}
         <div className="relative hidden lg:block">
           <Sidebar collapsed={sidebarCollapsed} />
@@ -34,7 +34,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main content area with tab strip */}
-        <main className="min-h-[calc(100vh-2rem)] flex-1">
+        <main className="flex-1 overflow-y-auto">
           {/* Tab strip sticky — igual ao ecommerce admin: h-[92px], rounded-t-2xl, backdrop-blur */}
           <div className="sticky top-0 z-20 flex h-[92px] items-end gap-2 rounded-t-2xl border-b border-[#dfe3ea] bg-[#f1f3f7]/95 px-3 pt-4 backdrop-blur dark:border-slate-800 dark:bg-[#0a1a3e]/95 sm:px-6">
             <TabSystem />
