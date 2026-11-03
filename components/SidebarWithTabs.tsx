@@ -333,9 +333,10 @@ export function SidebarWithTabs({
     if (savedState) {
       try {
         const { tabs: savedTabs, activeTabId: savedActiveId } = JSON.parse(savedState);
-        setTabs(savedTabs);
-        setActiveTabId(savedActiveId);
-        const maxId = savedTabs.reduce((max: number, tab: Tab) => {
+        const restoredTabs = Array.isArray(savedTabs) ? savedTabs : [];
+        setTabs(restoredTabs);
+        setActiveTabId(savedActiveId ?? "");
+        const maxId = restoredTabs.reduce((max: number, tab: Tab) => {
           const match = tab.id.match(/tab-(\d+)-/);
           return match ? Math.max(max, parseInt(match[1])) : max;
         }, 1);
@@ -350,9 +351,9 @@ export function SidebarWithTabs({
     }
   }, [defaultNav]);
 
-  // Persist tabs to localStorage (debounced)
+  // Persist tabs to localStorage (debounced) — allow empty state
   useEffect(() => {
-    if (!isClient || tabs.length === 0) return;
+    if (!isClient) return;
     const handler = setTimeout(() => {
       localStorage.setItem("crm-sidebar-tabs-state", JSON.stringify({ tabs, activeTabId }));
     }, 500);
