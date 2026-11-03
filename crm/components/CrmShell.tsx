@@ -17,8 +17,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const allowed = moduleKey === null || modules === null || modules[moduleKey] === true;
 
   return (
-    <div className="min-h-screen bg-[#f5f7fb] dark:bg-[#030d29]">
-      <div className="mx-auto flex h-screen max-w-[1920px] items-start gap-0 overflow-hidden px-0 py-4 sm:px-4 lg:pl-8 lg:pr-6">
+    <div className="h-dvh bg-[#f5f7fb] dark:bg-[#030d29]">
+      <div className="mx-auto flex h-dvh max-w-[1920px] items-start gap-0 overflow-hidden px-0 py-4 sm:px-4 lg:pl-8 lg:pr-6">
         {/* Sidebar — componente único com toggle integrado */}
         <div className="relative hidden lg:block">
           <Sidebar collapsed={sidebarCollapsed} />
