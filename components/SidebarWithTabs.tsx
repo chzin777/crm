@@ -427,7 +427,7 @@ export function SidebarWithTabs({
     closeOthers, closeToRight, closeToLeft, closeAll, setActiveTab,
   }), [tabs, activeTabId, activeNavId, setActiveNav, addTab, closeTab, closeOthers, closeToRight, closeToLeft, closeAll, setActiveTab]);
 
-  const canCloseTab = tabs.length > 1;
+  const canCloseTab = true;
   const hasOtherTabs = tabs.length > 1;
 
   return (
