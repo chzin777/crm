@@ -969,10 +969,16 @@ export default function Home() {
           recipientName={messageCard.cliente}
           recipientPhone={formatPhone(messageCard.telefone)}
           onClose={() => setMessageCard(null)}
-          onSend={async ({ text, files }) => {
+          onSend={async ({ text, files, template }) => {
             const body = new FormData();
             body.set("phone", messageCard.telefone);
             body.set("text", text);
+            if (template) {
+              body.set("templateName", template.name);
+              body.set("templateLanguage", template.language);
+              body.set("templateParams", JSON.stringify(template.params));
+              if (template.image) body.set("headerImage", template.image);
+            }
             files.forEach((file) => body.append("files", file));
             const response = await fetch("/api/whatsapp/send", { method: "POST", body });
             if (!response.ok) {
