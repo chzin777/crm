@@ -34,7 +34,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main content area with tab strip */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="h-full min-w-0 flex-1 overflow-y-auto">
           {/* Tab strip sticky — igual ao ecommerce admin: h-[92px], rounded-t-2xl, backdrop-blur */}
           <div className="sticky top-0 z-20 flex h-[92px] items-end gap-2 rounded-t-2xl border-b border-[#dfe3ea] bg-[#f1f3f7]/95 px-3 pt-4 backdrop-blur dark:border-slate-800 dark:bg-[#0a1a3e]/95 sm:px-6">
             <TabSystem />

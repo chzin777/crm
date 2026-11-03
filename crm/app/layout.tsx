@@ -21,7 +21,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="pt-BR"
       className={`${inter.variable} h-full antialiased`}
     >
-      <body className="h-dvh" suppressHydrationWarning>
+      <body className="h-dvh overflow-hidden" suppressHydrationWarning>
         <ToastProvider>
           <ConditionalShell>{children}</ConditionalShell>
         </ToastProvider>
