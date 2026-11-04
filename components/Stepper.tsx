@@ -601,103 +601,7 @@ className={`${kind === 'numbers' ? '' : 'px-[var(--stepper-inset)] pt-[var(--ste
 </div>
 </>
 );
-return isModal ? (
-<div
-className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm"
-onMouseDown={(event) => {
-if (event.target === event.currentTarget) onCancel?.();
-}}
->
-<div
-{...rest}
-ref={rootRef}
-role="dialog"
-aria-modal="true"
-aria-label={modalTitle}
-className={`${ROOT_CLASS} h-[min(640px,90vh)] max-h-[90vh] max-w-xl overflow-hidden border border-slate-200 !bg-white !p-5 !shadow-2xl !rounded-2xl dark:border-slate-700 dark:!bg-[#07194f] sm:!p-6 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${FRAMED_CLASS} ${stepCircleContainerClassName} ${className}`
-.replace(/\s+/g, ' ')
-.trim()}
-data-completed={completed ? '' : undefined}
-style={
-{
-...(THEMES[theme] ?? THEMES.dark),
-'--stepper-radius': `${Math.max(0, radius)}px`,
-'--stepper-spring': SPRING,
-'--stepper-width': size(width),
-...accentVars,
-...style
-} as CSSProperties
-}
-onKeyDown={handleKeyDown}
->
-{modalContent}
-<div
-className={`flex min-h-0 min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'flex-1 px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
->
-<div ref={viewportRef} className={`${VIEWPORT_CLASS} flex-1 min-h-0 overflow-y-auto ${contentClassName}`.trim()} aria-live="polite">
-{view.previous !== null && (
-<div key={view.id - 1} ref={leavingRef} className={`${PANE_CLASS} ${LEAVING_CLASS}`} aria-hidden="true">
-{paneContent(view.previous)}
-</div>
-)}
-<div key={view.id} ref={paneRef} className={PANE_CLASS} tabIndex={-1}>
-{paneContent(view.step)}
-</div>
-</div>
-{showFooter && (
-<div
-className={FOOTER_WRAP_CLASS}
-data-hidden={completed ? '' : undefined}
-aria-hidden={completed ? true : undefined}
->
-<div className={FOOTER_CLIP_CLASS}>
-<div className={`${FOOTER_CLASS} ${footerClassName}`.trim()}>
-{cancelButtonText && onCancel && (
-<button
-type="button"
-onClick={onCancel}
-className="mr-auto h-8 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
->
-{cancelButtonText}
-</button>
-)}
-<button
-type="button"
-{...backRest}
-className={`${BUTTON_CLASS} ${BACK_CLASS} ${backClass}`.trim()}
-data-hidden={current <= 1 ? '' : undefined}
-tabIndex={completed ? -1 : backRest.tabIndex}
-onClick={event => {
-onBackClick?.(event);
-if (!event.defaultPrevented) go(current - 1);
-}}
->
-<HugeiconsIcon icon={ArrowLeft01Icon} size={16} strokeWidth={2} />
-<span>{backButtonText}</span>
-</button>
-<button
-ref={nextBtnRef}
-type="button"
-{...nextRest}
-data-stepper="next"
-className={`${BUTTON_CLASS} ${NEXT_CLASS} ${nextClass}`.trim()}
-tabIndex={completed ? -1 : nextRest.tabIndex}
-onClick={event => {
-onNextClick?.(event);
-if (!event.defaultPrevented) go(current + 1);
-}}
->
-<span>{nextLabel}</span>
-<HugeiconsIcon icon={isLast ? Tick02Icon : ArrowRight01Icon} size={16} strokeWidth={2} />
-</button>
-</div>
-</div>
-</div>
-)}
-</div>
-</div>
-</div>
-) : (
+return (
 <div
 {...rest}
 ref={rootRef}
@@ -721,7 +625,7 @@ onKeyDown={handleKeyDown}
 <div
 className={`flex min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
 >
-<div ref={viewportRef} className={`${VIEWPORT_CLASS} ${contentClassName}`.trim()} aria-live="polite">
+<div ref={viewportRef} className={`${VIEWPORT_CLASS} flex-1 min-h-0 overflow-y-auto ${contentClassName}`.trim()} aria-live="polite">
 {view.previous !== null && (
 <div key={view.id - 1} ref={leavingRef} className={`${PANE_CLASS} ${LEAVING_CLASS}`} aria-hidden="true">
 {paneContent(view.previous)}
