@@ -1,4 +1,5 @@
 import "server-only";
+import { Pool } from "pg";
 import { betterAuth } from "better-auth";
 import { admin } from "better-auth/plugins";
 import { Resend } from "resend";
@@ -29,7 +30,7 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   trustedOrigins: ["https://crm.oticasbrasil.com.br"],
   secret,
-  database: { connectionString: createDatabaseUrl(process.env) },
+  database: new Pool({ connectionString: createDatabaseUrl(process.env) }),
   session: {
     expiresIn: 60 * 60 * 24, // 24 hours in seconds
     updateAge: 60 * 60 * 24, // refresh only at the end of the 24h window (no sliding expiry)
