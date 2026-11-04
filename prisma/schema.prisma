@@ -36,11 +36,11 @@ model Session {
   token          String   @unique
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  ipAddress      String?
-  userAgent      String?
+  ipAddress      String?   @map("ipAddress")
+  userAgent      String?   @map("userAgent")
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  impersonatedBy String?
+  impersonatedBy String?   @map("impersonatedBy")
 
   @@index([userId])
   @@map("Session")
@@ -48,15 +48,15 @@ model Session {
 
 model Account {
   id                    String    @id
-  accountId             String
-  providerId            String
-  userId                String
+  accountId             String    @map("accountId")
+  providerId            String    @map("providerId")
+  userId                String    @map("userId")
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
+  accessToken           String?   @map("accessToken")
+  refreshToken          String?   @map("refreshToken")
+  idToken               String?   @map("idToken")
+  accessTokenExpiresAt  DateTime? @map("accessTokenExpiresAt")
+  refreshTokenExpiresAt DateTime? @map("refreshTokenExpiresAt")
   scope                 String?
   password              String?
   createdAt             DateTime  @default(now())

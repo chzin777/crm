@@ -1,4 +1,6 @@
-import "server-only";
+﻿import "server-only";
+import { Pool } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 import { createDatabaseUrl } from "@/lib/database-url";
 
@@ -7,11 +9,10 @@ const globalForPrisma = globalThis as typeof globalThis & {
 };
 
 const createPrismaClient = () => {
-  // Native Prisma connection respects @@map/@map directives correctly.
-  // The @prisma/adapter-pg driver adapter has a known incompatibility with
-  // Better Auth's prisma adapter (P2022 ColumnNotFound "(not available)").
-  const url = createDatabaseUrl(process.env);
-  return new PrismaClient({ datasourceUrl: url });
+  const connectionString = createDatabaseUrl(process.env);
+  const pool = new Pool({ connectionString });
+  const adapter = new PrismaPg(pool);
+  return new PrismaClient({ adapter });
 };
 
 let instance: PrismaClient | undefined;
@@ -24,7 +25,6 @@ const getPrisma = () => {
   return instance;
 };
 
-// Lazy proxy: the client (and DB env validation) is only created on first use, so builds without DB vars succeed.
 export const prisma = new Proxy({} as PrismaClient, {
   get(_target, property) {
     const client = getPrisma();

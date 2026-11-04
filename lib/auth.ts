@@ -48,6 +48,7 @@ export const auth = betterAuth({
     additionalFields: {
       jobTitle: { type: "string", required: false },
       teamLevel: { type: "string", required: false, defaultValue: "Operador" },
+      roleId: { type: "string", required: false },
     },
   },
   plugins: [admin()],
