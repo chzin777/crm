@@ -211,6 +211,7 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
       title="Enviar mensagem"
       description={`Para ${recipientName}${recipientPhone ? ` · ${recipientPhone}` : ""}`}
       onClose={onClose}
+      fixedHeight
     >
       <div className="flex h-full min-h-0 flex-col gap-3">
         <div role="tablist" aria-label="Tipo de mensagem" className="flex shrink-0 gap-1.5">
