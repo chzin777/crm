@@ -19,7 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
+
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import Stepper, { Step } from "@/components/Stepper";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
@@ -599,9 +599,7 @@ export default function SegmentosPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+ <div className="bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
         <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
             Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Segmentos</strong>
@@ -745,9 +743,8 @@ export default function SegmentosPage() {
             <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800"><span>Mostrando {filteredSegments.length} de {segments.length} segmentos salvos</span><span>Banco de dados</span></footer>
           </section>
         </main>
-      </div>
 
-      {(selectedSegment || isCreateOpen) && (
+ {(selectedSegment || isCreateOpen) && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm" onMouseDown={closeOverlay}>
           <section role="dialog" aria-modal="true" aria-labelledby="segment-dialog-title" className={`w-full ${isCreateOpen || isEditingSegment ? "max-w-xl flex h-[min(640px,90vh)] max-h-[90vh] flex-col overflow-hidden" : "max-w-lg"} rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6`}>
             <div className={`flex items-start justify-between gap-4 ${isCreateOpen || isEditingSegment ? "mb-5 shrink-0" : "mb-5"}`}>

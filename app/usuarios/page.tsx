@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bell, Check, Plus, RefreshCw, ShieldCheck, Users } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
+
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
@@ -158,9 +158,7 @@ export default function UsuariosPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
+    <div className="bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
         <header className="h-16 mx-4 mt-4 bg-white dark:bg-[#051647] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm px-6 flex items-center justify-between gap-4">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
             Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Usuários da Equipe</strong>
@@ -217,7 +215,6 @@ export default function UsuariosPage() {
             </ul>
           </section>
         </main>
-      </div>
 
       {(selectedUser || isCreateOpen) && (
         <EntityDialog

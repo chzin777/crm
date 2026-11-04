@@ -25,7 +25,7 @@ import {
   SquareCheck,
   X,
 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
+
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import Stepper, { Step } from "@/components/Stepper";
@@ -795,9 +795,7 @@ export default function CampanhasPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+ <div className="bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
         <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
             Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Campanhas</strong>
@@ -1001,9 +999,8 @@ export default function CampanhasPage() {
             <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800"><span>Mostrando {filteredCampaigns.length} de {campaigns.length} campanhas salvas</span><span>Banco de dados</span></footer>
           </section>
         </main>
-      </div>
 
-      {(selectedCampaign || isCreateOpen) && (
+ {(selectedCampaign || isCreateOpen) && (
         <EntityDialog
           titleId="campaign-dialog-title"
           title={isCreateOpen ? "Nova campanha" : selectedCampaign?.nome ?? "Campanha"}

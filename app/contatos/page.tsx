@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Sidebar } from "@/components/Sidebar";
+
 import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
@@ -298,9 +298,7 @@ export default function ContatosPage() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
+    <div className="bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
         {/* Topbar estilo Dribbble */}
         <header className="h-16 mx-4 mt-4 bg-white dark:bg-[#051647] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm px-6 flex items-center justify-between gap-4">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
@@ -495,7 +493,6 @@ export default function ContatosPage() {
             </footer>
           </section>
         </main>
-      </div>
 
       {(selectedContact || isCreateOpen) && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); } }}>

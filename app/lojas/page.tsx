@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bell, ChevronUp, ChevronsUpDown, Plus, RefreshCw, Search, Store as StoreIcon, Trash2 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
+
 import { SearchableSelect } from "@/components/SearchableSelect";
 import Stepper, { Step } from "@/components/Stepper";
 import { ThemeSwitch } from "@/components/ThemeSwitch";
@@ -378,9 +378,7 @@ export default function LojasPage() {
   );
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+ <div className="bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
         <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
           <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
             Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Lojas</strong>
@@ -494,9 +492,8 @@ export default function LojasPage() {
             </footer>
           </section>
         </main>
-      </div>
 
-      {editing && (
+ {editing && (
         <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar loja ${editing.number}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm} size="lg">
           {editing === "new" ? (
             <Stepper
