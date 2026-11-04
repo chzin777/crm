@@ -26,6 +26,8 @@ model User {
   sessions         Session[]
   accounts         Account[]
   npsResponses     NpsResponse[]
+
+  @@map("User")
 }
 
 model Session {
@@ -41,6 +43,7 @@ model Session {
   impersonatedBy String?
 
   @@index([userId])
+  @@map("Session")
 }
 
 model Account {
@@ -61,6 +64,7 @@ model Account {
 
   @@unique([providerId, accountId])
   @@index([userId])
+  @@map("Account")
 }
 
 model Verification {
@@ -72,6 +76,7 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@index([identifier])
+  @@map("Verification")
 }
 
 model Contact {
