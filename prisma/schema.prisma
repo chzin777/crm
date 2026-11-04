@@ -27,8 +27,7 @@ model User {
   accounts         Account[]
   npsResponses     NpsResponse[]
 
-  @@map("User")
-}
+  }
 
 model Session {
   id             String   @id
@@ -36,27 +35,26 @@ model Session {
   token          String   @unique
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  ipAddress      String?   @map("ipAddress")
-  userAgent      String?   @map("userAgent")
+  ipAddress      String?
+  userAgent      String?
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  impersonatedBy String?   @map("impersonatedBy")
+  impersonatedBy String?
 
   @@index([userId])
-  @@map("Session")
 }
 
 model Account {
   id                    String    @id
-  accountId             String    @map("accountId")
-  providerId            String    @map("providerId")
-  userId                String    @map("userId")
+  accountId             String
+  providerId            String
+  userId                String
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?   @map("accessToken")
-  refreshToken          String?   @map("refreshToken")
-  idToken               String?   @map("idToken")
-  accessTokenExpiresAt  DateTime? @map("accessTokenExpiresAt")
-  refreshTokenExpiresAt DateTime? @map("refreshTokenExpiresAt")
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
   scope                 String?
   password              String?
   createdAt             DateTime  @default(now())
@@ -64,7 +62,6 @@ model Account {
 
   @@unique([providerId, accountId])
   @@index([userId])
-  @@map("Account")
 }
 
 model Verification {
@@ -76,7 +73,6 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@index([identifier])
-  @@map("Verification")
 }
 
 model Contact {
