@@ -101,6 +101,12 @@ export default function SegmentosPage() {
   const { data: campaigns, error: campaignsError } = useCrmData<{ id: string; publico: string }[]>("campaigns", []);
   const [contactsLoading, setContactsLoading] = useState(true);
   const [contactsError, setContactsError] = useState("");
+  const [contactsPage, setContactsPage] = useState(1);
+  const [contactsTotalPages, setContactsTotalPages] = useState(1);
+  const [contactsTotal, setContactsTotal] = useState(0);
+  const CONTACTS_PAGE_SIZE = 50;
+  const contactSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [contactSearchQuery, setContactSearchQuery] = useState("");
   const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
   const [audienceCounts, setAudienceCounts] = useState<Record<string, number>>({});
   const requestedAudienceKeysRef = useRef(new Set<string>());
@@ -166,8 +172,7 @@ export default function SegmentosPage() {
   const [formError, setFormError] = useState("");
   const [audienceMode, setAudienceMode] = useState<AudienceMode>("criterios");
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [contactSearch, setContactSearch] = useState("");
-  const [contactFilter, setContactFilter] = useState<ContactFilter>("Todos");
+    const [contactFilter, setContactFilter] = useState<ContactFilter>("Todos");
   const [isContactPickerOpen, setIsContactPickerOpen] = useState(false);
   const [isCriteriaMenuOpen, setIsCriteriaMenuOpen] = useState(false);
   const [criteriaSearchTerm, setCriteriaSearchTerm] = useState("");
@@ -180,22 +185,57 @@ export default function SegmentosPage() {
   const criteriaMenuPortalRef = useRef<HTMLDivElement>(null);
   const [criteriaMenuPosition, setCriteriaMenuPosition] = useState<CSSProperties>({});
 
+  const fetchContactsPage = async (page: number, search: string, signal?: AbortSignal) => {
+    setContactsLoading(true);
+    setContactsError("");
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: String(CONTACTS_PAGE_SIZE) });
+      if (search.trim()) params.set("q", search.trim());
+      const response = await fetch(`/api/contacts/search?${params.toString()}`, { signal });
+      const result = await response.json() as { data?: Contact[]; total?: number; totalPages?: number; error?: string };
+      if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
+      return { data: result.data ?? [], total: result.total ?? 0, totalPages: result.totalPages ?? 1 };
+    } catch (error: unknown) {
+      if ((error as Error).name !== "AbortError") {
+        setContactsError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
+      }
+      return null;
+    } finally {
+      setContactsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    let active = true;
-    fetch("/api/contacts/search?limit=50")
-      .then(async (response) => {
-        const result = await response.json() as { data?: Contact[]; error?: string };
-        if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
-        if (active) {
-          setContacts(result.data ?? []);
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) setContactsError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
-      })
-      .finally(() => { if (active) setContactsLoading(false); });
-    return () => { active = false; };
+    const controller = new AbortController();
+    fetchContactsPage(1, "", controller.signal).then((result) => {
+      if (result) {
+        setContacts(result.data);
+        setContactsTotal(result.total);
+        setContactsTotalPages(result.totalPages);
+        setContactsPage(1);
+      }
+    });
+    return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!isContactPickerOpen) return;
+    if (contactSearchDebounceRef.current) clearTimeout(contactSearchDebounceRef.current);
+    contactSearchDebounceRef.current = setTimeout(() => {
+      const controller = new AbortController();
+      fetchContactsPage(1, contactSearchQuery, controller.signal).then((result) => {
+        if (result) {
+          setContacts(result.data);
+          setContactsTotal(result.total);
+          setContactsTotalPages(result.totalPages);
+          setContactsPage(1);
+        }
+      });
+    }, 300);
+    return () => {
+      if (contactSearchDebounceRef.current) clearTimeout(contactSearchDebounceRef.current);
+    };
+  }, [contactSearchQuery, isContactPickerOpen]);
 
   useEffect(() => {
     let active = true;
@@ -336,13 +376,12 @@ export default function SegmentosPage() {
   const totalMembers = segments.reduce((total, segment) => total + segmentMemberCount(segment), 0);
   const connectedCampaigns = segments.reduce((total, segment) => total + segmentCampaignCount(segment), 0);
   const availableContacts = contacts.filter((contact) => {
-    const matchesSearch = `${contact.nome} ${contact.telefone} ${contact.email}`.toLocaleLowerCase("pt-BR").includes(contactSearch.trim().toLocaleLowerCase("pt-BR"));
     const matchesFilter = contactFilter === "Todos"
       || (contactFilter === "Clientes" && contact.compras > 0)
       || (contactFilter === "Leads" && contact.categoria === "lead")
       || (contactFilter === "NPS" && contact.categoria === "nps")
       || (contactFilter === "Inativos" && contact.categoria === "inativo");
-    return matchesSearch && matchesFilter;
+    return matchesFilter;
   });
   const allVisibleContactsSelected = availableContacts.length > 0
     && availableContacts.every((contact) => selectedContactIds.includes(contact.id));
@@ -514,7 +553,7 @@ export default function SegmentosPage() {
     setFormError("");
     setAudienceMode("criterios");
     setSelectedContactIds([]);
-    setContactSearch("");
+    setContactSearchQuery("");
     setContactFilter("Todos");
     setIsContactPickerOpen(false);
     setIsCreateOpen(false);
@@ -926,7 +965,7 @@ export default function SegmentosPage() {
                             <button
                               type="button"
                               onClick={() => {
-                                setContactSearch("");
+                                setContactSearchQuery("");
                                 setContactFilter("Todos");
                                 setIsContactPickerOpen(true);
                               }}
@@ -1135,7 +1174,7 @@ export default function SegmentosPage() {
                           </p>
                           <button
                             type="button"
-                            onClick={() => { setContactSearch(""); setContactFilter("Todos"); setIsContactPickerOpen(true); }}
+                            onClick={() => { setContactSearchQuery(""); setContactFilter("Todos"); setIsContactPickerOpen(true); }}
                             className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
                           >
                             <Users className="h-3.5 w-3.5" />
@@ -1219,15 +1258,15 @@ export default function SegmentosPage() {
             <div className="shrink-0 space-y-4 border-b border-slate-100 p-5 dark:border-slate-800 sm:px-6">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Exibindo {availableContacts.length} de {contacts.length} contatos
+                  Exibindo {availableContacts.length} de {contactsTotal} contatos · Página {contactsPage} de {contactsTotalPages}
                 </p>
                 <label className="relative block w-full sm:max-w-md">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="search"
                     autoFocus
-                    value={contactSearch}
-                    onChange={(event) => setContactSearch(event.target.value)}
+                    value={contactSearchQuery}
+                    onChange={(event) => setContactSearchQuery(event.target.value)}
                     aria-label="Buscar contatos"
                     placeholder="Buscar por nome, telefone ou e-mail"
                     className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800/80 dark:text-white dark:focus:border-[#C4D600]"
@@ -1326,13 +1365,54 @@ export default function SegmentosPage() {
               <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
                 {selectedContactIds.length} {selectedContactIds.length === 1 ? "contato selecionado" : "contatos selecionados"}
               </p>
-              <button
-                type="button"
-                onClick={() => setIsContactPickerOpen(false)}
-                className="inline-flex h-9 items-center rounded-lg bg-[#051647] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
-              >
-                Concluir seleção
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={contactsPage <= 1 || contactsLoading}
+                  onClick={() => {
+                    const nextPage = contactsPage - 1;
+                    setContactsPage(nextPage);
+                    fetchContactsPage(nextPage, contactSearchQuery).then((result) => {
+                      if (result) {
+                        setContacts(result.data);
+                        setContactsTotal(result.total);
+                        setContactsTotalPages(result.totalPages);
+                      }
+                    });
+                  }}
+                  className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+                >
+                  Anterior
+                </button>
+                <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                  {contactsPage}/{contactsTotalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={contactsPage >= contactsTotalPages || contactsLoading}
+                  onClick={() => {
+                    const nextPage = contactsPage + 1;
+                    setContactsPage(nextPage);
+                    fetchContactsPage(nextPage, contactSearchQuery).then((result) => {
+                      if (result) {
+                        setContacts(result.data);
+                        setContactsTotal(result.total);
+                        setContactsTotalPages(result.totalPages);
+                      }
+                    });
+                  }}
+                  className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+                >
+                  Próxima
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsContactPickerOpen(false)}
+                  className="inline-flex h-9 items-center rounded-lg bg-[#051647] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
+                >
+                  Concluir seleção
+                </button>
+              </div>
             </footer>
           </section>
         </div>

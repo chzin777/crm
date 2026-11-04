@@ -7,8 +7,10 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
   const url = new URL(request.url);
-  const q = url.searchParams.get("q")?.trim() || "";
+  const q = url.searchParams.get("q")?.trim() || url.searchParams.get("search")?.trim() || "";
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+  const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+  const skip = (page - 1) * limit;
 
   // Word-start matching: split query into words and match each against name parts
   // This allows searching by first name alone (e.g., "joão" matches "João Silva")
@@ -28,24 +30,28 @@ export async function GET(request: Request) {
       }
     : {};
 
-  const contacts = await prisma.contact.findMany({
-    where,
-    select: {
-      id: true,
-      name: true,
-      phone: true,
-      email: true,
-      category: true,
-      segment: true,
-      store: true,
-      purchases: true,
-      totalSpent: true,
-      lastPurchaseDate: true,
-      birthDate: true,
-    },
-    orderBy: { name: "asc" },
-    take: limit,
-  });
+  const [contacts, total] = await Promise.all([
+    prisma.contact.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        category: true,
+        segment: true,
+        store: true,
+        purchases: true,
+        totalSpent: true,
+        lastPurchaseDate: true,
+        birthDate: true,
+      },
+      orderBy: { name: "asc" },
+      skip,
+      take: limit,
+    }),
+    prisma.contact.count({ where }),
+  ]);
 
   return NextResponse.json({
     data: contacts.map((c) => ({
@@ -67,5 +73,9 @@ export async function GET(request: Request) {
         .join("")
         .toUpperCase(),
     })),
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
   });
 }
