@@ -1,6 +1,4 @@
 ﻿import "server-only";
-import { Pool } from "pg";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 import { createDatabaseUrl } from "@/lib/database-url";
 
@@ -9,10 +7,11 @@ const globalForPrisma = globalThis as typeof globalThis & {
 };
 
 const createPrismaClient = () => {
-  const connectionString = createDatabaseUrl(process.env);
-  const pool = new Pool({ connectionString });
-  const adapter = new PrismaPg(pool);
-  return new PrismaClient({ adapter });
+  // Conexão nativa do Prisma: respeita @@map/@map corretamente.
+  // O @prisma/adapter-pg v7.x tem incompatibilidade conhecida com o
+  // prismaAdapter do Better Auth (P2022 ColumnNotFound "(not available)").
+  const datasourceUrl = createDatabaseUrl(process.env);
+  return new PrismaClient({ datasourceUrl });
 };
 
 let instance: PrismaClient | undefined;
