@@ -1,10 +1,11 @@
+# syntax=docker/dockerfile:1
 
 # Stage 1: dependências completas (cacheadas enquanto os manifests não mudam)
 FROM node:20-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 # Stage 2: build (prisma generate + next build em modo standalone)
 FROM node:20-alpine AS builder
@@ -36,4 +37,3 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/login >/dev/null 2>&1 || exit 1
 CMD ["node", "server.js"]
-# cache-bust: 1793711598

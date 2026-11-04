@@ -61,7 +61,7 @@ services:
       retries: 5
   crm-app:
     build:
-      context: ./crm
+      context: .
       dockerfile: Dockerfile
     container_name: crm-app
     restart: unless-stopped

@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-
-import { ThemeSwitch } from "@/components/ThemeSwitch";
+import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
@@ -12,7 +11,6 @@ import Stepper, { Step } from "@/components/Stepper";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
 import {
   ArrowUpRight,
@@ -26,7 +24,6 @@ import {
   Check,
   ChevronUp,
   ChevronsUpDown,
-  X,
 } from "lucide-react";
 
 type ContactFilter = "Todos" | "Clientes" | "Leads" | "NPS" | "Inativos";
@@ -96,7 +93,7 @@ const isValidBrazilianPhone = (value: string) => {
 };
 
 export default function ContatosPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
+  const { isDark } = useCrmTheme();
   const toast = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ContactFilter>("Todos");
@@ -151,10 +148,6 @@ export default function ContatosPage() {
       params.set("sortOrder", activeSort.order);
 
       const response = await fetch(`/api/contacts?${params.toString()}`);
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.includes("application/json")) {
-        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
-      }
       const result = await response.json() as { data?: Contact[]; error?: string; pagination?: typeof pagination };
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
       setContacts(result.data ?? []);
@@ -297,20 +290,13 @@ export default function ContatosPage() {
     { label: "Valor comprado", value: currency(totalSpent), detail: "acumulado na base", icon: ArrowUpRight, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
   ];
 
+  if (contactsLoading) {
+    return <LoadingSpinner fullScreen label="Carregando contatos..." size={96} />;
+  }
+
   return (
-    <div className="bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
-        {/* Topbar estilo Dribbble */}
-        <header className="h-16 mx-4 mt-4 bg-white dark:bg-[#051647] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm px-6 flex items-center justify-between gap-4">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span> <strong className="text-slate-900 dark:text-white">Contatos & Clientes</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" className="topbar-icon-button text-slate-500 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
-              <Bell className="h-4 w-4" />
-            </button>
-                      </div>
-        </header>
+    <div>
+      <div className="flex-1 flex flex-col min-w-0">
 
         {/* Conteúdo */}
         <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
@@ -493,54 +479,55 @@ export default function ContatosPage() {
             </footer>
           </section>
         </main>
+      </div>
 
       {(selectedContact || isCreateOpen) && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); } }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="contact-dialog-title" className={`w-full ${isCreateOpen ? "max-w-xl flex h-[min(640px,90vh)] max-h-[90vh] flex-col overflow-hidden" : "max-w-lg"} rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6`}>
-            <div className={`flex items-start justify-between gap-4 ${isCreateOpen ? "mb-5 shrink-0" : "mb-5"}`}>
-              <div><h2 id="contact-dialog-title" className="text-base font-bold text-slate-900 dark:text-white">{isCreateOpen ? "Novo contato" : selectedContact?.nome ?? "Contato"}</h2><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{isCreateOpen ? "Cadastre um cliente ou lead na base." : "Edite os dados e o perfil deste contato ou cliente."}</p></div>
-              <button type="button" onClick={() => { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); }} aria-label="Fechar" title="Fechar" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-4 w-4" /></button>
-            </div>
-            {isCreateOpen ? (
-              <Stepper
-                initialStep={1}
-                onStepChange={() => setFormError("")}
-                onFinalStepCompleted={addContact}
-                validateStep={(step) => {
-                  if (step === 1 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone))) {
-                    setFormError(!form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
-                    return false;
-                  }
-                  if (step === 2 && !isValidEmail(form.email.trim())) {
-                    setFormError("Informe um e-mail válido.");
-                    return false;
-                  }
-                  if (step === 2 && !form.dataNascimento) {
-                    setFormError("Informe a data de nascimento.");
-                    return false;
-                  }
-                  if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()) || !form.dataNascimento)) {
-                    setFormError(!form.nome.trim() ? "Informe o nome do contato." : !isValidBrazilianPhone(form.telefone) ? "Informe um telefone brasileiro válido com DDD." : !isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.dataNascimento ? "Informe a data de nascimento." : "Confira o nome e os dados do contato.");
-                    return false;
-                  }
-                  setFormError("");
-                  return true;
-                }}
-                backButtonText="Voltar"
-                nextButtonText="Continuar"
-                completeButtonText="Salvar contato"
-                indicator="numbers"
-                orientation="horizontal"
-                transition="slide"
-                linear
-                showFooter
-                theme={isDark ? "dark" : "light"}
-                accentColor="#C4D600"
-                frame={false}
-                radius={16}
-                width="100%"
-                className="min-h-0 flex-1"
-              >
+        <EntityDialog
+          titleId="contact-dialog-title"
+          title={isCreateOpen ? "Novo contato" : selectedContact?.nome ?? "Contato"}
+          description={isCreateOpen ? "Cadastre um cliente ou lead na base." : "Edite os dados e o perfil deste contato ou cliente."}
+          onClose={() => { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); }}
+        >
+          {isCreateOpen ? (
+            <Stepper
+              initialStep={1}
+              onStepChange={() => setFormError("")}
+              onFinalStepCompleted={addContact}
+              validateStep={(step) => {
+                if (step === 1 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
+                  setFormError(!isValidEmail(form.email.trim()) ? "Informe um e-mail válido." : !form.nome.trim() ? "Informe o nome do contato." : "Informe um telefone brasileiro válido com DDD.");
+                  return false;
+                }
+                if (step === 2 && form.segmento.length === 0) {
+                  setFormError("Selecione pelo menos um segmento.");
+                  return false;
+                }
+                if (step === 2 && !isValidEmail(form.email.trim())) {
+                  setFormError("Informe um e-mail válido.");
+                  return false;
+                }
+                if (step === 3 && (!form.nome.trim() || !isValidBrazilianPhone(form.telefone) || !isValidEmail(form.email.trim()))) {
+                  setFormError(!isValidBrazilianPhone(form.telefone) ? "Informe um telefone brasileiro válido com DDD." : "Confira o nome e os dados do contato.");
+                  return false;
+                }
+                setFormError("");
+                return true;
+              }}
+              backButtonText="Voltar"
+              nextButtonText="Continuar"
+              completeButtonText="Salvar contato"
+              indicator="numbers"
+              orientation="horizontal"
+              transition="slide"
+              linear
+              showFooter
+              theme={isDark ? "dark" : "light"}
+              accentColor="#C4D600"
+              frame={false}
+              radius={16}
+              width="100%"
+              className="min-h-0 flex-1"
+            >
               <Step title="Identificação" description="Dados pessoais">
                 <div className="space-y-4">
                   <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Dados do contato</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Informe como podemos identificar e falar com essa pessoa.</p></div>
@@ -564,6 +551,7 @@ export default function ContatosPage() {
                     selected={form.segmento}
                     options={segmentOptions}
                     onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }}
+                    required
                   />
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                   <BirthdayDatePicker value={form.dataNascimento} onChange={(dataNascimento) => setForm({ ...form, dataNascimento })} />
@@ -614,8 +602,7 @@ export default function ContatosPage() {
               </footer>
             </div>
           )}
-          </section>
-        </div>
+        </EntityDialog>
       )}
     </div>
   );

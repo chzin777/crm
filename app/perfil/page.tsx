@@ -1,14 +1,10 @@
 "use client";
 
-import { Sidebar } from "@/components/Sidebar";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { authClient } from "@/lib/auth-client";
 import { Bell, Mail, Shield, User as UserIcon } from "lucide-react";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
 
 export default function PerfilPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
   const { data: session, isPending } = authClient.useSession();
 
   const userName = session?.user?.name ?? "Usuário";
@@ -27,25 +23,7 @@ export default function PerfilPage() {
 
   return (
     <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
-          <div className="text-sm font-semibold text-slate-500 dark:text-slate-300">
-            Workspace <span className="text-slate-300 dark:text-slate-600">/</span>{" "}
-            <strong className="text-slate-900 dark:text-white">Meu Perfil</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button
-              type="button"
-              aria-label="Alertas"
-              title="Alertas"
-              className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer"
-            >
-              <Bell className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
 
         <main className="mx-auto w-full max-w-3xl space-y-6 p-6 sm:p-8">
           <div>

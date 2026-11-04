@@ -5,7 +5,7 @@ import { cached, invalidateCache } from "@/lib/cache";
 import { normalizePlace, normalizePlaceList } from "@/lib/store-places";
 
 const storeSchema = z.object({
-  number: z.number().int().min(1).max(99999),
+  number: z.number().int().positive(),
   name: z.string().trim().min(1).max(120),
   address: z.string().trim().max(200).optional().default(""),
   addressNumber: z.string().trim().max(40).optional().default(""),
@@ -18,10 +18,9 @@ const storeSchema = z.object({
   active: z.boolean(),
 });
 
-function serialize(store: { id: string; number: number; name: string; address: string | null; addressNumber: string | null; complement: string | null; postalCode: string | null; city: string | null; state: string | null; neighborhoods: string[]; active: boolean; kind: string | null; startDate: string | null; unitIds: string[]; radiusKm: number; lat: number | null }) {
+function serialize(store: { id: string; name: string; address: string | null; addressNumber: string | null; complement: string | null; postalCode: string | null; city: string | null; state: string | null; neighborhoods: string[]; active: boolean; kind: string | null; startDate: string | null; unitIds: string[]; radiusKm: number; lat: number | null }) {
   return {
     id: store.id,
-    number: store.number,
     name: store.name,
     address: store.address ?? "",
     addressNumber: store.addressNumber ?? "",
@@ -61,13 +60,13 @@ export async function GET(request: Request) {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const url = new URL(request.url);
-  const sortByRaw = url.searchParams.get("sortBy") || "number";
+  const sortByRaw = url.searchParams.get("sortBy") || "name";
   const sortOrderRaw = url.searchParams.get("sortOrder") || "asc";
 
   const allowedSortFields: Record<string, string> = {
-    loja: "number",
-    numero: "number",
-    number: "number",
+    loja: "name",
+    
+    number: "name",
     nome: "name",
     name: "name",
     cidade: "city",
@@ -84,8 +83,8 @@ export async function GET(request: Request) {
 
   // Campos compostos (como neighborhoods) não são ordenáveis diretamente no Prisma;
   // para esses, mantemos a ordenação por número como fallback seguro.
-  const isSortableField = ["number", "name", "city", "active"].includes(sortField);
-  const effectiveSortField = isSortableField ? sortField : "number";
+  const isSortableField = ["name", "city", "active"].includes(sortField);
+  const effectiveSortField = isSortableField ? sortField : "name";
   const effectiveSortOrder = isSortableField ? sortOrder : "asc";
 
   const cacheKey = `stores:${effectiveSortField}:${effectiveSortOrder}`;

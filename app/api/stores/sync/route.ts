@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireSessionOrSyncToken } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
 
 export async function POST(request: NextRequest) {
+  const denied = await requireSessionOrSyncToken(request);
+  if (denied) return denied;
   try {
     const body = await request.json();
     const { number, name, address, addressNumber, complement, postalCode, city, state, neighborhoods, active, kind, unitIds } = body;
 
-    if (typeof number !== "number" || !name) {
-      return NextResponse.json({ error: "number and name are required" }, { status: 400 });
+    if (typeof number !== "number") {
+      return NextResponse.json({ error: "number is required" }, { status: 400 });
     }
 
     const store = await prisma.store.upsert({

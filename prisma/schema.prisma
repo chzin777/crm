@@ -13,6 +13,8 @@ model User {
   email            String     @unique
   jobTitle         String?
   teamLevel        String     @default("Operador")
+  roleId           String?
+  roleRef          Role?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
   emailVerified    Boolean    @default(false)
   image            String?
   createdAt        DateTime   @default(now())
@@ -191,4 +193,15 @@ enum CampaignMessageStatus {
   delivered
   read
   failed
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions Json     @default("{}") @db.JsonB
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
 }

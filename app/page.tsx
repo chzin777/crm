@@ -3,10 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import { Sidebar } from "@/components/Sidebar";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
-import { NotificationDropdown } from "@/components/NotificationDropdown";
 import { EntityDialog } from "@/components/EntityDialog";
 import { StageEditorDialog } from "@/components/StageEditorDialog";
 import { SendMessageDialog } from "@/components/SendMessageDialog";
@@ -42,6 +39,8 @@ import {
   Pencil,
   Paperclip,
   Plus,
+  Trash2,
+  Undo2,
   Search,
   UserCheck,
   RefreshCw,
@@ -121,6 +120,12 @@ function migrateCards(cards: PipelineCard[]): { cards: PipelineCard[]; changed: 
     return card;
   });
   return { cards: migrated, changed };
+}
+
+interface DismissedStore {
+  novos: string[];
+  relacionamento: string[];
+  names?: Record<string, string>;
 }
 
 interface PipelineConfig {
@@ -266,6 +271,15 @@ export default function Home() {
     }
   }, [cards, setCards]);
   const { data: settingsData } = useCrmData<{ pipelineRules?: LegacyPipelineRules }>("settings", {}, { autoSave: false });
+  const { data: dismissedStore, setData: setDismissedStore, saveData: saveDismissed } = useCrmData<DismissedStore>("pipeline-dismissed", { novos: [], relacionamento: [] }, { autoSave: false });
+  const saveDismissedStore = async (next: DismissedStore) => {
+    await saveDismissed(next);
+    setDismissedStore(next);
+  };
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const selectedCardId = selectedCard?.id;
+  const dismissedForActive = dismissedStore[activePipelineId] ?? [];
   const { data: stageStore, setData: setStageStore, saveData: saveStageStore } = useCrmData<StageConfigStore>("pipeline-stages", { stages: {} }, { autoSave: false });
   const [editingStageId, setEditingStageId] = useState<StageId | null>(null);
   const stageConfigs = useMemo(
@@ -333,6 +347,10 @@ export default function Home() {
       });
     return () => controller.abort();
   }, [selectedContactId]);
+
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [selectedCardId]);
 
   useEffect(() => {
     if (!selectedCard) return;
@@ -538,6 +556,41 @@ export default function Home() {
     setSelectedCard((prev) => prev && prev.id === selectedCard.id ? { ...prev, [field]: value } : prev);
   };
 
+  const deleteSelectedCard = async () => {
+    if (!selectedCard) return;
+    const card = selectedCard;
+    try {
+      if (card.contactId) {
+        const current = dismissedStore[card.pipelineId] ?? [];
+        if (!current.includes(card.contactId)) {
+          await saveDismissedStore({
+            ...dismissedStore,
+            [card.pipelineId]: [...current, card.contactId],
+            names: { ...(dismissedStore.names ?? {}), [card.contactId]: card.cliente },
+          });
+        }
+      }
+      setCards((existing) => existing.filter((item) => item.id !== card.id));
+      setSelectedCard(null);
+      setConfirmingDelete(false);
+      toast.success("Card excluído", `${card.cliente} foi removido da pipeline.`);
+    } catch (error) {
+      toast.error("Não foi possível excluir", error instanceof Error ? error.message : "Tente novamente.");
+    }
+  };
+
+  const restoreDismissed = async (contactId: string) => {
+    try {
+      await saveDismissedStore({
+        ...dismissedStore,
+        [activePipelineId]: dismissedForActive.filter((id) => id !== contactId),
+      });
+      toast.success("Contato restaurado", "Ele volta à pipeline na próxima sincronização.");
+    } catch (error) {
+      toast.error("Não foi possível restaurar", error instanceof Error ? error.message : "Tente novamente.");
+    }
+  };
+
   const addObservationToCard = (texto: string) => {
     if (!selectedCard || !texto.trim()) return;
     const obs: DealObservation = { id: generateId(), texto: texto.trim(), autor: "Usuário", criadoEm: new Date().toISOString() };
@@ -589,28 +642,7 @@ export default function Home() {
   const relacionamentoCount = useMemo(() => cards.filter((card) => card.pipelineId === "relacionamento").length, [cards]);
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] dark:bg-[#030d29] text-slate-800 dark:text-slate-100 transition-colors">
-      {/* Sidebar de Navegação */}
-      <Sidebar />
-
-      {/* Conteúdo Central */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar estilo Dribbble */}
-        <header className="h-16 mx-4 mt-4 bg-white dark:bg-[#051647] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm px-6 sm:px-8 flex items-center justify-between gap-4 transition-colors">
-          {/* Breadcrumb à esquerda */}
-          <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 font-medium">
-            <span>Workspace</span>
-            <span className="text-slate-300 dark:text-slate-600">/</span>
-            <strong className="text-slate-900 dark:text-white font-semibold">
-              Pipelines
-            </strong>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <NotificationDropdown isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
-          </div>
-        </header>
+    <div className="flex flex-col min-w-0 text-slate-800 dark:text-slate-100 transition-colors">
 
         {/* Cabeçalho do Pipeline estilo Dribbble */}
         <div className="px-6 sm:px-8 pt-8 pb-4">
@@ -652,6 +684,12 @@ export default function Home() {
               </button>
             </div>
             <div className="flex items-center gap-3">
+              {dismissedForActive.length > 0 && (
+                <button type="button" onClick={() => setShowDismissed(true)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+                  <Trash2 className="h-4 w-4" />
+                  Excluídos ({dismissedForActive.length})
+                </button>
+              )}
               <button type="button" onClick={() => void reloadPipeline()} disabled={cardsLoading} aria-label="Atualizar pipeline" title="Atualizar pipeline" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${cardsLoading ? "animate-spin" : ""}`} />
                 Atualizar
@@ -913,7 +951,6 @@ export default function Home() {
             </div>
           )}
         </main>
-      </div>
 
       {editingStage && (
         <StageEditorDialog
@@ -932,10 +969,16 @@ export default function Home() {
           recipientName={messageCard.cliente}
           recipientPhone={formatPhone(messageCard.telefone)}
           onClose={() => setMessageCard(null)}
-          onSend={async ({ text, files }) => {
+          onSend={async ({ text, files, template }) => {
             const body = new FormData();
             body.set("phone", messageCard.telefone);
             body.set("text", text);
+            if (template) {
+              body.set("templateName", template.name);
+              body.set("templateLanguage", template.language);
+              body.set("templateParams", JSON.stringify(template.params));
+              if (template.image) body.set("headerImage", template.image);
+            }
             files.forEach((file) => body.append("files", file));
             const response = await fetch("/api/whatsapp/send", { method: "POST", body });
             if (!response.ok) {
@@ -1281,6 +1324,32 @@ export default function Home() {
         </div>
       )}
 
+      {showDismissed && (
+        <EntityDialog
+          titleId="dismissed-title"
+          title="Contatos excluídos da pipeline"
+          description={`${pipelineMeta[activePipelineId].titulo}: não são recriados pela sincronização automática.`}
+          onClose={() => setShowDismissed(false)}
+        >
+          <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
+            {dismissedForActive.length === 0 && <li className="text-sm text-slate-500 dark:text-slate-400">Nenhum contato excluído.</li>}
+            {dismissedForActive.map((contactId) => (
+              <li key={contactId} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+                <span className="min-w-0 truncate text-sm font-medium text-slate-900 dark:text-white">{dismissedStore.names?.[contactId] ?? "Contato sem nome"}</span>
+                <button
+                  type="button"
+                  onClick={() => void restoreDismissed(contactId)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-[#002187] hover:bg-white dark:border-slate-600 dark:text-[#C4D600] dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Restaurar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </EntityDialog>
+      )}
+
       {selectedCard && (
         <EntityDialog
           titleId="customer-details-title"
@@ -1288,6 +1357,7 @@ export default function Home() {
           description={selectedCard.tag}
           onClose={() => setSelectedCard(null)}
           size="lg"
+          fixedHeight
         >
           <div className="flex h-full min-h-0 flex-col">
             {/* Fixed header with avatar and tag */}
@@ -1299,7 +1369,47 @@ export default function Home() {
                 <h2 className="truncate text-base font-bold text-slate-900 dark:text-white">{selectedCard.cliente}</h2>
                 <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${selectedCard.tagColor}`}>{selectedCard.tag}</span>
               </div>
-            </div>
+              {confirmingDelete ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="hidden text-xs text-slate-600 dark:text-slate-300 sm:inline">Excluir da pipeline?</span>
+                  <button
+                    type="button"
+                    onClick={() => void deleteSelectedCard()}
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700 cursor-pointer hover:cursor-pointer"
+                  >
+                    Confirmar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(false)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Excluir
+                </button>
+              )}
+                             <button
+                               type="button"
+                               onClick={() => {
+                                 setMessageCard(selectedCard);
+                                 setSelectedCard(null);
+                               }}
+                               className="flex shrink-0 items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
+                               title="Enviar mensagem"
+                             >
+                               <WhatsAppIcon className="h-3.5 w-3.5 fill-white" />
+                               <span>Enviar mensagem</span>
+                             </button>
+                           </div>
 
             {/* Tab bar */}
             <div className="mt-3 flex shrink-0 gap-1 border-b border-slate-200 dark:border-slate-700">

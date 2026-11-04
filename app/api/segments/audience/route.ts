@@ -25,7 +25,7 @@ const LAST_PURCHASE_DATE = Prisma.sql`(CASE
   WHEN c."lastPurchaseDate" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN to_date(left(c."lastPurchaseDate", 10), 'YYYY-MM-DD')
 END)`;
 
-type StoreRecord = { number: number; neighborhoods: string[]; city: string | null; radiusKm: number; lat: number | null; lng: number | null };
+type StoreRecord = { id: string; name: string; neighborhoods: string[]; city: string | null; radiusKm: number; lat: number | null; lng: number | null };
 
 const NORMALIZED_NEIGHBORHOOD = Prisma.sql`translate(upper(btrim(c.neighborhood)), 'ÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC')`;
 const NORMALIZED_CITY = Prisma.sql`translate(upper(btrim(c.city)), 'ÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC')`;
@@ -46,8 +46,8 @@ function withinRadius(store: StoreRecord): Prisma.Sql {
       AND ${own} <= ${store.radiusKm}
       AND NOT EXISTS (
         SELECT 1 FROM "Store" o
-        WHERE o.active AND o.lat IS NOT NULL AND o.lng IS NOT NULL AND o.number <> ${store.number}
-          AND (${other} < ${own} OR (${other} = ${own} AND o.number < ${store.number}))
+        WHERE o.active AND o.lat IS NOT NULL AND o.lng IS NOT NULL AND o.id <> ${store.id}
+          AND (${other} < ${own} OR (${other} = ${own} AND o.name < ${store.name}))
       )
   )`;
 }
@@ -132,15 +132,15 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
   }
 }
 
-function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: Map<number, StoreRecord>): Prisma.Sql {
+function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: Map<string, StoreRecord>): Prisma.Sql {
   if (criterion.regras && criterion.regras.length > 0) {
     return Prisma.sql`(${Prisma.join(criterion.regras.map(ruleCondition), " AND ")})`;
   }
   if (criterion.tipo === "loja") {
-    const store = stores.get(Number(criterion.id.replace(/^store-/, "")));
+    const store = stores.get(criterion.id.replace(/^store-/, ""));
     if (!store) return Prisma.sql`FALSE`;
     // Direct link: the store of the contact's latest sale. The store neighborhood and the service radius add nearby customers.
-    const bySale = Prisma.sql`btrim(c.store) = ${String(store.number)}`;
+    const bySale = Prisma.sql`btrim(c.store) = ${store.name}`;
     const alternatives = [bySale];
     if (store.neighborhoods.length > 0) {
       const sameNeighborhood = Prisma.sql`${NORMALIZED_NEIGHBORHOOD} = ANY(${store.neighborhoods}::text[])`;
@@ -172,11 +172,11 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
 export async function GET() {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
-  const stores = await prisma.store.findMany({ orderBy: { number: "asc" }, select: { number: true, active: true } });
+  const stores = await prisma.store.findMany({ orderBy: { name: "asc" }, select: { active: true } });
   return Response.json({ data: stores });
 }
 
-async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<number, StoreRecord>, includeRecipients: boolean): Promise<{ count: number; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
+async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean): Promise<{ count: number; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
   if (criteria.length === 0) return { count: 0, recipients: includeRecipients ? [] : undefined };
   const conditions = criteria.map((criterion) => criterionCondition(criterion, stores));
   if (includeRecipients) {
@@ -217,7 +217,7 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Critérios inválidos." }, { status: 400 });
 
-  const stores = new Map((await prisma.store.findMany()).map((store) => [store.number, store]));
+  const stores = new Map((await prisma.store.findMany()).map((store) => [store.name, store]));
   const counts: Record<string, number> = {};
   const recipients: Record<string, { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[]> = {};
 

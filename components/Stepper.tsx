@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import {
 Children,
 isValidElement,
@@ -614,7 +614,7 @@ ref={rootRef}
 role="dialog"
 aria-modal="true"
 aria-label={modalTitle}
-className={`${ROOT_CLASS} h-[min(640px,90vh)] max-h-[90vh] w-full max-w-xl min-h-0 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${FRAMED_CLASS} ${stepCircleContainerClassName} ${className}`
+className={`${ROOT_CLASS} h-[min(640px,90vh)] max-h-[90vh] max-w-xl overflow-hidden border border-slate-200 !bg-white !p-5 !shadow-2xl !rounded-2xl dark:border-slate-700 dark:!bg-[#07194f] sm:!p-6 ${rail ? 'flex-row items-stretch' : 'flex-col'} ${FRAMED_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}

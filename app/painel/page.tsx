@@ -25,11 +25,9 @@ import {
   Star,
   Target,
 } from "lucide-react";
-import { Sidebar } from "@/components/Sidebar";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { ThemeSwitch } from "@/components/ThemeSwitch";
-import Link from "next/link";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import Link from "next/link";
 
 type Period = "7d" | "30d" | "12m";
 interface DashboardData {
@@ -52,7 +50,6 @@ const stageLabels: Record<string, string> = {
   recompra: "Recompra",
   reativacao: "Reativação",
 };
-const stageColors = ["#002187", "#051647", "#C4D600", "#F7915E", "#002187", "#051647"];
 const categoryLabels: Record<string, { label: string; color: string }> = {
   cliente: { label: "Clientes", color: "#002187" },
   lead: { label: "Leads", color: "#F7915E" },
@@ -65,15 +62,17 @@ const toLocalDateKey = (date: Date) =>
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value);
 
-const formatCompactNumber = (value: number): string => {
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}MM`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}M`;
-  return String(value);
+const trimDecimal = (n: number) => n.toFixed(1).replace(/\.0$/, "");
+const formatCompact = (value: number) => {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${trimDecimal(value / 1_000_000)}MM`;
+  if (abs >= 1_000) return `${trimDecimal(value / 1_000)}M`;
+  return Math.round(value).toLocaleString("pt-BR");
 };
+const formatCurrencyCompact = (value: number) => `R$ ${formatCompact(value)}`;
 
 export default function PainelPage() {
-  const { isDark, toggleTheme } = useCrmTheme();
+  const { isDark } = useCrmTheme();
   const [period, setPeriod] = useState<Period>("30d");
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [dashboardError, setDashboardError] = useState("");
@@ -85,10 +84,6 @@ export default function PainelPage() {
     setDashboardError("");
     fetch("/api/dashboard")
       .then(async (response) => {
-        const contentType = response.headers.get("content-type") ?? "";
-        if (!contentType.includes("application/json")) {
-          throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
-        }
         const result = await response.json() as { data?: DashboardData; error?: string };
         if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível carregar os indicadores.");
         setCurrentDate(new Date());
@@ -156,9 +151,9 @@ export default function PainelPage() {
     stage: categoryLabels[contact.category]?.label ?? contact.category,
   }));
   const metrics = [
-    { label: "Receita no período", value: formatCompactNumber(rangeRevenue), note: `${matchingSales.reduce((sum, sale) => sum + sale.sales, 0).toLocaleString("pt-BR")} vendas importadas`, icon: CircleDollarSign, iconClass: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
-    { label: "Contatos", value: formatCompactNumber(dashboardData?.contacts ?? 0), note: "registros no banco", icon: ShoppingBag, iconClass: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
-    { label: "Compras", value: formatCompactNumber(dashboardData?.purchases ?? 0), note: `valor histórico ${formatCompactNumber(dashboardData?.totalRevenue ?? 0)}`, icon: Target, iconClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+    { label: "Receita no período", value: formatCurrencyCompact(rangeRevenue), note: `${formatCompact(matchingSales.reduce((sum, sale) => sum + sale.sales, 0))} vendas importadas`, icon: CircleDollarSign, iconClass: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
+    { label: "Contatos", value: formatCompact(dashboardData?.contacts ?? 0), note: "registros no banco", icon: ShoppingBag, iconClass: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
+    { label: "Compras", value: formatCompact(dashboardData?.purchases ?? 0), note: `valor histórico ${formatCurrencyCompact(dashboardData?.totalRevenue ?? 0)}`, icon: Target, iconClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
     { label: "NPS", value: dashboardData?.nps === null || dashboardData?.nps === undefined ? "—" : String(dashboardData.nps), note: `${dashboardData?.npsResponses ?? 0} respostas registradas`, icon: Star, iconClass: "bg-orange-50 text-[#b94a15] dark:bg-orange-950/30 dark:text-[#F7915E]" },
   ];
 
@@ -175,22 +170,8 @@ export default function PainelPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f4f5f8] text-slate-800 transition-colors dark:bg-[#030d29] dark:text-slate-100">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-4 mt-4 flex h-16 items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 shadow-sm dark:border-slate-800 dark:bg-[#051647]">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-500 dark:text-slate-400">
-            <span>Workspace</span>
-            <span className="text-slate-300 dark:text-slate-600">/</span>
-            <strong className="font-semibold text-slate-900 dark:text-white">Painel</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
-            <button type="button" aria-label="Alertas" title="Alertas" className="topbar-icon-button bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">
-              <Bell className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
+    <div>
+      <div>
 
         <main className="space-y-5 px-6 pb-10 pt-8 sm:px-8">
           {dashboardError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{dashboardError}</p>}
@@ -199,7 +180,7 @@ export default function PainelPage() {
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Painel</h1>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Visão geral do desempenho e relacionamento com clientes.</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-300">
                 <CalendarDays className="h-4 w-4 text-slate-400" />
                 <span className="sr-only">Período do painel</span>
@@ -209,11 +190,11 @@ export default function PainelPage() {
                   <option value="12m">Últimos 12 meses</option>
                 </select>
               </label>
-              <button type="button" onClick={reloadDashboard} disabled={isLoading} aria-label="Atualizar painel" title="Atualizar painel" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
+              <button type="button" onClick={reloadDashboard} disabled={isLoading} aria-label="Atualizar painel" title="Atualizar painel" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                 Atualizar
               </button>
-              <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+              <button type="button" className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#051647] px-3 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
                 <Plus className="h-4 w-4" />
                 Novo negócio
               </button>
@@ -256,7 +237,7 @@ export default function PainelPage() {
                   <AreaChart data={revenueByPeriod} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid stroke={isDark ? "#1e335b" : "#e2e8f0"} vertical={false} strokeDasharray="3 4" />
                     <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} dy={8} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} tickFormatter={(value: number) => new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 0 }).format(value)} width={48} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} tickFormatter={(value: number) => formatCompact(value)} width={48} />
                     <Tooltip contentStyle={tooltipStyle} formatter={(value) => formatCurrency(Number(value))} />
                     <Area isAnimationActive={false} type="monotone" dataKey="receita" stroke={revenueColor} strokeWidth={2.5} fill={revenueColor} fillOpacity={0.1} activeDot={{ r: 4, fill: "#C4D600", stroke: "#051647", strokeWidth: 2 }} />
                   </AreaChart>
@@ -265,30 +246,19 @@ export default function PainelPage() {
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f] sm:p-5 xl:col-span-4" aria-label="Funil de novos clientes">
-              <div className="mb-4 flex items-end justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">Oportunidades por etapa</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Distribuição do funil de vendas</p>
-                </div>
-                <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">{totalPipeline} total</span>
+              <div className="mb-3">
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">Oportunidades por etapa</h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{totalPipeline} oportunidades registradas</p>
               </div>
               <div className="h-[250px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={pipelineData} layout="vertical" margin={{ top: 4, right: 28, left: 4, bottom: 4 }}>
+                  <BarChart data={pipelineData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 4 }}>
                     <CartesianGrid stroke={isDark ? "#1e335b" : "#e2e8f0"} horizontal={false} strokeDasharray="3 4" />
-                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} allowDecimals={false} />
-                    <YAxis type="category" dataKey="etapa" axisLine={false} tickLine={false} tick={{ fill: isDark ? "#cbd5e1" : "#475569", fontSize: 11, fontWeight: 500 }} width={108} />
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                      cursor={{ fill: isDark ? "rgba(196,214,0,0.08)" : "rgba(0,33,135,0.06)" }}
-                      formatter={(value, _name, props) => {
-                        const num = Number(value);
-                        if (!Number.isFinite(num)) return ["0 oportunidades", "Etapa"];
-                        return [`${num} oportunidade${num === 1 ? "" : "s"}`, (props as { payload?: { etapa?: string } }).payload?.etapa ?? "Etapa"];
-                      }}
-                    />
-                    <Bar isAnimationActive={false} dataKey="deals" radius={[0, 4, 4, 0]} barSize={20} label={{ position: "right", fill: isDark ? "#e2e8f0" : "#334155", fontSize: 11, fontWeight: 600, offset: 6 }}>
-                      {pipelineData.map((_entry, index) => <Cell key={`stage-${index}`} fill={stageColors[index % stageColors.length]} />)}
+                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} />
+                    <YAxis type="category" dataKey="etapa" axisLine={false} tickLine={false} tick={{ fill: isDark ? "#cbd5e1" : "#475569", fontSize: 10 }} width={104} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={(value) => `${value} deals`} />
+                    <Bar isAnimationActive={false} dataKey="deals" radius={[0, 6, 6, 0]} barSize={18}>
+                      {pipelineData.map((entry, index) => <Cell key={entry.etapa} fill={index === 2 ? "#C4D600" : "#002187"} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>

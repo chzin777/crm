@@ -1,46 +1,34 @@
 "use client";
-
-import { useCallback, useEffect, useSyncExternalStore } from "react";
-
-const themeKey = "otb-crm-theme";
-const themeChangeEvent = "otb-crm-theme-change";
-type Theme = "light" | "dark";
-
-function getThemeSnapshot(): Theme {
-  const savedTheme = localStorage.getItem(themeKey);
-  if (savedTheme === "dark" || savedTheme === "light") return savedTheme;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function subscribeToTheme(onChange: () => void) {
-  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  window.addEventListener("storage", onChange);
-  window.addEventListener(themeChangeEvent, onChange);
-  mediaQuery.addEventListener("change", onChange);
-  return () => {
-    window.removeEventListener("storage", onChange);
-    window.removeEventListener(themeChangeEvent, onChange);
-    mediaQuery.removeEventListener("change", onChange);
-  };
-}
-
-function applyTheme(theme: Theme) {
-  localStorage.setItem(themeKey, theme);
-  document.documentElement.classList.toggle("dark", theme === "dark");
-  window.dispatchEvent(new Event(themeChangeEvent));
-}
+import { useEffect, useState } from "react";
 
 export function useCrmTheme() {
-  const theme = useSyncExternalStore(subscribeToTheme, getThemeSnapshot, () => "light");
-  const isDark = theme === "dark";
+  const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-  }, [isDark]);
+    const stored = window.localStorage.getItem("crm-theme");
+    if (stored === "dark") {
+      setIsDark(true);
+      document.documentElement.classList.add("dark");
+    } else if (stored === "light") {
+      setIsDark(false);
+      document.documentElement.classList.remove("dark");
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      setIsDark(true);
+      document.documentElement.classList.add("dark");
+    }
+  }, []);
 
-  const toggleTheme = useCallback(() => {
-    applyTheme(isDark ? "light" : "dark");
-  }, [isDark]);
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    if (next) {
+      document.documentElement.classList.add("dark");
+      window.localStorage.setItem("crm-theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      window.localStorage.setItem("crm-theme", "light");
+    }
+  };
 
   return { isDark, toggleTheme };
 }

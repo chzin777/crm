@@ -113,13 +113,19 @@ function LoginContent() {
         setErrorMessage("E-mail ou senha inválidos. Confira seus dados e tente novamente.");
         return;
       }
+
+      // Better Auth may not set the session cookie automatically behind Cloudflare Tunnel.
+      // Manually set it from the token returned in the response body.
+      if (result.data?.token) {
+        document.cookie = `better-auth.session_token=${result.data.token}; path=/; max-age=86400; SameSite=Lax; Secure`;
+      }
+
       const callbackUrl = searchParams.get("callbackUrl");
       const destination =
         callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
           ? callbackUrl
           : "/painel";
-      router.replace(destination);
-      router.refresh();
+      window.location.href = destination;
     } catch {
       setErrorMessage("Não foi possível entrar agora. Verifique sua conexão e tente novamente.");
     } finally {

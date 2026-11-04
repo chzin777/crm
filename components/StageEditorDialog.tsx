@@ -173,7 +173,7 @@ export function StageEditorDialog({ stageName, config, position, stageCount, onC
           ))}
         </div>
 
-        <div role="tabpanel" className="h-[28rem] min-h-0 shrink-0 space-y-4 overflow-y-auto pr-1">
+        <div role="tabpanel" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           {tab === "geral" && (
             <>
               <label className={labelClass}>

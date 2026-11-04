@@ -11,6 +11,15 @@
   --color-otb-orange: #F7915E;
 }
 
+/* Inter Typography System */
+html {
+  font-size: 17px;
+}
+
+body {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
 :root {
   --background: #f4f5f8;
   --foreground: #0f172a;
@@ -25,7 +34,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-graphik-regular), var(--font-graphik-light), Arial, Helvetica, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
