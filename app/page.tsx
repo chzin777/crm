@@ -1077,12 +1077,19 @@ export default function Home() {
                     />
                     <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
-                    {/* Dropdown ancorado de forma relativa (evita quebrar no scroll da página) */}
-                    {isDealContactOpen && (
+                    {/* Dropdown renderizado via Portal no body para evitar corte por overflow do modal */}
+                    {isDealContactOpen && dealContactRef.current && createPortal(
                       <ul
                         id="deal-contact-listbox"
                         role="listbox"
-                        className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                        style={{
+                          position: "fixed",
+                          top: dealContactRef.current.getBoundingClientRect().bottom + 4,
+                          left: dealContactRef.current.getBoundingClientRect().left,
+                          width: dealContactRef.current.getBoundingClientRect().width,
+                          zIndex: 9999,
+                        }}
+                        className="max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
                       >
                         {dealContactSearching ? (
                           <li className="px-3 py-2">
@@ -1119,7 +1126,8 @@ export default function Home() {
                             );
                           })
                         )}
-                      </ul>
+                      </ul>,
+                      document.body
                     )}
                   </div>
                 </div>
