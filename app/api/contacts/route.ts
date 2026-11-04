@@ -7,7 +7,7 @@ import { invalidateCache } from "@/lib/cache";
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
   telefone: z.string().trim().max(40).default(""),
-  email: z.string().trim().email().or(z.literal("")).default(""),
+  email: z.union([z.string().trim().email(), z.literal("")]).transform((v) => v.trim()).default(""),
   dataNascimento: z.string().trim().max(32).default(""),
   categoria: z.enum(["cliente", "lead", "nps", "inativo"]),
   segmento: z.string().trim().max(200).default(""),
