@@ -353,20 +353,23 @@ export default function Home() {
   }, [selectedCardId]);
 
   useEffect(() => {
-    if (!selectedCard) return;
+    if (!selectedCard && !isCreateDealOpen) return;
 
     const previousFocus = dialogReturnFocusRef.current;
-    closeDialogButtonRef.current?.focus();
+    if (selectedCard) closeDialogButtonRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelectedCard(null);
+      if (event.key === "Escape") {
+        if (isCreateDealOpen) setIsCreateDealOpen(false);
+        else if (selectedCard) setSelectedCard(null);
+      }
     };
 
     window.addEventListener("keydown", closeOnEscape);
     return () => {
       window.removeEventListener("keydown", closeOnEscape);
-      previousFocus?.focus();
+      if (selectedCard) previousFocus?.focus();
     };
-  }, [selectedCard]);
+  }, [selectedCard, isCreateDealOpen]);
 
   // Drag and Drop Handlers
   const handleDragStart = (e: React.DragEvent, cardId: string) => {
@@ -991,18 +994,17 @@ export default function Home() {
       )}
 
       {isCreateDealOpen && (
-        <div className="w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-[#07194f] sm:p-6">
-          {/* Cabeçalho */}
-          <div className="mb-6">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              {editingCard ? "Editar oportunidade" : "Nova oportunidade"}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {editingCard
-                ? "Atualize os dados desta oportunidade."
-                : "Vincule uma oportunidade a um contato existente no banco."}
-            </p>
-          </div>
+        <EntityDialog
+          titleId="deal-dialog-title"
+          title={editingCard ? "Editar oportunidade" : "Nova oportunidade"}
+          description={
+            editingCard
+              ? "Atualize os dados desta oportunidade."
+              : "Vincule uma oportunidade a um contato existente no banco."
+          }
+          onClose={() => setIsCreateDealOpen(false)}
+          size="lg"
+        >
 
           <Stepper
             initialStep={1}
@@ -1321,7 +1323,7 @@ export default function Home() {
               </div>
             </Step>
           </Stepper>
-        </div>
+        </EntityDialog>
       )}
 
       {showDismissed && (
