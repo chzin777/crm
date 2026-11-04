@@ -10,8 +10,9 @@ const createPrismaClient = () => {
   // Conexão nativa do Prisma: respeita @@map/@map corretamente.
   // O @prisma/adapter-pg v7.x tem incompatibilidade conhecida com o
   // prismaAdapter do Better Auth (P2022 ColumnNotFound "(not available)").
-  const datasourceUrl = createDatabaseUrl(process.env);
-  return new PrismaClient({ datasourceUrl });
+  // Prisma v7 com output customizado exige DATABASE_URL como env var.
+  process.env.DATABASE_URL = createDatabaseUrl(process.env);
+  return new PrismaClient();
 };
 
 let instance: PrismaClient | undefined;
