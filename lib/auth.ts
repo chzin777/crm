@@ -29,7 +29,7 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   trustedOrigins: ["https://crm.oticasbrasil.com.br"],
   secret,
-  database: createDatabaseUrl(process.env),
+  database: { connectionString: createDatabaseUrl(process.env) },
   session: {
     expiresIn: 60 * 60 * 24, // 24 hours in seconds
     updateAge: 60 * 60 * 24, // refresh only at the end of the 24h window (no sliding expiry)
