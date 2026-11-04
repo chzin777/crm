@@ -11,54 +11,53 @@ model User {
   id               String     @id
   name             String
   email            String     @unique
-  jobTitle         String?
-  teamLevel        String     @default("Operador")
-  roleId           String?
+  jobTitle         String?    @map("jobtitle")
+  teamLevel        String     @default("Operador") @map("teamlevel")
+  roleId           String?    @map("roleid")
   roleRef          Role?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  emailVerified    Boolean    @default(false)
+  emailVerified    Boolean    @default(false) @map("emailverified")
   image            String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  createdAt        DateTime   @default(now()) @map("createdat")
+  updatedAt        DateTime   @updatedAt @map("updatedat")
   role             String     @default("user")
   banned           Boolean    @default(false)
-  banReason        String?
-  banExpires       DateTime?
+  banReason        String?    @map("banreason")
+  banExpires       DateTime?  @map("banexpires")
   sessions         Session[]
   accounts         Account[]
   npsResponses     NpsResponse[]
-
-  }
+}
 
 model Session {
   id             String   @id
-  expiresAt      DateTime
+  expiresAt      DateTime @map("expiresat")
   token          String   @unique
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  ipAddress      String?
-  userAgent      String?
-  userId         String
+  createdAt      DateTime @default(now()) @map("createdat")
+  updatedAt      DateTime @updatedAt @map("updatedat")
+  ipAddress      String?  @map("ipaddress")
+  userAgent      String?  @map("useragent")
+  userId         String   @map("userid")
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  impersonatedBy String?
+  impersonatedBy String?  @map("impersonatedby")
 
   @@index([userId])
 }
 
 model Account {
   id                    String    @id
-  accountId             String
-  providerId            String
-  userId                String
+  accountId             String    @map("accountid")
+  providerId            String    @map("providerid")
+  userId                String    @map("userid")
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
+  accessToken           String?   @map("accesstoken")
+  refreshToken          String?   @map("refreshtoken")
+  idToken               String?   @map("idtoken")
+  accessTokenExpiresAt  DateTime? @map("accesstokenexpiresat")
+  refreshTokenExpiresAt DateTime? @map("refreshtokenexpiresat")
   scope                 String?
   password              String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  createdAt             DateTime  @default(now()) @map("createdat")
+  updatedAt             DateTime  @updatedAt @map("updatedat")
 
   @@unique([providerId, accountId])
   @@index([userId])
