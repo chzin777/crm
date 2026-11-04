@@ -184,11 +184,13 @@ export default function Home() {
   const [dealContactSearching, setDealContactSearching] = useState(false);
   const dealContactSearchRef = useRef(dealContactSearch);
   dealContactSearchRef.current = dealContactSearch;
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
 
   useEffect(() => {
     const term = dealContactSearch.trim();
     if (!term) {
-      setDealContactResults(contacts);
+      setDealContactResults(contactsRef.current);
       setDealContactSearching(false);
       return;
     }
@@ -216,7 +218,7 @@ export default function Home() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [dealContactSearch, contacts]);
+  }, [dealContactSearch]);
 
   // Click-outside handler for deal contact dropdown
   useEffect(() => {
