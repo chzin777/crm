@@ -58,9 +58,8 @@ export async function GET(request: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const andConditions: Array<{ OR: Array<Record<string, any>> }> = [];
 
-  // Tokens estritos (>=2 chars): buscam em name, phone, segment (não em email para evitar ruído de domínio)
+  // Tokens estritos (>=2 chars): buscam em name, phone, segment
   for (const token of strictTokens) {
-    const pattern = `%${token}%`;
     andConditions.push({
       OR: [
         { name: { contains: token, mode: "insensitive" } },
@@ -70,19 +69,20 @@ export async function GET(request: Request) {
     });
   }
 
-  // Tokens curtos (1 char): apenas prefixo do nome
+  // Tokens curtos (1 char): casam com contém em name, segment ou phone
+  // A filtragem fina (início de palavra) será feita no ranking em memória
   for (const token of shortTokens) {
     andConditions.push({
       OR: [
-        { name: { startsWith: token, mode: "insensitive" } },
+        { name: { contains: token, mode: "insensitive" } },
+        { segment: { contains: token, mode: "insensitive" } },
+        { phone: { contains: token, mode: "insensitive" } },
       ],
     });
   }
 
   const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
 
-  // Buscar todos os resultados que casam (sem paginação no banco — será feita em memória após ordenação)
-  // Limitamos a um teto razoável para evitar sobrecarga
   const MAX_FETCH = 2000;
 
   const [allMatches, total] = await Promise.all([
@@ -99,22 +99,39 @@ export async function GET(request: Request) {
   ]);
 
   // Ordenação por relevância em memória
-  const primaryToken = (strictTokens[0] || shortTokens[0] || "").toLowerCase();
+  const firstToken = (strictTokens[0] || "").toLowerCase();
+  const secondToken = (strictTokens[1] || shortTokens[0] || "").toLowerCase();
 
   const ranked = allMatches.map((c) => {
     const nameLower = c.name.toLowerCase();
+    const nameWords = nameLower.split(/\s+/);
+    const segmentLower = (c.segment ?? "").toLowerCase();
+    const phoneLower = (c.phone ?? "").toLowerCase();
+
     let score = 3; // default: outros
 
-    if (primaryToken && nameLower.startsWith(primaryToken)) {
-      score = 0; // nome começa exatamente com o primeiro token
-    } else if (primaryToken) {
-      // Verifica se alguma palavra do nome começa com o token
-      const words = nameLower.split(/\s+/);
-      if (words.some((w) => w.startsWith(primaryToken))) {
-        score = 1; // alguma palavra do nome começa com o token
-      } else if (c.phone && c.phone.toLowerCase().includes(primaryToken)) {
-        score = 2; // match apenas no telefone
+    // Peso 0: primeiro nome começa com o primeiro termo
+    if (firstToken && nameLower.startsWith(firstToken)) {
+      // Se há segundo termo, pontue melhor quem também casa o segundo termo
+      if (secondToken) {
+        const secondMatchesWord = nameWords.slice(1).some((w) => w.startsWith(secondToken));
+        const secondMatchesSegment = segmentLower.startsWith(secondToken);
+        if (secondMatchesWord || secondMatchesSegment) {
+          score = 0; // topo absoluto: primeiro nome + segundo termo casando
+        } else {
+          score = 0; // ainda topo, mas sem match do segundo termo
+        }
+      } else {
+        score = 0;
       }
+    }
+    // Peso 1: qualquer palavra do nome começa com o primeiro termo
+    else if (firstToken && nameWords.some((w) => w.startsWith(firstToken))) {
+      score = 1;
+    }
+    // Peso 2: casou apenas em telefone ou segmento
+    else if (firstToken && (phoneLower.includes(firstToken) || segmentLower.includes(firstToken))) {
+      score = 2;
     }
 
     return { ...c, _score: score };
