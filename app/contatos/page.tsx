@@ -129,6 +129,13 @@ function ContactEditTabs({
   const [activeTab, setActiveTab] = useState<ContactTab>("dados");
   const [purchases, setPurchases] = useState<{ produto: string; data: string; valor: string }[]>([]);
   const [purchasesLoading, setPurchasesLoading] = useState(false);
+  const [communications, setCommunications] = useState<{
+    whatsapp: { id: string; status: string; sentAt: string | null; deliveredAt: string | null; readAt: string | null; failedAt: string | null; failureReason: string | null; createdAt: string }[];
+    emails: { id: string; subject: string; status: string; sentAt: string | null }[];
+    contactPhone: string;
+    contactEmail: string;
+  }>({ whatsapp: [], emails: [], contactPhone: "", contactEmail: "" });
+  const [commsLoading, setCommsLoading] = useState(false);
 
   useEffect(() => {
     if (activeTab !== "historico") return;
@@ -144,6 +151,24 @@ function ContactEditTabs({
       })
       .finally(() => {
         if (!cancelled) setPurchasesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedContact.id]);
+
+  useEffect(() => {
+    if (activeTab !== "comunicacoes") return;
+    let cancelled = false;
+    setCommsLoading(true);
+    fetch(`/api/contacts/${encodeURIComponent(selectedContact.id)}/communications`)
+      .then((res) => res.json())
+      .then((result) => {
+        if (!cancelled && result.data) setCommunications(result.data);
+      })
+      .catch(() => {
+        if (!cancelled) setCommunications({ whatsapp: [], emails: [], contactPhone: "", contactEmail: "" });
+      })
+      .finally(() => {
+        if (!cancelled) setCommsLoading(false);
       });
     return () => { cancelled = true; };
   }, [activeTab, selectedContact.id]);
@@ -340,38 +365,87 @@ function ContactEditTabs({
 
         {activeTab === "comunicacoes" && (
           <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">WhatsApp</h3>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Últimas conversas com o contato.</p>
-            </div>
-            <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center dark:border-slate-700">
-              <WhatsAppIcon className="mx-auto h-6 w-6 fill-slate-400" />
-              <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Integração com WhatsApp não configurada</p>
-              <p className="mt-1 text-[10px] text-slate-400">Conecte uma API de mensagens para visualizar o histórico de conversas.</p>
-              <a
-                href={`https://wa.me/55${form.telefone.replace(/\D/g, "")}`}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-flex h-8 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
-              >
-                <WhatsAppIcon className="h-3.5 w-3.5 fill-current" />
-                Abrir WhatsApp
-                <ArrowUpRight className="h-3 w-3" />
-              </a>
-            </div>
+            {commsLoading ? (
+              <LoadingSpinner label="Carregando comunicações..." className="w-full justify-center py-8" />
+            ) : (
+              <>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white">WhatsApp</h3>
+                    <a
+                      href={`https://wa.me/55${communications.contactPhone.replace(/\D/g, "") || form.telefone.replace(/\D/g, "")}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#051647] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
+                    >
+                      <WhatsAppIcon className="h-3 w-3 fill-current" />
+                      Abrir conversa
+                      <ArrowUpRight className="h-2.5 w-2.5" />
+                    </a>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Mensagens enviadas via campanhas do CRM.</p>
+                </div>
+                {communications.whatsapp.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center dark:border-slate-700">
+                    <WhatsAppIcon className="mx-auto h-5 w-5 fill-slate-400" />
+                    <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Nenhuma mensagem enviada</p>
+                    <p className="mt-1 text-[10px] text-slate-400">As mensagens de WhatsApp enviadas por campanhas aparecerão aqui.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {communications.whatsapp.map((msg) => {
+                      const statusLabel: Record<string, string> = { queued: "Na fila", sent: "Enviada", delivered: "Entregue", read: "Lida", failed: "Falhou" };
+                      const statusColor: Record<string, string> = {
+                        queued: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+                        sent: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+                        delivered: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+                        read: "bg-[#C4D600]/15 text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]",
+                        failed: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+                      };
+                      return (
+                        <div key={msg.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
+                          <div className="min-w-0 flex-1">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusColor[msg.status] ?? statusColor.queued}`}>
+                              {statusLabel[msg.status] ?? msg.status}
+                            </span>
+                            <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                              {formatDateDisplay(msg.sentAt ?? msg.createdAt)}
+                              {msg.failureReason && <span className="ml-2 text-red-500">· {msg.failureReason.slice(0, 60)}</span>}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-            <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">E-mails enviados</h3>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Histórico de comunicações por e-mail.</p>
-            </div>
-            <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center dark:border-slate-700">
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto h-6 w-6 text-slate-400">
-                <rect width="20" height="16" x="2" y="4" rx="2" />
-                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-              </svg>
-              <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Integração de e-mail não configurada</p>
-              <p className="mt-1 text-[10px] text-slate-400">Conecte um provedor de e-mail para rastrear envios automaticamente.</p>
-            </div>
+                <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">E-mails enviados</h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Comunicações por e-mail via Resend.</p>
+                </div>
+                {communications.emails.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center dark:border-slate-700">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto h-5 w-5 text-slate-400">
+                      <rect width="20" height="16" x="2" y="4" rx="2" />
+                      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                    </svg>
+                    <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Nenhum e-mail registrado</p>
+                    <p className="mt-1 text-[10px] text-slate-400">Os e-mails enviados via Resend aparecerão aqui quando integrados ao histórico do contato.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {communications.emails.map((email) => (
+                      <div key={email.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-semibold text-slate-900 dark:text-white">{email.subject}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{formatDateDisplay(email.sentAt)} · {email.status}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
