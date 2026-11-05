@@ -867,28 +867,27 @@ export default function CampanhasPage() {
             </section>
           )}
 
+          <div className="mb-6 flex flex-wrap items-center gap-3">
+            <label className="relative block w-full sm:w-72 md:w-80">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} aria-label="Buscar campanhas" placeholder="Buscar campanha ou público" className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+            </label>
+            <div role="tablist" aria-label="Filtrar campanhas" className="flex flex-wrap gap-1.5">
+              {filters.map((filter) => {
+                const count = filter === "Todas" ? campaigns.length : campaigns.filter((campaign) => campaign.status === filter).length;
+                return (
+                  <button key={filter} type="button" role="tab" aria-selected={activeFilter === filter} onClick={() => setActiveFilter(filter)} className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activeFilter === filter ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"}`}>
+                    {filter}<span className={`text-[10px] ${activeFilter === filter ? "opacity-75" : "text-slate-400"}`}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
-            <div className="flex flex-col gap-4 border-b border-slate-100 p-4 dark:border-slate-800 sm:p-5">
-              <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-                <div>
-                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">Biblioteca de campanhas</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{filteredCampaigns.length} de {campaigns.length} campanhas</p>
-                </div>
-                <label className="relative block w-full lg:max-w-sm">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} aria-label="Buscar campanhas" placeholder="Buscar campanha ou público" className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800/80 dark:text-white dark:focus:border-[#C4D600]" />
-                </label>
-              </div>
-              <div role="tablist" aria-label="Filtrar campanhas" className="flex flex-wrap gap-1.5">
-                {filters.map((filter) => {
-                  const count = filter === "Todas" ? campaigns.length : campaigns.filter((campaign) => campaign.status === filter).length;
-                  return (
-                    <button key={filter} type="button" role="tab" aria-selected={activeFilter === filter} onClick={() => setActiveFilter(filter)} className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activeFilter === filter ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"}`}>
-                      {filter}<span className={`text-[10px] ${activeFilter === filter ? "opacity-75" : "text-slate-400"}`}>{count}</span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Biblioteca de campanhas</h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{filteredCampaigns.length} de {campaigns.length} campanhas</p>
             </div>
 
             <div className="overflow-x-auto">
