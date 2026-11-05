@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "motion/react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
@@ -179,6 +180,7 @@ export default function Home() {
   const [dealContactSearch, setDealContactSearch] = useState("");
   const [isDealContactOpen, setIsDealContactOpen] = useState(false);
   const dealContactRef = useRef<HTMLDivElement>(null);
+  const dealContactListboxRef = useRef<HTMLUListElement>(null);
   const [dealContactResults, setDealContactResults] = useState<Contact[]>([]);
   const [dealContactSearching, setDealContactSearching] = useState(false);
   const dealContactSearchRef = useRef(dealContactSearch);
@@ -219,11 +221,14 @@ export default function Home() {
     };
   }, [dealContactSearch]);
 
-  // Click-outside handler for deal contact dropdown
+  // Click-outside handler for deal contact dropdown (ignora cliques no listbox via Portal)
   useEffect(() => {
     if (!isDealContactOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
-      if (dealContactRef.current && !dealContactRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const insideInput = dealContactRef.current?.contains(target);
+      const insideListbox = dealContactListboxRef.current?.contains(target);
+      if (!insideInput && !insideListbox) {
         setIsDealContactOpen(false);
         if (dealContactId) {
           const selected = contacts.find((c) => c.id === dealContactId) ?? dealContactResults.find((c) => c.id === dealContactId);
@@ -1080,12 +1085,20 @@ export default function Home() {
                     />
                     <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
-                    {/* Dropdown inline com absolute; onMouseDown evita que o blur do input feche antes da seleção */}
-                    {isDealContactOpen && (
+                    {/* Dropdown via Portal no body para evitar corte pelo overflow do Stepper; listboxRef + onMouseDown garantem clique-fora e seleção corretos */}
+                    {isDealContactOpen && dealContactRef.current && createPortal(
                       <ul
+                        ref={dealContactListboxRef}
                         id="deal-contact-listbox"
                         role="listbox"
-                        className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
+                        style={{
+                          position: "fixed",
+                          top: dealContactRef.current.getBoundingClientRect().bottom + 4,
+                          left: dealContactRef.current.getBoundingClientRect().left,
+                          width: dealContactRef.current.getBoundingClientRect().width,
+                          zIndex: 99999,
+                        }}
+                        className="max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
                       >
                         {dealContactSearching ? (
                           <li className="px-3 py-2">
@@ -1123,7 +1136,8 @@ export default function Home() {
                             );
                           })
                         )}
-                      </ul>
+                      </ul>,
+                      document.body
                     )}
                   </div>
                 </div>

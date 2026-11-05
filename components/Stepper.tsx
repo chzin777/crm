@@ -344,15 +344,12 @@ const observer = new ResizeObserver(measure);
 observer.observe(root);
 return () => observer.disconnect();
 }, [vertical, labelled, frame, total, kind]);
+// Altura dinâmica do viewport desativada para evitar que o modal achate quando o step tem pouco conteúdo.
+// O container pai (EntityDialog) já garante altura fixa via flex/h-[min(56rem,90vh)].
 useIsomorphicLayoutEffect(() => {
 const viewport = viewportRef.current;
 if (!viewport) return;
-heightRef.current = viewport.offsetHeight;
-const observer = new ResizeObserver(() => {
-heightRef.current = viewport.offsetHeight;
-});
-observer.observe(viewport);
-return () => observer.disconnect();
+heightRef.current = Math.max(viewport.offsetHeight, 380);
 }, []);
 // Transition animation effect
 useIsomorphicLayoutEffect(() => {
