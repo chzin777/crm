@@ -183,8 +183,8 @@ export default function UsuariosPage() {
       <main className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-5 dark:border-slate-800 dark:bg-[#051647]">
           <div>
-            <h1 className="text-2xl font-semibold text-[#051647] dark:text-white">Usuários</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Gerencie os usuários e seus cargos</p>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Usuários</h1>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Gerencie os usuários e seus cargos</p>
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
@@ -237,12 +237,15 @@ export default function UsuariosPage() {
                     </th>
                     <th className="px-6 py-3">Cargo</th>
                     <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {paged.map((user) => (
-                    <tr key={user.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-white/5">
+                    <tr
+                      key={user.id}
+                      onClick={() => openForm(user)}
+                      className="group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600]"
+                    >
                       <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{user.name}</td>
                       <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{user.email}</td>
                       <td className="px-6 py-4">
@@ -257,15 +260,6 @@ export default function UsuariosPage() {
                         ) : (
                           <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">Ativo</span>
                         )}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => openForm(user)}
-                          className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-[#002187] dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-[#C4D600]"
-                        >
-                          Editar
-                        </button>
                       </td>
                     </tr>
                   ))}

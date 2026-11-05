@@ -114,8 +114,8 @@ export default function CargosPage() {
       <main className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-5 dark:border-slate-800 dark:bg-[#051647]">
           <div>
-            <h1 className="text-2xl font-semibold text-[#051647] dark:text-white">Cargos</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Gerencie os cargos do sistema</p>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Cargos</h1>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Gerencie os cargos do sistema</p>
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
@@ -148,26 +148,23 @@ export default function CargosPage() {
                     <th className="px-6 py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("description")}><div className="flex items-center gap-1">Descrição <SortIndicator field="description" /></div></th>
                     <th className="px-6 py-3">Permissões</th>
                     <th className="px-6 py-3">Tipo</th>
-                    <th className="px-6 py-3 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filtered.map((role) => {
                     const pc = MODULES.filter((module) => role.permissions?.[module.key] === true).length;
                     return (
-                      <tr key={role.id} className="transition-colors hover:bg-slate-50 dark:hover:bg-white/5">
+                      <tr
+                        key={role.id}
+                        onClick={() => openForm(role)}
+                        className="group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600]"
+                      >
                         <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{role.name}</td>
                         <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{role.description || "—"}</td>
                         <td className="px-6 py-4"><span className="inline-flex items-center rounded-full bg-[#051647]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">{pc} de {MODULES.length} telas</span></td>
                         <td className="px-6 py-4">{role.isSystem
                           ? <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"><Lock className="h-3 w-3" /> Sistema</span>
                           : <span className="inline-flex items-center rounded-full bg-[#C4D600]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">Personalizado</span>}</td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button type="button" onClick={() => openForm(role)} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]" title="Editar"><Pencil className="h-4 w-4" /></button>
-                            {!role.isSystem && <button type="button" onClick={() => removeRole(role)} className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400" title="Excluir"><Trash2 className="h-4 w-4" /></button>}
-                          </div>
-                        </td>
                       </tr>
                     );
                   })}
