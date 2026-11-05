@@ -31,7 +31,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`h-[540px] max-h-[90vh] flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#07194f] ${size === "lg" ? "max-w-4xl" : "max-w-xl"}`}
+        className={`max-h-[90vh] flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#07194f] ${size === "lg" ? "h-[680px] max-w-5xl" : "h-[540px] max-w-xl"}`}
       >
         <header className="shrink-0 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
           <div className="flex items-start justify-between gap-4">

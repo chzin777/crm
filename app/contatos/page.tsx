@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
@@ -127,6 +127,8 @@ function ContactEditTabs({
   saveContact: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<ContactTab>("dados");
+  const initialFormRef = useRef(form);
+  const hasChanges = form.nome !== initialFormRef.current.nome || form.telefone !== initialFormRef.current.telefone || form.email !== initialFormRef.current.email || form.dataNascimento !== initialFormRef.current.dataNascimento || form.categoria !== initialFormRef.current.categoria || JSON.stringify(form.segmento) !== JSON.stringify(initialFormRef.current.segmento);
   const [purchases, setPurchases] = useState<{ produto: string; data: string; valor: string }[]>([]);
   const [purchasesLoading, setPurchasesLoading] = useState(false);
   const [communications, setCommunications] = useState<{
@@ -471,8 +473,13 @@ function ContactEditTabs({
         </button>
         <button
           type="button"
-          onClick={saveContact}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
+          disabled={!hasChanges}
+          onClick={() => { saveContact(); initialFormRef.current = { ...form }; }}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${
+            hasChanges
+              ? "bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95"
+              : "bg-slate-200 text-slate-400 cursor-not-allowed dark:bg-slate-800 dark:text-slate-500"
+          }`}
         >
           <Check className="h-3.5 w-3.5" />
           Salvar alterações
@@ -873,6 +880,7 @@ export default function ContatosPage() {
           title={isCreateOpen ? "Novo contato" : selectedContact?.nome ?? "Contato"}
           description={isCreateOpen ? "Cadastre um cliente ou lead na base." : "Edite os dados e o perfil deste contato ou cliente."}
           onClose={() => { setSelectedContact(null); setIsCreateOpen(false); setFormError(""); }}
+          size={!isCreateOpen && selectedContact ? "lg" : "md"}
         >
           {isCreateOpen ? (
             <Stepper
