@@ -37,6 +37,7 @@ const TABS: TabDef[] = [
   { id: "usuarios", label: "Usuários", href: "/usuarios", icon: UserCog },
   { id: "cargos", label: "Cargos", href: "/cargos", icon: Shield },
   { id: "permissoes", label: "Permissões", href: "/permissoes", icon: KeyRound },
+  { id: "chat", label: "Atendimento", href: "/chat", icon: MessageSquare },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 
