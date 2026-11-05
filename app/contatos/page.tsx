@@ -412,13 +412,13 @@ export default function ContatosPage() {
                           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[10px] font-bold ${categoryStyles[contact.categoria]}`}>{contact.iniciais}</span>
                           <div className="min-w-0">
                             <p className="truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{contact.nome}</p>
-                            <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{contact.telefone}</p>
+                            <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{formatBrazilianPhone(contact.telefone)}</p>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${categoryStyles[contact.categoria]}`}>{contact.segmento}</span></td>
                       <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{formatDateBR(contact.ultimoContato)}</td>
-                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{formatDateBR(contact.dataNascimento)}</td>
+                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{contact.dataNascimento ? formatDateBR(new Date(contact.dataNascimento).toISOString().slice(0, 10)) : "—"}</td>
                       <td className="px-4 py-3.5 text-right text-xs font-medium text-slate-700 dark:text-slate-200">{contact.compras}</td>
                       <td className="px-5 py-3.5 text-right text-xs font-bold text-slate-900 dark:text-white">{contact.totalGasto ? currency(contact.totalGasto) : "—"}</td>
                     </tr>
