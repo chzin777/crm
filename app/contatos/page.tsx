@@ -92,6 +92,322 @@ const isValidBrazilianPhone = (value: string) => {
   return digits.length === 11 ? /^9\d{8}$/.test(subscriber) : /^[2-5]\d{7}$/.test(subscriber);
 };
 
+type ContactTab = "dados" | "perfil" | "historico" | "comunicacoes";
+
+const contactTabs: { key: ContactTab; label: string }[] = [
+  { key: "dados", label: "Dados" },
+  { key: "perfil", label: "Perfil" },
+  { key: "historico", label: "Histórico" },
+  { key: "comunicacoes", label: "Comunicações" },
+];
+
+function ContactEditTabs({
+  form,
+  setForm,
+  formError,
+  setFormError,
+  selectedContact,
+  segmentOptions,
+  contactCategoryOptions,
+  contactCategoryNames,
+  categoryStyles,
+  currency,
+  saveContact,
+}: {
+  form: { nome: string; telefone: string; email: string; dataNascimento: string; categoria: ContactCategory; segmento: string[] };
+  setForm: React.Dispatch<React.SetStateAction<typeof form>>;
+  formError: string;
+  setFormError: React.Dispatch<React.SetStateAction<string>>;
+  selectedContact: Contact;
+  segmentOptions: string[];
+  contactCategoryOptions: ContactCategory[];
+  contactCategoryNames: Record<ContactCategory, string>;
+  categoryStyles: Record<ContactCategory, string>;
+  currency: (value: number) => string;
+  saveContact: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<ContactTab>("dados");
+  const [purchases, setPurchases] = useState<{ produto: string; data: string; valor: string }[]>([]);
+  const [purchasesLoading, setPurchasesLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== "historico") return;
+    let cancelled = false;
+    setPurchasesLoading(true);
+    fetch(`/api/contacts/${encodeURIComponent(selectedContact.id)}/purchases`)
+      .then((res) => res.json())
+      .then((result) => {
+        if (!cancelled && Array.isArray(result.data)) setPurchases(result.data);
+      })
+      .catch(() => {
+        if (!cancelled) setPurchases([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPurchasesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, selectedContact.id]);
+
+  const formatDateDisplay = (value: string | null | undefined) => {
+    if (!value) return "—";
+    const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+    const brMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+    if (brMatch) return value;
+    try {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+    } catch { /* ignore */ }
+    return value;
+  };
+
+  const infoFieldClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
+  const labelClass = "block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300";
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Tab navigation */}
+      <div className="shrink-0 border-b border-slate-100 dark:border-slate-800">
+        <nav role="tablist" className="flex gap-1 px-1">
+          {contactTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`relative px-4 py-2.5 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${
+                activeTab === tab.key
+                  ? "text-[#002187] dark:text-[#C4D600]"
+                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              {tab.label}
+              {activeTab === tab.key && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#002187] dark:bg-[#C4D600]" />
+              )}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Tab content — fixed height container */}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 pt-4">
+        {activeTab === "dados" && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+              <span className={`grid h-11 w-11 place-items-center rounded-full text-xs font-bold ${categoryStyles[form.categoria]}`}>
+                {form.nome.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${categoryStyles[form.categoria]}`}>
+                  {form.segmento.length > 0 ? form.segmento.join(", ") : contactCategoryNames[form.categoria]}
+                </span>
+                <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatBrazilianPhone(form.telefone)}</p>
+              </div>
+            </div>
+            <label className={labelClass}>
+              <span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
+              <input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className={infoFieldClass} />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={labelClass}>
+                <span>Telefone <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
+                <input type="tel" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: event.target.value }); setFormError(""); }} className={infoFieldClass} />
+              </label>
+              <label className={labelClass}>
+                E-mail
+                <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className={infoFieldClass} />
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={labelClass}>
+                Nascimento
+                <input type="date" value={form.dataNascimento} onChange={(event) => setForm({ ...form, dataNascimento: event.target.value })} className={infoFieldClass} />
+              </label>
+              <label className={labelClass}>
+                CPF
+                <input type="text" readOnly value={selectedContact.cpf ?? ""} placeholder="Não informado" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={labelClass}>
+                Gênero
+                <input type="text" readOnly value={selectedContact.genero ?? ""} placeholder="Não informado" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+              <label className={labelClass}>
+                Ocupação
+                <input type="text" readOnly value={selectedContact.ocupacao ?? ""} placeholder="Não informado" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+            </div>
+            {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+          </div>
+        )}
+
+        {activeTab === "perfil" && (
+          <div className="space-y-4">
+            <FormSelect
+              label="Categoria"
+              value={contactCategoryNames[form.categoria]}
+              options={contactCategoryOptions.map((category) => contactCategoryNames[category])}
+              onChange={(value) => setForm({ ...form, categoria: contactCategoryOptions.find((category) => contactCategoryNames[category] === value) ?? "lead" })}
+            />
+            <FormMultiSelect
+              label="Perfil / segmento"
+              ariaLabel="Segmento"
+              selected={form.segmento}
+              options={segmentOptions}
+              onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }}
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={labelClass}>
+                Loja
+                <input type="text" readOnly value={selectedContact.loja ?? ""} placeholder="Não informada" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+              <label className={labelClass}>
+                Cidade
+                <input type="text" readOnly value={selectedContact.cidade ?? ""} placeholder="Não informada" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className={labelClass}>
+                Bairro
+                <input type="text" readOnly value={selectedContact.bairro ?? ""} placeholder="Não informado" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+              <label className={labelClass}>
+                Estado
+                <input type="text" readOnly value={selectedContact.estado ?? ""} placeholder="Não informado" className={`${infoFieldClass} cursor-not-allowed opacity-60`} />
+              </label>
+            </div>
+            <dl className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+                <dt className="text-[10px] text-slate-500 dark:text-slate-400">Último contato</dt>
+                <dd className="mt-1 text-xs text-slate-900 dark:text-white">{formatDateDisplay(selectedContact.ultimoContato)}</dd>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+                <dt className="text-[10px] text-slate-500 dark:text-slate-400">Compras · Total gasto</dt>
+                <dd className="mt-1 text-xs font-semibold text-slate-900 dark:text-white">{selectedContact.compras} · {currency(selectedContact.totalGasto)}</dd>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+                <dt className="text-[10px] text-slate-500 dark:text-slate-400">Última compra</dt>
+                <dd className="mt-1 text-xs text-slate-900 dark:text-white">{formatDateDisplay(selectedContact.ultimaCompra)}</dd>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+                <dt className="text-[10px] text-slate-500 dark:text-slate-400">Prescrição validade</dt>
+                <dd className="mt-1 text-xs text-slate-900 dark:text-white">{formatDateDisplay(selectedContact.prescricaoValidade)}</dd>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+                <dt className="text-[10px] text-slate-500 dark:text-slate-400">Cadastrado em</dt>
+                <dd className="mt-1 text-xs text-slate-900 dark:text-white">{formatDateDisplay(selectedContact.criadoEm)}</dd>
+              </div>
+              {selectedContact.npsRatings && selectedContact.npsRatings.length > 0 && (
+                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60">
+                  <dt className="text-[10px] text-slate-500 dark:text-slate-400">NPS ({selectedContact.npsRatings.length} avaliações)</dt>
+                  <dd className="mt-1 text-xs font-semibold text-slate-900 dark:text-white">
+                    {(selectedContact.npsRatings.reduce((a, b) => a + b, 0) / selectedContact.npsRatings.length).toFixed(1)} média
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
+
+        {activeTab === "historico" && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Histórico de compras</h3>
+            {purchasesLoading ? (
+              <LoadingSpinner label="Carregando compras..." className="w-full justify-center py-8" />
+            ) : purchases.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center dark:border-slate-700">
+                <CircleDollarSign className="mx-auto h-5 w-5 text-slate-400" />
+                <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Nenhuma compra registrada</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {purchases.map((purchase, index) => (
+                  <div key={index} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-semibold text-slate-900 dark:text-white">{purchase.produto}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{formatDateDisplay(purchase.data)}</p>
+                    </div>
+                    <span className="ml-3 shrink-0 text-xs font-bold text-slate-900 dark:text-white">{purchase.valor}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "comunicacoes" && (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">WhatsApp</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Últimas conversas com o contato.</p>
+            </div>
+            <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center dark:border-slate-700">
+              <WhatsAppIcon className="mx-auto h-6 w-6 fill-slate-400" />
+              <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Integração com WhatsApp não configurada</p>
+              <p className="mt-1 text-[10px] text-slate-400">Conecte uma API de mensagens para visualizar o histórico de conversas.</p>
+              <a
+                href={`https://wa.me/55${form.telefone.replace(/\D/g, "")}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex h-8 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
+              >
+                <WhatsAppIcon className="h-3.5 w-3.5 fill-current" />
+                Abrir WhatsApp
+                <ArrowUpRight className="h-3 w-3" />
+              </a>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">E-mails enviados</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Histórico de comunicações por e-mail.</p>
+            </div>
+            <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center dark:border-slate-700">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto h-6 w-6 text-slate-400">
+                <rect width="20" height="16" x="2" y="4" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+              <p className="mt-2 text-xs font-medium text-slate-600 dark:text-slate-300">Integração de e-mail não configurada</p>
+              <p className="mt-1 text-[10px] text-slate-400">Conecte um provedor de e-mail para rastrear envios automaticamente.</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer actions — always visible */}
+      <footer className="mt-4 flex shrink-0 justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => {
+            setFormError("");
+            setForm({
+              nome: selectedContact.nome,
+              telefone: selectedContact.telefone,
+              email: selectedContact.email,
+              dataNascimento: toDateInput(selectedContact.dataNascimento),
+              categoria: selectedContact.categoria,
+              segmento: selectedContact.segmento ? selectedContact.segmento.split(",").map((s) => s.trim()).filter(Boolean) : [],
+            });
+          }}
+          className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+        >
+          Descartar alterações
+        </button>
+        <button
+          type="button"
+          onClick={saveContact}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
+        >
+          <Check className="h-3.5 w-3.5" />
+          Salvar alterações
+        </button>
+      </footer>
+    </div>
+  );
+}
+
 export default function ContatosPage() {
   const { isDark } = useCrmTheme();
   const toast = useToast();
@@ -568,35 +884,19 @@ export default function ContatosPage() {
               </Step>
             </Stepper>
           ) : selectedContact && (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
-                  <span className={`grid h-11 w-11 place-items-center rounded-full text-xs font-bold ${categoryStyles[form.categoria]}`}>{form.nome.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
-                  <div className="min-w-0 flex-1">
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${categoryStyles[form.categoria]}`}>{form.segmento.length > 0 ? form.segmento.join(", ") : contactCategoryNames[form.categoria]}</span>
-                    <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{form.telefone}</p>
-                  </div>
-                </div>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome completo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Telefone <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input type="tel" value={form.telefone} onChange={(event) => { setForm({ ...form, telefone: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                  <FormSelect label="Categoria" value={contactCategoryNames[form.categoria]} options={contactCategoryOptions.map((category) => contactCategoryNames[category])} onChange={(value) => setForm({ ...form, categoria: contactCategoryOptions.find((category) => contactCategoryNames[category] === value) ?? "lead" })} />
-                </div>
-                <FormMultiSelect label="Perfil / segmento" ariaLabel="Segmento" selected={form.segmento} options={segmentOptions} onChange={(segmento) => { setForm({ ...form, segmento }); setFormError(""); }} />
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">E-mail<input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">Nascimento<input type="date" value={form.dataNascimento} onChange={(event) => setForm({ ...form, dataNascimento: event.target.value })} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                <dl className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Último contato</dt><dd className="mt-1 text-xs text-slate-900 dark:text-white">{selectedContact.ultimoContato}</dd></div>
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Compras · Total gasto</dt><dd className="mt-1 text-xs font-semibold text-slate-900 dark:text-white">{selectedContact.compras} · {currency(selectedContact.totalGasto)}</dd></div>
-                </dl>
-                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                <a href={`https://wa.me/55${form.telefone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[#051647] text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"><WhatsAppIcon className="h-4 w-4 fill-current" />Conversar no WhatsApp<ArrowUpRight className="h-3.5 w-3.5" /></a>
-              </div>
-              <footer className="mt-4 flex shrink-0 justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-                <button type="button" onClick={() => { setFormError(""); setForm({ nome: selectedContact.nome, telefone: selectedContact.telefone, email: selectedContact.email, dataNascimento: toDateInput(selectedContact.dataNascimento), categoria: selectedContact.categoria, segmento: selectedContact.segmento ? selectedContact.segmento.split(",").map((s) => s.trim()).filter(Boolean) : [] }); }} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Descartar alterações</button>
-                <button type="button" onClick={saveContact} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"><Check className="h-3.5 w-3.5" />Salvar alterações</button>
-              </footer>
-            </div>
+            <ContactEditTabs
+              form={form}
+              setForm={setForm}
+              formError={formError}
+              setFormError={setFormError}
+              selectedContact={selectedContact}
+              segmentOptions={segmentOptions}
+              contactCategoryOptions={contactCategoryOptions}
+              contactCategoryNames={contactCategoryNames}
+              categoryStyles={categoryStyles}
+              currency={currency}
+              saveContact={saveContact}
+            />
           )}
         </EntityDialog>
       )}

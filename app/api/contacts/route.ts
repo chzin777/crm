@@ -22,8 +22,16 @@ const toContact = (contact: {
   category: string;
   segment: string | null;
   store: string | null;
+  cpf: string | null;
+  gender: string | null;
+  occupation: string | null;
+  city: string | null;
+  neighborhood: string | null;
+  state: string | null;
   npsResponses?: { rating: number }[];
   lastPurchaseDate: string | null;
+  prescriptionExpiry: string | null;
+  createdAt: Date;
   purchases: number;
   totalSpent: { toNumber(): number };
 }) => ({
@@ -35,8 +43,17 @@ const toContact = (contact: {
   categoria: contact.category,
   segmento: contact.segment ?? "",
   loja: contact.store ?? "",
+  cpf: contact.cpf ?? "",
+  genero: contact.gender ?? "",
+  ocupacao: contact.occupation ?? "",
+  cidade: contact.city ?? "",
+  bairro: contact.neighborhood ?? "",
+  estado: contact.state ?? "",
   npsRatings: contact.npsResponses?.map((response) => response.rating) ?? [],
   ultimoContato: contact.lastPurchaseDate ?? "",
+  ultimaCompra: contact.lastPurchaseDate ?? "",
+  prescricaoValidade: contact.prescriptionExpiry ?? "",
+  criadoEm: contact.createdAt.toISOString(),
   compras: contact.purchases,
   totalGasto: contact.totalSpent.toNumber(),
   iniciais: contact.name.split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase(),
@@ -103,7 +120,15 @@ export async function GET(request: Request) {
         category: true,
         segment: true,
         store: true,
+        cpf: true,
+        gender: true,
+        occupation: true,
+        city: true,
+        neighborhood: true,
+        state: true,
         lastPurchaseDate: true,
+        prescriptionExpiry: true,
+        createdAt: true,
         purchases: true,
         totalSpent: true,
       },
@@ -143,8 +168,16 @@ export async function POST(request: Request) {
       category: true,
       segment: true,
       store: true,
+      cpf: true,
+      gender: true,
+      occupation: true,
+      city: true,
+      neighborhood: true,
+      state: true,
       npsResponses: { select: { rating: true } },
       lastPurchaseDate: true,
+      prescriptionExpiry: true,
+      createdAt: true,
       purchases: true,
       totalSpent: true,
     },

@@ -14,4 +14,13 @@ export interface Contact {
   compras: number;
   totalGasto: number;
   iniciais: string;
+  cpf?: string;
+  genero?: string;
+  ocupacao?: string;
+  cidade?: string;
+  bairro?: string;
+  estado?: string;
+  ultimaCompra?: string;
+  prescricaoValidade?: string;
+  criadoEm?: string;
 }
