@@ -185,6 +185,7 @@ model CampaignMessage {
   sentAt          DateTime?
   deliveredAt     DateTime?
   readAt          DateTime?
+  repliedAt       DateTime?
   failedAt        DateTime?
   failureReason   String?
   createdAt       DateTime              @default(now())
@@ -193,6 +194,20 @@ model CampaignMessage {
   @@index([campaignId])
   @@index([whatsappMsgId])
   @@index([status])
+  @@index([contactId])
+}
+
+model InboundMessage {
+  id            String   @id @default(cuid())
+  whatsappMsgId String   @unique
+  contactId     String?
+  phone         String
+  text          String?
+  mediaType     String?
+  receivedAt    DateTime @default(now())
+
+  @@index([contactId])
+  @@index([phone])
 }
 
 enum CampaignMessageStatus {
@@ -200,6 +215,7 @@ enum CampaignMessageStatus {
   sent
   delivered
   read
+  replied
   failed
 }
 

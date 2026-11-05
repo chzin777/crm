@@ -7,7 +7,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const { id } = await context.params;
 
-  const [whatsappMessages, contact] = await Promise.all([
+  const [sentMessages, inboundMessages, contact] = await Promise.all([
     prisma.campaignMessage.findMany({
       where: { contactId: id },
       orderBy: { createdAt: "desc" },
@@ -18,9 +18,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         sentAt: true,
         deliveredAt: true,
         readAt: true,
+        repliedAt: true,
         failedAt: true,
         failureReason: true,
         createdAt: true,
+      },
+    }),
+    prisma.inboundMessage.findMany({
+      where: { contactId: id },
+      orderBy: { receivedAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        text: true,
+        mediaType: true,
+        receivedAt: true,
       },
     }),
     prisma.contact.findUnique({
@@ -31,15 +43,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   return Response.json({
     data: {
-      whatsapp: whatsappMessages.map((msg) => ({
+      whatsapp: sentMessages.map((msg) => ({
         id: msg.id,
         status: msg.status,
         sentAt: msg.sentAt?.toISOString() ?? null,
         deliveredAt: msg.deliveredAt?.toISOString() ?? null,
         readAt: msg.readAt?.toISOString() ?? null,
+        repliedAt: msg.repliedAt?.toISOString() ?? null,
         failedAt: msg.failedAt?.toISOString() ?? null,
         failureReason: msg.failureReason ?? null,
         createdAt: msg.createdAt.toISOString(),
+      })),
+      inbound: inboundMessages.map((msg) => ({
+        id: msg.id,
+        text: msg.text ?? "",
+        mediaType: msg.mediaType ?? null,
+        receivedAt: msg.receivedAt.toISOString(),
       })),
       emails: [] as { id: string; subject: string; status: string; sentAt: string | null }[],
       contactPhone: contact?.phone ?? "",

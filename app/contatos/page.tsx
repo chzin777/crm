@@ -132,11 +132,12 @@ function ContactEditTabs({
   const [purchases, setPurchases] = useState<{ produto: string; data: string; valor: string }[]>([]);
   const [purchasesLoading, setPurchasesLoading] = useState(false);
   const [communications, setCommunications] = useState<{
-    whatsapp: { id: string; status: string; sentAt: string | null; deliveredAt: string | null; readAt: string | null; failedAt: string | null; failureReason: string | null; createdAt: string }[];
+    whatsapp: { id: string; status: string; sentAt: string | null; deliveredAt: string | null; readAt: string | null; repliedAt: string | null; failedAt: string | null; failureReason: string | null; createdAt: string }[];
+    inbound: { id: string; text: string; mediaType: string | null; receivedAt: string }[];
     emails: { id: string; subject: string; status: string; sentAt: string | null }[];
     contactPhone: string;
     contactEmail: string;
-  }>({ whatsapp: [], emails: [], contactPhone: "", contactEmail: "" });
+  }>({ whatsapp: [], inbound: [], emails: [], contactPhone: "", contactEmail: "" });
   const [commsLoading, setCommsLoading] = useState(false);
 
   useEffect(() => {
@@ -167,7 +168,7 @@ function ContactEditTabs({
         if (!cancelled && result.data) setCommunications(result.data);
       })
       .catch(() => {
-        if (!cancelled) setCommunications({ whatsapp: [], emails: [], contactPhone: "", contactEmail: "" });
+        if (!cancelled) setCommunications({ whatsapp: [], inbound: [], emails: [], contactPhone: "", contactEmail: "" });
       })
       .finally(() => {
         if (!cancelled) setCommsLoading(false);
@@ -396,12 +397,13 @@ function ContactEditTabs({
                 ) : (
                   <div className="space-y-2">
                     {communications.whatsapp.map((msg) => {
-                      const statusLabel: Record<string, string> = { queued: "Na fila", sent: "Enviada", delivered: "Entregue", read: "Lida", failed: "Falhou" };
+                      const statusLabel: Record<string, string> = { queued: "Na fila", sent: "Enviada", delivered: "Entregue", read: "Lida", replied: "Respondida", failed: "Falhou" };
                       const statusColor: Record<string, string> = {
                         queued: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
                         sent: "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
                         delivered: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
                         read: "bg-[#C4D600]/15 text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]",
+                        replied: "bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
                         failed: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300",
                       };
                       return (
@@ -418,6 +420,21 @@ function ContactEditTabs({
                         </div>
                       );
                     })}
+                  </div>
+                )}
+
+                {communications.inbound.length > 0 && (
+                  <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Mensagens recebidas</h3>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Respostas do contato via WhatsApp.</p>
+                    <div className="mt-2 space-y-2">
+                      {communications.inbound.map((msg) => (
+                        <div key={msg.id} className="rounded-lg border border-slate-100 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
+                          <p className="text-xs text-slate-900 dark:text-white">{msg.text || (msg.mediaType ? `📎 ${msg.mediaType}` : "Mensagem sem texto")}</p>
+                          <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{formatDateDisplay(msg.receivedAt)}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
