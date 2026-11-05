@@ -602,7 +602,7 @@ return (
 <div
 {...rest}
 ref={rootRef}
-className={`${ROOT_CLASS} h-full flex flex-col ${rail ? 'flex-row items-stretch' : ''} ${frame ? FRAMED_CLASS : BARE_CLASS} ${stepCircleContainerClassName} ${className}`
+className={`${ROOT_CLASS} h-full flex flex-col justify-between ${rail ? 'flex-row items-stretch' : ''} ${frame ? FRAMED_CLASS : BARE_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}
