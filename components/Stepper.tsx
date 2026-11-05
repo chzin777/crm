@@ -625,7 +625,7 @@ onKeyDown={handleKeyDown}
 <div
 className={`flex min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
 >
-<div ref={viewportRef} className={`${VIEWPORT_CLASS} flex-1 min-h-0 overflow-y-auto ${contentClassName}`.trim()} aria-live="polite">
+<div ref={viewportRef} className={`${VIEWPORT_CLASS} flex flex-1 min-h-0 flex-col overflow-y-auto ${contentClassName}`.trim()} aria-live="polite">
 {view.previous !== null && (
 <div key={view.id - 1} ref={leavingRef} className={`${PANE_CLASS} ${LEAVING_CLASS}`} aria-hidden="true">
 {paneContent(view.previous)}

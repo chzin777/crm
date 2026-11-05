@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { EntityDialog } from "@/components/EntityDialog";
@@ -238,7 +237,9 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isDealContactOpen, dealContactId, contacts, dealContactResults]);
 
-  const filteredDealContacts = dealContactSearch.trim() ? dealContactResults : contacts;
+  // Quando há texto digitado, exibe apenas resultados da API; sem fallback para lista global.
+  const hasDealSearch = !!dealContactSearch.trim();
+  const filteredDealContacts = hasDealSearch ? dealContactResults : contacts;
   const [dealTitle, setDealTitle] = useState("");
   const [dealValue, setDealValue] = useState("");
   const [dealNotes, setDealNotes] = useState("");
@@ -1079,19 +1080,12 @@ export default function Home() {
                     />
                     <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
-                    {/* Dropdown renderizado via Portal no body para evitar corte por overflow do modal */}
-                    {isDealContactOpen && dealContactRef.current && createPortal(
+                    {/* Dropdown inline com absolute; onMouseDown evita que o blur do input feche antes da seleção */}
+                    {isDealContactOpen && (
                       <ul
                         id="deal-contact-listbox"
                         role="listbox"
-                        style={{
-                          position: "fixed",
-                          top: dealContactRef.current.getBoundingClientRect().bottom + 4,
-                          left: dealContactRef.current.getBoundingClientRect().left,
-                          width: dealContactRef.current.getBoundingClientRect().width,
-                          zIndex: 9999,
-                        }}
-                        className="max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
+                        className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
                       >
                         {dealContactSearching ? (
                           <li className="px-3 py-2">
@@ -1109,7 +1103,8 @@ export default function Home() {
                                 key={contact.id}
                                 role="option"
                                 aria-selected={isSelected}
-                                onClick={() => {
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
                                   setDealContactId(contact.id);
                                   setDealContactSearch(contact.nome);
                                   setIsDealContactOpen(false);
@@ -1128,8 +1123,7 @@ export default function Home() {
                             );
                           })
                         )}
-                      </ul>,
-                      document.body
+                      </ul>
                     )}
                   </div>
                 </div>

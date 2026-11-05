@@ -12,21 +12,20 @@ export async function GET(request: Request) {
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const skip = (page - 1) * limit;
 
-  // Word-start matching: split query into words and match each against name parts
-  // This allows searching by first name alone (e.g., "joão" matches "João Silva")
-  const words = q.split(/\s+/).filter(Boolean);
-  const where = q
+  // Busca composta por tokens: cada palavra digitada deve casar em pelo menos um campo.
+  // Ex.: "Michel Gerente" encontra contato com nome "Michel" e segmento "Gerente".
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const where = tokens.length
     ? {
-        OR: [
-          // Match full query as substring (existing behavior)
-          { name: { contains: q, mode: "insensitive" as const } },
-          { phone: { contains: q, mode: "insensitive" as const } },
-          { email: { contains: q, mode: "insensitive" as const } },
-          // Match each word individually for partial name searches
-          ...words.map((word) => ({
-            name: { contains: word, mode: "insensitive" as const },
-          })),
-        ],
+        AND: tokens.map((token) => ({
+          OR: [
+            { name: { contains: token, mode: "insensitive" as const } },
+            { phone: { contains: token, mode: "insensitive" as const } },
+            { email: { contains: token, mode: "insensitive" as const } },
+            { segment: { contains: token, mode: "insensitive" as const } },
+            { category: { contains: token, mode: "insensitive" as const } },
+          ],
+        })),
       }
     : {};
 
