@@ -158,7 +158,7 @@ const PANE_CLASS = 'box-border px-[var(--stepper-bleed)] py-1.5 outline-none';
 const LEAVING_CLASS = 'pointer-events-none absolute top-0 right-0 left-0';
 const FOOTER_WRAP_CLASS = 'group/footer mt-auto border-t border-slate-100 pt-4 dark:border-slate-800 grid grid-rows-[1fr] [transition:grid-template-rows_480ms_var(--stepper-spring),opacity_0.2s_ease] data-[hidden]:pointer-events-none data-[hidden]:grid-rows-[0fr] data-[hidden]:opacity-0 motion-reduce:[transition-duration:0.01ms]';
 const FOOTER_CLIP_CLASS = 'min-h-0 group-data-[hidden]/footer:overflow-hidden';
-const FOOTER_CLASS = 'flex items-center justify-between gap-3 pt-5';
+const FOOTER_CLASS = 'flex w-full items-center justify-between gap-3 pt-5';
 const BUTTON_CLASS = `inline-flex h-[38px] flex-none cursor-pointer items-center gap-1.5 rounded-[max(8px,calc(var(--stepper-radius)*0.5))] border-none px-3.5 font-[inherit] text-[13.5px] leading-none font-semibold [transition:filter_0.2s_ease,transform_0.2s_ease,opacity_0.2s_ease] disabled:cursor-not-allowed disabled:opacity-40 active:enabled:[filter:var(--stepper-press)] active:enabled:[transform:scale(0.96)] active:enabled:duration-0 ${FOCUS}`;
 const BACK_CLASS = `pl-2.5 ${INK} [background:var(--stepper-tile)] [box-shadow:inset_0_0_0_1px_var(--stepper-tile-edge),inset_0_1px_0_var(--stepper-tile-highlight),var(--stepper-tile-shadow)] hover:enabled:[filter:var(--stepper-hover)] data-[hidden]:invisible data-[hidden]:opacity-0 data-[hidden]:[transition:opacity_0.2s_ease,visibility_0s_0.2s]`;
 const NEXT_CLASS = 'ml-auto pr-[11px] text-[color:var(--stepper-solid-ink)] [background:var(--stepper-solid)] [box-shadow:0_4px_12px_-6px_rgba(0,0,0,0.5)] hover:enabled:[filter:var(--stepper-solid-hover)]';
@@ -602,7 +602,7 @@ return (
 <div
 {...rest}
 ref={rootRef}
-className={`${ROOT_CLASS} ${rail ? 'flex-row items-stretch' : 'flex-col'} ${frame ? FRAMED_CLASS : BARE_CLASS} ${stepCircleContainerClassName} ${className}`
+className={`${ROOT_CLASS} h-full flex flex-col ${rail ? 'flex-row items-stretch' : ''} ${frame ? FRAMED_CLASS : BARE_CLASS} ${stepCircleContainerClassName} ${className}`
 .replace(/\s+/g, ' ')
 .trim()}
 data-completed={completed ? '' : undefined}
@@ -620,7 +620,7 @@ onKeyDown={handleKeyDown}
 >
 {modalContent}
 <div
-className={`flex min-w-0 flex-col ${rail ? 'flex-1 pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
+className={`flex flex-1 min-h-0 min-w-0 flex-col justify-between ${rail ? 'pt-[var(--stepper-inset)] pr-[var(--stepper-inset)] pb-[var(--stepper-inset)] pl-5' : 'px-[var(--stepper-inset)] pt-5 pb-[var(--stepper-inset)]'}`}
 >
 <div ref={viewportRef} className={`${VIEWPORT_CLASS} flex flex-1 min-h-0 flex-col overflow-y-auto ${contentClassName}`.trim()} aria-live="polite">
 {view.previous !== null && (
