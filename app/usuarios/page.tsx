@@ -287,7 +287,7 @@ export default function UsuariosPage() {
       </main>
       {editing && (
         <EntityDialog titleId="user-dialog-title" title={editing === "new" ? "Novo Usuário" : `Editar: ${(editing as UserRecord).name}`} description="Defina os dados e o cargo do usuário." onClose={closeForm}>
-          <div className="space-y-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <label className="block space-y-1.5">
               <span className={labelClass}>Nome *</span>
               <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} placeholder="Nome completo" />
@@ -326,7 +326,7 @@ export default function UsuariosPage() {
             )}
             {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
           </div>
-          <footer className="mt-4 flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <footer className="mt-auto flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
             <div className="flex items-center gap-3">
               {editing !== "new" && (
                 <button type="button" onClick={() => removeUser(editing as UserRecord)} className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-600 hover:cursor-pointer hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950/30"><Trash2 className="h-4 w-4" /> Excluir</button>

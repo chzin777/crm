@@ -1041,7 +1041,6 @@ export default function Home() {
               : "Vincule uma oportunidade a um contato existente no banco."
           }
           onClose={() => setIsCreateDealOpen(false)}
-          size="lg"
         >
 
           <Stepper

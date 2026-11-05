@@ -179,12 +179,12 @@ export default function CargosPage() {
       </main>
       {editing && (
         <EntityDialog titleId="cargo-dialog-title" title={editing === "new" ? "Novo Cargo" : `Editar: ${(editing as RoleRecord).name}`} description="Defina o nome do cargo. As telas liberadas ficam em Permissões." onClose={closeForm}>
-          <div className="space-y-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <label className="block space-y-1.5"><span className={labelClass}>Nome *</span><input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputClass} placeholder="Ex: Supervisor Regional" /></label>
             <label className="block space-y-1.5"><span className={labelClass}>Descrição</span><input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={inputClass} placeholder="Descrição opcional" /></label>
             {formError && <p className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
           </div>
-          <footer className="mt-4 flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <footer className="mt-auto flex shrink-0 items-center justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
             <button type="button" onClick={closeForm} className="h-10 cursor-pointer rounded-lg border border-slate-200 px-4 text-sm font-semibold hover:cursor-pointer dark:border-slate-700">Cancelar</button>
             <button type="button" disabled={isSaving} onClick={saveRole} className="h-10 cursor-pointer rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white hover:cursor-pointer hover:bg-[#002187] disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647]">{isSaving ? "Salvando..." : "Salvar"}</button>
           </footer>

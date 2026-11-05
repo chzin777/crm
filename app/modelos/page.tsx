@@ -399,7 +399,7 @@ export default function ModelosPage() {
       </div>
 
       {isCreateOpen && (
-        <EntityDialog titleId="create-template-title" title="Novo modelo" description="O modelo é enviado para análise da Meta antes de poder ser usado." onClose={() => setIsCreateOpen(false)} size="lg">
+        <EntityDialog titleId="create-template-title" title="Novo modelo" description="O modelo é enviado para análise da Meta antes de poder ser usado." onClose={() => setIsCreateOpen(false)}>
           <Stepper
             initialStep={1}
             onStepChange={() => setCreateError("")}

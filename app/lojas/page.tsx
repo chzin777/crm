@@ -483,7 +483,7 @@ export default function LojasPage() {
       </div>
 
       {editing && (
-        <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar loja ${editing.number}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm} size="lg">
+        <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar loja ${editing.number}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm}>
           {editing === "new" ? (
             <Stepper
               initialStep={1}
