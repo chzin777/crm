@@ -157,6 +157,7 @@ export function FormMultiSelect({
                   type="button"
                   role="option"
                   aria-selected={isSelected}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => toggleOption(option)}
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
                 >

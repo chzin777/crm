@@ -344,12 +344,10 @@ const observer = new ResizeObserver(measure);
 observer.observe(root);
 return () => observer.disconnect();
 }, [vertical, labelled, frame, total, kind]);
-// Altura dinâmica do viewport desativada para evitar que o modal achate quando o step tem pouco conteúdo.
-// O container pai (EntityDialog) já garante altura fixa via flex/h-[min(56rem,90vh)].
+// Altura dinâmica do viewport desativada: o EntityDialog garante h-[560px] fixa.
+// Manter heightRef apenas como fallback inicial sem recalcular por step.
 useIsomorphicLayoutEffect(() => {
-const viewport = viewportRef.current;
-if (!viewport) return;
-heightRef.current = Math.max(viewport.offsetHeight, 380);
+heightRef.current = 0;
 }, []);
 // Transition animation effect
 useIsomorphicLayoutEffect(() => {
@@ -367,15 +365,8 @@ finish();
 return;
 }
 for (const element of [viewport, pane, leaving]) element?.getAnimations().forEach(animation => animation.cancel());
-const from = heightRef.current;
-const to = viewport.offsetHeight;
 const spring = ease();
-if (Math.abs(from - to) > 0.5) {
-viewport.animate([{ height: `${from}px` }, { height: `${to}px` }], {
-duration: reduced ? 200 : 560,
-easing: reduced ? SETTLE : spring
-});
-}
+// Animação de altura desativada: o EntityDialog mantém h-[560px] fixa em todos os steps.
 const axis = vertical ? 'Y' : 'X';
 const shift = mode === 'slide' ? 36 : 0;
 if (pane) {

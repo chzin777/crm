@@ -31,9 +31,9 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`max-h-[90vh] flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#07194f] ${size === "lg" ? "h-[680px] max-w-5xl" : "h-[540px] max-w-xl"}`}
+        className={`flex h-[560px] max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-[#07194f] ${size === "lg" ? "max-w-5xl" : "max-w-4xl"}`}
       >
-        <header className="shrink-0 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-6">
+        <header className="shrink-0 border-b border-slate-100 px-6 py-4 dark:border-slate-800">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id={titleId} className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
@@ -52,7 +52,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
             </button>
           </div>
         </header>
-        <div className="flex flex-1 min-h-0 flex-col p-5 sm:p-6 overflow-hidden">
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
           {children}
         </div>
       </section>

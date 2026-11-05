@@ -105,6 +105,7 @@ export function FormSelect({ label, value, options, onChange, ariaLabel, require
                 type="button"
                 role="option"
                 aria-selected={value === option}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onChange(option);
                   setIsOpen(false);

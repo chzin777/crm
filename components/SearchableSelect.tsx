@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Search } from "lucide-react";
 
 interface SearchableSelectProps {
@@ -13,17 +14,55 @@ interface SearchableSelectProps {
   isLoading?: boolean;
 }
 
-const fold = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+const fold = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("pt-BR");
 
 export function SearchableSelect({ label, value, options, onChange, placeholder = "Selecione", disabled = false, isLoading = false }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const dropdownHeight = Math.min(options.length * 40 + 52, 280);
+    const margin = 8;
+
+    let left = rect.left;
+    const width = rect.width;
+    if (left + width > viewportWidth - margin) {
+      left = viewportWidth - width - margin;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+
+    const spaceBelow = viewportHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    let top: number;
+
+    if (spaceBelow >= dropdownHeight) {
+      top = rect.bottom + 8;
+    } else if (spaceAbove >= dropdownHeight) {
+      top = rect.top - dropdownHeight - 8;
+    } else {
+      top = spaceBelow >= spaceAbove ? rect.bottom + 8 : Math.max(margin, rect.top - spaceAbove);
+    }
+
+    setDropdownPosition({ top, left, width });
+  }, [isOpen, options.length]);
 
   useEffect(() => {
     if (!isOpen) return;
     const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.stopPropagation(); setIsOpen(false); }
@@ -45,6 +84,7 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
     <div ref={rootRef} className="relative space-y-1.5">
       <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</span>
       <button
+        ref={buttonRef}
         type="button"
         aria-label={label}
         aria-haspopup="listbox"
@@ -56,8 +96,12 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
         <span className={`truncate ${value ? "" : "text-slate-400"}`}>{value || placeholder}</span>
         <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
-      {isOpen && (
-        <div className="absolute left-0 right-0 top-full z-[120] mt-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-[#07194f]">
+      {isOpen && dropdownPosition && typeof document !== "undefined" && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[99999] mt-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-[#07194f]"
+          style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
+        >
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
@@ -77,6 +121,7 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
                 type="button"
                 role="option"
                 aria-selected={value === option}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { onChange(option); setIsOpen(false); }}
                 className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-xs text-slate-700 transition-colors hover:bg-[#C4D600]/20 hover:text-[#051647] dark:text-slate-200 dark:hover:bg-[#C4D600]/15 dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
               >
@@ -85,7 +130,8 @@ export function SearchableSelect({ label, value, options, onChange, placeholder 
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
 
 interface CustomSelectOption {
@@ -27,31 +28,66 @@ export function CustomSelect({
 }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLUListElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const selectedOption = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    if (!isOpen || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const dropdownHeight = Math.min(options.length * 40 + 12, 260);
+    const margin = 8;
+
+    let left = rect.left;
+    const width = rect.width;
+    if (left + width > viewportWidth - margin) {
+      left = viewportWidth - width - margin;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+
+    const spaceBelow = viewportHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    let top: number;
+
+    if (spaceBelow >= dropdownHeight) {
+      top = rect.bottom + 8;
+    } else if (spaceAbove >= dropdownHeight) {
+      top = rect.top - dropdownHeight - 8;
+    } else {
+      top = spaceBelow >= spaceAbove ? rect.bottom + 8 : Math.max(margin, rect.top - spaceAbove);
+    }
+
+    setDropdownPosition({ top, left, width });
+  }, [isOpen, options.length]);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setIsOpen(false);
     };
+    document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, [isOpen]);
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
@@ -71,10 +107,12 @@ export function CustomSelect({
         />
       </button>
 
-      {isOpen && (
+      {isOpen && dropdownPosition && typeof document !== "undefined" && createPortal(
         <ul
+          ref={dropdownRef}
           role="listbox"
-          className="absolute left-0 right-0 top-full z-30 mt-1.5 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+          className="fixed z-[99999] max-h-60 overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+          style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
         >
           {options.map((option) => {
             const isSelected = option.value === value;
@@ -82,6 +120,7 @@ export function CustomSelect({
               <li key={option.value} role="option" aria-selected={isSelected}>
                 <button
                   type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onChange(option.value);
                     setIsOpen(false);
@@ -101,7 +140,8 @@ export function CustomSelect({
           {options.length === 0 && (
             <li className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">Nenhuma opção disponível.</li>
           )}
-        </ul>
+        </ul>,
+        document.body
       )}
     </div>
   );
