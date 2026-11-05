@@ -91,13 +91,12 @@ export default function PermissoesPage() {
   return (
     <div>
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-5 dark:border-slate-800 dark:bg-[#051647]">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Permissões</h1>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Defina quais telas cada cargo pode acessar</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
+        <div className="flex flex-1 flex-col overflow-hidden px-6 pt-8 pb-4 sm:px-8">
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Permissões</h1>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Defina quais telas cada cargo pode acessar</p>
+            </div>
             <button
               type="button"
               disabled={isSaving || changedRoles.length === 0}
@@ -107,8 +106,6 @@ export default function PermissoesPage() {
               <Save className="h-4 w-4" /> {isSaving ? "Salvando..." : "Salvar alterações"}
             </button>
           </div>
-        </header>
-        <div className="flex flex-1 flex-col overflow-hidden px-8 py-6">
           <p className="mb-4 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             <Lock className="h-3.5 w-3.5" /> Administradores do sistema sempre têm acesso a tudo. Usuários sem cargo não acessam nenhuma tela, exceto o próprio perfil.
           </p>

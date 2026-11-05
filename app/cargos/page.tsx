@@ -112,19 +112,16 @@ export default function CargosPage() {
   return (
     <div>
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-5 dark:border-slate-800 dark:bg-[#051647]">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Cargos</h1>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Gerencie os cargos do sistema</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
+        <div className="flex flex-1 flex-col overflow-hidden px-6 pt-8 pb-4 sm:px-8">
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Cargos</h1>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Gerencie os cargos do sistema</p>
+            </div>
             <button type="button" onClick={() => openForm("new")} className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white hover:cursor-pointer hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">
               <Plus className="h-4 w-4" /> Novo Cargo
             </button>
           </div>
-        </header>
-        <div className="flex flex-1 flex-col overflow-hidden px-8 py-6">
           <div className="mb-4 flex items-center gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
