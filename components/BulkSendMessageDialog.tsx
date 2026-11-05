@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, FileText, Image as ImageIcon, Paperclip, Send, Video, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { ChatPreview, formatFileSize } from "@/components/WhatsAppPreview";
 
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -147,10 +148,13 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
                 </div>
               )}
               {mode === "free" && (
+                <>
                 <label className="flex shrink-0 flex-col gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                   {files.length > 0 ? "Legenda" : "Mensagem"}
                   <textarea value={text} onChange={(event) => setText(event.target.value)} maxLength={4096} placeholder={files.length > 0 ? "Adicione uma legenda..." : "Digite a mensagem..."} className="h-24 resize-none rounded-lg border border-slate-200 bg-white p-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
                 </label>
+                <ChatPreview text={text} files={files} />
+                </>
               )}
               {files.length > 0 && (
                 <div className="space-y-2">
