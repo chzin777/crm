@@ -10,6 +10,7 @@ export const MODULES = [
   { key: "usuarios", label: "Usuários", href: "/usuarios", group: "Gestão" },
   { key: "cargos", label: "Cargos", href: "/cargos", group: "Gestão" },
   { key: "permissoes", label: "Permissões", href: "/permissoes", group: "Gestão" },
+  { key: "chat", label: "Atendimento", href: "/chat", group: "Vendas" },
   { key: "configuracoes", label: "Configurações", href: "/configuracoes", group: "Geral" },
 ] as const;
 
