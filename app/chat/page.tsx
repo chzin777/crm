@@ -239,7 +239,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#07194f]">
+    <div className="flex h-full w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#07194f]">
       {/* Coluna Esquerda - Lista de Conversas */}
       <div
         className={`flex flex-col border-r border-slate-200 dark:border-slate-800 ${

@@ -34,13 +34,13 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main content area with tab strip */}
-        <main className="h-full min-w-0 flex-1 overflow-y-auto">
+        <main className={`h-full min-w-0 flex-1 ${pathname === "/chat" ? "overflow-hidden" : "overflow-y-auto"}`}>
           {/* Tab strip sticky — igual ao ecommerce admin: h-[92px], rounded-t-2xl, backdrop-blur */}
           <div className="sticky top-0 z-20 flex h-[92px] items-end gap-2 rounded-t-2xl border-b border-[#dfe3ea] bg-[#f1f3f7]/95 px-3 pt-4 backdrop-blur dark:border-slate-800 dark:bg-[#0a1a3e]/95 sm:px-6">
             <TabSystem />
           </div>
           {/* Page content */}
-          <div className="mx-auto w-full max-w-[1680px] px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
+          <div className={`mx-auto w-full max-w-[1680px] ${pathname === "/chat" ? "h-[calc(100%-92px)] overflow-hidden p-0" : "px-4 py-6 sm:px-7 sm:py-8 xl:px-10"}`}>
             {isLoading && moduleKey !== null ? (
               <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Verificando permissões..." /></div>
             ) : allowed ? (
