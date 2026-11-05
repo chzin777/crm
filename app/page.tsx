@@ -7,6 +7,7 @@ import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { EntityDialog } from "@/components/EntityDialog";
 import { StageEditorDialog } from "@/components/StageEditorDialog";
 import { SendMessageDialog } from "@/components/SendMessageDialog";
+import { BulkSendMessageDialog, type BulkRecipient, type BulkSendResult } from "@/components/BulkSendMessageDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { CustomSelect } from "@/components/CustomSelect";
 import { useCrmData } from "@/hooks/useCrmData";
@@ -39,6 +40,7 @@ import {
   Pencil,
   Paperclip,
   Plus,
+  Send,
   Trash2,
   Undo2,
   Search,
@@ -172,6 +174,7 @@ export default function Home() {
   const notificationAreaRef = useRef<HTMLDivElement>(null);
   const [selectedCard, setSelectedCard] = useState<PipelineCard | null>(null);
   const [messageCard, setMessageCard] = useState<PipelineCard | null>(null);
+ const [bulkSendStage, setBulkSendStage] = useState<{ stageId: string; stageName: string } | null>(null);
   const [loadedPurchases, setLoadedPurchases] = useState<{ contactId: string; items: PurchaseRecord[] | null } | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactsError, setContactsError] = useState("");
@@ -795,6 +798,17 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
+                        {cardsDaColuna.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setBulkSendStage({ stageId: coluna.id, stageName: stageConfigs[coluna.id].titulo })}
+                            aria-label={`Enviar mensagem para etapa ${stageConfigs[coluna.id].titulo}`}
+                            title="Enviar para etapa"
+                            className="grid h-6 w-6 place-items-center rounded-full text-slate-500 hover:bg-white/80 hover:text-[#002187] dark:text-slate-400 dark:hover:bg-[#051647] dark:hover:text-[#C4D600] cursor-pointer hover:cursor-pointer"
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setEditingStageId(coluna.id)}
@@ -997,6 +1011,22 @@ export default function Home() {
               throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
             }
             toast.success("Mensagem enviada", `Enviada para ${messageCard.cliente}.`);
+          }}
+        />
+      )}
+
+      {bulkSendStage && (
+        <BulkSendMessageDialog
+          stageName={bulkSendStage.stageName}
+          recipients={cards
+            .filter((card) => card.coluna === bulkSendStage.stageId && card.pipelineId === activePipelineId)
+            .map((card) => ({ contactId: card.contactId ?? card.id, nome: card.cliente, telefone: card.telefone }))}
+          onClose={() => setBulkSendStage(null)}
+          onComplete={(results: BulkSendResult[]) => {
+            const sent = results.filter((r) => r.status === "sent").length;
+            const failed = results.filter((r) => r.status === "failed").length;
+            if (sent > 0) toast.success("Envio em massa concluído", `${sent} mensagem(ns) enviada(s)${failed > 0 ? ` · ${failed} falharam` : ""}`);
+            else if (failed > 0) toast.error("Falha no envio em massa", `${failed} mensagem(ns) não foram enviadas.`);
           }}
         />
       )}
