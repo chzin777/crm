@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, KeyRound, Lock, Save, Search, ShieldCheck, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Lock, Plus, Save, Search, ShieldCheck, Users, X } from "lucide-react";
+import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { MODULES, type ModuleKey } from "@/lib/permissions";
@@ -52,6 +53,10 @@ export default function PermissoesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -132,6 +137,35 @@ export default function PermissoesPage() {
     }
   };
 
+  const createRole = async () => {
+    if (!createName.trim()) {
+      toast.error("Nome do cargo é obrigatório.");
+      return;
+    }
+    setIsCreating(true);
+    try {
+      const res = await fetch("/api/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: createName.trim(), description: createDescription.trim() || null }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { data?: RoleRecord; error?: string };
+      if (!res.ok) throw new Error(json.error || "Erro ao criar cargo.");
+      toast.success(`Cargo "${json.data?.name}" criado com sucesso.`);
+      setCreateName("");
+      setCreateDescription("");
+      setIsCreateOpen(false);
+      await load();
+      if (json.data?.id) {
+        setSelectedRoleId(json.data.id);
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro inesperado ao criar cargo.");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   const filteredModules = MODULES.filter((m) => {
     const matchesSearch = m.label.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesGroup = filterGroup === "Todos" || m.group === filterGroup;
@@ -139,6 +173,12 @@ export default function PermissoesPage() {
   });
 
   const filteredGroups = filterGroup === "Todos" ? groups : groups.filter((g) => g === filterGroup);
+
+  const activePermissionCount = (roleId: string) => {
+    const d = draft[roleId];
+    if (!d) return 0;
+    return MODULES.filter((m) => d[m.key] === true).length;
+  };
 
   return (
     <div className="space-y-6">
@@ -156,45 +196,16 @@ export default function PermissoesPage() {
         </div>
       )}
 
-      {/* Seletor de Cargo + Info */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="role-select" className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Cargo selecionado
-          </label>
-          {isLoading ? (
-            <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-700" />
-          ) : (
-            <select
-              id="role-select"
-              value={selectedRoleId ?? ""}
-              onChange={(e) => setSelectedRoleId(e.target.value)}
-              className="h-10 w-full max-w-xs cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 outline-none transition-colors focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-            >
-              {roles.map((role) => (
-                <option key={role.id} value={role.id}>
-                  {role.name}{role.isSystem ? " (sistema)" : ""}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-        <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <Lock className="h-3.5 w-3.5" />
-          Administradores sempre têm acesso total. Usuários sem cargo não acessam telas.
-        </p>
-      </div>
-
-      {/* Linha de Controle: Busca + Filtro */}
+      {/* Linha de Controle: Busca + Botão Novo Cargo */}
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <label className="relative block w-full sm:w-72 md:w-80">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
-            placeholder="Buscar módulo..."
+            placeholder="Buscar cargo ou módulo..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            aria-label="Buscar módulos"
+            aria-label="Buscar"
             className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
           />
         </label>
@@ -208,88 +219,174 @@ export default function PermissoesPage() {
             <option key={g} value={g}>{g}</option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={() => setIsCreateOpen(true)}
+          className="ml-auto inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]"
+        >
+          <Plus className="h-4 w-4" /> Novo Cargo
+        </button>
       </div>
 
-      {/* Conteúdo Principal */}
+      {/* Cards de Cargos (Estilo KPI) */}
       {isLoading ? (
-        <div className="flex h-64 items-center justify-center">
-          <LoadingSpinner label="Carregando permissões..." />
-        </div>
-      ) : roles.length === 0 ? (
-        <div className="flex h-64 flex-col items-center justify-center gap-2 text-slate-400">
-          <KeyRound className="h-8 w-8" />
-          <p className="text-sm">Nenhum cargo cadastrado. Crie um cargo em Cargos para definir permissões.</p>
-        </div>
-      ) : !selectedRole || !selectedDraft ? (
-        <div className="flex h-64 items-center justify-center text-slate-400">
-          <p className="text-sm">Selecione um cargo para gerenciar permissões.</p>
+        <div className="flex h-40 items-center justify-center">
+          <LoadingSpinner label="Carregando cargos..." size={32} />
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
-          {filteredGroups.map((group) => {
-            const modulesInGroup = filteredModules.filter((m) => m.group === group);
-            if (modulesInGroup.length === 0) return null;
-            const allChecked = modulesInGroup.every((m) => selectedDraft[m.key] === true);
-            const noneChecked = modulesInGroup.every((m) => selectedDraft[m.key] === false);
-
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {roles.map((role) => {
+            const isSelected = role.id === selectedRoleId;
+            const permCount = activePermissionCount(role.id);
             return (
-              <div
-                key={group}
-                className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]"
+              <button
+                key={role.id}
+                type="button"
+                onClick={() => setSelectedRoleId(role.id)}
+                className={`group relative flex flex-col gap-2 rounded-xl border p-4 text-left transition-all cursor-pointer hover:shadow-md ${
+                  isSelected
+                    ? "border-[#002187] bg-white shadow-md ring-1 ring-[#002187] dark:border-[#C4D600] dark:bg-[#07194f] dark:ring-[#C4D600]"
+                    : "border-slate-200/80 bg-white hover:border-slate-300 dark:border-slate-700/80 dark:bg-[#07194f] dark:hover:border-slate-600"
+                }`}
               >
-                {/* Header do Card */}
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="h-5 w-5 text-[#051647] dark:text-[#C4D600]" />
-                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">{group}</h2>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setAllForGroup(group, true)}
-                      disabled={allChecked}
-                      className="cursor-pointer rounded px-2 py-1 text-[10px] font-semibold text-[#002187] hover:bg-slate-100 disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800"
-                    >
-                      Marcar todos
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAllForGroup(group, false)}
-                      disabled={noneChecked}
-                      className="cursor-pointer rounded px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
-                    >
-                      Desmarcar
-                    </button>
-                  </div>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className={`text-base font-bold ${isSelected ? "text-[#051647] dark:text-[#C4D600]" : "text-slate-900 dark:text-white"}`}>
+                    {role.name}
+                  </h3>
+                  {role.isSystem && (
+                    <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      Sistema
+                    </span>
+                  )}
                 </div>
-
-                {/* Lista de Módulos com Toggles */}
-                <div className="space-y-3">
-                  {modulesInGroup.map((module) => {
-                    const checked = selectedDraft[module.key] === true;
-                    return (
-                      <div
-                        key={module.key}
-                        className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 transition-colors dark:border-slate-800/50 dark:bg-white/[0.03]"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{module.label}</p>
-                          <p className="text-[10px] text-slate-400">Acesso à tela {module.href}</p>
-                        </div>
-                        <Toggle
-                          checked={checked}
-                          onChange={() => toggle(module.key)}
-                          label={`${checked ? "Remover" : "Conceder"} acesso a ${module.label}`}
-                        />
-                      </div>
-                    );
-                  })}
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>{permCount} permissões ativas</span>
                 </div>
-              </div>
+                {role.description && (
+                  <p className="line-clamp-2 text-[11px] text-slate-400">{role.description}</p>
+                )}
+              </button>
             );
           })}
+
+          {/* Card "+ Adicionar Cargo" */}
+          <button
+            type="button"
+            onClick={() => setIsCreateOpen(true)}
+            className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 p-4 text-slate-400 transition-all cursor-pointer hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600]"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
+              <Plus className="h-5 w-5" />
+            </div>
+            <span className="text-sm font-semibold">Adicionar Cargo</span>
+          </button>
         </div>
       )}
+
+      {/* Área de Permissões do Cargo Selecionado */}
+      {!isLoading && selectedRole && selectedDraft ? (
+        <div className="space-y-4">
+          {/* Header da Seção de Permissões */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-[#051647] dark:text-[#C4D600]" />
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                Permissões do Cargo: <span className="text-[#002187] dark:text-[#C4D600]">{selectedRole.name}</span>
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => MODULES.forEach((m) => { if (!selectedDraft[m.key]) toggle(m.key); })}
+                className="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold text-[#002187] hover:bg-slate-100 dark:text-[#C4D600] dark:hover:bg-slate-800"
+              >
+                Marcar todas
+              </button>
+              <button
+                type="button"
+                onClick={() => MODULES.forEach((m) => { if (selectedDraft[m.key]) toggle(m.key); })}
+                className="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              >
+                Desmarcar todas
+              </button>
+            </div>
+          </div>
+
+          <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <Lock className="h-3.5 w-3.5" />
+            Administradores sempre têm acesso total. Usuários sem cargo não acessam telas.
+          </p>
+
+          {/* Grid de Módulos com Toggles */}
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
+            {filteredGroups.map((group) => {
+              const modulesInGroup = filteredModules.filter((m) => m.group === group);
+              if (modulesInGroup.length === 0) return null;
+              const allChecked = modulesInGroup.every((m) => selectedDraft[m.key] === true);
+              const noneChecked = modulesInGroup.every((m) => selectedDraft[m.key] === false);
+
+              return (
+                <div
+                  key={group}
+                  className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]"
+                >
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-[#051647] dark:text-[#C4D600]" />
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">{group}</h3>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setAllForGroup(group, true)}
+                        disabled={allChecked}
+                        className="cursor-pointer rounded px-2 py-1 text-[10px] font-semibold text-[#002187] hover:bg-slate-100 disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800"
+                      >
+                        Marcar todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAllForGroup(group, false)}
+                        disabled={noneChecked}
+                        className="cursor-pointer rounded px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
+                      >
+                        Desmarcar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {modulesInGroup.map((module) => {
+                      const checked = selectedDraft[module.key] === true;
+                      return (
+                        <div
+                          key={module.key}
+                          className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 transition-colors dark:border-slate-800/50 dark:bg-white/[0.03]"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{module.label}</p>
+                            <p className="text-[10px] text-slate-400">Acesso à tela {module.href}</p>
+                          </div>
+                          <Toggle
+                            checked={checked}
+                            onChange={() => toggle(module.key)}
+                            label={`${checked ? "Remover" : "Conceder"} acesso a ${module.label}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : !isLoading && roles.length > 0 && !selectedRole ? (
+        <div className="flex h-40 items-center justify-center text-slate-400">
+          <p className="text-sm">Selecione um cargo acima para gerenciar permissões.</p>
+        </div>
+      ) : null}
 
       {/* Barra Flutuante de Alterações Não Salvas */}
       {hasChanges && (
@@ -313,10 +410,67 @@ export default function PermissoesPage() {
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#002187] disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]"
             >
               <Save className="h-4 w-4" />
-              {isSaving ? "Salvando..." : "Salvar permissões"}
+              {isSaving ? "Salvando..." : "Salvar alterações"}
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modal de Criar Novo Cargo */}
+      {isCreateOpen && (
+        <EntityDialog
+          titleId="create-role-title"
+          title="Novo Cargo"
+          description="Crie um novo cargo para definir permissões de acesso."
+          onClose={() => setIsCreateOpen(false)}
+        >
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="role-name" className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Nome do cargo *
+              </label>
+              <input
+                id="role-name"
+                type="text"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="Ex: Vendedor, Gerente de Loja"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition-colors focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label htmlFor="role-desc" className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Descrição
+              </label>
+              <textarea
+                id="role-desc"
+                value={createDescription}
+                onChange={(e) => setCreateDescription(e.target.value)}
+                placeholder="Descrição opcional do cargo..."
+                rows={3}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(false)}
+                className="inline-flex h-10 cursor-pointer items-center rounded-lg px-4 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={createRole}
+                disabled={isCreating || !createName.trim()}
+                className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#002187] disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]"
+              >
+                {isCreating ? "Criando..." : "Criar Cargo"}
+              </button>
+            </div>
+          </div>
+        </EntityDialog>
       )}
     </div>
   );
