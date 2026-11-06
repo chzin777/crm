@@ -17,12 +17,13 @@ type Props = {
   act: (url: string, method: string, body?: unknown, success?: string) => Promise<boolean>;
 };
 
-export function Metric({ icon: Icon, label, value, alert = false }: { icon: typeof Inbox; label: string; value: string; alert?: boolean }) {
+export function Metric({ icon: Icon, label, value, alert = false, healthy = false }: { icon: typeof Inbox; label: string; value: string; alert?: boolean; healthy?: boolean }) {
+  const good = healthy && !alert;
   return (
     <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-slate-800 dark:bg-white/5">
-      <Icon className={`h-5 w-5 shrink-0 ${alert ? "text-[#F7915E]" : "text-slate-400"}`} />
+      <Icon className={`h-5 w-5 shrink-0 ${alert ? "text-[#F7915E]" : good ? "text-emerald-600 dark:text-[#25D366]" : "text-slate-400"}`} />
       <div className="min-w-0">
-        <p className="text-lg font-bold leading-tight text-slate-900 dark:text-white">{value}</p>
+        <p className={`text-lg font-bold leading-tight ${good ? "text-emerald-700 dark:text-[#25D366]" : "text-slate-900 dark:text-white"}`}>{value}</p>
         <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">{label}</p>
       </div>
     </div>
@@ -71,7 +72,7 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
                   type="button"
                   aria-current={active}
                   onClick={() => { setSelectedId(item.id); setMemberSearch(""); }}
-                  className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${active ? "bg-[#051647]/5 dark:bg-white/10" : "hover:bg-slate-50 dark:hover:bg-white/5"}`}
+                  className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border-l-4 px-3 py-2.5 text-left transition-colors ${active ? "border-[#25D366] bg-[#051647]/5 dark:border-[#C4D600] dark:bg-white/10" : "border-transparent hover:bg-slate-50 dark:hover:bg-white/5"}`}
                 >
                   <span className="h-8 w-1 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                   <span className="min-w-0 flex-1">
@@ -105,10 +106,10 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
         </header>
 
         <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <Metric icon={Inbox} label="Esperando agora" value={String(queue.waiting)} alert={queue.waiting > 0} />
-          <Metric icon={Clock} label="Maior espera" value={oldest ? oldest.text : "-"} alert={(oldest?.minutes ?? 0) >= 3} />
-          <Metric icon={Users} label="Online" value={`${online}/${queue.members.length}`} />
-          <Metric icon={UserPlus} label="Carga da fila" value={`${open}/${capacity}`} alert={capacity > 0 && open >= capacity} />
+          <Metric icon={Inbox} label="Esperando agora" value={String(queue.waiting)} alert={queue.waiting > 0} healthy />
+          <Metric icon={Clock} label="Maior espera" value={oldest ? oldest.text : "-"} alert={(oldest?.minutes ?? 0) >= 3} healthy={!!oldest} />
+          <Metric icon={Users} label="Online" value={`${online}/${queue.members.length}`} healthy={online > 0} />
+          <Metric icon={UserPlus} label="Carga da fila" value={`${open}/${capacity}`} alert={capacity > 0 && open >= capacity} healthy={capacity > 0} />
         </div>
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -118,7 +119,7 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
               <input value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Buscar pessoa..." aria-label="Buscar pessoa na fila" className="h-9 w-44 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
             )}
             {canManage && (
-              <button type="button" onClick={() => setAdding(true)} className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-[#051647] px-3 text-sm font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]"><UserPlus className="h-4 w-4" />Adicionar pessoas</button>
+              <button type="button" onClick={() => setAdding(true)} className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-[#25D366] px-3 text-sm font-semibold text-[#051647] hover:bg-[#1ebe5b] dark:bg-[#C4D600] dark:hover:bg-[#b3c400]"><UserPlus className="h-4 w-4" />Adicionar pessoas</button>
             )}
           </div>
         </div>
@@ -143,6 +144,7 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
                   <div className="min-w-44 flex-1">
                     <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
                       <span className="truncate">{member.name}</span>
+                      {member.online && !member.paused && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">Online</span>}
                       {member.paused && <span className="rounded bg-[#F7915E]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#b4531f] dark:text-[#F7915E]">Pausada</span>}
                     </p>
                     {agent && !agent.hasChatAccess ? (
@@ -154,7 +156,7 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
                   <div className="w-32 shrink-0">
                     <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">{member.open} de {member.capacity} conversas</p>
                     <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                      <div className={`h-full rounded-full ${ratio >= 1 ? "bg-[#F7915E]" : "bg-[#002187] dark:bg-[#C4D600]"}`} style={{ width: `${ratio * 100}%` }} />
+                      <div className={`h-full rounded-full ${ratio >= 1 ? "bg-[#F7915E]" : "bg-[#25D366] dark:bg-[#C4D600]"}`} style={{ width: `${ratio * 100}%` }} />
                     </div>
                   </div>
                   {canManage && (

@@ -17,11 +17,12 @@ export type MessageListHandle = {
   releaseRefresh: () => void;
 };
 
-function Delivery({ delivery, reason }: { delivery: ChatDelivery | null; reason: string | null }) {
+function Delivery({ delivery, reason, onLime }: { delivery: ChatDelivery | null; reason: string | null; onLime: boolean }) {
   if (delivery === "sending") return <Clock className="h-3.5 w-3.5" aria-label="Enviando" />;
   if (delivery === "sent") return <Check className="h-3.5 w-3.5" aria-label="Enviada" />;
   if (delivery === "delivered") return <CheckCheck className="h-3.5 w-3.5" aria-label="Entregue" />;
-  if (delivery === "read") return <CheckCheck className="h-3.5 w-3.5 text-[#25D366]" aria-label="Lida" />;
+  // No tema escuro o balão do atendente é lima: o verde sumiria sobre ele.
+  if (delivery === "read") return <CheckCheck className={`h-3.5 w-3.5 text-[#25D366] ${onLime ? "dark:text-[#002187]" : ""}`} aria-label="Lida" />;
   if (delivery === "failed") return <span title={reason ?? "Falha no envio"}><AlertCircle className="h-3.5 w-3.5 text-red-400" aria-label="Falhou" /></span>;
   return null;
 }
@@ -265,7 +266,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       {message.text && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
                       <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
-                        {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} />}
+                        {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
                       </div>
                       {message.delivery === "failed" && <p className="mt-1 text-[10px] font-medium text-red-300">{message.failureReason ?? "Falha no envio"}</p>}
                     </div>

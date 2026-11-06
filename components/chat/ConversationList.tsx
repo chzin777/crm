@@ -45,7 +45,7 @@ function DeliveryIcon({ delivery }: { delivery: ChatDelivery }) {
   if (delivery === "sending") return <Clock className={`${className} text-slate-400`} aria-label="Enviando" />;
   if (delivery === "sent") return <Check className={`${className} text-slate-400`} aria-label="Enviada" />;
   if (delivery === "delivered") return <CheckCheck className={`${className} text-slate-400`} aria-label="Entregue" />;
-  if (delivery === "read") return <CheckCheck className={`${className} text-blue-500`} aria-label="Lida" />;
+  if (delivery === "read") return <CheckCheck className={`${className} text-emerald-600 dark:text-[#25D366]`} aria-label="Lida" />;
   return <AlertCircle className={`${className} text-red-500`} aria-label="Falha no envio" />;
 }
 
@@ -121,7 +121,7 @@ function FilterSelect({ label, value, placeholder, options, onChange }: FilterSe
       align="left"
       compact
       widthClassName="w-52 min-w-[140px]"
-      triggerClassName="flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition-all hover:bg-slate-50 focus:border-[#002187] dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700/50 dark:focus:border-[#C4D600]"
+      triggerClassName={`flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-xl border bg-white px-3 text-xs font-medium text-slate-700 outline-none transition-all hover:bg-slate-50 focus:border-[#002187] dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700/50 dark:focus:border-[#C4D600] ${value ? "border-emerald-500 dark:border-[#C4D600]/70" : "border-slate-200/80 dark:border-slate-700/80"}`}
       trigger={(
         <>
           <span className="min-w-0 flex-1 truncate text-left">{text}</span>
@@ -150,7 +150,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Conversas</h2>
           {counts.unread > 0 && (
-            <span title="Conversas não lidas" className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">{counts.unread}</span>
+            <span title="Conversas não lidas" className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">{counts.unread}</span>
           )}
           <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>
         </div>
@@ -174,7 +174,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
               onClick={() => onTab(id)}
               className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                 tab === id
-                  ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]"
+                  ? "bg-[#C4D600] text-[#051647]"
                   : "bg-transparent text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5"
               }`}
             >
@@ -264,7 +264,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         {isSticker(item) ? <span className="inline-flex items-center gap-1"><Smile className="h-3.5 w-3.5" />Figurinha</span> : preview(item)}
                       </p>
                       {item.unreadCount > 0 && (
-                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white dark:bg-[#C4D600] dark:text-slate-900">{item.unreadCount}</span>
+                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-[#051647] dark:bg-[#C4D600]">{item.unreadCount}</span>
                       )}
                     </div>
                     {hasTags && (

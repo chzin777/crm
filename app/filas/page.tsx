@@ -86,7 +86,7 @@ export default function FilasPage() {
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Quem atende cada fila, carga da equipe e configuração do atendimento</p>
         </div>
         {canManage && view === "queues" && (
-          <button type="button" onClick={() => openForm("new")} className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">
+          <button type="button" onClick={() => openForm("new")} className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg bg-[#25D366] px-4 text-sm font-semibold text-[#051647] hover:bg-[#1ebe5b] dark:bg-[#C4D600] dark:hover:bg-[#b3c400]">
             <Plus className="h-4 w-4" /> Nova fila
           </button>
         )}
@@ -94,7 +94,7 @@ export default function FilasPage() {
 
       <div className="mb-5 flex flex-wrap gap-1">
         {tabs.map((tab) => (
-          <button key={tab.id} type="button" onClick={() => setView(tab.id)} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium ${view === tab.id ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"}`}>
+          <button key={tab.id} type="button" onClick={() => setView(tab.id)} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium ${view === tab.id ? "bg-[#C4D600] text-[#051647]" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"}`}>
             {tab.label}
           </button>
         ))}

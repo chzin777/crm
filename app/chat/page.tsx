@@ -365,7 +365,7 @@ function ChatWorkspace() {
             actions={(
               <>
                 {canWrite && (
-                  <button type="button" onClick={() => setShowNew(true)} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-medium text-white shadow-xs transition-opacity hover:opacity-90 dark:bg-[#C4D600] dark:text-[#051647]">
+                  <button type="button" onClick={() => setShowNew(true)} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#25D366] px-3 text-xs font-medium text-[#051647] shadow-xs transition-opacity hover:opacity-90 dark:bg-[#C4D600]">
                     <MessageSquarePlus className="h-4 w-4" />
                     Nova conversa
                   </button>
@@ -391,8 +391,13 @@ function ChatWorkspace() {
                 <button type="button" onClick={() => select(null)} aria-label="Voltar" className="md:hidden cursor-pointer rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                   <ArrowLeft className="h-5 w-5" />
                 </button>
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
-                  {initials(open.name)}
+                <div className="relative shrink-0">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
+                    {initials(open.name)}
+                  </div>
+                  {open.windowOpen && !open.closedAt && (
+                    <span title="Janela de 24h aberta" className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#25D366] ring-2 ring-white dark:ring-[#07194f]" />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{open.name}</h3>
