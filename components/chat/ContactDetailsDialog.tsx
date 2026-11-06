@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRightLeft, CalendarClock, Camera, Check, Copy, Hourglass, ListOrdered, MessageSquarePlus, MessagesSquare, Send, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, Ban, CalendarClock, Camera, Check, Copy, Hourglass, ListOrdered, MessageSquarePlus, MessagesSquare, Send, type LucideIcon } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
@@ -12,6 +12,9 @@ import { formatPhone } from "@/lib/chat/phone";
 import { STATUS_LABELS, type ContactNoteItem, type ContactProfile, type ConversationDetail } from "@/lib/chat/types";
 
 const COPIED_MS = 1500;
+const FOOTER_BUTTON = "inline-flex h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-colors";
+const FOOTER_NEUTRAL = `${FOOTER_BUTTON} border border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/5`;
+const FOOTER_PRIMARY = `${FOOTER_BUTTON} bg-[#C4D600] text-[#051647] hover:opacity-90`;
 const CATEGORY_LABELS: Record<string, string> = { cliente: "Cliente", lead: "Lead", nps: "NPS", inativo: "Inativo" };
 
 type Tab = "cadastro" | "atendimento" | "anotacoes";
@@ -224,22 +227,13 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
         </div>
         <div className="min-w-0 flex-1">
           <p title={conversation.name} className="truncate text-lg font-bold leading-tight text-slate-900 dark:text-white">{conversation.name}</p>
-          <div className="flex items-center gap-1 text-sm text-slate-600 dark:text-slate-300">
-            {formatPhone(phone)}
-            <CopyButton value={phone} label="telefone" />
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-xs font-semibold text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{CATEGORY_LABELS[conversation.category] ?? conversation.category}</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200">
+              <span className={`h-2 w-2 rounded-full ${conversation.windowOpen ? "bg-[#C4D600]" : "bg-slate-300 dark:bg-slate-600"}`} />
+              Janela 24h {conversation.windowOpen ? "aberta" : "fechada"}
+            </span>
           </div>
-        </div>
-        <div className="flex shrink-0 gap-1.5">
-          {canWrite && (
-            <button type="button" onClick={onNewConversation} aria-label="Nova conversa" title="Nova conversa" className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg bg-[#C4D600] text-[#051647] hover:opacity-90">
-              <MessageSquarePlus className="h-4 w-4" />
-            </button>
-          )}
-          {canMove && (
-            <button type="button" onClick={onTransfer} aria-label="Transferir" title="Transferir" className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/5">
-              <ArrowRightLeft className="h-4 w-4" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -256,14 +250,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
 
       {/* Os painéis ficam montados: trocar de aba não refaz a busca nem perde a nota em digitação. */}
       <div ref={content} className="min-h-0 flex-1 overflow-y-auto scroll-smooth p-4 [scrollbar-gutter:stable]">
-        <div role="tabpanel" id="contact-panel-cadastro" aria-labelledby="contact-tab-cadastro" hidden={tab !== "cadastro"} className="space-y-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-xs font-semibold text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{CATEGORY_LABELS[conversation.category] ?? conversation.category}</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200">
-              <span className={`h-2 w-2 rounded-full ${conversation.windowOpen ? "bg-[#C4D600]" : "bg-slate-300 dark:bg-slate-600"}`} />
-              Janela 24h {conversation.windowOpen ? "aberta" : "fechada"}
-            </span>
-          </div>
+        <div role="tabpanel" id="contact-panel-cadastro" aria-labelledby="contact-tab-cadastro" hidden={tab !== "cadastro"}>
           <dl className="grid gap-3 sm:grid-cols-2">
             <Info label="Nome completo"><span title={conversation.name} className="min-w-0 truncate">{conversation.name}</span><CopyButton value={conversation.name} label="nome" /></Info>
             <Info label="CPF">
@@ -283,14 +270,6 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
             <Info label="Origem">{profile?.origin ?? <Empty text={missing} />}</Info>
             <Info label="Segmento">{conversation.segment ?? <Empty text="Não informado" />}</Info>
           </dl>
-          <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-            <Link href={`/contatos?busca=${encodeURIComponent(phone.replace(/^55/, ""))}`} className="inline-block cursor-pointer text-sm font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Abrir ficha do contato</Link>
-            {canBlock && (
-              <button type="button" onClick={onToggleBlock} className="cursor-pointer text-sm font-medium text-red-600 hover:underline dark:text-red-300">
-                {conversation.blocked ? "Desbloquear número" : "Bloquear número"}
-              </button>
-            )}
-          </div>
         </div>
 
         <div role="tabpanel" id="contact-panel-atendimento" aria-labelledby="contact-tab-atendimento" hidden={tab !== "atendimento"} className="space-y-4">
@@ -300,12 +279,6 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
             <Metric icon={CalendarClock} label="Primeira mensagem do dia" value={firstToday ? clockTime(firstToday) : "Sem mensagens hoje"} detail={firstToday ? new Date(firstToday).toLocaleDateString("pt-BR") : "Nada trocado hoje"} />
             <Metric icon={Hourglass} label="Tempo de espera" value={waiting || "Sem espera"} detail={waiting ? "Aguardando atendente" : "Não está na fila de espera"} />
           </div>
-
-          {canMove && (
-            <button type="button" onClick={onTransfer} className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-3 text-sm font-semibold text-[#051647] hover:opacity-90">
-              <ArrowRightLeft className="h-4 w-4" />Transferir ou trocar de fila
-            </button>
-          )}
 
           <Section title="Etiquetas">
             <div className="flex flex-wrap gap-1.5">
@@ -364,6 +337,30 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
           ) : <Empty text={failed ? "Não foi possível carregar as notas." : "Carregando..."} />}
         </div>
       </div>
+
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+        <div>
+          {canBlock && (
+            <button type="button" onClick={onToggleBlock} className={`${FOOTER_BUTTON} border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10`}>
+              <Ban className="h-3.5 w-3.5" />{conversation.blocked ? "Desbloquear contato" : "Bloquear contato"}
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className={FOOTER_NEUTRAL}>Fechar</button>
+          <Link href={`/contatos?busca=${encodeURIComponent(phone.replace(/^55/, ""))}`} className={FOOTER_NEUTRAL}>Ver ficha completa</Link>
+          {canWrite && (
+            <button type="button" onClick={onNewConversation} className={canMove ? FOOTER_NEUTRAL : FOOTER_PRIMARY}>
+              <MessageSquarePlus className="h-3.5 w-3.5" />Nova conversa
+            </button>
+          )}
+          {canMove && (
+            <button type="button" onClick={onTransfer} className={FOOTER_PRIMARY}>
+              <ArrowRightLeft className="h-3.5 w-3.5" />Transferir ou trocar de fila
+            </button>
+          )}
+        </div>
+      </footer>
     </EntityDialog>
   );
 }
