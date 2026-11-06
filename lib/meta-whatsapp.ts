@@ -8,7 +8,75 @@
  *   META_WHATSAPP_ACCOUNT_ID       – WhatsApp Business Account ID
  */
 
+import { request } from "node:https";
+import { connect, type TLSSocket } from "node:tls";
+
 const GRAPH_API = "https://graph.facebook.com/v21.0";
+
+/**
+ * Certificado que o FortiGate apresenta para *.fbsbx.com enquanto inspeciona o tráfego, sem enviar a CA.
+ * Vence em 14/11/2026: depois disso o download falha até este valor ser atualizado.
+ * Remover quando lookaside.fbsbx.com entrar na exceção de inspeção SSL do firewall.
+ */
+const INSPECTED_MEDIA_FINGERPRINT = "39:B7:52:85:A6:CA:37:09:7F:40:CF:E6:31:6D:98:56:BA:EC:EB:CF:BB:AC:C8:74:C5:C5:E9:E3:E9:CC:9D:31";
+const MEDIA_TIMEOUT_MS = 20_000;
+const CHAIN_ERRORS = new Set([
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+]);
+
+const isChainError = (error: unknown) => CHAIN_ERRORS.has((error as { cause?: { code?: string } }).cause?.code ?? "");
+
+const isMediaHost = (url: URL) => url.protocol === "https:" && (url.hostname === "fbsbx.com" || url.hostname.endsWith(".fbsbx.com"));
+
+/** Só devolve o socket depois de conferir a fingerprint: nenhum byte HTTP, nem o token, sai antes disso. */
+function pinnedMediaSocket(host: string) {
+  return new Promise<TLSSocket>((resolve, reject) => {
+    const socket = connect({ host, port: 443, servername: host, rejectUnauthorized: false });
+    socket.setTimeout(MEDIA_TIMEOUT_MS, () => socket.destroy(new Error("Tempo esgotado ao baixar mídia.")));
+    socket.once("error", reject);
+    socket.once("secureConnect", () => {
+      const { fingerprint256 } = socket.getPeerCertificate();
+      if (fingerprint256 !== INSPECTED_MEDIA_FINGERPRINT) {
+        socket.destroy();
+        reject(new Error(`Certificado de mídia não reconhecido (${fingerprint256}).`));
+        return;
+      }
+      socket.off("error", reject);
+      resolve(socket);
+    });
+  });
+}
+
+async function downloadPinnedMedia(url: URL, accessToken: string, maxBytes: number) {
+  const socket = await pinnedMediaSocket(url.hostname);
+  return new Promise<{ buffer: Buffer; contentType: string | undefined }>((resolve, reject) => {
+    const outgoing = request(url, { agent: false, createConnection: () => socket, headers: { Authorization: `Bearer ${accessToken}` } }, (response) => {
+      if (response.statusCode !== 200) {
+        outgoing.destroy();
+        reject(new Error(`Falha ao baixar mídia (${response.statusCode}).`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > maxBytes) outgoing.destroy(new Error("Mídia acima do limite."));
+        else chunks.push(chunk);
+      });
+      response.on("error", reject);
+      response.on("end", () => {
+        socket.destroy();
+        resolve({ buffer: Buffer.concat(chunks), contentType: response.headers["content-type"] });
+      });
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
 
 function getConfig() {
   const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
@@ -98,7 +166,15 @@ export async function downloadMedia(mediaId: string, maxBytes: number) {
   const { accessToken } = getConfig();
   const info = await graph<{ url: string; mime_type?: string; file_size?: number }>(`/${mediaId}`);
   if (info.file_size && info.file_size > maxBytes) throw new Error("Mídia acima do limite.");
-  const response = await fetch(info.url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  const url = new URL(info.url);
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }).catch((error: unknown) => {
+    if (isChainError(error) && isMediaHost(url)) return null;
+    throw error;
+  });
+  if (!response) {
+    const { buffer, contentType } = await downloadPinnedMedia(url, accessToken, maxBytes);
+    return { buffer, mime: info.mime_type ?? contentType ?? "application/octet-stream" };
+  }
   if (!response.ok) throw new Error(`Falha ao baixar mídia (${response.status}).`);
   const buffer = Buffer.from(await response.arrayBuffer());
   if (buffer.length > maxBytes) throw new Error("Mídia acima do limite.");
