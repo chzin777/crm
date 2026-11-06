@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { resolveAccess } from "@/lib/permissions";
 import { chatError, requireChatActor } from "@/lib/chat/access";
 import { openCount } from "@/lib/chat/actions";
 import { addAudit } from "@/lib/chat/conversation";
@@ -14,7 +15,7 @@ export async function GET() {
     prisma.user.findMany({
       where: { banned: false },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, email: true, chatAgent: true, chatQueues: { select: { queueId: true } } },
+      select: { id: true, name: true, email: true, role: true, roleRef: { select: { permissions: true } }, chatAgent: true, chatQueues: { select: { queueId: true } } },
     }),
     prisma.chatConversation.groupBy({ by: ["assigneeId"], where: { assigneeId: { not: null }, closedAt: null }, _count: { _all: true } }),
   ]);
@@ -25,6 +26,7 @@ export async function GET() {
       id: user.id,
       name: user.name,
       email: user.email,
+      hasChatAccess: resolveAccess(user.role, user.roleRef?.permissions).chat,
       capacity: user.chatAgent?.capacity ?? 0,
       paused: user.chatAgent?.paused ?? false,
       online: isOnline(user.chatAgent?.lastSeenAt),

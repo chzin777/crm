@@ -71,7 +71,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-    - ./crm/.env
+    - .env
     environment:
       NODE_ENV: production
       PORT: 3000
