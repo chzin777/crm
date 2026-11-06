@@ -16,7 +16,7 @@ export class ChatRuleError extends Error {
   }
 }
 
-export type OutgoingTemplate = { name: string; language: string; params: string[] };
+export type OutgoingTemplate = { name: string; language: string; params: string[]; headerParams?: string[]; headerMedia?: ChatAttachment };
 
 export type OutgoingMessage = {
   text: string;
@@ -61,12 +61,19 @@ export async function assumeFor(actor: ChatActor, conversation: Pick<ChatConvers
 
 async function templateText(template: OutgoingTemplate) {
   const found = (await listTemplates()).find((item) => item.name === template.name && item.language === template.language);
-  const body = found?.body ?? template.name;
-  return { found, text: body.replace(/\{\{(\d+)\}\}/g, (_, index: string) => template.params[Number(index) - 1] ?? "") };
+  const fill = (text: string, values: string[]) => text.replace(/\{\{(\d+)\}\}/g, (_, index: string) => values[Number(index) - 1] ?? "");
+  const body = fill(found?.body ?? template.name, template.params);
+  const header = found?.headerFormat === "TEXT" ? fill(found.headerText, template.headerParams ?? []) : "";
+  return { found, text: header ? `${header}\n\n${body}` : body };
 }
 
-async function templateHeader(found: Awaited<ReturnType<typeof templateText>>["found"]) {
-  if (found?.headerFormat !== "IMAGE") return undefined;
+const HEADER_KINDS: Record<string, "image" | "video" | "document"> = { IMAGE: "image", VIDEO: "video", DOCUMENT: "document" };
+
+async function templateHeader(found: Awaited<ReturnType<typeof templateText>>["found"], media?: ChatAttachment) {
+  const kind = HEADER_KINDS[found?.headerFormat ?? ""];
+  if (!found || !kind) return undefined;
+  if (media) return { kind, mimetype: media.mime.split(";")[0], fileName: media.name, base64: (await readFile(media.key)).toString("base64") };
+  if (kind !== "image") throw new Error("Este modelo exige um arquivo no cabeçalho.");
   if (!found.headerImageUrl) throw new Error("Este modelo exige uma imagem e a Meta não retornou a do modelo.");
   const downloaded = await fetch(found.headerImageUrl);
   if (!downloaded.ok) throw new Error("Não foi possível carregar a imagem do modelo.");
@@ -133,6 +140,7 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
   const template = input.template ? await templateText(input.template) : null;
   const quote = await loadQuote(conversation.id, input.replyToId);
   const isAudio = input.attachment?.kind === "audio";
+  const attachment = input.attachment ?? input.template?.headerMedia;
 
   const message = await prisma.chatMessage.create({
     data: {
@@ -143,7 +151,7 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
       text: template?.text ?? (isAudio ? "" : text),
       delivery: "sending",
       createdAt: now,
-      ...(input.attachment ? { attachment: input.attachment as unknown as Prisma.InputJsonValue } : {}),
+      ...(attachment ? { attachment: attachment as unknown as Prisma.InputJsonValue } : {}),
       ...(quote ? { replyTo: quote.replyTo } : {}),
     },
   });
@@ -155,7 +163,7 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
 
   const sent = await deliver(message.id, async () => {
     if (input.template) {
-      return sendTemplate(conversation.phone, input.template.name, input.template.language, input.template.params, await templateHeader(template?.found));
+      return sendTemplate(conversation.phone, input.template.name, input.template.language, input.template.params, await templateHeader(template?.found, input.template.headerMedia), input.template.headerParams);
     }
     if (input.attachment) return sendAttachment(conversation, message.id, input.attachment, isAudio ? "" : text, quote?.externalId);
     return sendText(conversation.phone, text, quote?.externalId);

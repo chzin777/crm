@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CheckCircle2, Clock3, ExternalLink, FileText, Image as ImageIcon, Pencil, Phone, Plus, RefreshCw, Reply, Search, Send, Trash2, X, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, FileText, Image as ImageIcon, Pencil, Plus, RefreshCw, Search, Send, Trash2, X, XCircle } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import Stepper, { Step } from "@/components/Stepper";
+import { WhatsAppBubble } from "@/components/WhatsAppBubble";
 import { TEMPLATE_EDIT_LIMITS, type ReservedTemplateName, type TemplateEditUsage } from "@/lib/template-edit-limits";
 
 type TemplateButton = { type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER"; text: string; url?: string; phone_number?: string };
@@ -80,40 +81,6 @@ function StepHeading({ title, text }: { title: string; text: string }) {
     <div>
       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{text}</p>
-    </div>
-  );
-}
-
-function fillVariables(text: string, values: string[]) {
-  return text.replace(/\{\{(\d+)\}\}/g, (match, index: string) => values[Number(index) - 1]?.trim() || match);
-}
-
-function WhatsAppBubble({ image, body, footer, values = [], buttons = [] }: { image?: string | null; body: string; footer?: string; values?: string[]; buttons?: { type: string; text: string }[] }) {
-  const time = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return (
-    <div className="rounded-lg bg-[#efeae2] p-3 dark:bg-[#0b141a]" aria-label="Prévia da mensagem">
-      <div className="w-fit max-w-[92%]">
-      <div className="rounded-lg rounded-tl-none bg-white p-1 text-[#111b21] shadow-sm dark:bg-[#202c33] dark:text-[#e9edef]">
-        {image === "" && (
-          <div className="grid h-28 w-60 max-w-full place-items-center rounded-md bg-slate-200 text-slate-400 dark:bg-slate-700"><ImageIcon className="h-7 w-7" /></div>
-        )}
-        {image && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={image} alt="Imagem do cabeçalho" className="max-h-44 w-full rounded-md object-cover" />
-        )}
-        <p className="whitespace-pre-wrap break-words px-1.5 pt-1 text-[13px] leading-snug">{fillVariables(body, values) || <span className="text-[#667781]">O texto do modelo aparece aqui.</span>}</p>
-        {footer && <p className="px-1.5 pt-1 text-[11px] text-[#667781] dark:text-[#8696a0]">{footer}</p>}
-        <p className="px-1.5 pb-0.5 text-right text-[10px] text-[#667781] dark:text-[#8696a0]">{time}</p>
-      </div>
-      {buttons.map((button, index) => (
-        <div key={index} className="mt-1 flex items-center justify-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[13px] font-medium text-[#00a5f4] shadow-sm dark:bg-[#202c33]">
-          {button.type === "URL" && <ExternalLink className="h-3.5 w-3.5" />}
-          {button.type === "PHONE_NUMBER" && <Phone className="h-3.5 w-3.5" />}
-          {button.type === "QUICK_REPLY" && <Reply className="h-3.5 w-3.5" />}
-          <span className="truncate">{button.text || "Botão"}</span>
-        </div>
-      ))}
-      </div>
     </div>
   );
 }

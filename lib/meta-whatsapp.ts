@@ -346,13 +346,17 @@ export async function sendTemplate(
   name: string,
   language: string,
   params: string[] = [],
-  headerImage?: { mimetype: string; fileName: string; base64?: string; url?: string; mediaId?: string },
+  headerImage?: { mimetype: string; fileName: string; base64?: string; url?: string; mediaId?: string; kind?: "image" | "video" | "document" },
+  headerParams: string[] = [],
 ) {
   const { phoneNumberId } = getConfig();
   const components: Record<string, unknown>[] = [];
   if (headerImage) {
     const id = headerImage.mediaId ?? await uploadMedia(headerImage);
-    components.push({ type: "header", parameters: [{ type: "image", image: { id } }] });
+    const kind = headerImage.kind ?? "image";
+    components.push({ type: "header", parameters: [{ type: kind, [kind]: kind === "document" ? { id, filename: headerImage.fileName } : { id } }] });
+  } else if (headerParams.length > 0) {
+    components.push({ type: "header", parameters: headerParams.map((text) => ({ type: "text", text })) });
   }
   if (params.length > 0) {
     components.push({ type: "body", parameters: params.map((text) => ({ type: "text", text })) });

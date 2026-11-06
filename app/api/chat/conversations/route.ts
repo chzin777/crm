@@ -36,10 +36,23 @@ function searchWhere(search: string): Prisma.ChatConversationWhereInput[] {
 
 const newConversationBody = z.object({
   contactId: z.string().min(1),
-  template: z.object({ name: z.string().min(1), language: z.string().min(1), params: z.array(z.string()).default([]) }).optional(),
+  text: z.string().max(4096).default(""),
+  template: z.object({
+    name: z.string().min(1),
+    language: z.string().min(1),
+    params: z.array(z.string()).default([]),
+    headerParams: z.array(z.string()).default([]),
+    headerMedia: z.object({
+      kind: z.enum(["image", "video", "document"]),
+      name: z.string().min(1).max(200),
+      mime: z.string().min(1).max(120),
+      size: z.number().int().positive(),
+      key: z.string().min(1),
+    }).optional(),
+  }).optional(),
 });
 
-/** Inicia conversa pelo atendente; se o contato já tiver uma aberta, devolve a existente. */
+/** Inicia conversa pelo atendente; se o contato já tiver uma aberta, a primeira mensagem sai nela. */
 export async function POST(request: Request) {
   const guard = await requireChatActor("chat.assume");
   if (guard.response) return guard.response;
@@ -48,12 +61,23 @@ export async function POST(request: Request) {
   const parsed = newConversationBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return chatError("Dados inválidos.", 400);
   const { contactId, template } = parsed.data;
+  const text = parsed.data.text.trim();
+  // O arquivo precisa ter sido enviado por esta pessoa em /api/chat/media.
+  if (template?.headerMedia && !template.headerMedia.key.startsWith(`chat/upload/${actor.id}/`)) return chatError("Anexo inválido.", 400);
 
   const open = await prisma.chatConversation.findUnique({ where: { openKey: contactId } });
   if (open) {
     const visible = await prisma.chatConversation.findFirst({ where: { AND: [{ id: open.id }, scopeWhere(actor)] }, select: { id: true } });
-    if (visible) return NextResponse.json({ id: open.id, existing: true });
-    return chatError("Este contato já está em atendimento em outra fila.", 409);
+    if (!visible) return chatError("Este contato já está em atendimento em outra fila.", 409);
+    if (!template && !text) return NextResponse.json({ id: open.id, existing: true });
+    try {
+      await sendAgentMessage(actor, open, { text, internal: false, template });
+      return NextResponse.json({ id: open.id, existing: true });
+    } catch (error) {
+      if (error instanceof ChatRuleError) return chatError(error.message, error.status, { code: error.code });
+      console.error("[chat] falha ao enviar na conversa aberta:", error);
+      return chatError("Não foi possível enviar a mensagem.", 500);
+    }
   }
 
   const contact = await prisma.contact.findUnique({ where: { id: contactId }, select: { phone: true } });
@@ -77,7 +101,7 @@ export async function POST(request: Request) {
     const conversation = await prisma.chatConversation.create({
       data: { contactId, phone, openKey: contactId, queueId: actor.queueIds[0] ?? queue?.id ?? null, assigneeId: actor.id, status: "in_progress", lastInboundAt },
     });
-    if (template) await sendAgentMessage(actor, conversation, { text: "", internal: false, template });
+    if (template || text) await sendAgentMessage(actor, conversation, { text, internal: false, template });
     return NextResponse.json({ id: conversation.id, existing: false }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
