@@ -179,7 +179,7 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
 }
 
 /** Mensagem automática: gravada antes de sair, para quem assumir ver o que já foi dito. */
-export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string) {
+export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string, send?: () => Promise<{ messages?: { id: string }[] }>) {
   if (await isBlocked(conversation.phone)) return null;
   const text = withoutDashes(rawText);
   const now = new Date();
@@ -187,5 +187,5 @@ export async function sendAutomaticMessage(conversation: Pick<ChatConversation, 
     data: { conversationId: conversation.id, author: "bot", authorName: "Atendimento automático", text, delivery: "sending", createdAt: now },
   });
   await prisma.chatConversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now } });
-  return deliver(message.id, () => sendText(conversation.phone, text));
+  return deliver(message.id, send ?? (() => sendText(conversation.phone, text)));
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { NpsWhatsappPanel } from "@/components/NpsWhatsappPanel";
 import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, RefreshCw, Star, TrendingUp, Users, X } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
@@ -241,6 +242,9 @@ export default function NpsPage() {
           {messageError && !editingSurvey && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{messageError}</p>}
           {responseFormError && !isResponseFormOpen && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{responseFormError}</p>}
 
+          <NpsWhatsappPanel />
+
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">Pesquisas de loja e produto</h2>
           <section aria-label="Indicadores gerais de NPS" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { label: "Avaliações recebidas", value: overallMetrics.count, detail: "nas duas pesquisas", icon: MessageSquare, color: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },

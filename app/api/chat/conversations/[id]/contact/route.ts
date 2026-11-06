@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { chatError, conversationNotFound, findScopedConversation, requireChatActor } from "@/lib/chat/access";
 import { addAudit } from "@/lib/chat/conversation";
+import { startOfBrazilDay } from "@/lib/chat/format";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -20,12 +21,6 @@ const ORIGINS: Record<string, string> = {
 };
 
 const originLabel = (sourceKey: string) => ORIGINS[sourceKey.split(":")[0]] ?? "Não identificada";
-
-/** O dia do atendimento é o de Brasília, não o do fuso do servidor. */
-function startOfBrazilDay() {
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-  return new Date(`${day}T00:00:00-03:00`);
-}
 
 export async function GET(_request: Request, context: Context) {
   const guard = await requireChatActor();

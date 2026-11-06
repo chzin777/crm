@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { chatError, conversationNotFound, findScopedConversation, requireChatActor } from "@/lib/chat/access";
 import { closeConversation } from "@/lib/chat/actions";
+import { sendSatisfactionSurvey } from "@/lib/chat/nps";
 import { ChatRuleError } from "@/lib/chat/outbound";
 
 type Context = { params: Promise<{ id: string }> };
@@ -14,6 +15,7 @@ export async function POST(_request: Request, context: Context) {
 
   try {
     await closeConversation(conversation, guard.actor, `${guard.actor.name} encerrou a conversa`);
+    await sendSatisfactionSurvey(conversation, conversation.assigneeId ?? guard.actor.id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof ChatRuleError) return chatError(error.message, error.status);

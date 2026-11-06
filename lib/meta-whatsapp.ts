@@ -162,6 +162,26 @@ export async function sendText(phone: string, text: string, replyToId?: string) 
   });
 }
 
+/** Lista interativa: comporta mais opções que os botões, limitados a 3 pela Meta. */
+export async function sendList(phone: string, list: { body: string; button: string; rows: { id: string; title: string }[] }) {
+  const { phoneNumberId } = getConfig();
+
+  return graph<{ messages: { id: string }[] }>(`/${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizePhone(phone),
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: list.body },
+        action: { button: list.button, sections: [{ rows: list.rows }] },
+      },
+    }),
+  });
+}
+
 /** Baixa a mídia recebida: o evento traz só o id; a URL exige o mesmo Bearer e expira em minutos. */
 export async function downloadMedia(mediaId: string, maxBytes: number) {
   const { accessToken } = getConfig();

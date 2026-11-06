@@ -9,6 +9,12 @@ export function relativeTime(value: string | null) {
   return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 }
 
+/** O dia do atendimento é o de Brasília, não o do fuso do servidor. */
+export function startOfBrazilDay() {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  return new Date(`${day}T00:00:00-03:00`);
+}
+
 /** O ERP grava CPF sem zeros à esquerda; valor fora do padrão aparece como veio. */
 export function formatCpf(value: string) {
   const digits = value.replace(/\D/g, "").padStart(11, "0");

@@ -5,6 +5,7 @@ import { downloadMedia } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
 import { attributeCampaignReply } from "@/lib/chat/campaign-origin";
 import { openConversationFor } from "@/lib/chat/conversation";
+import { recordSurveyReply } from "@/lib/chat/nps";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
 
@@ -165,9 +166,18 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   if (repeated) return null;
 
   const receivedAt = message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date();
+  const content = readContent(message);
+  const answeredSurvey = await recordSurveyReply({
+    externalId: message.id,
+    phone: message.from,
+    text: content.media ? "" : content.text,
+    isText: message.type === "text",
+    receivedAt,
+  });
+  if (answeredSurvey) return null;
+
   const contact = await findOrCreateContact(message.from, profileName);
   const { conversation, created } = await openConversationFor(contact.id, message.from);
-  const content = readContent(message);
   const attachment = content.media ? await storeMedia(content.media) : null;
   const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
   const replyTo = await findQuoted(message.context?.id);

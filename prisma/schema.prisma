@@ -29,6 +29,7 @@ model User {
   chatQueues       ChatQueueMember[]
   chatAgent        ChatAgent?
   chatAssigned     ChatConversation[] @relation("ChatAssignee")
+  npsFeedbacks     NpsFeedback[]
 
   @@map("user")
 }
@@ -117,6 +118,7 @@ model Contact {
   npsResponses       NpsResponse[]
   chatConversations  ChatConversation[]
   notes              ContactNote[]
+  npsFeedbacks       NpsFeedback[]
 
   @@index([cpf])
   @@index([phone])
@@ -217,6 +219,35 @@ model NpsResponse {
   @@index([contactId])
 }
 
+enum NpsFeedbackStatus {
+  PENDING
+  ANSWERED
+  EXPIRED
+}
+
+/// Pesquisa de 1 a 5 enviada no WhatsApp; PENDING é o estado de "aguardando nota".
+model NpsFeedback {
+  id             String            @id @default(cuid())
+  conversationId String?
+  contactId      String
+  attendantId    String?
+  queueId        String?
+  phone          String
+  score          Int?
+  comment        String?
+  status         NpsFeedbackStatus @default(PENDING)
+  createdAt      DateTime          @default(now())
+  answeredAt     DateTime?
+  conversation   ChatConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contact        Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  attendant      User?             @relation(fields: [attendantId], references: [id], onDelete: SetNull)
+  queue          ChatQueue?        @relation(fields: [queueId], references: [id], onDelete: SetNull)
+
+  @@index([phone, status])
+  @@index([status, createdAt])
+  @@index([attendantId, createdAt])
+}
+
 model CampaignMessage {
   id              String                @id @default(cuid())
   campaignId      String
@@ -315,6 +346,7 @@ model ChatQueue {
   updatedAt           DateTime           @updatedAt
   members             ChatQueueMember[]
   conversations       ChatConversation[]
+  npsFeedbacks        NpsFeedback[]
 }
 
 model ChatQueueMember {
@@ -362,6 +394,7 @@ model ChatConversation {
   queue         ChatQueue?    @relation(fields: [queueId], references: [id], onDelete: SetNull)
   assignee      User?         @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   messages      ChatMessage[]
+  npsFeedbacks  NpsFeedback[]
 
   @@index([queueId, status, waitingSince])
   @@index([assigneeId, closedAt])

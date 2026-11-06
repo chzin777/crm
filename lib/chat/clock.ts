@@ -4,6 +4,7 @@ import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { readMenuState, saveMenuState } from "@/lib/chat/menu";
+import { expireSurveys, sendSatisfactionSurvey } from "@/lib/chat/nps";
 import { composeWithMenu, silenceFarewell } from "@/lib/chat/settings";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 
@@ -31,7 +32,7 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 }
 
 export async function runClock() {
-  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, cleaned: 0, errors: [] as string[] };
+  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, cleaned: 0, errors: [] as string[] };
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -136,9 +137,14 @@ export async function runClock() {
         summary.silenceAsked += 1;
       } else if (now - new Date(state.warnedAt).getTime() >= settings.silenceCloseMinutes * MINUTE) {
         await closeConversation(row, null, "Conversa encerrada por falta de resposta", silenceFarewell(settings));
+        await sendSatisfactionSurvey(row, row.assigneeId);
         summary.silenceClosed += 1;
       }
     }
+  });
+
+  await block("pesquisa", async () => {
+    summary.surveysExpired = await expireSurveys(now);
   });
 
   await block("faxina", async () => {
