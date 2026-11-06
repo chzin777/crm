@@ -23,7 +23,7 @@ import { formatPhone } from "@/lib/chat/phone";
 import { STATUS_LABELS, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
 import { usePulse } from "@/lib/chat/use-pulse";
 
-const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, closed: 0 };
+const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, closed: 0, unread: 0, campaigns: 0 };
 
 function ChatWorkspace() {
   const selectedId = useSearchParams().get("c");
@@ -350,8 +350,9 @@ function ChatWorkspace() {
             actions={(
               <>
                 {canWrite && (
-                  <button type="button" onClick={() => setShowNew(true)} title="Nova conversa" aria-label="Nova conversa" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-lg bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">
+                  <button type="button" onClick={() => setShowNew(true)} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-medium text-white shadow-xs transition-opacity hover:opacity-90 dark:bg-[#C4D600] dark:text-[#051647]">
                     <MessageSquarePlus className="h-4 w-4" />
+                    Nova conversa
                   </button>
                 )}
                 <button
@@ -359,7 +360,7 @@ function ChatWorkspace() {
                   onClick={() => void toggleAlerts()}
                   title={alertsOn ? "Desligar som" : "Ligar som"}
                   aria-label={alertsOn ? "Desligar som" : "Ligar som"}
-                  className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   {alertsOn ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
                 </button>

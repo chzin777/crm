@@ -1,14 +1,15 @@
 "use client";
-import { MessageSquare, Search, Trash2, X } from "lucide-react";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { CampaignBadge } from "@/components/chat/CampaignBadge";
+import type { ReactNode } from "react";
+import { AlertCircle, Check, CheckCheck, Clock, Megaphone, MessageSquare, Search, SearchX, Store, Trash2, User, X } from "lucide-react";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
-import { PRIORITY_LABELS, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
+import { PRIORITY_LABELS, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
 
 const TABS: { id: ChatTab; label: string }[] = [
-  { id: "queue", label: "Fila" },
-  { id: "mine", label: "Meus" },
   { id: "all", label: "Todas" },
+  { id: "unread", label: "Não lidas" },
+  { id: "mine", label: "Minhas" },
+  { id: "campaigns", label: "Campanhas" },
+  { id: "queue", label: "Fila" },
   { id: "closed", label: "Encerradas" },
 ];
 
@@ -21,11 +22,31 @@ const PRIORITY_STYLES: Record<ChatPriority, string> = {
 
 const ATTACHMENT_LABELS: Record<string, string> = { image: "Imagem", video: "Vídeo", audio: "Áudio", document: "Documento", sticker: "Figurinha" };
 
+const SKELETON_ROWS = [0, 1, 2, 3, 4, 5, 6];
+
 function preview(item: ConversationItem) {
   const last = item.lastMessage;
   if (!last) return "Sem mensagens";
-  const prefix = last.author === "agent" ? "Você: " : "";
+  const prefix = last.author === "agent" && !last.delivery ? "Você: " : "";
   return `${prefix}${last.text || (last.attachmentKind ? ATTACHMENT_LABELS[last.attachmentKind] ?? "Anexo" : "")}`;
+}
+
+function storeLabel(store: string) {
+  const value = store.trim();
+  return /^\d+$/.test(value) ? `Loja ${value}` : value;
+}
+
+function DeliveryIcon({ delivery }: { delivery: ChatDelivery }) {
+  const className = "h-3.5 w-3.5 shrink-0";
+  if (delivery === "sending") return <Clock className={`${className} text-slate-400`} aria-label="Enviando" />;
+  if (delivery === "sent") return <Check className={`${className} text-slate-400`} aria-label="Enviada" />;
+  if (delivery === "delivered") return <CheckCheck className={`${className} text-slate-400`} aria-label="Entregue" />;
+  if (delivery === "read") return <CheckCheck className={`${className} text-blue-500`} aria-label="Lida" />;
+  return <AlertCircle className={`${className} text-red-500`} aria-label="Falha no envio" />;
+}
+
+function ContextTag({ title, children }: { title?: string; children: ReactNode }) {
+  return <span title={title} className="inline-flex max-w-[140px] items-center gap-1 truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">{children}</span>;
 }
 
 function WaitBadge({ since }: { since: string | null }) {
@@ -36,7 +57,26 @@ function WaitBadge({ since }: { since: string | null }) {
     : minutes >= 3
       ? "bg-[#F7915E]/20 text-[#b4531f] dark:text-[#F7915E]"
       : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
-  return <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${style}`}>{text}</span>;
+  return <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${style}`}>{text}</span>;
+}
+
+function ListSkeleton() {
+  return (
+    <div role="status" aria-label="Carregando conversas" className="animate-pulse">
+      {SKELETON_ROWS.map((row) => (
+        <div key={row} className="mx-2 my-1 flex items-center gap-3 border-l-4 border-transparent px-3 py-3">
+          <div className="h-11 w-11 shrink-0 rounded-full bg-slate-200 dark:bg-slate-800" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-center justify-between gap-6">
+              <div className="h-3 w-2/5 rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="h-2.5 w-8 rounded bg-slate-200 dark:bg-slate-800" />
+            </div>
+            <div className="h-2.5 w-4/5 rounded bg-slate-200 dark:bg-slate-800" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 type Props = {
@@ -72,28 +112,34 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
     <>
       <div className="shrink-0 space-y-3 border-b border-slate-200 p-4 dark:border-slate-800">
         <div className="flex items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => onSearch(event.target.value)}
-              placeholder="Buscar conversa..."
-              className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none transition-colors focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-            />
-          </div>
-          {actions}
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Conversas</h2>
+          {counts.unread > 0 && (
+            <span title="Conversas não lidas" className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">{counts.unread}</span>
+          )}
+          <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>
         </div>
-        <div className="flex gap-1">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => onSearch(event.target.value)}
+            placeholder="Buscar conversa..."
+            aria-label="Buscar conversa"
+            className="h-9 w-full rounded-xl border border-transparent bg-slate-100/80 px-3 pl-9 text-xs outline-none transition-all focus:border-[#002187] dark:bg-slate-800/80! dark:text-white dark:focus:border-[#C4D600]"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
           {TABS.map(({ id, label }) => (
             <button
               key={id}
               type="button"
+              aria-pressed={tab === id}
               onClick={() => onTab(id)}
-              className={`flex-1 whitespace-nowrap rounded-md px-1.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+              className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                 tab === id
                   ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+                  : "bg-transparent text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5"
               }`}
             >
               {label} <span className="opacity-70">{counts[id]}</span>
@@ -123,65 +169,86 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
+      <div className="min-h-0 flex-1 overflow-y-auto py-1" onScroll={handleScroll}>
         {loading ? (
-          <div className="flex h-40 items-center justify-center">
-            <LoadingSpinner label="Carregando conversas..." size={32} />
-          </div>
+          <ListSkeleton />
         ) : items.length === 0 ? (
-          <div className="flex h-40 flex-col items-center justify-center gap-2 text-center text-slate-500 dark:text-slate-400">
-            <MessageSquare className="h-8 w-8 opacity-40" />
-            <p className="text-sm">{error ? "Não foi possível carregar as conversas" : "Nenhuma conversa aqui"}</p>
-          </div>
+          search.trim() && !error ? (
+            <div className="flex h-48 flex-col items-center justify-center gap-2 px-6 text-center text-slate-500 dark:text-slate-400">
+              <SearchX className="h-8 w-8 opacity-40" />
+              <p className="text-sm">Nenhuma conversa encontrada</p>
+              <button type="button" onClick={() => onSearch("")} className="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium text-[#002187] transition-colors hover:bg-slate-100 dark:text-[#C4D600] dark:hover:bg-white/5">Limpar busca</button>
+            </div>
+          ) : (
+            <div className="flex h-40 flex-col items-center justify-center gap-2 text-center text-slate-500 dark:text-slate-400">
+              <MessageSquare className="h-8 w-8 opacity-40" />
+              <p className="text-sm">{error ? "Não foi possível carregar as conversas" : "Nenhuma conversa aqui"}</p>
+            </div>
+          )
         ) : (
-          items.map((item) => (
-            <div key={item.id} className="group relative">
-              <button
-                type="button"
-                onClick={() => onSelect(item.id)}
-                className={`flex w-full items-center gap-3 border-b border-slate-100 p-4 text-left transition-colors cursor-pointer hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-white/5 ${selectedId === item.id ? "bg-slate-100 dark:bg-white/10" : ""}`}
-              >
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
-                  {initials(item.name)}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
-                    <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">{relativeTime(item.lastMessageAt)}</span>
-                  </div>
-                  {item.campaign && <div className="my-0.5 flex"><CampaignBadge name={item.campaign.name} /></div>}
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{preview(item)}</p>
-                    {item.unreadCount > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[10px] font-bold text-white">{item.unreadCount}</span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                    {item.status === "waiting" && <WaitBadge since={item.waitingSince} />}
-                    {item.priority !== "normal" && <span className={`rounded px-1.5 py-0.5 font-semibold ${PRIORITY_STYLES[item.priority]}`}>{PRIORITY_LABELS[item.priority]}</span>}
-                    {item.queue && (
-                      <span className="inline-flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.queue.color }} />
-                        {item.queue.name}
-                      </span>
-                    )}
-                    {item.assignee && <span>· {item.assignee.name}</span>}
-                  </div>
-                </div>
-              </button>
-              {onDelete && (
+          items.map((item) => {
+            const selected = selectedId === item.id;
+            const delivery = item.lastMessage && item.lastMessage.author !== "customer" ? item.lastMessage.delivery : null;
+            const waiting = item.status === "waiting" && !!item.waitingSince;
+            const hasTags = !!item.campaign || !!item.store || waiting || item.priority !== "normal" || !!item.queue || !!item.assignee;
+            return (
+              <div key={item.id} className="group relative mx-2 my-1">
                 <button
                   type="button"
-                  onClick={() => onDelete(item)}
-                  title="Excluir conversa"
-                  aria-label={`Excluir conversa com ${item.name}`}
-                  className="absolute bottom-2 right-2 grid h-7 w-7 cursor-pointer place-items-center rounded-lg text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                  onClick={() => onSelect(item.id)}
+                  aria-current={selected ? "true" : undefined}
+                  className={`flex w-full cursor-pointer items-start gap-3 rounded-xl border-l-4 px-3 py-3 text-left transition-all duration-150 ${
+                    selected
+                      ? "border-[#051647] bg-blue-50/70 shadow-xs dark:border-[#C4D600] dark:bg-white/10"
+                      : "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5"
+                  }`}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <div className="relative shrink-0">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-[#051647]/10 bg-gradient-to-br from-[#051647] to-[#002187] text-sm font-bold text-white dark:border-white/10 dark:from-slate-700 dark:to-slate-800 dark:text-[#C4D600]">
+                      {initials(item.name)}
+                    </div>
+                    {item.windowOpen && !item.closedAt && (
+                      <span title="Janela de 24h aberta" className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#25D366] ring-2 ring-white dark:ring-[#07194f]" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
+                      <span className={`shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500 ${onDelete ? "group-hover:invisible" : ""}`}>{relativeTime(item.lastMessageAt)}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      {delivery && <DeliveryIcon delivery={delivery} />}
+                      <p className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-slate-400">{preview(item)}</p>
+                      {item.unreadCount > 0 && (
+                        <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-white dark:bg-[#C4D600] dark:text-slate-900">{item.unreadCount}</span>
+                      )}
+                    </div>
+                    {hasTags && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {waiting && <WaitBadge since={item.waitingSince} />}
+                        {item.priority !== "normal" && <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${PRIORITY_STYLES[item.priority]}`}>{PRIORITY_LABELS[item.priority]}</span>}
+                        {item.campaign && <ContextTag title={`Respondeu à campanha: ${item.campaign.name}`}><Megaphone className="h-3 w-3 shrink-0" /><span className="truncate">{item.campaign.name}</span></ContextTag>}
+                        {item.store && <ContextTag title={storeLabel(item.store)}><Store className="h-3 w-3 shrink-0" /><span className="truncate">{storeLabel(item.store)}</span></ContextTag>}
+                        {item.queue && <ContextTag title={`Fila: ${item.queue.name}`}><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.queue.color }} /><span className="truncate">{item.queue.name}</span></ContextTag>}
+                        {item.assignee && <ContextTag title={`Atendente: ${item.assignee.name}`}><User className="h-3 w-3 shrink-0" /><span className="truncate">{item.assignee.name}</span></ContextTag>}
+                      </div>
+                    )}
+                  </div>
                 </button>
-              )}
-            </div>
-          ))
+                {onDelete && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(item)}
+                    title="Excluir conversa"
+                    aria-label={`Excluir conversa com ${item.name}`}
+                    className="absolute right-2 top-2 grid h-7 w-7 cursor-pointer place-items-center rounded-lg text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </>

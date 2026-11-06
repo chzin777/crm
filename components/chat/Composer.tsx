@@ -173,7 +173,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
                   onChange={(event) => setQuickSearch(event.target.value)}
                   placeholder="Buscar resposta pronta"
                   aria-label="Buscar resposta pronta"
-                  className="h-10 min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white"
+                  className="h-10 min-w-0 flex-1 bg-transparent! text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-white"
                 />
               </div>
             )}
@@ -251,7 +251,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
               }
             }}
             placeholder={internal ? "Nota interna, o cliente não vê..." : "Digite uma mensagem..."}
-            className={`max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-y-auto scroll-smooth rounded-2xl px-4 py-[11px] text-sm leading-5 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-1 focus:ring-[#002187]/30 dark:text-white dark:focus:ring-[#C4D600]/40 ${internal ? "bg-[#F7915E]/15" : "bg-slate-100 dark:bg-slate-800/80"}`}
+            className={`max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-y-auto scroll-smooth rounded-2xl px-4 py-[11px] text-sm leading-5 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-1 focus:ring-[#002187]/30 dark:text-white dark:focus:ring-[#C4D600]/40 ${internal ? "bg-[#F7915E]/15!" : "bg-slate-100 dark:bg-slate-800/80!"}`}
           />
           {text.trim() || internal ? (
             <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className={`${roundButton} bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]`}>

@@ -1,4 +1,4 @@
-export type ChatTab = "queue" | "mine" | "all" | "closed";
+export type ChatTab = "queue" | "mine" | "all" | "closed" | "unread" | "campaigns";
 export type ChatStatus = "bot" | "waiting" | "in_progress" | "closed";
 export type ChatPriority = "low" | "normal" | "high" | "urgent";
 export type ChatAuthor = "customer" | "agent" | "bot" | "system";
@@ -11,6 +11,7 @@ export type ConversationItem = {
   phone: string;
   email: string | null;
   segment: string | null;
+  store: string | null;
   category: string;
   status: ChatStatus;
   priority: ChatPriority;

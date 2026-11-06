@@ -16,6 +16,8 @@ function tabWhere(tab: string, actor: ChatActor): Prisma.ChatConversationWhereIn
   if (tab === "queue") return { status: "waiting", closedAt: null };
   if (tab === "mine") return { assigneeId: actor.id, ...OPEN };
   if (tab === "closed") return { status: "closed" };
+  if (tab === "unread") return { unreadCount: { gt: 0 }, ...OPEN };
+  if (tab === "campaigns") return { campaignId: { not: null }, ...OPEN };
   return OPEN;
 }
 
@@ -136,7 +138,7 @@ export async function GET(request: Request) {
     ? [{ closedAt: "desc" }]
     : [{ waitingSince: { sort: "asc", nulls: "last" } }, { lastMessageAt: { sort: "desc", nulls: "last" } }];
 
-  const [rows, queue, mine, all, closed] = await Promise.all([
+  const [rows, queue, mine, all, closed, unread, campaigns] = await Promise.all([
     prisma.chatConversation.findMany({
       where: { AND: [tabWhere(tab, actor), ...filters] },
       include: conversationInclude,
@@ -148,11 +150,13 @@ export async function GET(request: Request) {
     prisma.chatConversation.count({ where: { AND: [tabWhere("mine", actor), ...filters] } }),
     prisma.chatConversation.count({ where: { AND: [tabWhere("all", actor), ...filters] } }),
     prisma.chatConversation.count({ where: { AND: [tabWhere("closed", actor), ...filters] } }),
+    prisma.chatConversation.count({ where: { AND: [tabWhere("unread", actor), ...filters] } }),
+    prisma.chatConversation.count({ where: { AND: [tabWhere("campaigns", actor), ...filters] } }),
   ]);
 
   return NextResponse.json({
     items: rows.slice(0, PAGE_SIZE).map(serializeConversation),
     nextCursor: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
-    counts: { queue, mine, all, closed },
+    counts: { queue, mine, all, closed, unread, campaigns },
   });
 }

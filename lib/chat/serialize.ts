@@ -5,7 +5,7 @@ import { isWindowOpen } from "@/lib/chat/conversation";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 
 export const conversationInclude = {
-  contact: { select: { name: true, email: true, segment: true, category: true } },
+  contact: { select: { name: true, email: true, segment: true, category: true, store: true } },
   queue: { select: { id: true, name: true, color: true } },
   assignee: { select: { id: true, name: true } },
   messages: {
@@ -28,6 +28,7 @@ export function serializeConversation(row: ConversationRow) {
     phone: row.phone,
     email: row.contact.email,
     segment: row.contact.segment,
+    store: row.contact.store,
     category: row.contact.category,
     status: row.status,
     priority: row.priority,
