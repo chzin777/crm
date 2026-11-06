@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, Smile } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
 import { MediaViewer } from "@/components/chat/MediaViewer";
@@ -28,9 +28,27 @@ function Delivery({ delivery, reason }: { delivery: ChatDelivery | null; reason:
 
 const mediaUrl = (message: ChatMessageItem) => message.attachment?.localUrl ?? `/api/chat/media/${message.id}`;
 
+function Sticker({ message, onOpen }: { message: ChatMessageItem; onOpen: () => void }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span title="Não foi possível carregar a figurinha" className="grid h-32 w-32 place-items-center rounded-xl bg-slate-200/60 text-slate-400 dark:bg-white/5">
+        <Smile className="h-8 w-8" />
+      </span>
+    );
+  }
+  return (
+    <button type="button" onClick={onOpen} aria-label="Abrir figurinha" className="block cursor-pointer">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={mediaUrl(message)} alt="Figurinha" loading="lazy" onError={() => setFailed(true)} className="h-40 w-40 object-contain" />
+    </button>
+  );
+}
+
 function Attachment({ message, onOpen }: { message: ChatMessageItem; onOpen: () => void }) {
   const attachment = message.attachment!;
-  if (attachment.kind === "image" || attachment.kind === "sticker") {
+  if (attachment.kind === "sticker") return <Sticker message={message} onOpen={onOpen} />;
+  if (attachment.kind === "image") {
     return (
       <button type="button" onClick={onOpen} aria-label={`Abrir ${attachment.name}`} className="mb-1 block cursor-pointer">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -196,6 +214,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
           {messages.map((message, index) => {
             const newDay = index === 0 || dayLabel(messages[index - 1].createdAt) !== dayLabel(message.createdAt);
             const fromUs = message.author === "agent" || message.author === "bot";
+            const sticker = message.attachment?.kind === "sticker" && !message.text;
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {newDay && (
@@ -217,7 +236,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       </button>
                     )}
                     <div
-                      className={`max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm ${
+                      className={sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm ${
                         message.internal
                           ? "rounded-br-sm border border-dashed border-[#F7915E] bg-[#F7915E]/15 text-slate-900 dark:text-white"
                           : message.author === "bot"
@@ -244,7 +263,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       )}
                       {message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />}
                       {message.text && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
-                      <div className={`mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
+                      <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} />}
                       </div>
