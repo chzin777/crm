@@ -11,7 +11,7 @@ import {
   Kanban,
   LayoutDashboard,
   Users,
-  Tags,
+  Layers,
   Store,
   MessageSquare,
   ListOrdered,
@@ -23,9 +23,16 @@ import {
   Megaphone,
   LogOut,
   User as UserIcon,
-  Shield,
+  ShieldCheck,
   KeyRound,
+  TrendingUp,
+  Target,
+  Building2,
 } from "lucide-react";
+
+const ITEM_ACTIVE = "bg-[#051647]/[0.07] text-[#051647] dark:bg-white/10 dark:text-[#C4D600]";
+const ICON_ACTIVE = "text-[#051647] dark:text-[#C4D600]";
+const ICON_IDLE = "text-[#8992a4] group-hover:text-[#58657c] dark:text-slate-500 dark:group-hover:text-slate-300";
 
 export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const pathname = usePathname();
@@ -76,15 +83,15 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Painel", href: "/painel", icon: LayoutDashboard },
     { title: "Pipelines", href: "/", icon: Kanban },
     { title: "Contatos & Clientes", href: "/contatos", icon: Users },
-    { title: "Segmentos", href: "/segmentos", icon: Tags },
+    { title: "Segmentos", href: "/segmentos", icon: Layers },
     { title: "Atendimento", href: "/chat", icon: MessageSquare },
     { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Lojas", href: "/lojas", icon: Store },
-    { title: "Campanhas", href: "/campanhas", icon: MessageSquare },
+    { title: "Campanhas", href: "/campanhas", icon: Megaphone },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
     { title: "Pesquisas NPS", href: "/nps", icon: Award },
     { title: "Usuários", href: "/usuarios", icon: UserCog },
-    { title: "Cargos", href: "/cargos", icon: Shield },
+    { title: "Cargos", href: "/cargos", icon: ShieldCheck },
     { title: "Permissões", href: "/permissoes", icon: KeyRound },
     { title: "Configurações", href: "/configuracoes", icon: Settings },
   ];
@@ -92,9 +99,9 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: Kanban, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos"), byHref("/chat"), byHref("/filas")] },
-    { id: "marketing", label: "Marketing", icon: Megaphone, items: [byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
-    { id: "gestao", label: "Gestão", icon: Store, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
+    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos"), byHref("/chat"), byHref("/filas")] },
+    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
+    { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
   ]
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))
     .filter((group) => group.items.length > 0);
@@ -135,10 +142,10 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                 className={`group flex w-full items-center rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                   isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                 } ${
-                  isActive ? "bg-[#f1f3f8] text-[#142344] dark:bg-white/10 dark:text-white" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+                  isActive ? ITEM_ACTIVE : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
                 }`}
               >
-                <Icon className={`h-[19px] w-[19px] shrink-0 ${isActive ? "text-[#4156b8] dark:text-[#C4D600]" : "text-[#8992a4] group-hover:text-[#58657c] dark:text-slate-500 dark:group-hover:text-slate-300"}`} />
+                <Icon className={`h-5 w-5 shrink-0 transition-colors ${isActive ? ICON_ACTIVE : ICON_IDLE}`} />
                 <span className={`truncate transition-opacity duration-200 ${isCollapsed ? "w-0 opacity-0" : "opacity-100"}`}>{item.title}</span>
               </Link>
             );
@@ -159,12 +166,12 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                   className={`group flex w-full items-center justify-start rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                     isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                   } ${
-                    groupActive ? "text-[#142344] dark:text-white" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+                    groupActive ? "text-[#051647] dark:text-[#C4D600]" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
                   }`}
                 >
-                  <GroupIcon className={`h-[19px] w-[19px] shrink-0 ${groupActive ? "text-[#4156b8] dark:text-[#C4D600]" : "text-[#8992a4] group-hover:text-[#58657c] dark:text-slate-500 dark:group-hover:text-slate-300"}`} />
+                  <GroupIcon className={`h-5 w-5 shrink-0 transition-colors ${groupActive ? ICON_ACTIVE : ICON_IDLE}`} />
                   <span className={`truncate text-left transition-[opacity,width,flex] duration-200 ${isCollapsed ? "w-0 flex-none overflow-hidden opacity-0" : "min-w-0 flex-1 opacity-100"}`}>{group.label}</span>
-                  <ChevronDown className={`h-[16px] w-[16px] text-[#929bad] transition-[transform,opacity,width] duration-200 ${expanded ? "rotate-180" : ""} ${isCollapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100"}`} />
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-[#929bad] transition-[transform,opacity,width] duration-200 ${expanded ? "rotate-180" : ""} ${isCollapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100"}`} />
                 </button>
                 {!isCollapsed && (
                   <div
@@ -190,13 +197,14 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                                 />
                                 <Link
                                   href={item.href}
-                                  className={`flex w-full items-center rounded-lg px-3 py-2 text-[12px] text-left font-medium transition-colors duration-150 cursor-pointer hover:cursor-pointer ${
+                                  className={`group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-left font-medium transition-colors duration-150 cursor-pointer hover:cursor-pointer ${
                                     itemActive
-                                      ? "bg-[#f1f3f8] text-[#34415e] dark:bg-white/10 dark:text-white"
+                                      ? ITEM_ACTIVE
                                       : "text-[#818b9d] hover:bg-[#f7f8fa] hover:text-[#34415e] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
                                   }`}
                                 >
-                                  {item.title}
+                                  <Icon className={`h-4 w-4 shrink-0 transition-colors ${itemActive ? ICON_ACTIVE : "text-slate-400 group-hover:text-current dark:text-slate-500"}`} />
+                                  <span className="truncate">{item.title}</span>
                                 </Link>
                               </div>
                             );
@@ -223,10 +231,10 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                 className={`group mt-1 flex w-full items-center rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                   isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                 } ${
-                  isActive ? "bg-[#f1f3f8] text-[#142344] dark:bg-white/10 dark:text-white" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+                  isActive ? ITEM_ACTIVE : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
                 }`}
               >
-                <Icon className={`h-[19px] w-[19px] shrink-0 ${isActive ? "text-[#4156b8] dark:text-[#C4D600]" : "text-[#8992a4] group-hover:text-[#58657c] dark:text-slate-500 dark:group-hover:text-slate-300"}`} />
+                <Icon className={`h-5 w-5 shrink-0 transition-colors ${isActive ? ICON_ACTIVE : ICON_IDLE}`} />
                 <span className={`truncate transition-opacity duration-200 ${isCollapsed ? "w-0 opacity-0" : "opacity-100"}`}>{item.title}</span>
               </Link>
             );
