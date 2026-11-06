@@ -175,7 +175,16 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
 
   await prisma.chatConversation.update({
     where: { id: conversation.id },
-    data: { unreadCount: { increment: 1 }, lastMessageAt: receivedAt, lastInboundAt: receivedAt },
+    data: { unreadCount: { increment: 1 } },
+  });
+  // A Meta pode reenviar mensagem antiga depois de uma nova: as datas da conversa nunca voltam no tempo.
+  await prisma.chatConversation.updateMany({
+    where: { id: conversation.id, OR: [{ lastInboundAt: null }, { lastInboundAt: { lt: receivedAt } }] },
+    data: { lastInboundAt: receivedAt },
+  });
+  await prisma.chatConversation.updateMany({
+    where: { id: conversation.id, OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: receivedAt } }] },
+    data: { lastMessageAt: receivedAt },
   });
   await prisma.chatConversation.updateMany({
     where: { id: conversation.id, waitingSince: null, status: { not: "bot" } },
