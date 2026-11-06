@@ -28,8 +28,8 @@ type Conversation = {
   segment: string | null;
   category: string;
   lastMessageText: string | null;
-  lastMessageTime: string;
-  lastMessageDirection: "in" | "out";
+  lastMessageTime: string | null;
+  lastMessageDirection: "in" | "out" | null;
   lastMessageStatus: string | null;
   lastMessageMediaType: string | null;
   unreadCount: number;
@@ -101,11 +101,15 @@ function StatusCheck({ status }: { status: string | null }) {
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
   const [loadingList, setLoadingList] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [listError, setListError] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [sending, setSending] = useState(false);
   const [messageInput, setMessageInput] = useState("");
@@ -114,23 +118,39 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selectedConversation = conversations.find((c) => c.contactId === selectedContactId);
+  const listRequestRef = useRef(0);
 
-  const loadConversations = useCallback(async () => {
+  const selectedContactId = selectedConversation?.contactId ?? null;
+
+  const loadConversations = useCallback(async (offset = 0) => {
+    const requestId = ++listRequestRef.current;
+    setLoadingMore(offset > 0);
     try {
       const params = new URLSearchParams();
-      if (search) params.set("search", search);
+      if (debouncedSearch) params.set("search", debouncedSearch);
       if (filter !== "all") params.set("filter", filter);
+      if (offset > 0) params.set("offset", String(offset));
       const res = await fetch(`/api/chat/conversations?${params}`);
-      if (res.ok) {
-        setConversations(await res.json());
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { items: Conversation[]; hasMore: boolean } = await res.json();
+      if (requestId !== listRequestRef.current) return;
+      setConversations((prev) => {
+        if (offset === 0) return data.items;
+        const loaded = new Set(prev.map((c) => c.contactId));
+        return [...prev, ...data.items.filter((c) => !loaded.has(c.contactId))];
+      });
+      setHasMore(data.hasMore);
+      setListError(false);
     } catch (err) {
-      console.error("[chat] falha ao carregar conversas:", err);
+      console.error("[chat] falha ao carregar contatos:", err);
+      if (requestId === listRequestRef.current) setListError(true);
     } finally {
-      setLoadingList(false);
+      if (requestId === listRequestRef.current) {
+        setLoadingList(false);
+        setLoadingMore(false);
+      }
     }
-  }, [search, filter]);
+  }, [debouncedSearch, filter]);
 
   const loadHistory = useCallback(async (contactId: string) => {
     setLoadingHistory(true);
@@ -147,11 +167,17 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     loadConversations();
   }, [loadConversations]);
 
   useEffect(() => {
     if (selectedContactId) {
+      setTimeline([]);
       loadHistory(selectedContactId);
     }
   }, [selectedContactId, loadHistory]);
@@ -160,9 +186,16 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [timeline]);
 
-  const handleSelectConversation = (contactId: string) => {
-    setSelectedContactId(contactId);
+  const handleSelectConversation = (conversation: Conversation) => {
+    setSelectedConversation(conversation);
     setMobileView("chat");
+  };
+
+  const handleListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const list = e.currentTarget;
+    if (hasMore && !loadingMore && list.scrollTop + list.clientHeight >= list.scrollHeight - 200) {
+      loadConversations(conversations.length);
+    }
   };
 
   const handleBackToList = () => {
@@ -278,22 +311,22 @@ export default function ChatPage() {
         </div>
 
         {/* Lista de Conversas */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" onScroll={handleListScroll}>
           {loadingList ? (
             <div className="flex h-40 items-center justify-center">
-              <LoadingSpinner label="Carregando conversas..." size={32} />
+              <LoadingSpinner label="Carregando contatos..." size={32} />
             </div>
           ) : conversations.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-center text-slate-500 dark:text-slate-400">
               <MessageSquare className="h-8 w-8 opacity-40" />
-              <p className="text-sm">Nenhuma conversa encontrada</p>
+              <p className="text-sm">{listError ? "Não foi possível carregar os contatos" : "Nenhum contato encontrado"}</p>
             </div>
           ) : (
             conversations.map((conv) => (
               <button
                 key={conv.contactId}
                 type="button"
-                onClick={() => handleSelectConversation(conv.contactId)}
+                onClick={() => handleSelectConversation(conv)}
                 className={`flex w-full items-center gap-3 border-b border-slate-100 p-4 text-left transition-colors cursor-pointer hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-white/5 ${
                   selectedContactId === conv.contactId
                     ? "bg-slate-100 dark:bg-white/10"
@@ -308,10 +341,13 @@ export default function ChatPage() {
                     <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                       {conv.name}
                     </span>
-                    <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">
-                      {formatRelativeTime(conv.lastMessageTime)}
-                    </span>
+                    {conv.lastMessageTime && (
+                      <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">
+                        {formatRelativeTime(conv.lastMessageTime)}
+                      </span>
+                    )}
                   </div>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">{formatPhone(conv.phone)}</p>
                   <div className="flex items-center justify-between gap-2">
                     <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                       {conv.lastMessageDirection === "out" && (
@@ -319,7 +355,7 @@ export default function ChatPage() {
                           <StatusCheck status={conv.lastMessageStatus} />
                         </span>
                       )}
-                      {conv.lastMessageText || "Sem mensagens"}
+                      {conv.lastMessageText || "Toque para iniciar conversa"}
                     </p>
                     {conv.unreadCount > 0 && (
                       <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[10px] font-bold text-white">

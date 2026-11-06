@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
+import { hasInboundSchema } from "@/lib/chat-inbound";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
@@ -13,17 +14,19 @@ export async function GET(request: Request) {
   if (!contact?.phone) return NextResponse.json([]);
 
   // Mensagens recebidas
-  const inbound = await prisma.inboundMessage.findMany({
-    where: { contactId },
-    orderBy: { receivedAt: "asc" },
-    select: { id: true, text: true, mediaType: true, receivedAt: true, whatsappMsgId: true },
-  });
+  const inbound = (await hasInboundSchema())
+    ? await prisma.inboundMessage.findMany({
+        where: { contactId },
+        orderBy: { receivedAt: "asc" },
+        select: { id: true, text: true, mediaType: true, receivedAt: true, whatsappMsgId: true },
+      })
+    : [];
 
   // Mensagens enviadas (campanhas)
   const outbound = await prisma.campaignMessage.findMany({
     where: { contactId },
     orderBy: { createdAt: "asc" },
-    select: { id: true, status: true, sentAt: true, deliveredAt: true, readAt: true, repliedAt: true, createdAt: true, whatsappMsgId: true },
+    select: { id: true, status: true, sentAt: true, createdAt: true },
   });
 
   // Unifica em timeline única
