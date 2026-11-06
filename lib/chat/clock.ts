@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
-import { composeWithMenu, readMenuState, saveMenuState } from "@/lib/chat/menu";
+import { readMenuState, saveMenuState } from "@/lib/chat/menu";
+import { composeWithMenu } from "@/lib/chat/settings";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 
 const MINUTE = 60_000;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Pause, Play, Plus } from "lucide-react";
+import { Pause, Play, Plus, Search } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
@@ -31,6 +31,7 @@ export default function FilasPage() {
   const [editing, setEditing] = useState<QueueRecord | "new" | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState("");
+  const [teamSearch, setTeamSearch] = useState("");
 
   const load = useCallback(async () => {
     const [queueResponse, teamResponse] = await Promise.all([fetch("/api/chat/queues", { cache: "no-store" }), fetch("/api/chat/team", { cache: "no-store" })]);
@@ -72,6 +73,9 @@ export default function FilasPage() {
       setFormError(error instanceof Error ? error.message : "Não foi possível salvar.");
     }
   };
+
+  const teamTerm = teamSearch.trim().toLowerCase();
+  const visibleAgents = teamTerm ? agents.filter((agent) => agent.name.toLowerCase().includes(teamTerm) || agent.email.toLowerCase().includes(teamTerm)) : agents;
 
   const tabs = [
     { id: "queues", label: "Filas" },
@@ -116,8 +120,16 @@ export default function FilasPage() {
         )
       ) : (
         <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-3 dark:border-slate-800">
+            <div className="relative min-w-0 flex-1 sm:max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} placeholder="Buscar por nome ou e-mail..." aria-label="Buscar usuário" className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+            </div>
+            <span className="text-xs text-slate-500 dark:text-slate-400">{visibleAgents.length} de {agents.length} {agents.length === 1 ? "pessoa" : "pessoas"}</span>
+          </div>
+          {visibleAgents.length === 0 && <p className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">Ninguém encontrado com essa busca.</p>}
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {agents.map((agent) => (
+            {visibleAgents.map((agent) => (
               <li key={agent.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
                 <span className="relative shrink-0">
                   <span className="grid h-10 w-10 place-items-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">{initials(agent.name)}</span>

@@ -4,7 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { readChatSettings } from "@/lib/chat/conversation";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
-import type { ChatMenuSettings, MenuOption } from "@/lib/chat/settings";
+import { composeWithMenu, optionsAt } from "@/lib/chat/settings";
 import { fillVariables } from "@/lib/chat/text";
 
 export type MenuState = {
@@ -33,31 +33,6 @@ export function readMenuState(raw: unknown): MenuState {
 
 export const saveMenuState = (conversationId: string, state: MenuState) =>
   prisma.chatConversation.update({ where: { id: conversationId }, data: { menuState: state as unknown as Prisma.InputJsonValue } });
-
-function optionsAt(settings: ChatMenuSettings, path: string[]): MenuOption[] {
-  let list = settings.options;
-  for (const id of path) {
-    const found = list.find((option) => option.id === id);
-    if (!found || found.action !== "submenu") return list;
-    list = found.options;
-  }
-  return list;
-}
-
-export function menuText(settings: ChatMenuSettings, path: string[]) {
-  const lines = optionsAt(settings, path).map((option, index) => `${index + 1}. ${option.label}`);
-  if (path.length) lines.push("0. Voltar");
-  return [...lines, "", settings.footer].join("\n").trim();
-}
-
-/** Onde estiver {menu} entra a lista; sem a marca, ela vai no fim. */
-export function composeWithMenu(settings: ChatMenuSettings, path: string[], parts: string[]) {
-  const list = menuText(settings, path);
-  const filled = parts.filter((part) => part.trim());
-  return filled.some((part) => part.includes("{menu}"))
-    ? filled.map((part) => part.replaceAll("{menu}", list)).join("\n\n")
-    : [...filled, list].join("\n\n");
-}
 
 function choiceFrom(text: string, count: number) {
   if (!/^\d{1,2}$/.test(text)) return null;
