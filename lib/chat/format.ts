@@ -9,7 +9,13 @@ export function relativeTime(value: string | null) {
   return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 }
 
-export const clockTime = (value: string) => new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+/** O ERP grava CPF sem zeros à esquerda; valor fora do padrão aparece como veio. */
+export function formatCpf(value: string) {
+  const digits = value.replace(/\D/g, "").padStart(11, "0");
+  return digits.length === 11 ? digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4") : value;
+}
+
+export const clockTime =(value: string) => new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
 export function dayLabel(value: string) {
   const date = new Date(value);

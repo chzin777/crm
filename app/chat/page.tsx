@@ -2,12 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
+import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { DeleteConversationDialog } from "@/components/chat/DeleteConversationDialog";
@@ -53,7 +52,7 @@ function ChatWorkspace() {
   const [queueOptions, setQueueOptions] = useState<{ id: string; name: string }[]>([]);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showNew, setShowNew] = useState(false);
-  const [tagInput, setTagInput] = useState("");
+  const [newSearch, setNewSearch] = useState("");
   const canWrite = capabilities["chat.assume"] === true;
   const listRequest = useRef(0);
   const messageList = useRef<MessageListHandle>(null);
@@ -365,7 +364,7 @@ function ChatWorkspace() {
             actions={(
               <>
                 {canWrite && (
-                  <button type="button" onClick={() => setShowNew(true)} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-medium text-[#051647] shadow-xs transition-opacity hover:opacity-90">
+                  <button type="button" onClick={() => { setNewSearch(""); setShowNew(true); }} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-medium text-[#051647] shadow-xs transition-opacity hover:opacity-90">
                     <MessageSquarePlus className="h-4 w-4" />
                     Nova conversa
                   </button>
@@ -437,87 +436,19 @@ function ChatWorkspace() {
         </div>
 
         {showDetails && open && (
-          <EntityDialog titleId="contact-details-title" title={open.name} description="Detalhes do contato" onClose={() => setShowDetails(false)}>
-            <div className="space-y-4 overflow-y-auto p-1">
-              <div className="flex items-center gap-4">
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#051647] text-xl font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
-                  {initials(open.name)}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{open.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{formatPhone(open.phone)}</p>
-                  {open.email && <p className="text-xs text-slate-500 dark:text-slate-400">{open.email}</p>}
-                </div>
-              </div>
-              <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500 dark:text-slate-400">Categoria</span>
-                  <span className="font-medium text-slate-900 dark:text-white capitalize">{open.category}</span>
-                </div>
-                {open.segment && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500 dark:text-slate-400">Segmento</span>
-                    <span className="font-medium text-slate-900 dark:text-white">{open.segment}</span>
-                  </div>
-                )}
-              </div>
-              <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
-                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Etiquetas</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {open.tags.map((tag) => (
-                    <button key={tag} type="button" title="Remover etiqueta" disabled={!canWrite} onClick={() => void updateConversation({ tags: open.tags.filter((item) => item !== tag) })} className="cursor-pointer rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200">{tag} ×</button>
-                  ))}
-                </div>
-                {canWrite && (
-                  <input
-                    value={tagInput}
-                    onChange={(event) => setTagInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      const tag = tagInput.trim();
-                      if (event.key === "Enter" && tag) {
-                        event.preventDefault();
-                        setTagInput("");
-                        if (!open.tags.includes(tag)) void updateConversation({ tags: [...open.tags, tag] });
-                      }
-                    }}
-                    placeholder="Nova etiqueta e Enter"
-                    aria-label="Nova etiqueta"
-                    className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                  />
-                )}
-              </div>
-              {open.campaigns.length > 0 && (
-                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Campanhas de origem</p>
-                  {open.campaigns.map((campaign) => (
-                    <div key={campaign.id} className="flex items-center justify-between gap-3">
-                      <CampaignBadge name={campaign.name} className="min-w-0" />
-                      <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{new Date(campaign.repliedAt).toLocaleDateString("pt-BR")}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {open.previous.length > 0 && (
-                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Conversas anteriores</p>
-                  {open.previous.map((item) => (
-                    <button key={item.id} type="button" onClick={() => { setShowDetails(false); select(item.id); }} className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-white/5">
-                      <span className="text-slate-700 dark:text-slate-200">{new Date(item.createdAt).toLocaleDateString("pt-BR")}{item.queue ? ` · ${item.queue.name}` : ""}</span>
-                      <span className="text-slate-500 dark:text-slate-400">{STATUS_LABELS[item.status]}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-center justify-between gap-3">
-                <Link href={`/contatos?busca=${encodeURIComponent(open.phone.replace(/^55/, ""))}`} className="inline-block cursor-pointer text-sm font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Abrir ficha do contato</Link>
-                {capabilities["chat.queues"] && (
-                  <button type="button" onClick={() => void toggleBlock(open.phone, open.blocked)} className="cursor-pointer text-sm font-medium text-red-600 hover:underline dark:text-red-300">
-                    {open.blocked ? "Desbloquear número" : "Bloquear número"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </EntityDialog>
+          <ContactDetailsDialog
+            key={open.id}
+            conversation={open}
+            canWrite={canWrite}
+            canTransfer={capabilities["chat.transfer"] === true}
+            canBlock={capabilities["chat.queues"] === true}
+            onClose={() => setShowDetails(false)}
+            onTagsChange={(tags) => void updateConversation({ tags })}
+            onToggleBlock={() => void toggleBlock(open.phone, open.blocked)}
+            onOpenConversation={(id) => { setShowDetails(false); select(id); }}
+            onTransfer={() => { setShowDetails(false); setShowTransfer(true); }}
+            onNewConversation={() => { setShowDetails(false); setNewSearch(open.phone.replace(/^55/, "")); setShowNew(true); }}
+          />
         )}
 
         {showTransfer && open && (
@@ -529,7 +460,7 @@ function ChatWorkspace() {
         )}
 
         {showNew && (
-          <NewConversationDialog onClose={() => setShowNew(false)} onOpened={(id) => { setShowNew(false); setTab("mine"); select(id); void loadList(); }} />
+          <NewConversationDialog initialSearch={newSearch} onClose={() => setShowNew(false)} onOpened={(id) => { setShowNew(false); setTab("mine"); select(id); void loadList(); }} />
         )}
       </div>
     </div>

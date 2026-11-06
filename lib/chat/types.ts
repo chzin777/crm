@@ -34,6 +34,19 @@ export type ConversationDetail = ConversationItem & {
   previous: { id: string; status: ChatStatus; subject: string; createdAt: string; closedAt: string | null; queue: { name: string } | null }[];
 };
 
+export type ContactNoteItem = { id: string; text: string; authorName: string; createdAt: string };
+
+/** Dados da ficha, buscados só ao abrir o modal para não pesar no pulso da conversa. */
+export type ContactProfile = {
+  cpf: string | null;
+  avatarUrl: string | null;
+  createdAt: string;
+  origin: string;
+  messageCount: number;
+  conversationCount: number;
+  notes: ContactNoteItem[];
+};
+
 export type ChatMessageItem = {
   id: string;
   author: ChatAuthor;

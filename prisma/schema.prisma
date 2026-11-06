@@ -110,16 +110,30 @@ model Contact {
   ecommercePurchases        Int       @default(0)
   ecommerceTotalSpent       Decimal   @default(0) @db.Decimal(14, 2)
   ecommerceLastPurchaseDate String?
+  avatarUrl          String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   importedSales      ImportedSale[]
   npsResponses       NpsResponse[]
   chatConversations  ChatConversation[]
+  notes              ContactNote[]
 
   @@index([cpf])
   @@index([phone])
   @@index([email])
   @@index([name])
+}
+
+model ContactNote {
+  id         String   @id @default(cuid())
+  contactId  String
+  authorId   String?
+  authorName String
+  text       String
+  createdAt  DateTime @default(now())
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, createdAt])
 }
 
 model Store {

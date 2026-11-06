@@ -71,9 +71,9 @@ function VariableField({ id, label, value, contact, onChange }: { id: string; la
   );
 }
 
-export function NewConversationDialog({ onClose, onOpened }: { onClose: () => void; onOpened: (id: string) => void }) {
+export function NewConversationDialog({ onClose, onOpened, initialSearch = "" }: { onClose: () => void; onOpened: (id: string) => void; initialSearch?: string }) {
   const { isDark } = useCrmTheme();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [result, setResult] = useState<SearchResult | null>(null);
   const defaultContacts = useRef<Contact[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
