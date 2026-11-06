@@ -510,6 +510,10 @@ export default function ContatosPage() {
   const { isDark } = useCrmTheme();
   const toast = useToast();
   const [searchTerm, setSearchTerm] = useState("");
+  useEffect(() => {
+    const term = new URLSearchParams(window.location.search).get("busca");
+    if (term) setSearchTerm(term);
+  }, []);
   const [activeFilter, setActiveFilter] = useState<ContactFilter>("Todos");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const { data: segments } = useCrmData<{ id: string; nome: string }[]>("segments", []);

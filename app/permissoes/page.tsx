@@ -5,7 +5,7 @@ import { Lock, Plus, Save, Search, ShieldCheck, Users, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
-import { MODULES, type ModuleKey } from "@/lib/permissions";
+import { CHAT_CAPABILITIES, MODULES, type ModuleKey } from "@/lib/permissions";
 
 interface RoleRecord {
   id: string;
@@ -15,10 +15,10 @@ interface RoleRecord {
   isSystem: boolean;
 }
 
-type Draft = Record<string, Record<ModuleKey, boolean>>;
+type Draft = Record<string, Record<string, boolean>>;
 
 const toModuleMap = (permissions: Record<string, boolean>) =>
-  Object.fromEntries(MODULES.map((module) => [module.key, permissions?.[module.key] === true])) as Record<ModuleKey, boolean>;
+  Object.fromEntries([...MODULES, ...CHAT_CAPABILITIES].map((item) => [item.key, permissions?.[item.key] === true])) as Record<ModuleKey, boolean> & Record<string, boolean>;
 
 const groups = [...new Set(MODULES.map((module) => module.group))];
 
@@ -92,10 +92,10 @@ export default function PermissoesPage() {
 
   const hasChanges = useMemo(() => {
     if (!selectedRoleId || !selectedDraft || !originalPermissions) return false;
-    return MODULES.some((m) => selectedDraft[m.key] !== originalPermissions[m.key]);
+    return [...MODULES, ...CHAT_CAPABILITIES].some((m) => selectedDraft[m.key] !== originalPermissions[m.key]);
   }, [selectedRoleId, selectedDraft, originalPermissions]);
 
-  const toggle = (key: ModuleKey) => {
+  const toggle = (key: string) => {
     if (!selectedRoleId) return;
     setDraft((current) => ({
       ...current,
@@ -380,6 +380,26 @@ export default function PermissoesPage() {
                 </div>
               );
             })}
+            <div className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
+              <div className="mb-4 flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-[#051647] dark:text-[#C4D600]" />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Ações no Atendimento</h3>
+              </div>
+              <div className="space-y-3">
+                {CHAT_CAPABILITIES.map((capability) => {
+                  const checked = selectedDraft[capability.key] === true;
+                  return (
+                    <div key={capability.key} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 transition-colors dark:border-slate-800 dark:bg-white/5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-900 dark:text-white">{capability.label}</p>
+                        <p className="text-[10px] text-slate-400">{capability.description}</p>
+                      </div>
+                      <Toggle checked={checked} onChange={() => toggle(capability.key)} label={`${checked ? "Remover" : "Conceder"} ${capability.label}`} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       ) : !isLoading && roles.length > 0 && !selectedRole ? (

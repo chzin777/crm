@@ -42,6 +42,11 @@ async function deliver(messageId: string, send: () => Promise<{ messages?: { id:
 /** Assume para quem responde, só se ninguém assumiu antes. */
 export async function assumeFor(actor: ChatActor, conversation: Pick<ChatConversation, "id" | "assigneeId">) {
   if (conversation.assigneeId === actor.id) return;
+  const agent = await prisma.chatAgent.findUnique({ where: { userId: actor.id } });
+  if (agent && agent.capacity > 0) {
+    const open = await prisma.chatConversation.count({ where: { assigneeId: actor.id, closedAt: null } });
+    if (open >= agent.capacity) throw new ChatRuleError("Você atingiu seu limite de conversas simultâneas.", 409, "at_capacity");
+  }
   const updated = await prisma.chatConversation.updateMany({
     where: { id: conversation.id, assigneeId: null, closedAt: null },
     data: { assigneeId: actor.id, status: "in_progress", waitingSince: null, unreadCount: 0 },

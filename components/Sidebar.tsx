@@ -14,6 +14,7 @@ import {
   Tags,
   Store,
   MessageSquare,
+  ListOrdered,
   FileText,
   Award,
   UserCog,
@@ -77,6 +78,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Contatos & Clientes", href: "/contatos", icon: Users },
     { title: "Segmentos", href: "/segmentos", icon: Tags },
     { title: "Atendimento", href: "/chat", icon: MessageSquare },
+    { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Lojas", href: "/lojas", icon: Store },
     { title: "Campanhas", href: "/campanhas", icon: MessageSquare },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
@@ -90,7 +92,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: Kanban, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos"), byHref("/chat")] },
+    { id: "vendas", label: "Vendas", icon: Kanban, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos"), byHref("/chat"), byHref("/filas")] },
     { id: "marketing", label: "Marketing", icon: Megaphone, items: [byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
     { id: "gestao", label: "Gestão", icon: Store, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
   ]

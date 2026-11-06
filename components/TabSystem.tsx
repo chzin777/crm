@@ -9,6 +9,7 @@ import {
   Tags,
   Store,
   MessageSquare,
+  ListOrdered,
   FileText,
   Award,
   UserCog,
@@ -38,6 +39,7 @@ const TABS: TabDef[] = [
   { id: "cargos", label: "Cargos", href: "/cargos", icon: Shield },
   { id: "permissoes", label: "Permissões", href: "/permissoes", icon: KeyRound },
   { id: "chat", label: "Atendimento", href: "/chat", icon: MessageSquare },
+  { id: "filas", label: "Filas", href: "/filas", icon: ListOrdered },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 

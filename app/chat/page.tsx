@@ -2,17 +2,20 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Bell, BellOff, Info, MessageSquare, Phone } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, ArrowRightLeft, Bell, BellOff, CheckCircle2, Hand, Info, Mail, MessageSquare, MessageSquarePlus, Phone, RotateCcw } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
+import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
 import type { TemplateChoice } from "@/components/chat/TemplatePicker";
+import { TransferDialog } from "@/components/chat/TransferDialog";
 import { alertsEnabled, disableAlerts, enableAlerts } from "@/lib/chat/alerts";
 import { initials, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
-import { STATUS_LABELS, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
+import { PRIORITY_LABELS, STATUS_LABELS, type ChatMessageItem, type ChatPriority, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
 import { usePulse } from "@/lib/chat/use-pulse";
 
 const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, closed: 0 };
@@ -37,7 +40,12 @@ function ChatWorkspace() {
   const [replyTo, setReplyTo] = useState<ChatMessageItem | null>(null);
   const [sendError, setSendError] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [canWrite, setCanWrite] = useState(false);
+  const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
+  const [queueOptions, setQueueOptions] = useState<{ id: string; name: string }[]>([]);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const canWrite = capabilities["chat.assume"] === true;
   const listRequest = useRef(0);
   const messageList = useRef<MessageListHandle>(null);
 
@@ -45,7 +53,14 @@ function ChatWorkspace() {
     setAlertsOn(alertsEnabled());
     fetch("/api/me/chat")
       .then(async (response) => {
-        if (response.ok) setCanWrite(((await response.json()) as { capabilities: Record<string, boolean> }).capabilities["chat.assume"] === true);
+        if (!response.ok) return;
+        const me = (await response.json()) as { capabilities: Record<string, boolean> };
+        setCapabilities(me.capabilities);
+      })
+      .catch((error) => console.error("[chat]", error));
+    fetch("/api/chat/queues")
+      .then(async (response) => {
+        if (response.ok) setQueueOptions(((await response.json()) as { data: { id: string; name: string }[] }).data);
       })
       .catch((error) => console.error("[chat]", error));
   }, []);
@@ -239,7 +254,25 @@ function ChatWorkspace() {
     }
   };
 
-  const queues = [...new Map(items.flatMap((item) => (item.queue ? [[item.queue.id, item.queue]] : []))).values()];
+  const refreshOpen = () => {
+    void loadList();
+    if (selectedId) void loadDetail(selectedId);
+    messageList.current?.refresh();
+  };
+
+  const conversationAction = async (path: string, init?: RequestInit) => {
+    setSendError("");
+    const response = await fetch(`/api/chat/conversations/${selectedId}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, ...init }).catch(() => null);
+    const data = (await response?.json().catch(() => null)) as { error?: string; openConversationId?: string } | null;
+    if (response?.ok) refreshOpen();
+    else {
+      setSendError(data?.error ?? "Não foi possível concluir a ação.");
+      if (data?.openConversationId) select(data.openConversationId);
+    }
+  };
+
+  const updateConversation = (body: Record<string, unknown>) => conversationAction("", { method: "PATCH", body: JSON.stringify(body) });
+
   const open = selectedId ? detail?.id === selectedId ? detail : null : null;
   const waiting = open?.status === "waiting" ? waitingLabel(open.waitingSince).text : "";
 
@@ -258,7 +291,7 @@ function ChatWorkspace() {
             onQueue={setQueueId}
             priority={priority}
             onPriority={setPriority}
-            queues={queues}
+            queues={queueOptions}
             loading={loadingList}
             error={listError}
             selectedId={selectedId}
@@ -267,15 +300,22 @@ function ChatWorkspace() {
               if (nextCursor) void loadList(nextCursor);
             }}
             actions={(
-              <button
-                type="button"
-                onClick={() => void toggleAlerts()}
-                title={alertsOn ? "Desligar som" : "Ligar som"}
-                aria-label={alertsOn ? "Desligar som" : "Ligar som"}
-                className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                {alertsOn ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
-              </button>
+              <>
+                {canWrite && (
+                  <button type="button" onClick={() => setShowNew(true)} title="Nova conversa" aria-label="Nova conversa" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-lg bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">
+                    <MessageSquarePlus className="h-4 w-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void toggleAlerts()}
+                  title={alertsOn ? "Desligar som" : "Ligar som"}
+                  aria-label={alertsOn ? "Desligar som" : "Ligar som"}
+                  className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  {alertsOn ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+                </button>
+              </>
             )}
           />
         </div>
@@ -299,7 +339,27 @@ function ChatWorkspace() {
                     {open.queue ? ` · ${open.queue.name}` : ""}
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center justify-end gap-1">
+                  {canWrite && !open.closedAt && (
+                    <select aria-label="Prioridade" value={open.priority} onChange={(event) => void updateConversation({ priority: event.target.value })} className="hidden h-8 cursor-pointer rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs outline-none sm:block dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                      {(Object.keys(PRIORITY_LABELS) as ChatPriority[]).map((key) => <option key={key} value={key}>{PRIORITY_LABELS[key]}</option>)}
+                    </select>
+                  )}
+                  {canWrite && !open.closedAt && !open.assignee && (
+                    <button type="button" onClick={() => void conversationAction("/assume")} title="Assumir" aria-label="Assumir" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><Hand className="h-4 w-4" /></button>
+                  )}
+                  {capabilities["chat.transfer"] && !open.closedAt && (
+                    <button type="button" onClick={() => setShowTransfer(true)} title="Transferir" aria-label="Transferir" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><ArrowRightLeft className="h-4 w-4" /></button>
+                  )}
+                  {!open.closedAt && (
+                    <button type="button" onClick={() => void conversationAction("/read", { body: JSON.stringify({ unread: true }) })} title="Marcar como não lida" aria-label="Marcar como não lida" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><Mail className="h-4 w-4" /></button>
+                  )}
+                  {capabilities["chat.close"] && !open.closedAt && (
+                    <button type="button" onClick={() => void conversationAction("/close")} title="Encerrar" aria-label="Encerrar" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><CheckCircle2 className="h-4 w-4" /></button>
+                  )}
+                  {capabilities["chat.close"] && canWrite && open.closedAt && (
+                    <button type="button" onClick={() => void conversationAction("/reopen")} title="Reabrir" aria-label="Reabrir" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><RotateCcw className="h-4 w-4" /></button>
+                  )}
                   <a href={`tel:${open.phone}`} title={formatPhone(open.phone)} className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
                     <Phone className="h-4 w-4" />
                   </a>
@@ -351,8 +411,53 @@ function ChatWorkspace() {
                   </div>
                 )}
               </div>
+              <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Etiquetas</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {open.tags.map((tag) => (
+                    <button key={tag} type="button" title="Remover etiqueta" disabled={!canWrite} onClick={() => void updateConversation({ tags: open.tags.filter((item) => item !== tag) })} className="cursor-pointer rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200">{tag} ×</button>
+                  ))}
+                </div>
+                {canWrite && (
+                  <input
+                    value={tagInput}
+                    onChange={(event) => setTagInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      const tag = tagInput.trim();
+                      if (event.key === "Enter" && tag) {
+                        event.preventDefault();
+                        setTagInput("");
+                        if (!open.tags.includes(tag)) void updateConversation({ tags: [...open.tags, tag] });
+                      }
+                    }}
+                    placeholder="Nova etiqueta e Enter"
+                    aria-label="Nova etiqueta"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                  />
+                )}
+              </div>
+              {open.previous.length > 0 && (
+                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Conversas anteriores</p>
+                  {open.previous.map((item) => (
+                    <button key={item.id} type="button" onClick={() => { setShowDetails(false); select(item.id); }} className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-white/5">
+                      <span className="text-slate-700 dark:text-slate-200">{new Date(item.createdAt).toLocaleDateString("pt-BR")}{item.queue ? ` · ${item.queue.name}` : ""}</span>
+                      <span className="text-slate-500 dark:text-slate-400">{STATUS_LABELS[item.status]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Link href={`/contatos?busca=${encodeURIComponent(open.phone.replace(/^55/, ""))}`} className="inline-block cursor-pointer text-sm font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Abrir ficha do contato</Link>
             </div>
           </EntityDialog>
+        )}
+
+        {showTransfer && open && (
+          <TransferDialog conversationId={open.id} currentQueueId={open.queue?.id ?? null} onClose={() => setShowTransfer(false)} onDone={() => { setShowTransfer(false); refreshOpen(); }} />
+        )}
+
+        {showNew && (
+          <NewConversationDialog onClose={() => setShowNew(false)} onOpened={(id) => { setShowNew(false); setTab("mine"); select(id); void loadList(); }} />
         )}
       </div>
     </div>
