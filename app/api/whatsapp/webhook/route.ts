@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAutomation } from "@/lib/chat/automation";
 import { recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
+import { phoneVariants } from "@/lib/chat/phone";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
 export async function GET(request: Request) {
@@ -14,9 +15,7 @@ export async function GET(request: Request) {
   return new Response("Forbidden", { status: 403 });
 }
 
-function validSignature(body: string, header: string | null) {
-  const secret = process.env.META_APP_SECRET;
-  if (!secret) return false;
+function validSignature(body: string, header: string | null, secret: string) {
   if (!header?.startsWith("sha256=")) return false;
   const expected = createHmac("sha256", secret).update(body).digest();
   const received = Buffer.from(header.slice(7), "hex");
@@ -98,12 +97,9 @@ async function handleInboundMessage(msg: InboundMessageEvent) {
   const text = msg.text?.body ?? msg.image?.caption ?? msg.video?.caption ?? msg.audio?.transcript ?? msg.document?.caption ?? null;
   const mediaType = msg.type === "text" ? null : msg.type ?? null;
 
-  // Normaliza telefone para buscar contato (remove 55 se presente)
-  let phoneDigits = msg.from.replace(/\D/g, "");
-  if (phoneDigits.startsWith("55") && phoneDigits.length > 11) phoneDigits = phoneDigits.slice(2);
-
   const contact = await prisma.contact.findFirst({
-    where: { OR: [{ phone: msg.from }, { phone: phoneDigits }, { phone: `55${phoneDigits}` }] },
+    where: { phone: { in: phoneVariants(msg.from) } },
+    orderBy: { createdAt: "asc" },
     select: { id: true },
   });
 
@@ -135,7 +131,14 @@ async function handleInboundMessage(msg: InboundMessageEvent) {
 // Registra o status de entrega (sent/delivered/read/failed) e o motivo das falhas nos logs.
 export async function POST(request: Request) {
   const raw = await request.text();
-  if (!validSignature(raw, request.headers.get("x-hub-signature-256"))) {
+  const secret = process.env.META_APP_SECRET;
+  // Sem 200 a Meta reenvia o evento: nada se perde enquanto a chave não estiver certa.
+  if (!secret) {
+    console.error("[whatsapp/webhook] evento recusado: META_APP_SECRET não está configurado no .env do servidor.");
+    return new Response("Webhook not configured", { status: 503 });
+  }
+  if (!validSignature(raw, request.headers.get("x-hub-signature-256"), secret)) {
+    console.error(`[whatsapp/webhook] assinatura inválida (${raw.length} bytes): confira se META_APP_SECRET é a chave secreta do app desta conta na Meta.`);
     return new Response("Invalid signature", { status: 401 });
   }
   try {
@@ -145,6 +148,7 @@ export async function POST(request: Request) {
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const profiles = change.value?.contacts ?? [];
+        console.log(`[whatsapp/webhook] evento ${change.field ?? "?"}: ${change.value?.messages?.length ?? 0} mensagem(ns), ${change.value?.statuses?.length ?? 0} status`);
         for (const status of change.value?.statuses ?? []) {
           await updateMessageStatus(status).catch((failure) => console.error("[whatsapp/webhook] atualizar status:", failure));
           const error = status.errors?.[0];
@@ -164,6 +168,7 @@ export async function POST(request: Request) {
             console.error("[whatsapp/webhook] gravar conversa:", failure);
             return new Response("Falha ao gravar", { status: 500 });
           }
+          console.log(recorded ? `[whatsapp/webhook] mensagem ${msg.id} gravada na conversa ${recorded.conversationId}` : `[whatsapp/webhook] mensagem ${msg.id} ignorada (repetida ou reação)`);
           if (recorded) await runAutomation(recorded).catch((failure) => console.error("[whatsapp/webhook] fluxo automático:", failure));
         }
       }

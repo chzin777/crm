@@ -71,8 +71,17 @@ function readContent(message: MetaInboundMessage): { text: string; media: (MetaM
 }
 
 async function findOrCreateContact(waId: string, profileName: string | undefined) {
+  // O cadastro tem telefones repetidos: a conversa aberta diz com qual contato o cliente já fala.
+  const variants = phoneVariants(waId);
+  const open = await prisma.chatConversation.findFirst({
+    where: { phone: { in: variants }, closedAt: null },
+    orderBy: { updatedAt: "desc" },
+    select: { contactId: true },
+  });
+  if (open) return { id: open.contactId };
+
   const contact = await prisma.contact.findFirst({
-    where: { phone: { in: phoneVariants(waId) } },
+    where: { phone: { in: variants } },
     orderBy: { createdAt: "asc" },
     select: { id: true },
   });
