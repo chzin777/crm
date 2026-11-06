@@ -3,7 +3,7 @@ import { requireApiSession, requireModule } from "@/lib/api-auth";
 import { addAudit } from "@/lib/chat/conversation";
 import { createTemplate, deleteTemplate, downloadTemplateImage, editTemplate, listTemplates, type TemplateButton, type TemplateContent } from "@/lib/meta-whatsapp";
 import { prisma } from "@/lib/prisma";
-import { templateEditUsage, templateEditWindowStart } from "@/lib/template-edit-limits";
+import { templateEditUsage, templateEditWindowStart, templateNameAvailableAt, type ReservedTemplateName } from "@/lib/template-edit-limits";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const EDITABLE_STATUS = ["APPROVED", "REJECTED", "PAUSED"];
@@ -20,6 +20,21 @@ async function approvedEditsByTemplate(ids: string[]) {
     edits.set(row.targetId, [...(edits.get(row.targetId) ?? []), row.createdAt]);
   }
   return edits;
+}
+
+/** Só a exclusão feita pelo CRM fica registrada; a mais recente de cada nome define a liberação. */
+async function reservedTemplateNames(): Promise<ReservedTemplateName[]> {
+  const rows = await prisma.chatAudit.findMany({
+    where: { action: "template.delete", createdAt: { gte: templateEditWindowStart() } },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true, before: true },
+  });
+  const reserved = new Map<string, string>();
+  for (const row of rows) {
+    const before = row.before as { name?: string; status?: string } | null;
+    if (before?.name && before.status === "APPROVED") reserved.set(before.name, templateNameAvailableAt(row.createdAt));
+  }
+  return [...reserved].map(([name, availableAt]) => ({ name, availableAt }));
 }
 
 /** Validação comum a criar e editar: o conteúdo segue as mesmas regras nos dois casos. */
@@ -81,8 +96,8 @@ export async function GET() {
   if (!(await requireApiSession())) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   try {
     const templates = await listTemplates();
-    const edits = await approvedEditsByTemplate(templates.map((template) => template.id));
-    return NextResponse.json({ data: templates.map((template) => ({ ...template, editUsage: templateEditUsage(template.status, edits.get(template.id) ?? []) })) });
+    const [edits, reservedNames] = await Promise.all([approvedEditsByTemplate(templates.map((template) => template.id)), reservedTemplateNames()]);
+    return NextResponse.json({ data: templates.map((template) => ({ ...template, editUsage: templateEditUsage(template.status, edits.get(template.id) ?? []) })), reservedNames });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao listar modelos." }, { status: 422 });
   }
@@ -98,8 +113,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Modelo inválido." }, { status: 400 });
   }
   try {
+    const status = (await listTemplates()).find((template) => template.id === id)?.status;
     await deleteTemplate(id, name);
-    await addAudit({ userId: guard.user.id, action: "template.delete", targetId: id, before: { name } });
+    await addAudit({ userId: guard.user.id, action: "template.delete", targetId: id, before: { name, status } });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[whatsapp/templates] falha ao excluir:", error);
@@ -117,6 +133,10 @@ export async function POST(request: Request) {
 
     if (!/^[a-z0-9_]{1,512}$/.test(name)) {
       return NextResponse.json({ error: "Nome inválido: use apenas letras minúsculas, números e underscore." }, { status: 400 });
+    }
+    const reserved = (await reservedTemplateNames()).find((item) => item.name === name);
+    if (reserved) {
+      return NextResponse.json({ error: "Este nome é de um modelo aprovado excluído nos últimos 30 dias.", availableAt: reserved.availableAt }, { status: 409 });
     }
     const { content, error } = await readTemplateContent(form);
     if (!content) return NextResponse.json({ error }, { status: 400 });

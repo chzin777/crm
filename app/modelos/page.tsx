@@ -6,7 +6,7 @@ import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import Stepper, { Step } from "@/components/Stepper";
-import { TEMPLATE_EDIT_LIMITS, type TemplateEditUsage } from "@/lib/template-edit-limits";
+import { TEMPLATE_EDIT_LIMITS, type ReservedTemplateName, type TemplateEditUsage } from "@/lib/template-edit-limits";
 
 type TemplateButton = { type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER"; text: string; url?: string; phone_number?: string };
 type ButtonDraft = { type: TemplateButton["type"]; text: string; value: string };
@@ -122,6 +122,7 @@ export default function ModelosPage() {
   const { isDark } = useCrmTheme();
   const toast = useToast();
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [reservedNames, setReservedNames] = useState<ReservedTemplateName[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -160,9 +161,12 @@ export default function ModelosPage() {
     setError("");
     try {
       const response = await fetch("/api/whatsapp/templates", { cache: "no-store" });
-      const result = (await response.json().catch(() => ({}))) as { data?: Template[]; error?: string };
+      const result = (await response.json().catch(() => ({}))) as { data?: Template[]; reservedNames?: ReservedTemplateName[]; error?: string };
       if (!response.ok) setError(result.error ?? "Não foi possível carregar os modelos.");
-      else setTemplates(result.data ?? []);
+      else {
+        setTemplates(result.data ?? []);
+        setReservedNames(result.reservedNames ?? []);
+      }
     } finally {
       setLoading(false);
     }
@@ -206,6 +210,9 @@ export default function ModelosPage() {
     });
   }, [templates, search, filter]);
 
+  const reservedName = editTarget ? undefined : reservedNames.find((item) => item.name === name.trim());
+  const reservedNotice = reservedName && `Este nome é de um modelo aprovado excluído nos últimos 30 dias. A Meta só libera em ${formatDateTime(reservedName.availableAt)}. Use outro nome.`;
+
   const bodyVariables = variableCount(body);
   const sampleValues = Array.from({ length: maxVariable(body) }, (_, index) => examples[index]?.trim() || "Exemplo");
 
@@ -230,6 +237,7 @@ export default function ModelosPage() {
   const validateTemplateStep = (step: number) => {
     const fail = (message: string) => (setCreateError(message), false);
     if (step === 1 && !name.trim()) return fail("Informe o nome do modelo.");
+    if (step === 1 && reservedNotice) return false;
     if (step === 2) {
       const text = body.trim();
       if (!text) return fail("Escreva o texto da mensagem.");
@@ -511,6 +519,7 @@ export default function ModelosPage() {
               <label className={labelClass}>
                 Nome (minúsculas e underscore)
                 <input value={name} disabled={Boolean(editTarget)} onChange={(event) => setName(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} placeholder="confirmacao_atendimento" className={`${inputClass} disabled:opacity-70`} />
+                {reservedNotice && <span role="alert" className="block text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{reservedNotice}</span>}
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className={labelClass}>
@@ -665,7 +674,7 @@ export default function ModelosPage() {
             <WhatsAppBubble image={deleteTarget.headerFormat === "IMAGE" ? deleteTarget.headerImageUrl || "" : null} body={deleteTarget.body} footer={deleteTarget.footer} buttons={deleteTarget.buttons} />
             <ul className="list-disc space-y-1 rounded-lg border border-[#F7915E]/50 bg-[#F7915E]/10 py-3 pl-7 pr-4 text-xs text-slate-700 dark:text-slate-200">
               <li>A exclusão na Meta não pode ser desfeita.</li>
-              <li>O nome {deleteTarget.name} fica indisponível por 30 dias.</li>
+              {deleteTarget.status === "APPROVED" && <li>O nome {deleteTarget.name} fica indisponível por 30 dias.</li>}
               <li>Envios e campanhas que usam este modelo deixam de funcionar.</li>
             </ul>
             {deleteError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{deleteError}</p>}

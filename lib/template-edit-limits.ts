@@ -31,3 +31,8 @@ export function templateEditUsage(status: string, edits: Date[], now = new Date(
 }
 
 export const templateEditWindowStart = (now = new Date()) => new Date(now.getTime() - MONTH_MS);
+
+/** Nome de modelo aprovado excluído: a Meta recusa criar outro igual por 30 dias. */
+export type ReservedTemplateName = { name: string; availableAt: string };
+
+export const templateNameAvailableAt = (deletedAt: Date) => new Date(deletedAt.getTime() + MONTH_MS).toISOString();
