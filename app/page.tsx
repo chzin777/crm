@@ -485,6 +485,17 @@ export default function Home() {
     setEditingCard(null);
     setIsCreateDealOpen(true);
   };
+  // Atalho "Criar oportunidade" do atendimento: abre o diálogo com o contato da conversa.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const contactId = params.get("oportunidade");
+    if (!contactId) return;
+    window.history.replaceState(null, "", "/");
+    openDealDialog();
+    setDealContactId(contactId);
+    setDealContactSearch(params.get("contato") ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const createDeal = () => {
     const contact = contacts.find((item) => item.id === dealContactId) ?? dealContactResults.find((item) => item.id === dealContactId);
     if (!contact) {

@@ -3,19 +3,21 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowRightLeft, Bell, BellOff, CheckCircle2, Hand, Info, Mail, MessageSquare, MessageSquarePlus, Phone, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, Phone, RotateCcw, Target, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
+import { FloatingMenu, type FloatingMenuItem } from "@/components/chat/FloatingMenu";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
+import { PriorityPill } from "@/components/chat/PriorityPill";
 import type { TemplateChoice } from "@/components/chat/TemplatePicker";
 import { TransferDialog } from "@/components/chat/TransferDialog";
 import { alertsEnabled, disableAlerts, enableAlerts } from "@/lib/chat/alerts";
-import { initials, waitingLabel } from "@/lib/chat/format";
+import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
-import { PRIORITY_LABELS, STATUS_LABELS, type ChatMessageItem, type ChatPriority, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
+import { STATUS_LABELS, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
 import { usePulse } from "@/lib/chat/use-pulse";
 
 const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, closed: 0 };
@@ -287,6 +289,23 @@ function ChatWorkspace() {
 
   const open = selectedId ? detail?.id === selectedId ? detail : null : null;
   const waiting = open?.status === "waiting" ? waitingLabel(open.waitingSince).text : "";
+  const lastContact = open?.lastMessageAt ? `último contato: ${relativeTime(open.lastMessageAt).toLowerCase()}` : "";
+  const headerInfo = open
+    ? [formatPhone(open.phone), STATUS_LABELS[open.status], open.assignee?.name, open.queue?.name, waiting ? `esperando há ${waiting}` : lastContact].filter(Boolean).join(" · ")
+    : "";
+  const menuItems: FloatingMenuItem[] = open
+    ? [
+        { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => void conversationAction("/assume"), hidden: !canWrite || !!open.closedAt || !!open.assignee },
+        { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
+        { label: "Ligar para o cliente", icon: <Phone className="h-4 w-4" />, href: `tel:${open.phone}` },
+        { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(open.contactId)}&contato=${encodeURIComponent(open.name)}`, hidden: !canWrite },
+        { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!open.closedAt },
+        { label: "Marcar como não lida", icon: <Mail className="h-4 w-4" />, onSelect: () => void conversationAction("/read", { body: JSON.stringify({ unread: true }) }), hidden: !!open.closedAt },
+        { label: "Finalizar atendimento", icon: <CheckCircle2 className="h-4 w-4" />, onSelect: () => void conversationAction("/close"), hidden: !capabilities["chat.close"] || !!open.closedAt },
+        { label: "Reabrir atendimento", icon: <RotateCcw className="h-4 w-4" />, onSelect: () => void conversationAction("/reopen"), hidden: !capabilities["chat.close"] || !canWrite || !open.closedAt },
+        { label: open.blocked ? "Desbloquear contato" : "Bloquear contato", icon: <Ban className="h-4 w-4" />, onSelect: () => void toggleBlock(open.phone, open.blocked), danger: true, hidden: !capabilities["chat.queues"] },
+      ]
+    : [];
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
@@ -344,40 +363,18 @@ function ChatWorkspace() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{open.name}</h3>
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {STATUS_LABELS[open.status]}
-                    {open.assignee ? ` · ${open.assignee.name}` : ""}
-                    {waiting ? ` · esperando há ${waiting}` : ""}
-                    {open.queue ? ` · ${open.queue.name}` : ""}
-                  </p>
+                  <p title={headerInfo} className="truncate text-xs text-slate-500 dark:text-slate-400">{headerInfo}</p>
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-1">
-                  {canWrite && !open.closedAt && (
-                    <select aria-label="Prioridade" value={open.priority} onChange={(event) => void updateConversation({ priority: event.target.value })} className="hidden h-8 cursor-pointer rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs outline-none sm:block dark:border-slate-700 dark:bg-slate-800 dark:text-white">
-                      {(Object.keys(PRIORITY_LABELS) as ChatPriority[]).map((key) => <option key={key} value={key}>{PRIORITY_LABELS[key]}</option>)}
-                    </select>
-                  )}
-                  {canWrite && !open.closedAt && !open.assignee && (
-                    <button type="button" onClick={() => void conversationAction("/assume")} title="Assumir" aria-label="Assumir" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><Hand className="h-4 w-4" /></button>
-                  )}
-                  {capabilities["chat.transfer"] && !open.closedAt && (
-                    <button type="button" onClick={() => setShowTransfer(true)} title="Transferir" aria-label="Transferir" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><ArrowRightLeft className="h-4 w-4" /></button>
-                  )}
-                  {!open.closedAt && (
-                    <button type="button" onClick={() => void conversationAction("/read", { body: JSON.stringify({ unread: true }) })} title="Marcar como não lida" aria-label="Marcar como não lida" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><Mail className="h-4 w-4" /></button>
-                  )}
-                  {capabilities["chat.close"] && !open.closedAt && (
-                    <button type="button" onClick={() => void conversationAction("/close")} title="Encerrar" aria-label="Encerrar" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><CheckCircle2 className="h-4 w-4" /></button>
-                  )}
-                  {capabilities["chat.close"] && canWrite && open.closedAt && (
-                    <button type="button" onClick={() => void conversationAction("/reopen")} title="Reabrir" aria-label="Reabrir" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><RotateCcw className="h-4 w-4" /></button>
-                  )}
-                  <a href={`tel:${open.phone}`} title={formatPhone(open.phone)} className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
-                    <Phone className="h-4 w-4" />
-                  </a>
-                  <button type="button" onClick={() => setShowDetails(true)} title="Detalhes do contato" aria-label="Detalhes do contato" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
-                    <Info className="h-4 w-4" />
-                  </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <PriorityPill key={`${open.id}-priority`} priority={open.priority} onChange={canWrite && !open.closedAt ? (value) => void updateConversation({ priority: value }) : undefined} />
+                  <FloatingMenu
+                    key={open.id}
+                    label="Ações da conversa"
+                    widthClassName="w-60"
+                    triggerClassName="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+                    trigger={<MoreVertical className="h-5 w-5" />}
+                    items={menuItems}
+                  />
                 </div>
               </div>
               <MessageList key={open.id} conversationId={open.id} tick={tick} onReply={canWrite ? setReplyTo : undefined} listRef={messageList} />
