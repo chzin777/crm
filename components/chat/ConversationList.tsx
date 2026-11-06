@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, Check, CheckCheck, ChevronDown, Clock, Megaphone, MessageSquare, Search, SearchX, Smile, Store, Trash2, User, X } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, ChevronDown, Clock, Megaphone, MessageSquare, Mic, Search, SearchX, Smile, Store, Trash2, User, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
@@ -32,8 +32,9 @@ function preview(item: ConversationItem) {
   return `${prefix}${last.text || (last.attachmentKind ? ATTACHMENT_LABELS[last.attachmentKind] ?? "Anexo" : "")}`;
 }
 
-/** Figurinha cujo download falhou fica gravada só com o rótulo do tipo. */
+/** Mídia cujo download falhou fica gravada só com o rótulo do tipo. */
 const isSticker = (item: ConversationItem) => item.lastMessage?.attachmentKind === "sticker" || item.lastMessage?.text === "[Figurinha]";
+const isAudio = (item: ConversationItem) => item.lastMessage?.attachmentKind === "audio" || item.lastMessage?.text === "[Áudio]";
 
 function storeLabel(store: string) {
   const value = store.trim();
@@ -261,7 +262,11 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                     <div className="mt-0.5 flex items-center gap-1.5">
                       {delivery && <DeliveryIcon delivery={delivery} />}
                       <p className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-slate-400">
-                        {isSticker(item) ? <span className="inline-flex items-center gap-1"><Smile className="h-3.5 w-3.5" />Figurinha</span> : preview(item)}
+                        {isSticker(item) ? (
+                          <span className="inline-flex items-center gap-1"><Smile className="h-3.5 w-3.5" />Figurinha</span>
+                        ) : isAudio(item) ? (
+                          <span className="inline-flex items-center gap-1"><Mic className="h-3.5 w-3.5" />Áudio</span>
+                        ) : preview(item)}
                       </p>
                       {item.unreadCount > 0 && (
                         <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#25D366] px-1 text-[10px] font-bold text-[#051647] dark:bg-[#C4D600]">{item.unreadCount}</span>

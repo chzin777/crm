@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, Smile } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, Mic, Smile } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
 import { MediaViewer } from "@/components/chat/MediaViewer";
@@ -28,6 +28,24 @@ function Delivery({ delivery, reason, onLime }: { delivery: ChatDelivery | null;
 }
 
 const mediaUrl = (message: ChatMessageItem) => message.attachment?.localUrl ?? `/api/chat/media/${message.id}`;
+
+/** Quando o download falha, a mensagem fica gravada só com o rótulo do tipo, sem arquivo. */
+const MISSING_MEDIA: Record<string, { icon: typeof Mic; label: string }> = {
+  "[Áudio]": { icon: Mic, label: "Áudio indisponível" },
+  "[Figurinha]": { icon: Smile, label: "Figurinha indisponível" },
+  "[Imagem]": { icon: FileIcon, label: "Imagem indisponível" },
+  "[Vídeo]": { icon: FileIcon, label: "Vídeo indisponível" },
+  "[Documento]": { icon: FileIcon, label: "Documento indisponível" },
+};
+
+function MissingMedia({ icon: Icon, label }: { icon: typeof Mic; label: string }) {
+  return (
+    <p title="O arquivo não pôde ser baixado da Meta. Peça para o cliente reenviar." className="flex items-center gap-1.5 text-sm italic opacity-70">
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </p>
+  );
+}
 
 function Sticker({ message, onOpen }: { message: ChatMessageItem; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
@@ -219,6 +237,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
             const newDay = index === 0 || dayLabel(messages[index - 1].createdAt) !== dayLabel(message.createdAt);
             const fromUs = message.author === "agent" || message.author === "bot";
             const sticker = message.attachment?.kind === "sticker" && !message.text;
+            const missing = message.author === "customer" && !message.attachment ? MISSING_MEDIA[message.text] : undefined;
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {newDay && (
@@ -266,7 +285,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                         </button>
                       )}
                       {message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />}
-                      {message.text && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
+                      {missing ? <MissingMedia {...missing} /> : message.text && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
                       <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
