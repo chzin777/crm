@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CheckCircle2, Clock3, ExternalLink, FileText, Image as ImageIcon, Phone, Plus, RefreshCw, Reply, Search, Send, X, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, ExternalLink, FileText, Image as ImageIcon, Phone, Plus, RefreshCw, Reply, Search, Send, Trash2, X, XCircle } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -129,6 +129,9 @@ export default function ModelosPage() {
   const [sendPreview, setSendPreview] = useState<string | null>(null);
   const [sendError, setSendError] = useState("");
   const [sending, setSending] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const sendImageRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -303,6 +306,30 @@ export default function ModelosPage() {
     }
   };
 
+  const openDelete = (template: Template) => {
+    setDeleteError("");
+    setDeleteTarget(template);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const query = new URLSearchParams({ id: deleteTarget.id, name: deleteTarget.name });
+      const response = await fetch(`/api/whatsapp/templates?${query}`, { method: "DELETE" });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Não foi possível excluir o modelo.");
+      toast.success("Modelo excluído", `"${deleteTarget.name}" foi removido da Meta.`);
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Tente novamente.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const sendDisabled = sending || phone.replace(/\D/g, "").length < 10 || params.slice(0, sendVariables).filter((value) => value?.trim()).length < sendVariables || (needsImage && !sendImage && !sendTarget?.headerImageUrl);
 
   return (
@@ -386,7 +413,10 @@ export default function ModelosPage() {
                   </div>
                   <WhatsAppBubble image={template.headerFormat === "IMAGE" ? template.headerImageUrl || "" : null} body={template.body} footer={template.footer} buttons={template.buttons} />
                   {template.rejectedReason && <p className="text-[10px] text-[#9a3d12] dark:text-[#F7915E]">Motivo: {template.rejectedReason}</p>}
-                  <div className="mt-auto flex justify-end">
+                  <div className="mt-auto flex items-center justify-between gap-2">
+                    <button type="button" title="Excluir modelo" aria-label={`Excluir modelo ${template.name}`} onClick={() => openDelete(template)} className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-300">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                     <button type="button" onClick={() => openSend(template)} disabled={template.status !== "APPROVED"} className={primaryButton}>
                       <Send className="h-3.5 w-3.5" /> Enviar
                     </button>
@@ -562,6 +592,26 @@ export default function ModelosPage() {
             <button type="button" onClick={() => setSendTarget(null)} className={ghostButton}>Cancelar</button>
             <button type="button" onClick={() => void sendTemplate()} disabled={sendDisabled} className={primaryButton}>
               <Send className="h-3.5 w-3.5" /> {sending ? "Enviando..." : "Enviar notificação"}
+            </button>
+          </div>
+        </EntityDialog>
+      )}
+
+      {deleteTarget && (
+        <EntityDialog titleId="delete-template-title" title="Excluir modelo" description={`Modelo ${deleteTarget.name} · ${deleteTarget.language}`} onClose={() => setDeleteTarget(null)}>
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            <WhatsAppBubble image={deleteTarget.headerFormat === "IMAGE" ? deleteTarget.headerImageUrl || "" : null} body={deleteTarget.body} footer={deleteTarget.footer} buttons={deleteTarget.buttons} />
+            <ul className="list-disc space-y-1 rounded-lg border border-[#F7915E]/50 bg-[#F7915E]/10 py-3 pl-7 pr-4 text-xs text-slate-700 dark:text-slate-200">
+              <li>A exclusão na Meta não pode ser desfeita.</li>
+              <li>O nome {deleteTarget.name} fica indisponível por 30 dias.</li>
+              <li>Envios e campanhas que usam este modelo deixam de funcionar.</li>
+            </ul>
+            {deleteError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{deleteError}</p>}
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <button type="button" onClick={() => setDeleteTarget(null)} className={ghostButton}>Cancelar</button>
+            <button type="button" onClick={() => void confirmDelete()} disabled={deleting} className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-red-600 px-3.5 text-xs font-bold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+              <Trash2 className="h-3.5 w-3.5" /> {deleting ? "Excluindo..." : "Excluir modelo"}
             </button>
           </div>
         </EntityDialog>

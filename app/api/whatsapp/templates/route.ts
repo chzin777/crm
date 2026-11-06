@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireApiSession } from "@/lib/api-auth";
-import { createTemplate, listTemplates, type TemplateButton } from "@/lib/meta-whatsapp";
+import { requireApiSession, requireModule } from "@/lib/api-auth";
+import { addAudit } from "@/lib/chat/conversation";
+import { createTemplate, deleteTemplate, listTemplates, type TemplateButton } from "@/lib/meta-whatsapp";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
@@ -10,6 +11,25 @@ export async function GET() {
     return NextResponse.json({ data: await listTemplates() });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao listar modelos." }, { status: 422 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const guard = await requireModule("modelos");
+  if (guard.response) return guard.response;
+  const url = new URL(request.url);
+  const id = url.searchParams.get("id") ?? "";
+  const name = url.searchParams.get("name") ?? "";
+  if (!/^\d+$/.test(id) || !/^[a-z0-9_]{1,512}$/.test(name)) {
+    return NextResponse.json({ error: "Modelo inválido." }, { status: 400 });
+  }
+  try {
+    await deleteTemplate(id, name);
+    await addAudit({ userId: guard.user.id, action: "template.delete", targetId: id, before: { name } });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[whatsapp/templates] falha ao excluir:", error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao excluir modelo." }, { status: 422 });
   }
 }
 

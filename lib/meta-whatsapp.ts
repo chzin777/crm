@@ -243,7 +243,7 @@ export async function listTemplates(): Promise<WhatsAppTemplate[]> {
   const data = await graph<{
     data: { id: string; name: string; status: string; category: string; language: string; rejected_reason?: string; components?: TemplateComponent[] }[];
   }>(`/${accountId}/message_templates?limit=100&fields=name,status,category,language,components,rejected_reason`);
-  return data.data.filter((item) => item.name !== "hello_world").map((item) => ({
+  return data.data.filter((item) => item.name !== "hello_world" && !["DELETED", "PENDING_DELETION"].includes(item.status)).map((item) => ({
     id: item.id,
     name: item.name,
     status: item.status,
@@ -308,6 +308,12 @@ export async function createTemplate(input: {
     method: "POST",
     body: JSON.stringify({ name: input.name, language: input.language, category: input.category, components }),
   });
+}
+
+/** Com hsm_id a Meta apaga só este idioma; só com o nome, apagaria todos. */
+export async function deleteTemplate(id: string, name: string) {
+  const accountId = getAccountId();
+  return graph<{ success: boolean }>(`/${accountId}/message_templates?hsm_id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 export async function sendTemplate(
