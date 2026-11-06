@@ -239,7 +239,8 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#07194f]">
+    <div className="flex h-full w-full flex-col overflow-hidden px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
+    <div className="flex flex-1 min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-[#07194f]">
       {/* Coluna Esquerda - Lista de Conversas */}
       <div
         className={`flex flex-col border-r border-slate-200 dark:border-slate-800 ${
@@ -540,6 +541,7 @@ export default function ChatPage() {
           </div>
         </EntityDialog>
       )}
+    </div>
     </div>
   );
 }
