@@ -54,7 +54,8 @@ function pinnedMediaSocket(host: string) {
 async function downloadPinnedMedia(url: URL, accessToken: string, maxBytes: number) {
   const socket = await pinnedMediaSocket(url.hostname);
   return new Promise<{ buffer: Buffer; contentType: string | undefined }>((resolve, reject) => {
-    const outgoing = request(url, { agent: false, createConnection: () => socket, headers: { Authorization: `Bearer ${accessToken}` } }, (response) => {
+    // Sem a opção agent: com qualquer agent o Node ignora createConnection e abre outra conexão.
+    const outgoing = request(url, { createConnection: () => socket, headers: { Authorization: `Bearer ${accessToken}` } }, (response) => {
       if (response.statusCode !== 200) {
         outgoing.destroy();
         reject(new Error(`Falha ao baixar mídia (${response.statusCode}).`));
