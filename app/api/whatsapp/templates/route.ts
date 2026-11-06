@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession, requireModule } from "@/lib/api-auth";
 import { addAudit } from "@/lib/chat/conversation";
-import { createTemplate, deleteTemplate, downloadTemplateImage, editTemplate, listTemplates, type TemplateButton, type TemplateContent } from "@/lib/meta-whatsapp";
+import { createTemplate, deleteTemplate, downloadTemplateImage, editTemplate, findTemplate, listTemplates, type TemplateButton, type TemplateContent } from "@/lib/meta-whatsapp";
 import { prisma } from "@/lib/prisma";
 import { templateEditUsage, templateEditWindowStart, templateNameAvailableAt, type ReservedTemplateName } from "@/lib/template-edit-limits";
 
@@ -113,9 +113,13 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Modelo inválido." }, { status: 400 });
   }
   try {
-    const status = (await listTemplates()).find((template) => template.id === id)?.status;
+    const current = await findTemplate(id, name);
+    if (!current) {
+      console.warn(`[whatsapp/templates] ${name} (${id}) não existe mais na Meta.`);
+      return NextResponse.json({ ok: true, alreadyDeleted: true });
+    }
     await deleteTemplate(id, name);
-    await addAudit({ userId: guard.user.id, action: "template.delete", targetId: id, before: { name, status } });
+    await addAudit({ userId: guard.user.id, action: "template.delete", targetId: id, before: { name, status: current.status } });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[whatsapp/templates] falha ao excluir:", error);

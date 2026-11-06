@@ -336,9 +336,9 @@ export default function ModelosPage() {
     try {
       const query = new URLSearchParams({ id: deleteTarget.id, name: deleteTarget.name });
       const response = await fetch(`/api/whatsapp/templates?${query}`, { method: "DELETE" });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      const result = (await response.json().catch(() => ({}))) as { error?: string; alreadyDeleted?: boolean };
       if (!response.ok) throw new Error(result.error ?? "Não foi possível excluir o modelo.");
-      toast.success("Modelo excluído", `"${deleteTarget.name}" foi removido da Meta.`);
+      toast.success("Modelo excluído", `"${deleteTarget.name}" ${result.alreadyDeleted ? "já não existia" : "foi removido"} na Meta.`);
       setDeleteTarget(null);
       await load();
     } catch (err) {

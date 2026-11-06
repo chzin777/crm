@@ -48,14 +48,14 @@ async function graph<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const errorMsg = body?.error?.message ?? body?.error?.error_user_msg ?? JSON.stringify(body?.error ?? body);
     const code = Number(body?.error?.code);
-    throw new MetaApiError(`Meta WhatsApp API: ${errorMsg}`, Number.isFinite(code) ? code : undefined, response.status);
+    throw new MetaApiError(`Meta WhatsApp API: ${errorMsg}`, Number.isFinite(code) ? code : undefined, response.status, body?.error);
   }
 
   return body as T;
 }
 
 export class MetaApiError extends Error {
-  constructor(message: string, public code?: number, public httpStatus?: number) {
+  constructor(message: string, public code?: number, public httpStatus?: number, public details?: unknown) {
     super(message);
     this.name = "MetaApiError";
   }
@@ -335,10 +335,38 @@ export async function editTemplate(id: string, input: TemplateContent) {
   return graph<{ success: boolean }>(`/${id}`, { method: "POST", body: JSON.stringify({ components: await buildTemplateComponents(input) }) });
 }
 
-/** Com hsm_id a Meta apaga só este idioma; só com o nome, apagaria todos. */
+/** Consulta direta por nome: a listagem geral para em 100 modelos. */
+export async function findTemplate(id: string, name: string) {
+  const accountId = getAccountId();
+  const found = await graph<{ data: { id: string; status: string }[] }>(`/${accountId}/message_templates?name=${encodeURIComponent(name)}&fields=id,status&limit=100`);
+  return found.data.find((item) => item.id === id && !["DELETED", "PENDING_DELETION"].includes(item.status)) ?? null;
+}
+
+/**
+ * Com hsm_id a Meta apaga só este idioma; só com o nome, apagaria todos.
+ * Ler modelos não exige a atribuição da conta ao usuário do sistema; apagar exige.
+ */
 export async function deleteTemplate(id: string, name: string) {
   const accountId = getAccountId();
-  return graph<{ success: boolean }>(`/${accountId}/message_templates?hsm_id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
+  const path = `/${accountId}/message_templates?hsm_id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`;
+  console.log(`[whatsapp/templates] DELETE ${GRAPH_API}${path}`);
+  try {
+    const result = await graph<{ success: boolean }>(path, { method: "DELETE" });
+    console.log(`[whatsapp/templates] DELETE ${name}: ${JSON.stringify(result)}`);
+    return result;
+  } catch (error) {
+    if (!(error instanceof MetaApiError)) throw error;
+    console.error(`[whatsapp/templates] DELETE ${name}: HTTP ${error.httpStatus} ${JSON.stringify(error.details)}`);
+    if (error.code === 100 && /need permission/i.test(error.message)) {
+      throw new MetaApiError(
+        `A Meta recusou a exclusão: o usuário do sistema não tem acesso à conta do WhatsApp ${accountId}. No Meta Business, atribua esta conta a ele com controle total. Se o erro continuar, gere um novo token com os escopos whatsapp_business_management e whatsapp_business_messaging e atualize o .env do servidor.`,
+        error.code,
+        error.httpStatus,
+        error.details,
+      );
+    }
+    throw error;
+  }
 }
 
 export async function sendTemplate(
