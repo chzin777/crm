@@ -45,6 +45,7 @@ export type ChatMessageItem = {
   replyTo: { author: string; text: string; messageId?: string } | null;
   createdAt: string;
   attachment: { kind: string; name: string; mime: string; size: number; localUrl?: string } | null;
+  pendingMedia?: string | null;
 };
 
 export const PRIORITY_LABELS: Record<ChatPriority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };

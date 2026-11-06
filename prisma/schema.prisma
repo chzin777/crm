@@ -342,6 +342,7 @@ model ChatMessage {
   failureReason  String?
   internal       Boolean          @default(false)
   attachment     Json?
+  metaMedia      Json?
   replyTo        Json?
   externalId     String?          @unique
   createdAt      DateTime         @default(now())

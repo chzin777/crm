@@ -1,5 +1,5 @@
 import "server-only";
-import { Prisma } from "@/generated/prisma/client";
+import { Prisma, type ChatMessage } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { downloadMedia } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
@@ -124,6 +124,23 @@ async function storeMedia(media: MetaMedia & { kind: AttachmentKind }): Promise<
   }
 }
 
+type SavedMetaMedia = Pick<MetaMedia, "id" | "mime_type" | "filename"> & { kind: AttachmentKind };
+
+/** Nova tentativa de download: a Meta mantém o arquivo por tempo limitado. */
+export async function retryInboundMedia(message: Pick<ChatMessage, "id" | "text" | "metaMedia">) {
+  const media = message.metaMedia as SavedMetaMedia | null;
+  if (!media?.id) return null;
+  const attachment = await storeMedia(media);
+  if (!attachment) return null;
+  return prisma.chatMessage.update({
+    where: { id: message.id },
+    data: {
+      attachment: attachment as unknown as Prisma.InputJsonValue,
+      text: message.text === MEDIA_LABELS[media.kind] ? "" : message.text,
+    },
+  });
+}
+
 async function findQuoted(externalId: string | undefined) {
   if (!externalId) return null;
   const original = await prisma.chatMessage.findUnique({ where: { externalId }, select: { id: true, author: true, text: true, authorName: true } });
@@ -154,6 +171,9 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   const attachment = content.media ? await storeMedia(content.media) : null;
   const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
   const replyTo = await findQuoted(message.context?.id);
+  const metaMedia: SavedMetaMedia | null = content.media
+    ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind }
+    : null;
 
   let saved;
   try {
@@ -165,6 +185,7 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
         externalId: message.id,
         createdAt: receivedAt,
         ...(attachment ? { attachment: attachment as unknown as Prisma.InputJsonValue } : {}),
+        ...(metaMedia ? { metaMedia: metaMedia as Prisma.InputJsonValue } : {}),
         ...(replyTo ? { replyTo: replyTo as Prisma.InputJsonValue } : {}),
       },
     });

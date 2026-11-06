@@ -48,8 +48,10 @@ export function serializeConversation(row: ConversationRow) {
 
 export function serializeMessage(message: ChatMessage) {
   const attachment = message.attachment as ChatAttachment | null;
+  const metaMedia = message.metaMedia as { id?: string; kind?: string } | null;
   return {
     id: message.id,
+    pendingMedia: !attachment && metaMedia?.id ? metaMedia.kind ?? null : null,
     author: message.author,
     authorName: message.authorName,
     text: message.text,

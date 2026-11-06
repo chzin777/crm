@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, Mic, Smile } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, Mic, RotateCcw, Smile } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
 import { MediaViewer } from "@/components/chat/MediaViewer";
@@ -29,21 +29,55 @@ function Delivery({ delivery, reason, onLime }: { delivery: ChatDelivery | null;
 
 const mediaUrl = (message: ChatMessageItem) => message.attachment?.localUrl ?? `/api/chat/media/${message.id}`;
 
-/** Quando o download falha, a mensagem fica gravada só com o rótulo do tipo, sem arquivo. */
 const MISSING_MEDIA: Record<string, { icon: typeof Mic; label: string }> = {
-  "[Áudio]": { icon: Mic, label: "Áudio indisponível" },
-  "[Figurinha]": { icon: Smile, label: "Figurinha indisponível" },
-  "[Imagem]": { icon: FileIcon, label: "Imagem indisponível" },
-  "[Vídeo]": { icon: FileIcon, label: "Vídeo indisponível" },
-  "[Documento]": { icon: FileIcon, label: "Documento indisponível" },
+  audio: { icon: Mic, label: "Áudio indisponível" },
+  sticker: { icon: Smile, label: "Figurinha indisponível" },
+  image: { icon: FileIcon, label: "Imagem indisponível" },
+  video: { icon: FileIcon, label: "Vídeo indisponível" },
+  document: { icon: FileIcon, label: "Documento indisponível" },
 };
 
-function MissingMedia({ icon: Icon, label }: { icon: typeof Mic; label: string }) {
+/** Quando o download falha, a mensagem fica gravada só com o rótulo do tipo, sem arquivo. */
+const LABEL_KINDS: Record<string, string> = {
+  "[Áudio]": "audio",
+  "[Figurinha]": "sticker",
+  "[Imagem]": "image",
+  "[Vídeo]": "video",
+  "[Documento]": "document",
+};
+
+function MissingMedia({ kind, onRetry }: { kind: string; onRetry?: () => Promise<boolean> }) {
+  const [retrying, setRetrying] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const { icon: Icon, label } = MISSING_MEDIA[kind] ?? MISSING_MEDIA.document;
+
+  const retry = async () => {
+    setRetrying(true);
+    setFailed(false);
+    const done = await onRetry?.();
+    setFailed(!done);
+    setRetrying(false);
+  };
+
   return (
-    <p title="O arquivo não pôde ser baixado da Meta. Peça para o cliente reenviar." className="flex items-center gap-1.5 text-sm italic opacity-70">
-      <Icon className="h-4 w-4 shrink-0" />
-      {label}
-    </p>
+    <div className="flex items-center gap-1.5 text-sm">
+      <span title="O arquivo não pôde ser baixado da Meta." className="flex items-center gap-1.5 italic opacity-70">
+        <Icon className="h-4 w-4 shrink-0" />
+        {label}
+      </span>
+      {onRetry && (
+        <button
+          type="button"
+          title={failed ? "Ainda indisponível. Tentar baixar novamente" : "Tentar baixar novamente"}
+          aria-label="Tentar baixar novamente"
+          disabled={retrying}
+          onClick={() => void retry()}
+          className={`cursor-pointer rounded p-1 transition-colors hover:bg-black/10 disabled:cursor-not-allowed dark:hover:bg-white/10 ${failed ? "text-red-500" : "opacity-70"}`}
+        >
+          <RotateCcw className={`h-3.5 w-3.5 ${retrying ? "animate-spin" : ""}`} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -116,6 +150,13 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
   const merge = useCallback((incoming: ChatMessageItem[]) => {
     setMessages((current) => mergeMessages(current, incoming));
   }, []);
+
+  const retryMedia = async (messageId: string) => {
+    const response = await fetch(`/api/chat/media/${messageId}/retry`, { method: "POST" }).catch(() => null);
+    if (!response?.ok) return false;
+    merge([(await response.json()) as ChatMessageItem]);
+    return true;
+  };
 
   const fetchLatest = useCallback(async () => {
     const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, { cache: "no-store" });
@@ -237,7 +278,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
             const newDay = index === 0 || dayLabel(messages[index - 1].createdAt) !== dayLabel(message.createdAt);
             const fromUs = message.author === "agent" || message.author === "bot";
             const sticker = message.attachment?.kind === "sticker" && !message.text;
-            const missing = message.author === "customer" && !message.attachment ? MISSING_MEDIA[message.text] : undefined;
+            const missing = message.author === "customer" && !message.attachment ? message.pendingMedia ?? LABEL_KINDS[message.text] : undefined;
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {newDay && (
@@ -285,7 +326,8 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                         </button>
                       )}
                       {message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />}
-                      {missing ? <MissingMedia {...missing} /> : message.text && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
+                      {missing && <MissingMedia kind={missing} onRetry={message.pendingMedia && onReply ? () => retryMedia(message.id) : undefined} />}
+                      {message.text && !(missing && LABEL_KINDS[message.text]) && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
                       <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
