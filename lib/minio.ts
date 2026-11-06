@@ -26,9 +26,10 @@ export async function ensureBucket(): Promise<void> {
 export async function uploadFile(
   buffer: Buffer,
   fileName: string,
-  contentType: string
+  contentType: string,
+  prefix = "campaigns"
 ): Promise<{ key: string; url: string }> {
-  const key = `campaigns/${randomUUID()}/${fileName}`;
+  const key = `${prefix}/${randomUUID()}/${fileName}`;
   await client.send(
     new PutObjectCommand({
       Bucket: BUCKET,
@@ -49,6 +50,18 @@ export async function getPresignedUrl(key: string, expiresIn = 3600): Promise<st
 export function getPublicUrl(key: string): string {
   if (PUBLIC_URL) return `${PUBLIC_URL}/${BUCKET}/${key}`;
   return "";
+}
+
+export async function readFile(key: string): Promise<Buffer> {
+  const object = await client.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+  if (!object.Body) throw new Error("Arquivo vazio no armazenamento.");
+  return Buffer.from(await object.Body.transformToByteArray());
+}
+
+export async function readFileStream(key: string, range?: string) {
+  const object = await client.send(new GetObjectCommand({ Bucket: BUCKET, Key: key, ...(range ? { Range: range } : {}) }));
+  if (!object.Body) throw new Error("Arquivo vazio no armazenamento.");
+  return { stream: object.Body.transformToWebStream(), contentLength: object.ContentLength };
 }
 
 export async function deleteFile(key: string): Promise<void> {

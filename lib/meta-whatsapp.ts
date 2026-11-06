@@ -92,6 +92,18 @@ export async function sendText(phone: string, text: string) {
   });
 }
 
+/** Baixa a mídia recebida: o evento traz só o id; a URL exige o mesmo Bearer e expira em minutos. */
+export async function downloadMedia(mediaId: string, maxBytes: number) {
+  const { accessToken } = getConfig();
+  const info = await graph<{ url: string; mime_type?: string; file_size?: number }>(`/${mediaId}`);
+  if (info.file_size && info.file_size > maxBytes) throw new Error("Mídia acima do limite.");
+  const response = await fetch(info.url, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+  if (!response.ok) throw new Error(`Falha ao baixar mídia (${response.status}).`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxBytes) throw new Error("Mídia acima do limite.");
+  return { buffer, mime: info.mime_type ?? response.headers.get("content-type") ?? "application/octet-stream" };
+}
+
 /**
  * Upload media to Meta's servers and return the media ID.
  * Required before sending media messages.

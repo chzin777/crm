@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
 export async function GET(request: Request) {
@@ -113,9 +114,12 @@ export async function POST(request: Request) {
     return new Response("Invalid signature", { status: 401 });
   }
   try {
-    const payload = JSON.parse(raw) as { entry?: { changes?: { field?: string; value?: { statuses?: StatusEvent[]; messages?: InboundMessageEvent[] } }[] }[] };
+    const payload = JSON.parse(raw) as {
+      entry?: { changes?: { field?: string; value?: { statuses?: StatusEvent[]; messages?: (InboundMessageEvent & MetaInboundMessage)[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] } }[] }[];
+    };
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
+        const profiles = change.value?.contacts ?? [];
         for (const status of change.value?.statuses ?? []) {
           await updateMessageStatus(status).catch((failure) => console.error("[whatsapp/webhook] atualizar status:", failure));
           const error = status.errors?.[0];
@@ -126,6 +130,14 @@ export async function POST(request: Request) {
         }
         for (const msg of change.value?.messages ?? []) {
           await handleInboundMessage(msg).catch((failure) => console.error("[whatsapp/webhook] processar inbound:", failure));
+          const profile = profiles.find((item) => item.wa_id === msg.from)?.profile?.name ?? profiles[0]?.profile?.name;
+          try {
+            await recordInbound(msg, profile);
+          } catch (failure) {
+            // Sem a conversa gravada, a mensagem se perderia: 500 faz a Meta reenviar o evento.
+            console.error("[whatsapp/webhook] gravar conversa:", failure);
+            return new Response("Falha ao gravar", { status: 500 });
+          }
         }
       }
     }
