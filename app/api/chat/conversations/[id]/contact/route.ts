@@ -21,6 +21,12 @@ const ORIGINS: Record<string, string> = {
 
 const originLabel = (sourceKey: string) => ORIGINS[sourceKey.split(":")[0]] ?? "Não identificada";
 
+/** O dia do atendimento é o de Brasília, não o do fuso do servidor. */
+function startOfBrazilDay() {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  return new Date(`${day}T00:00:00-03:00`);
+}
+
 export async function GET(_request: Request, context: Context) {
   const guard = await requireChatActor();
   if (guard.response) return guard.response;
@@ -29,7 +35,7 @@ export async function GET(_request: Request, context: Context) {
   if (!conversation) return conversationNotFound();
 
   const { contactId } = conversation;
-  const [contact, messageCount, conversationCount] = await Promise.all([
+  const [contact, messageCount, conversationCount, firstToday] = await Promise.all([
     prisma.contact.findUnique({
       where: { id: contactId },
       select: {
@@ -42,11 +48,16 @@ export async function GET(_request: Request, context: Context) {
     }),
     prisma.chatMessage.count({ where: { internal: false, conversation: { contactId } } }),
     prisma.chatConversation.count({ where: { contactId } }),
+    prisma.chatMessage.findFirst({
+      where: { internal: false, createdAt: { gte: startOfBrazilDay() }, conversation: { contactId } },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
   ]);
   if (!contact) return conversationNotFound();
 
   const { sourceKey, ...profile } = contact;
-  return NextResponse.json({ ...profile, origin: originLabel(sourceKey), messageCount, conversationCount });
+  return NextResponse.json({ ...profile, origin: originLabel(sourceKey), messageCount, conversationCount, firstMessageToday: firstToday?.createdAt ?? null });
 }
 
 export async function POST(request: Request, context: Context) {

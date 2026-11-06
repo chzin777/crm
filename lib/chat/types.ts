@@ -44,6 +44,7 @@ export type ContactProfile = {
   origin: string;
   messageCount: number;
   conversationCount: number;
+  firstMessageToday: string | null;
   notes: ContactNoteItem[];
 };
 
