@@ -1,17 +1,17 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, ListTree, MessageSquareText, Plus, Save, Timer, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, ListOrdered, ListTree, MessageCircleQuestion, MessageSquareText, MessagesSquare, Plus, Save, Timer, Trash2, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
+import { ChoiceCards, DurationField, MessageField, SettingCard, Switch, SwitchRow, fieldClass, labelClass } from "@/components/chat/MenuFormParts";
 import { MenuSimulator } from "@/components/chat/MenuSimulator";
-import type { ChatMenuSettings, MenuOption } from "@/lib/chat/settings";
+import { DEFAULT_CHAT_SETTINGS, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
 
 type Queues = { id: string; name: string }[];
 type Section = "menu" | "texts" | "silence" | "closing";
 
-const field = "w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
-const labelClass = "mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-200";
-const hintClass = "mt-1 text-[11px] text-slate-500 dark:text-slate-400";
+const field = fieldClass;
+const CUSTOMER_VARIABLES = [{ mark: "{cliente}", label: "Nome do cliente" }, { mark: "{saudacao}", label: "Bom dia/tarde/noite" }];
 const panel = "min-w-0 rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs sm:p-6 dark:border-slate-700/80 dark:bg-[#07194f]";
 
 const ACTIONS: { id: MenuOption["action"]; label: string; hint: string }[] = [
@@ -62,38 +62,19 @@ function findIssues(settings: ChatMenuSettings) {
   return issues;
 }
 
-function Switch({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
+/** Etapa da linha do tempo do silêncio. */
+function TimelineStep({ number, title, description, last = false, children }: { number: number; title: string; description: string; last?: boolean; children?: React.ReactNode }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${checked ? "bg-[#002187] dark:bg-[#C4D600]" : "bg-slate-300 dark:bg-slate-600"}`}>
-      <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : ""}`} />
-    </button>
-  );
-}
-
-function SwitchRow({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-slate-800 dark:bg-white/5">
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>
+    <li className="relative pl-12">
+      {!last && <span aria-hidden className="absolute bottom-0 left-[15px] top-8 w-0.5 bg-slate-200 dark:bg-slate-700" />}
+      <span className="absolute left-0 top-0 grid h-8 w-8 place-items-center rounded-full bg-[#051647] text-xs font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">{number}</span>
+      <div className={last ? "" : "pb-6"}>
+        <h3 className="pt-1 text-sm font-bold text-slate-900 dark:text-white">{title}</h3>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">{description}</p>
+        {children && <div className="space-y-4">{children}</div>}
       </div>
-      <Switch checked={checked} onChange={onChange} label={title} />
-    </div>
+    </li>
   );
-}
-
-function TextArea({ id, label, hint, value, rows = 3, onChange }: { id: string; label: string; hint?: string; value: string; rows?: number; onChange: (value: string) => void }) {
-  return (
-    <div>
-      <label htmlFor={id} className={labelClass}>{label}</label>
-      <textarea id={id} rows={rows} value={value} onChange={(event) => onChange(event.target.value)} className={`${field} resize-y`} />
-      {hint && <p className={hintClass}>{hint}</p>}
-    </div>
-  );
-}
-
-function NumberInline({ value, onChange, label }: { value: number; onChange: (value: number) => void; label: string }) {
-  return <input type="number" min={0} aria-label={label} value={value} onChange={(event) => onChange(Number(event.target.value))} className="h-9 w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 text-center text-sm font-semibold text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />;
 }
 
 type TreeProps = {
@@ -158,8 +139,9 @@ function OptionTree({ options, prefix, openId, queues, onOpen, onPatch, onRemove
                     </select>
                   </div>
                 )}
-                <TextArea
+                <MessageField
                   id={`text-${option.id}`}
+                  variables={CUSTOMER_VARIABLES}
                   label={option.action === "submenu" ? "Frase antes da lista (opcional)" : option.action === "queue" ? "Mensagem ao encaminhar (opcional)" : "Resposta enviada ao cliente"}
                   value={option.text}
                   onChange={(value) => onPatch(option.id, { text: value })}
@@ -270,20 +252,19 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
         {(section === "menu" || section === "texts") && <MenuSimulator settings={settings} queues={queues} />}
         </div>
 
-        <div className="min-w-0">
-          <section className={`${panel} space-y-5`}>
-            {issues.length > 0 && (
-              <div role="status" className="rounded-xl border border-[#F7915E]/50 bg-[#F7915E]/10 px-4 py-3">
-                <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white"><AlertTriangle className="h-4 w-4 text-[#F7915E]" />Falta ajustar</p>
-                <ul className="list-disc space-y-0.5 pl-6 text-xs text-slate-700 dark:text-slate-200">
-                  {issues.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
-                  {issues.length > 5 && <li>e mais {issues.length - 5}.</li>}
-                </ul>
-              </div>
-            )}
+        <div className="min-w-0 space-y-4">
+          {issues.length > 0 && (
+            <div role="status" className="rounded-xl border border-[#F7915E]/50 bg-[#F7915E]/10 px-4 py-3">
+              <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white"><AlertTriangle className="h-4 w-4 text-[#F7915E]" />Falta ajustar</p>
+              <ul className="list-disc space-y-0.5 pl-6 text-xs text-slate-700 dark:text-slate-200">
+                {issues.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
+                {issues.length > 5 && <li>e mais {issues.length - 5}.</li>}
+              </ul>
+            </div>
+          )}
 
-            {section === "menu" && (
-              <>
+          {section === "menu" && (
+            <section className={`${panel} space-y-5`}>
                 <SwitchRow title="Menu automático" description={settings.enabled ? "Conversas novas começam no menu, sem ninguém assumir." : "Desligado: conversas novas vão direto para a primeira fila."} checked={settings.enabled} onChange={(value) => set("enabled", value)} />
                 <div>
                   <div className="mb-3 flex items-center justify-between gap-3">
@@ -310,49 +291,95 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
                     />
                   )}
                 </div>
-              </>
-            )}
+            </section>
+          )}
 
-            {section === "texts" && (
-              <>
-                <TextArea id="menu-greeting" label="Saudação" rows={4} value={settings.greeting} onChange={(value) => set("greeting", value)} hint="Use {cliente} para o nome e {menu} para o lugar da lista. Sem {menu}, a lista vai no fim." />
-                <TextArea id="menu-footer" label="Rodapé da lista" rows={2} value={settings.footer} onChange={(value) => set("footer", value)} />
-                <SwitchRow title="Aceitar texto livre" description={settings.acceptFreeText ? "Quem escreve fora das opções segue para a equipe." : "Quem escreve fora das opções recebe o aviso abaixo."} checked={settings.acceptFreeText} onChange={(value) => set("acceptFreeText", value)} />
-                {!settings.acceptFreeText && <TextArea id="menu-invalid" label="Aviso de opção inválida" rows={2} value={settings.invalidOptionText} onChange={(value) => set("invalidOptionText", value)} />}
-                <div className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
-                  <h2 className="text-sm font-bold text-slate-900 dark:text-white">Depois de responder uma opção</h2>
-                  <p className="flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-200">Enviar a frase de fechamento depois de <NumberInline label="Segundos até o fechamento" value={settings.closingDelaySeconds} onChange={(value) => set("closingDelaySeconds", value)} /> segundos</p>
-                  <TextArea id="menu-closing" label="Frase de fechamento" rows={2} value={settings.closingText} onChange={(value) => set("closingText", value)} hint="Se o cliente escrever antes, a frase não é enviada." />
-                  <SwitchRow title="Repetir a lista no fechamento" description="Mostra as opções de novo junto com a frase." checked={settings.repeatMenu} onChange={(value) => set("repeatMenu", value)} />
-                </div>
-              </>
-            )}
+          {section === "texts" && (
+            <>
+              <SettingCard icon={MessagesSquare} title="Abertura" description="A primeira mensagem que o cliente recebe.">
+                <MessageField id="menu-greeting" label="Saudação" rows={4} value={settings.greeting} onChange={(value) => set("greeting", value)} variables={[...CUSTOMER_VARIABLES, { mark: "{menu}", label: "Lista de opções" }]} hint="Sem a lista de opções no texto, ela entra no fim." />
+                <MessageField id="menu-footer" label="Rodapé da lista" rows={1} value={settings.footer} onChange={(value) => set("footer", value)} />
+              </SettingCard>
 
-            {section === "silence" && (
-              <>
-                <SwitchRow title="Cuidar do silêncio do cliente" description="Vale só para conversas no menu, sem atendente. Conversa com a equipe nunca encerra sozinha." checked={settings.silenceEnabled} onChange={(value) => set("silenceEnabled", value)} />
-                {settings.silenceEnabled && (
-                  <>
-                    <div className="space-y-3">
-                      <p className="flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-200">Se o cliente não responder por <NumberInline label="Minutos até perguntar" value={settings.silenceAskMinutes} onChange={(value) => set("silenceAskMinutes", value)} /> minutos, perguntar:</p>
-                      <TextArea id="menu-silence-ask" label="Pergunta" rows={2} value={settings.silenceAskText} onChange={(value) => set("silenceAskText", value)} hint="{minutos} vira o tempo até encerrar." />
-                    </div>
-                    <div className="space-y-3 border-t border-slate-100 pt-5 dark:border-slate-800">
-                      <p className="flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-200">Sem resposta por mais <NumberInline label="Minutos até encerrar" value={settings.silenceCloseMinutes} onChange={(value) => set("silenceCloseMinutes", value)} /> minutos, encerrar com:</p>
-                      <TextArea id="menu-silence-close" label="Mensagem de encerramento" rows={2} value={settings.silenceCloseText} onChange={(value) => set("silenceCloseText", value)} />
-                    </div>
-                  </>
+              <SettingCard icon={MessageCircleQuestion} title="Quando o cliente não escolhe uma opção" description="O que fazer se ele escrever algo fora da lista.">
+                <ChoiceCards
+                  label="Mensagem fora das opções"
+                  value={settings.acceptFreeText ? "team" : "ask"}
+                  onChange={(value) => set("acceptFreeText", value === "team")}
+                  options={[
+                    { id: "team", title: "Passar para a equipe", description: "A conversa segue para a fila." },
+                    { id: "ask", title: "Pedir para escolher", description: "Envia um aviso e repete a lista." },
+                  ]}
+                />
+                {!settings.acceptFreeText && <MessageField id="menu-invalid" label="Aviso" rows={2} value={settings.invalidOptionText} onChange={(value) => set("invalidOptionText", value)} />}
+              </SettingCard>
+
+              <SettingCard icon={Timer} title="Depois de responder uma opção" description="Uma pergunta de fechamento, sem atropelar quem ainda está lendo.">
+                <DurationField
+                  label="Tempo de espera"
+                  value={settings.closingDelaySeconds}
+                  onChange={(value) => set("closingDelaySeconds", value)}
+                  unit="seg"
+                  min={0}
+                  max={3600}
+                  step={15}
+                  presets={[{ value: 0, label: "Na hora" }, { value: 30, label: "30 seg" }, { value: 60, label: "1 min" }, { value: 120, label: "2 min" }, { value: 300, label: "5 min" }]}
+                />
+                <MessageField id="menu-closing" label="Frase de fechamento" rows={2} value={settings.closingText} onChange={(value) => set("closingText", value)} hint="Se o cliente escrever antes, a frase não é enviada." />
+                <SwitchRow title="Repetir a lista junto" description="Mostra as opções de novo com a frase." checked={settings.repeatMenu} onChange={(value) => set("repeatMenu", value)} />
+              </SettingCard>
+            </>
+          )}
+
+          {section === "silence" && (
+            <SettingCard
+              icon={Timer}
+              title="Silêncio do cliente"
+              description={settings.silenceEnabled ? `Sem resposta, a conversa encerra em ${settings.silenceAskMinutes + settings.silenceCloseMinutes} minutos. Só no menu: com a equipe, nunca encerra sozinha.` : "Desligado: conversas paradas no menu ficam abertas."}
+              action={<Switch checked={settings.silenceEnabled} onChange={(value) => set("silenceEnabled", value)} label="Cuidar do silêncio do cliente" />}
+            >
+              {settings.silenceEnabled && (
+                <ol>
+                  <TimelineStep number={1} title="Cliente para de responder" description="O tempo conta a partir da última mensagem do menu." />
+                  <TimelineStep number={2} title="Perguntar se ainda está aí" description="Se ele responder, o menu continua normalmente.">
+                    <DurationField label="Esperar antes de perguntar" value={settings.silenceAskMinutes} onChange={(value) => set("silenceAskMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[5, 10, 15, 30].map((value) => ({ value, label: `${value} min` }))} />
+                    <MessageField id="menu-silence-ask" label="Pergunta" rows={2} value={settings.silenceAskText} onChange={(value) => set("silenceAskText", value)} variables={[{ mark: "{minutos}", label: "Tempo até encerrar" }]} />
+                  </TimelineStep>
+                  <TimelineStep number={3} title="Encerrar a conversa" description="Se ele voltar depois, começa uma conversa nova." last>
+                    <DurationField label="Esperar depois da pergunta" value={settings.silenceCloseMinutes} onChange={(value) => set("silenceCloseMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[2, 3, 5, 10].map((value) => ({ value, label: `${value} min` }))} />
+                    <MessageField id="menu-silence-close" label="Mensagem de encerramento" rows={2} value={settings.silenceCloseText} onChange={(value) => set("silenceCloseText", value)} />
+                  </TimelineStep>
+                </ol>
+              )}
+            </SettingCard>
+          )}
+
+          {section === "closing" && (
+            <>
+              <SettingCard
+                icon={Hand}
+                title="Despedida"
+                description="Enviada quando a equipe encerra, se a janela de 24h estiver aberta."
+                action={<Switch checked={settings.farewellText.trim().length > 0} onChange={(value) => set("farewellText", value ? DEFAULT_CHAT_SETTINGS.farewellText : "")} label="Enviar despedida" />}
+              >
+                {settings.farewellText.trim().length > 0 && <MessageField id="menu-farewell" label="Mensagem" rows={3} value={settings.farewellText} onChange={(value) => set("farewellText", value)} variables={CUSTOMER_VARIABLES} />}
+              </SettingCard>
+
+              <SettingCard
+                icon={ListOrdered}
+                title="Posição na fila"
+                description="Avisa o cliente quando ele avança, se a janela de 24h estiver aberta."
+                action={<Switch checked={settings.notifyQueuePosition} onChange={(value) => set("notifyQueuePosition", value)} label="Avisar quando a posição na fila mudar" />}
+              >
+                {settings.notifyQueuePosition && (
+                  <div>
+                    <p className={labelClass}>O cliente recebe</p>
+                    <p className="w-fit max-w-full rounded-2xl rounded-bl-sm border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">Você avançou na fila: agora é o 2º da fila Vendas. Obrigado por aguardar.</p>
+                  </div>
                 )}
-              </>
-            )}
-
-            {section === "closing" && (
-              <>
-                <TextArea id="menu-farewell" label="Despedida ao encerrar" rows={3} value={settings.farewellText} onChange={(value) => set("farewellText", value)} hint="Enviada quando a equipe encerra, se a janela de 24h estiver aberta. Vazia, nada é enviado." />
-                <SwitchRow title="Avisar quando a posição na fila mudar" description="O cliente recebe uma mensagem ao avançar na fila, se a janela de 24h estiver aberta." checked={settings.notifyQueuePosition} onChange={(value) => set("notifyQueuePosition", value)} />
-              </>
-            )}
-          </section>
+              </SettingCard>
+            </>
+          )}
         </div>
       </div>
 
