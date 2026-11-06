@@ -160,6 +160,7 @@ export async function sendMedia(
 
   // Upload media first
   const mediaId = await uploadMedia(file);
+  if (file.mimetype.startsWith("audio/")) console.log(`[whatsapp/media] áudio enviado à Meta: mime=${file.mimetype} media_id=${mediaId}`);
 
   // Determine media type
   let type: string;
@@ -172,9 +173,9 @@ export async function sendMedia(
     type = "video";
     payload = { video: { id: mediaId, ...(caption ? { caption } : {}) } };
   } else if (!options.asDocument && file.mimetype.startsWith("audio/")) {
-    // Áudio não aceita legenda.
+    // Áudio não aceita legenda; ogg/opus segue como mensagem de voz, com a barra de reprodução nativa.
     type = "audio";
-    payload = { audio: { id: mediaId } };
+    payload = { audio: { id: mediaId, ...(file.mimetype === "audio/ogg" ? { voice: true } : {}) } };
   } else {
     type = "document";
     payload = {

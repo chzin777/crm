@@ -88,8 +88,11 @@ async function sendAttachment(conversation: ChatConversation, messageId: string,
   let bytes = await readFile(attachment.key);
   let file = attachment;
 
-  if (attachment.kind === "audio" && !attachment.mime.startsWith("audio/ogg")) {
+  // Todo áudio passa pela conversão: o ogg do Firefox pode vir em estéreo e a Meta só aceita mono.
+  if (attachment.kind === "audio") {
+    const received = bytes.length;
     bytes = await convertToOggOpus(bytes);
+    console.log(`[chat] áudio convertido: mime=${attachment.mime} entrada=${received} bytes saída=${bytes.length} bytes`);
     const name = attachment.name.replace(/\.[^.]+$/, "") + ".ogg";
     const { key } = await uploadFile(bytes, name, "audio/ogg", attachment.key.split("/").slice(0, -2).join("/"));
     file = { ...attachment, key, name, mime: "audio/ogg", size: bytes.length };

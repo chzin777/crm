@@ -14,7 +14,8 @@ export async function convertToOggOpus(input: Buffer) {
   const target = join(folder, "output.ogg");
   try {
     await writeFile(source, input);
-    await run("ffmpeg", ["-y", "-i", source, "-vn", "-ac", "1", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", target], { timeout: 30_000 });
+    // Sem make_zero o ogg começa com timestamp negativo, herdado do pre-skip do opus.
+    await run("ffmpeg", ["-y", "-i", source, "-vn", "-map_metadata", "-1", "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "32k", "-application", "voip", "-avoid_negative_ts", "make_zero", "-f", "ogg", target], { timeout: 30_000 });
     return await readFile(target);
   } catch (error) {
     console.error("[chat] falha ao converter áudio:", error);
