@@ -11,6 +11,8 @@ export async function GET(request: Request) {
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const skip = (page - 1) * limit;
+  // No SQL, `phone <> ''` também descarta telefones nulos.
+  const phoneFilter = url.searchParams.get("withPhone") === "1" ? { phone: { not: "" } } : null;
 
   const rawTokens = q.split(/\s+/).filter(Boolean);
   const strictTokens = rawTokens.filter((t) => t.length >= 2);
@@ -20,6 +22,7 @@ export async function GET(request: Request) {
   if (rawTokens.length === 0) {
     const [contacts, total] = await Promise.all([
       prisma.contact.findMany({
+        where: phoneFilter ?? {},
         select: {
           id: true, name: true, phone: true, email: true, category: true,
           segment: true, store: true, purchases: true, totalSpent: true,
@@ -29,7 +32,7 @@ export async function GET(request: Request) {
         skip,
         take: limit,
       }),
-      prisma.contact.count(),
+      prisma.contact.count({ where: phoneFilter ?? {} }),
     ]);
 
     return NextResponse.json({
@@ -80,6 +83,8 @@ export async function GET(request: Request) {
       ],
     });
   }
+
+  if (phoneFilter) andConditions.push({ OR: [phoneFilter] });
 
   const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
 
