@@ -26,6 +26,9 @@ model User {
   sessions         Session[]
   accounts         Account[]
   npsResponses     NpsResponse[]
+  chatQueues       ChatQueueMember[]
+  chatAgent        ChatAgent?
+  chatAssigned     ChatConversation[] @relation("ChatAssignee")
 
   @@map("user")
 }
@@ -106,6 +109,7 @@ model Contact {
   updatedAt          DateTime       @updatedAt
   importedSales      ImportedSale[]
   npsResponses       NpsResponse[]
+  chatConversations  ChatConversation[]
 
   @@index([cpf])
   @@index([phone])
@@ -228,4 +232,177 @@ model Role {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   users       User[]
+}
+
+
+enum ChatStatus {
+  bot
+  waiting
+  in_progress
+  closed
+}
+
+enum ChatPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum ChatAuthor {
+  customer
+  agent
+  bot
+  system
+}
+
+enum ChatDelivery {
+  sending
+  sent
+  delivered
+  read
+  failed
+}
+
+model ChatQueue {
+  id                  String             @id @default(cuid())
+  name                String
+  description         String             @default("")
+  color               String             @default("#002187")
+  hours               String             @default("")
+  firstResponseSlaMin Int                @default(15)
+  order               Int                @default(0)
+  archivedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  members             ChatQueueMember[]
+  conversations       ChatConversation[]
+}
+
+model ChatQueueMember {
+  userId    String
+  queueId   String
+  order     Int       @default(0)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  queue     ChatQueue @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  @@id([userId, queueId])
+  @@index([queueId])
+}
+
+model ChatAgent {
+  userId     String    @id
+  capacity   Int       @default(0)
+  paused     Boolean   @default(false)
+  lastSeenAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChatConversation {
+  id            String        @id @default(cuid())
+  contactId     String
+  phone         String
+  openKey       String?       @unique
+  queueId       String?
+  assigneeId    String?
+  status        ChatStatus    @default(waiting)
+  priority      ChatPriority  @default(normal)
+  subject       String        @default("")
+  unreadCount   Int           @default(0)
+  waitingSince  DateTime?
+  lastMessageAt DateTime?
+  lastInboundAt DateTime?
+  tags          String[]      @default([])
+  menuState     Json?
+  closedAt      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  contact       Contact       @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  queue         ChatQueue?    @relation(fields: [queueId], references: [id], onDelete: SetNull)
+  assignee      User?         @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages      ChatMessage[]
+
+  @@index([queueId, status, waitingSince])
+  @@index([assigneeId, closedAt])
+  @@index([contactId, createdAt])
+  @@index([lastMessageAt])
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  author         ChatAuthor
+  authorUserId   String?
+  authorName     String?
+  text           String           @default("")
+  delivery       ChatDelivery?
+  failureReason  String?
+  internal       Boolean          @default(false)
+  attachment     Json?
+  replyTo        Json?
+  externalId     String?          @unique
+  createdAt      DateTime         @default(now())
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model ChatQuickReply {
+  id         String   @id @default(cuid())
+  title      String
+  text       String
+  shortcut   String   @default("")
+  automatic  Boolean  @default(false)
+  triggers   String[] @default([])
+  variations String[] @default([])
+  queueId    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([queueId, title])
+}
+
+model ChatBlockedNumber {
+  phone     String   @id
+  reason    String   @default("")
+  createdBy String?
+  createdAt DateTime @default(now())
+}
+
+model ChatNotification {
+  id             String    @id @default(cuid())
+  userId         String
+  conversationId String?
+  type           String
+  title          String
+  detail         String    @default("")
+  href           String    @default("/chat")
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+model ChatDispatch {
+  key       String   @id
+  createdAt DateTime @default(now())
+}
+
+model ChatAudit {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  targetId  String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([targetId, createdAt])
+}
+
+model ChatSettings {
+  id        String   @id
+  menu      Json
+  updatedAt DateTime @updatedAt
 }
