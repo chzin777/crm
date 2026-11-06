@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Lock, Send, Smile, StickyNote, X } from "lucide-react";
+import { Lock, Mic, Paperclip, Send, Smile, Square, StickyNote, Trash2, X } from "lucide-react";
 import { TemplatePicker, type TemplateChoice } from "@/components/chat/TemplatePicker";
 import type { ChatMessageItem, ConversationDetail } from "@/lib/chat/types";
+import { useRecorder } from "@/lib/chat/use-recorder";
 
 export const EMOJIS = [
   "👍", "🙏", "✅", "❌", "⏳", "📦", "🚚", "🧾",
@@ -19,18 +20,36 @@ type Props = {
   onCancelReply: () => void;
   onSend: (message: ComposerSend) => Promise<boolean>;
   onTemplate: (template: TemplateChoice) => Promise<void>;
+  onAttach: (file: File, caption: string) => Promise<boolean>;
+  onError: (message: string) => void;
+  uploadProgress: number | null;
   error: string;
-  children?: React.ReactNode;
 };
 
 const iconButton = "cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800";
 
-export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSend, onTemplate, error, children }: Props) {
+export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error }: Props) {
   const [text, setText] = useState("");
   const [internal, setInternal] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const [sending, setSending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const recorder = useRecorder(onError);
+
+  const attach = async (file: File) => {
+    setSending(true);
+    const caption = file.type.startsWith("audio/") ? "" : text.trim();
+    if (await onAttach(file, caption)) {
+      if (caption) setText("");
+    }
+    setSending(false);
+  };
+
+  const sendRecording = async () => {
+    const file = await recorder.finish();
+    if (file) await attach(file);
+  };
 
   useEffect(() => {
     const box = field.current;
@@ -93,10 +112,32 @@ export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSen
         <p className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300"><Lock className="h-4 w-4 shrink-0" />Este número está bloqueado e não recebe mensagens. Você ainda pode registrar notas internas.</p>
       ) : windowClosed ? (
         <TemplatePicker onSend={onTemplate} />
+      ) : recorder.recording ? (
+        <div className="flex items-center gap-3 rounded-lg bg-slate-100 px-3 py-2 dark:bg-slate-800">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+          <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-200">Gravando {Math.floor(recorder.seconds / 60)}:{String(recorder.seconds % 60).padStart(2, "0")}</span>
+          <button type="button" onClick={recorder.discard} title="Descartar" aria-label="Descartar gravação" className={iconButton}><Trash2 className="h-5 w-5" /></button>
+          <button type="button" onClick={() => void sendRecording()} title="Parar e enviar" aria-label="Parar e enviar" className="cursor-pointer rounded-lg bg-[#051647] p-2.5 text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]"><Square className="h-5 w-5" /></button>
+        </div>
       ) : (
         <div className="flex items-end gap-2">
           <button type="button" title="Emojis" aria-label="Emojis" onClick={() => setShowEmojis((value) => !value)} className={iconButton}><Smile className="h-5 w-5" /></button>
-          {!internal && children}
+          {!internal && (
+            <>
+              <input
+                ref={fileInput}
+                type="file"
+                aria-label="Anexar arquivo"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void attach(file);
+                }}
+              />
+              <button type="button" title="Anexar arquivo" aria-label="Anexar arquivo" disabled={sending} onClick={() => fileInput.current?.click()} className={iconButton}><Paperclip className="h-5 w-5" /></button>
+            </>
+          )}
           <textarea
             ref={field}
             rows={1}
@@ -111,9 +152,18 @@ export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSen
             placeholder={internal ? "Nota interna, o cliente não vê..." : "Digite uma mensagem..."}
             className={`min-h-10 flex-1 resize-none rounded-lg border px-4 py-2 text-sm outline-none transition-colors focus:border-[#002187] dark:text-white dark:focus:border-[#C4D600] ${internal ? "border-[#F7915E] bg-[#F7915E]/10" : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800"}`}
           />
-          <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className="cursor-pointer rounded-lg bg-[#051647] p-2.5 text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]">
-            <Send className="h-5 w-5" />
-          </button>
+          {text.trim() || internal ? (
+            <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className="cursor-pointer rounded-lg bg-[#051647] p-2.5 text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]">
+              <Send className="h-5 w-5" />
+            </button>
+          ) : (
+            <button type="button" title="Gravar áudio" aria-label="Gravar áudio" disabled={sending} onClick={() => void recorder.start()} className={iconButton}><Mic className="h-5 w-5" /></button>
+          )}
+        </div>
+      )}
+      {uploadProgress !== null && (
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label="Envio do arquivo" aria-valuenow={uploadProgress}>
+          <div className="h-full bg-[#002187] transition-all dark:bg-[#C4D600]" style={{ width: `${uploadProgress}%` }} />
         </div>
       )}
       <div className="mt-2 flex items-center gap-2">

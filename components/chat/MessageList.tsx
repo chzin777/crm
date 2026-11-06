@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { AudioPlayer } from "@/components/chat/AudioPlayer";
+import { MediaViewer } from "@/components/chat/MediaViewer";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
 import type { ChatDelivery, ChatMessageItem } from "@/lib/chat/types";
 
@@ -23,14 +25,18 @@ function Delivery({ delivery, reason }: { delivery: ChatDelivery | null; reason:
 
 const mediaUrl = (message: ChatMessageItem) => message.attachment?.localUrl ?? `/api/chat/media/${message.id}`;
 
-function Attachment({ message }: { message: ChatMessageItem }) {
+function Attachment({ message, onOpen }: { message: ChatMessageItem; onOpen: () => void }) {
   const attachment = message.attachment!;
   if (attachment.kind === "image" || attachment.kind === "sticker") {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={mediaUrl(message)} alt={attachment.name} loading="lazy" className="mb-1 max-h-64 rounded-lg object-contain" />;
+    return (
+      <button type="button" onClick={onOpen} aria-label={`Abrir ${attachment.name}`} className="mb-1 block cursor-pointer">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={mediaUrl(message)} alt={attachment.name} loading="lazy" className="max-h-64 rounded-lg object-contain" />
+      </button>
+    );
   }
   if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 max-h-64 rounded-lg" />;
-  if (attachment.kind === "audio") return <audio src={mediaUrl(message)} controls preload="none" className="mb-1 w-64 max-w-full" />;
+  if (attachment.kind === "audio") return <AudioPlayer src={mediaUrl(message)} />;
   return (
     <a href={mediaUrl(message)} target="_blank" rel="noreferrer" className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 p-2 dark:bg-white/10">
       <FileIcon className="h-5 w-5 shrink-0 opacity-70" />
@@ -47,12 +53,12 @@ type Props = {
   conversationId: string;
   tick: number;
   onReply?: (message: ChatMessageItem) => void;
-  renderAttachment?: (message: ChatMessageItem, all: ChatMessageItem[]) => React.ReactNode;
   listRef?: Ref<MessageListHandle>;
 };
 
-export function MessageList({ conversationId, tick, onReply, renderAttachment, listRef }: Props) {
+export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
+  const [viewing, setViewing] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -222,7 +228,7 @@ export function MessageList({ conversationId, tick, onReply, renderAttachment, l
                           <span className="line-clamp-2 opacity-80">{message.replyTo.text}</span>
                         </button>
                       )}
-                      {message.attachment && (renderAttachment?.(message, messages) ?? <Attachment message={message} />)}
+                      {message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />}
                       {message.text && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
                       <div className={`mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
@@ -241,6 +247,13 @@ export function MessageList({ conversationId, tick, onReply, renderAttachment, l
             );
           })}
         </div>
+      )}
+      {viewing && (
+        <MediaViewer
+          startId={viewing}
+          onClose={() => setViewing(null)}
+          images={messages.filter((message) => message.attachment?.kind === "image" || message.attachment?.kind === "sticker").map((message) => ({ id: message.id, url: mediaUrl(message), name: message.attachment!.name }))}
+        />
       )}
     </div>
   );

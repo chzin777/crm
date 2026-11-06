@@ -26,6 +26,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
+# O áudio gravado no navegador precisa virar ogg/opus para a Meta aceitar.
+RUN apk add --no-cache ffmpeg
 RUN addgroup -S -g 1001 nodejs && adduser -S -u 1001 -G nodejs nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public

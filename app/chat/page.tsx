@@ -36,6 +36,7 @@ function ChatWorkspace() {
   const [alertsOn, setAlertsOn] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatMessageItem | null>(null);
   const [sendError, setSendError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [canWrite, setCanWrite] = useState(false);
   const listRequest = useRef(0);
   const messageList = useRef<MessageListHandle>(null);
@@ -162,6 +163,70 @@ function ChatWorkspace() {
     }
   };
 
+  const uploadAttachment = (file: File) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      const form = new FormData();
+      form.append("file", file);
+      request.open("POST", "/api/chat/media");
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable) setUploadProgress(Math.round((event.loaded / event.total) * 100));
+      };
+      request.onload = () => {
+        const data = (() => {
+          try {
+            return JSON.parse(request.responseText) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })();
+        if (request.status === 201) resolve(data);
+        else reject(new Error(typeof data.error === "string" ? data.error : "Não foi possível enviar o arquivo."));
+      };
+      request.onerror = () => reject(new Error("Falha de conexão ao enviar o arquivo."));
+      request.send(form);
+    });
+
+  const handleAttach = async (file: File, caption: string) => {
+    const temporaryId = `temp-${Date.now()}`;
+    const localUrl = URL.createObjectURL(file);
+    const kind = file.type.startsWith("audio/") ? "audio" : file.type === "video/mp4" ? "video" : file.type === "image/jpeg" || file.type === "image/png" ? "image" : "document";
+    setSendError("");
+    setUploadProgress(0);
+    messageList.current?.add({
+      id: temporaryId,
+      author: "agent",
+      authorName: null,
+      text: caption,
+      delivery: "sending",
+      failureReason: null,
+      internal: false,
+      replyTo: null,
+      createdAt: new Date().toISOString(),
+      attachment: { kind, name: file.name, mime: file.type, size: file.size, localUrl },
+    });
+    try {
+      const attachment = await uploadAttachment(file);
+      const saved = await postMessage({ text: caption, attachment, replyToId: replyTo?.id });
+      messageList.current?.replace(temporaryId, saved);
+      setReplyTo(null);
+      void loadList();
+      if (selectedId) void loadDetail(selectedId);
+      if (saved.delivery === "failed") {
+        setSendError(saved.failureReason ?? "Falha no envio.");
+        return false;
+      }
+      return true;
+    } catch (error) {
+      messageList.current?.remove(temporaryId);
+      setSendError(error instanceof Error ? error.message : "Não foi possível enviar o arquivo.");
+      return false;
+    } finally {
+      setUploadProgress(null);
+      URL.revokeObjectURL(localUrl);
+    }
+  };
+
   const handleTemplate = async (template: TemplateChoice) => {
     setSendError("");
     try {
@@ -244,7 +309,7 @@ function ChatWorkspace() {
                 </div>
               </div>
               <MessageList key={open.id} conversationId={open.id} tick={tick} onReply={canWrite ? setReplyTo : undefined} listRef={messageList} />
-              <Composer conversation={open} canWrite={canWrite} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={handleSend} onTemplate={handleTemplate} error={sendError} />
+              <Composer key={open.id} conversation={open} canWrite={canWrite} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={handleSend} onTemplate={handleTemplate} onAttach={handleAttach} onError={setSendError} uploadProgress={uploadProgress} error={sendError} />
             </>
           ) : selectedId ? (
             <div className="flex flex-1 items-center justify-center"><LoadingSpinner label="Abrindo conversa..." size={32} /></div>
