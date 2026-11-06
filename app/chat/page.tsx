@@ -310,6 +310,15 @@ function ChatWorkspace() {
   };
 
   const open = selectedId ? detail?.id === selectedId ? detail : null : null;
+
+  // Mensagem que chega na conversa aberta já foi vista; depende do horário para respeitar "Marcar como não lida".
+  const openHasUnread = !!open?.unreadCount;
+  const openLastMessageAt = open?.lastMessageAt;
+  useEffect(() => {
+    if (!selectedId || !openHasUnread || document.hidden) return;
+    void fetch(`/api/chat/conversations/${selectedId}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, openLastMessageAt]);
   const waiting = open?.status === "waiting" ? waitingLabel(open.waitingSince).text : "";
   const lastContact = open?.lastMessageAt ? `último contato: ${relativeTime(open.lastMessageAt).toLowerCase()}` : "";
   const headerInfo = open

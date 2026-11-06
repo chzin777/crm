@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { alertUser } from "@/lib/chat/alerts";
 
-const INTERVAL_MS = 6000;
+const INTERVAL_MS = 3000;
+const HIDDEN_INTERVAL_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 8000;
 const MAX_BACKOFF = 5;
 
 /** Devolve um contador que sobe sempre que o estado do atendimento muda no servidor. */
@@ -14,25 +16,26 @@ export function usePulse() {
   useEffect(() => {
     let alive = true;
     let running = false;
+    let again = false;
     let backoff = 0;
     let timer: number;
 
     function schedule() {
       if (!alive) return;
       window.clearTimeout(timer);
-      timer = window.setTimeout(beat, INTERVAL_MS * (backoff + 1));
+      timer = window.setTimeout(beat, (document.hidden ? HIDDEN_INTERVAL_MS : INTERVAL_MS) * (backoff + 1));
     }
 
     async function beat() {
-      if (!alive || running) return;
-      if (document.hidden) return schedule();
+      if (!alive) return;
+      if (running) {
+        // Um aviso durante a consulta pode ter ficado de fora dela: consulta de novo ao terminar.
+        again = true;
+        return;
+      }
       running = true;
       try {
-        const response = await fetch("/api/chat/pulse", { cache: "no-store" });
-        if (response.status === 401) {
-          alive = false;
-          return;
-        }
+        const response = await fetch("/api/chat/pulse", { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
         if (response.ok) {
           const data = (await response.json()) as { mark: string; unread: number; notifications: number };
           if (mark.current !== null && data.mark !== mark.current) setTick((value) => value + 1);
@@ -42,25 +45,40 @@ export function usePulse() {
           else if (last && data.notifications > last.notifications) alertUser("Aviso do atendimento", "Abra as notificações para ver.");
           previous.current = { unread: data.unread, notifications: data.notifications };
           backoff = 0;
+        } else {
+          // Erro passageiro não pode encerrar a sincronização até o próximo F5.
+          backoff = Math.min(backoff + 1, MAX_BACKOFF);
         }
       } catch {
         backoff = Math.min(backoff + 1, MAX_BACKOFF);
       } finally {
         running = false;
-        schedule();
+        if (again) {
+          again = false;
+          void beat();
+        } else {
+          schedule();
+        }
       }
     }
 
     const onVisible = () => {
       if (!document.hidden) void beat();
     };
+    const onChange = () => void beat();
+    const events = new EventSource("/api/chat/stream");
+    events.onopen = onChange;
+    events.onmessage = onChange;
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onChange);
     void beat();
 
     return () => {
       alive = false;
       window.clearTimeout(timer);
+      events.close();
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onChange);
     };
   }, []);
 

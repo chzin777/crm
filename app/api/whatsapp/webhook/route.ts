@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAutomation } from "@/lib/chat/automation";
+import { notifyChatChange } from "@/lib/chat/events";
 import { recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 import { phoneVariants } from "@/lib/chat/phone";
 
@@ -136,6 +137,7 @@ export async function POST(request: Request) {
         console.log(`[whatsapp/webhook] evento ${change.field ?? "?"}: ${change.value?.messages?.length ?? 0} mensagem(ns), ${change.value?.statuses?.length ?? 0} status`);
         for (const status of change.value?.statuses ?? []) {
           await updateMessageStatus(status).catch((failure) => console.error("[whatsapp/webhook] atualizar status:", failure));
+          notifyChatChange();
           const error = status.errors?.[0];
           console.log(
             `[whatsapp/webhook] ${status.status} para ${status.recipient_id} (${status.id})` +
@@ -154,7 +156,11 @@ export async function POST(request: Request) {
             return new Response("Falha ao gravar", { status: 500 });
           }
           console.log(recorded ? `[whatsapp/webhook] mensagem ${msg.id} gravada na conversa ${recorded.conversationId}` : `[whatsapp/webhook] mensagem ${msg.id} ignorada (repetida ou reação)`);
-          if (recorded) await runAutomation(recorded).catch((failure) => console.error("[whatsapp/webhook] fluxo automático:", failure));
+          if (recorded) {
+            notifyChatChange();
+            await runAutomation(recorded).catch((failure) => console.error("[whatsapp/webhook] fluxo automático:", failure));
+            notifyChatChange();
+          }
         }
       }
     }
