@@ -146,14 +146,21 @@ function ChatWorkspace() {
   };
 
   const postMessage = async (body: Record<string, unknown>) => {
-    const response = await fetch(`/api/chat/conversations/${selectedId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = (await response.json().catch(() => null)) as (ChatMessageItem & { error?: string }) | null;
-    if (!response.ok) throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
-    return data as ChatMessageItem;
+    // A sincronização espera o envio terminar para não trazer a mensagem antes da resposta do POST.
+    const list = messageList.current;
+    list?.holdRefresh();
+    try {
+      const response = await fetch(`/api/chat/conversations/${selectedId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await response.json().catch(() => null)) as (ChatMessageItem & { error?: string }) | null;
+      if (!response.ok) throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
+      return data as ChatMessageItem;
+    } finally {
+      list?.releaseRefresh();
+    }
   };
 
   const handleSend = async ({ text, internal, replyTo: quoted }: ComposerSend) => {

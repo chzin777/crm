@@ -5,6 +5,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
 import { MediaViewer } from "@/components/chat/MediaViewer";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
+import { mergeMessages, replaceMessage } from "@/lib/chat/reconcile";
 import type { ChatDelivery, ChatMessageItem } from "@/lib/chat/types";
 
 export type MessageListHandle = {
@@ -12,6 +13,8 @@ export type MessageListHandle = {
   replace: (id: string, message: ChatMessageItem) => void;
   remove: (id: string) => void;
   refresh: () => void;
+  holdRefresh: () => void;
+  releaseRefresh: () => void;
 };
 
 function Delivery({ delivery, reason }: { delivery: ChatDelivery | null; reason: string | null }) {
@@ -65,6 +68,8 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const restoreFrom = useRef<number | null>(null);
   const pendingScroll = useRef<"instant" | "smooth" | null>(null);
+  const refreshHolds = useRef(0);
+  const refreshDeferred = useRef(false);
 
   const isNearBottom = () => {
     const box = scroller.current;
@@ -72,11 +77,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
   };
 
   const merge = useCallback((incoming: ChatMessageItem[]) => {
-    setMessages((current) => {
-      const byId = new Map(current.map((message) => [message.id, message]));
-      for (const message of incoming) byId.set(message.id, message);
-      return [...byId.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    });
+    setMessages((current) => mergeMessages(current, incoming));
   }, []);
 
   const fetchLatest = useCallback(async () => {
@@ -107,6 +108,10 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
   }, [fetchLatest]);
 
   const refresh = useCallback(() => {
+    if (refreshHolds.current > 0) {
+      refreshDeferred.current = true;
+      return;
+    }
     fetchLatest()
       .then((data) => {
         if (isNearBottom()) pendingScroll.current = "smooth";
@@ -139,9 +144,18 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
       pendingScroll.current = "smooth";
       setMessages((current) => [...current, message]);
     },
-    replace: (id, message) => setMessages((current) => current.map((item) => (item.id === id ? message : item))),
+    replace: (id, message) => setMessages((current) => replaceMessage(current, id, message)),
     remove: (id) => setMessages((current) => current.filter((item) => item.id !== id)),
     refresh,
+    holdRefresh: () => {
+      refreshHolds.current += 1;
+    },
+    releaseRefresh: () => {
+      refreshHolds.current = Math.max(0, refreshHolds.current - 1);
+      if (refreshHolds.current > 0 || !refreshDeferred.current) return;
+      refreshDeferred.current = false;
+      refresh();
+    },
   }), [refresh]);
 
   const loadOlder = async () => {
