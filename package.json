@@ -27,6 +27,7 @@
     "clsx": "^2.1.1",
     "csv-parse": "^7.0.3",
     "dotenv": "^18.0.8",
+    "emoji-picker-react": "^5.1.4",
     "ioredis": "^6.0.0",
     "lucide-react": "^1.56.0",
     "motion": "^14.2.0",

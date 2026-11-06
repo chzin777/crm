@@ -190,6 +190,31 @@ body {
   }
 }
 
+@keyframes recording-wave {
+  0%, 100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.recording-wave span {
+  width: 2px;
+  height: 100%;
+  flex: none;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: recording-wave 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording-wave span {
+    animation: none;
+    transform: scaleY(0.5);
+  }
+}
+
 /* Regra global: todo elemento clicável com cursor pointer */
 button, [role="button"], label, a {
   cursor: pointer;

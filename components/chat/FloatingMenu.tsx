@@ -21,12 +21,13 @@ type Props = {
   triggerClassName: string;
   widthClassName: string;
   items: FloatingMenuItem[];
+  align?: "left" | "right";
 };
 
 const GAP = 6;
 const MARGIN = 8;
 
-export function FloatingMenu({ label, trigger, triggerClassName, widthClassName, items }: Props) {
+export function FloatingMenu({ label, trigger, triggerClassName, widthClassName, items, align = "right" }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -45,10 +46,10 @@ export function FloatingMenu({ label, trigger, triggerClassName, widthClassName,
     const fitsBelow = rect.bottom + GAP + height <= window.innerHeight - MARGIN;
     setPosition({
       top: fitsBelow ? rect.bottom + GAP : Math.max(MARGIN, rect.top - GAP - height),
-      right: Math.max(MARGIN, window.innerWidth - rect.right),
+      right: Math.max(MARGIN, window.innerWidth - (align === "left" ? rect.left + panelRef.current.offsetWidth : rect.right)),
     });
     panelRef.current.querySelector<HTMLElement>("[data-menu-item]")?.focus({ preventScroll: true });
-  }, [isOpen]);
+  }, [isOpen, align]);
 
   useEffect(() => {
     if (!isOpen) return;
