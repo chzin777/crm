@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, Phone, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -319,7 +319,6 @@ function ChatWorkspace() {
     ? [
         { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => void conversationAction("/assume"), hidden: !canWrite || !!open.closedAt || !!open.assignee },
         { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
-        { label: "Ligar para o cliente", icon: <Phone className="h-4 w-4" />, href: `tel:${open.phone}` },
         { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(open.contactId)}&contato=${encodeURIComponent(open.name)}`, hidden: !canWrite },
         { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!open.closedAt },
         { label: "Marcar como não lida", icon: <Mail className="h-4 w-4" />, onSelect: () => void conversationAction("/read", { body: JSON.stringify({ unread: true }) }), hidden: !!open.closedAt },
