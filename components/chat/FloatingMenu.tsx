@@ -7,7 +7,7 @@ import { Check } from "lucide-react";
 
 export type FloatingMenuItem = {
   label: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   onSelect?: () => void;
   href?: string;
   danger?: boolean;
@@ -22,12 +22,13 @@ type Props = {
   widthClassName: string;
   items: FloatingMenuItem[];
   align?: "left" | "right";
+  compact?: boolean;
 };
 
 const GAP = 6;
 const MARGIN = 8;
 
-export function FloatingMenu({ label, trigger, triggerClassName, widthClassName, items, align = "right" }: Props) {
+export function FloatingMenu({ label, trigger, triggerClassName, widthClassName, items, align = "right", compact = false }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -113,14 +114,14 @@ export function FloatingMenu({ label, trigger, triggerClassName, widthClassName,
           role="menu"
           aria-label={label}
           onKeyDown={handleKeyDown}
-          className={`fixed z-[99999] max-w-[calc(100vw-16px)] rounded-xl border border-slate-200 bg-white p-1 shadow-xl transition-opacity duration-150 dark:border-slate-800 dark:bg-[#07194f] ${widthClassName} ${position ? "opacity-100" : "opacity-0"}`}
+          className={`fixed z-[99999] max-h-72 max-w-[calc(100vw-16px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl transition-opacity duration-150 dark:border-slate-800 dark:bg-[#07194f] ${widthClassName} ${position ? "opacity-100" : "opacity-0"}`}
           style={position ?? { top: 0, right: MARGIN }}
         >
           {visible.map((item) => {
-            const className = `flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-slate-100 focus-visible:bg-slate-100 dark:hover:bg-white/10 dark:focus-visible:bg-white/10 ${item.danger ? "text-red-600 dark:text-red-300" : "text-slate-700 dark:text-slate-200"}`;
+            const className = `flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left ${compact ? "text-xs" : "text-sm"} outline-none transition-colors hover:bg-slate-100 focus-visible:bg-slate-100 dark:hover:bg-white/10 dark:focus-visible:bg-white/10 ${item.danger ? "text-red-600 dark:text-red-300" : "text-slate-700 dark:text-slate-200"}`;
             const content = (
               <>
-                <span className="grid h-4 w-4 shrink-0 place-items-center">{item.icon}</span>
+                {item.icon && <span className="grid h-4 w-4 shrink-0 place-items-center">{item.icon}</span>}
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
                 {item.checked && <Check className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />}
               </>

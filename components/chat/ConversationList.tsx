@@ -1,6 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, Check, CheckCheck, Clock, Megaphone, MessageSquare, Search, SearchX, Store, Trash2, User, X } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, ChevronDown, Clock, Megaphone, MessageSquare, Search, SearchX, Store, Trash2, User, X } from "lucide-react";
+import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
 
@@ -100,13 +101,45 @@ type Props = {
   actions?: React.ReactNode;
 };
 
+type FilterSelectProps = {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+};
+
+function FilterSelect({ label, value, placeholder, options, onChange }: FilterSelectProps) {
+  const selected = value ? options.find((option) => option.value === value)?.label : undefined;
+  const text = selected ?? placeholder;
+  return (
+    <FloatingMenu
+      label={`${label}: ${text}`}
+      align="left"
+      compact
+      widthClassName="w-52 min-w-[140px]"
+      triggerClassName="flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200/80 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition-all hover:bg-slate-50 focus:border-[#002187] dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700/50 dark:focus:border-[#C4D600]"
+      trigger={(
+        <>
+          <span className="min-w-0 flex-1 truncate text-left">{text}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        </>
+      )}
+      items={options.map((option) => ({
+        label: option.label,
+        checked: option.value === value,
+        onSelect: () => onChange(option.value),
+      }))}
+    />
+  );
+}
+
 export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, loading, error, selectedId, onSelect, onDelete, onEndReached, actions }: Props) {
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const list = event.currentTarget;
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
   };
   const hasFilters = !!queueId || !!priority;
-  const selectClass = "h-8 min-w-0 flex-1 cursor-pointer rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white";
 
   return (
     <>
@@ -147,21 +180,27 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <select aria-label="Filtrar por fila" value={queueId} onChange={(event) => onQueue(event.target.value)} className={selectClass}>
-            <option value="">Todas as filas</option>
-            {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-          </select>
-          <select aria-label="Filtrar por prioridade" value={priority} onChange={(event) => onPriority(event.target.value)} className={selectClass}>
-            <option value="">Prioridade</option>
-            {(Object.keys(PRIORITY_LABELS) as ChatPriority[]).map((key) => <option key={key} value={key}>{PRIORITY_LABELS[key]}</option>)}
-          </select>
+          <FilterSelect
+            label="Filtrar por fila"
+            value={queueId}
+            placeholder="Todas as filas"
+            options={[{ value: "", label: "Todas as filas" }, ...queues.map((queue) => ({ value: queue.id, label: queue.name }))]}
+            onChange={onQueue}
+          />
+          <FilterSelect
+            label="Filtrar por prioridade"
+            value={priority}
+            placeholder="Prioridade"
+            options={[{ value: "", label: "Todas as prioridades" }, ...(Object.keys(PRIORITY_LABELS) as ChatPriority[]).map((key) => ({ value: key, label: PRIORITY_LABELS[key] }))]}
+            onChange={onPriority}
+          />
           {hasFilters && (
             <button
               type="button"
               title="Limpar filtros"
               aria-label="Limpar filtros"
               onClick={() => { onQueue(""); onPriority(""); }}
-              className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
             >
               <X className="h-4 w-4" />
             </button>
