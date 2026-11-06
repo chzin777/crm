@@ -31,6 +31,42 @@ function dateValue(value: string | null) {
   return Date.parse(brazilian ? `${brazilian[3]}-${brazilian[2]}-${brazilian[1]}` : value);
 }
 
+const contactFields = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  cpf: true,
+  city: true,
+  state: true,
+  ecommerceCustomerId: true,
+  ecommerceUpdatedAt: true,
+} as const;
+
+// O ERP grava CPF sem zeros à esquerda, então os dois formatos precisam ser procurados.
+async function findContactByCpf(tx: Prisma.TransactionClient, cpf: string) {
+  const unpadded = cpf.replace(/^0+/, "");
+  if (!unpadded) return null;
+  const matches = await tx.contact.findMany({
+    where: { cpf: { in: [cpf, unpadded] } },
+    select: { id: true, ecommerceCustomerId: true },
+    take: 2,
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+// Comparação exata: e-mail compartilhado por mais de um contato nunca gera vínculo.
+async function findContactByEmail(tx: Prisma.TransactionClient, email: string) {
+  const matches = await tx.$queryRaw<{ id: string; ecommerceCustomerId: string | null }[]>`
+    SELECT "id", "ecommerceCustomerId" FROM "Contact" WHERE lower("email") = lower(${email}) LIMIT 2
+  `;
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function isEmpty(value: string | null | undefined) {
+  return !value?.trim();
+}
+
 async function upsertCustomer(tx: Prisma.TransactionClient, customer: Record<string, unknown>) {
   const customerId = String(customer.customerId || "");
   const name = typeof customer.name === "string" ? customer.name.trim().slice(0, 200) : "";
@@ -40,28 +76,30 @@ async function upsertCustomer(tx: Prisma.TransactionClient, customer: Record<str
     throw new Error("Dados de cliente do e-commerce inválidos.");
   }
 
-  const sourceKey = `ecommerce:${customerId}`;
+  const customerSourceId = `ecommerce:${customerId}`;
   let current = await tx.contact.findUnique({
-    where: { sourceKey },
-    select: { id: true, ecommerceUpdatedAt: true },
+    where: { ecommerceCustomerId: customerId },
+    select: contactFields,
   });
   if (!current) {
     const cpf = typeof customer.cpf === "string" ? customer.cpf.replace(/\D/g, "").slice(0, 11) : "";
     const email = typeof customer.email === "string" ? customer.email.trim() : "";
     const matched = cpf.length === 11
-      ? await tx.contact.findFirst({ where: { cpf }, select: { id: true, ecommerceUpdatedAt: true } })
+      ? await findContactByCpf(tx, cpf)
       : email
-        ? await tx.contact.findFirst({ where: { email: { equals: email, mode: "insensitive" } }, select: { id: true, ecommerceUpdatedAt: true } })
+        ? await findContactByEmail(tx, email)
         : null;
-    if (matched) {
-      await tx.contact.update({ where: { id: matched.id }, data: { sourceKey } });
-      current = matched;
+    if (matched && !matched.ecommerceCustomerId) {
+      current = await tx.contact.update({
+        where: { id: matched.id },
+        data: { ecommerceCustomerId: customerId },
+        select: contactFields,
+      });
     }
   }
   const canApplyProfile = !current?.ecommerceUpdatedAt || sourceUpdatedAt >= current.ecommerceUpdatedAt;
   const profile = {
     name,
-    category: "cliente",
     ...(typeof customer.email === "string" && customer.email.trim()
       ? { email: customer.email.trim().slice(0, 254) }
       : {}),
@@ -80,22 +118,36 @@ async function upsertCustomer(tx: Prisma.TransactionClient, customer: Record<str
   };
 
   if (current && canApplyProfile) {
+    const existing = current;
+    // A loja só completa o cadastro: o que já veio do ERP nunca é sobrescrito.
+    const missing = Object.fromEntries(
+      Object.entries(profile).filter(([field]) => isEmpty(existing[field as keyof typeof profile])),
+    );
     await tx.contact.update({
-      where: { sourceKey },
-      data: { ...profile, ecommerceUpdatedAt: sourceUpdatedAt },
+      where: { id: existing.id },
+      data: { ...missing, ecommerceUpdatedAt: sourceUpdatedAt },
     });
-  } else if (!current) {
-    await tx.contact.create({
-      data: { sourceKey, ...profile, ecommerceUpdatedAt: sourceUpdatedAt },
-    });
+    return { contactId: existing.id, customerSourceId };
   }
-  return sourceKey;
+  if (current) return { contactId: current.id, customerSourceId };
+
+  const created = await tx.contact.create({
+    data: {
+      sourceKey: customerSourceId,
+      ecommerceCustomerId: customerId,
+      category: "cliente",
+      ...profile,
+      ecommerceUpdatedAt: sourceUpdatedAt,
+    },
+    select: { id: true },
+  });
+  return { contactId: created.id, customerSourceId };
 }
 
-async function updatePurchaseTotals(tx: Prisma.TransactionClient, customerSourceId: string) {
+async function updatePurchaseTotals(tx: Prisma.TransactionClient, contactId: string, customerSourceId: string) {
   const [contact, orders] = await Promise.all([
     tx.contact.findUnique({
-      where: { sourceKey: customerSourceId },
+      where: { id: contactId },
       select: {
         id: true,
         purchases: true,
@@ -181,7 +233,7 @@ export async function POST(request: Request) {
       } else if (type === "cart.upsert") {
         const customer = object(data.customer);
         if (!customer) throw new Error("O evento de carrinho não contém cliente.");
-        const customerSourceId = await upsertCustomer(tx, customer);
+        const { customerSourceId } = await upsertCustomer(tx, customer);
         await tx.commerceSyncRecord.upsert({
           where: { recordType_sourceId: { recordType: "cart", sourceId: customerSourceId } },
           create: { recordType: "cart", sourceId: customerSourceId, customerSourceId, payload: jsonValue(data) },
@@ -192,13 +244,13 @@ export async function POST(request: Request) {
         const customer = object(data.customer);
         const orderId = String(order?.id || "");
         if (!order || !customer || !uuid.test(orderId)) throw new Error("O evento de pedido é inválido.");
-        const customerSourceId = await upsertCustomer(tx, customer);
+        const { contactId, customerSourceId } = await upsertCustomer(tx, customer);
         await tx.commerceSyncRecord.upsert({
           where: { recordType_sourceId: { recordType: "order", sourceId: orderId } },
           create: { recordType: "order", sourceId: orderId, customerSourceId, payload: jsonValue(order) },
           update: { customerSourceId, payload: jsonValue(order) },
         });
-        await updatePurchaseTotals(tx, customerSourceId);
+        await updatePurchaseTotals(tx, contactId, customerSourceId);
       } else {
         await tx.commerceSyncRecord.upsert({
           where: { recordType_sourceId: { recordType: "promotions", sourceId: "ecommerce:current" } },

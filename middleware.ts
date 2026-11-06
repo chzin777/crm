@@ -12,6 +12,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Chamada servidor a servidor do e-commerce: a própria rota valida INTEGRATION_SHARED_SECRET.
+  if (request.method === "POST" && pathname === "/api/integrations/ecommerce/events") {
+    return NextResponse.next();
+  }
+
   // Better Auth usa o prefixo __Secure- quando BETTER_AUTH_URL é https; getSessionCookie cobre os dois nomes.
   if (!getSessionCookie(request)) {
     const loginUrl = new URL("/login", request.url);

@@ -105,6 +105,11 @@ model Contact {
   prescriptionExpiry String?
   purchases          Int            @default(0)
   totalSpent         Decimal        @default(0) @db.Decimal(14, 2)
+  ecommerceCustomerId       String?   @unique
+  ecommerceUpdatedAt        DateTime?
+  ecommercePurchases        Int       @default(0)
+  ecommerceTotalSpent       Decimal   @default(0) @db.Decimal(14, 2)
+  ecommerceLastPurchaseDate String?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   importedSales      ImportedSale[]
@@ -162,6 +167,25 @@ model CrmWorkspaceData {
   key       String   @id
   value     Json     @db.JsonB
   updatedAt DateTime @updatedAt
+}
+
+model IntegrationEvent {
+  eventId    String   @id
+  source     String
+  eventType  String
+  receivedAt DateTime @default(now())
+}
+
+model CommerceSyncRecord {
+  id               String   @id @default(cuid())
+  recordType       String
+  sourceId         String
+  customerSourceId String?
+  payload          Json     @db.JsonB
+  updatedAt        DateTime @updatedAt
+
+  @@unique([recordType, sourceId])
+  @@index([customerSourceId, updatedAt])
 }
 
 model NpsResponse {
