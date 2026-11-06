@@ -76,7 +76,7 @@ export function normalizePhone(phone: string): string {
 /**
  * Send a text message via Meta WhatsApp Cloud API.
  */
-export async function sendText(phone: string, text: string) {
+export async function sendText(phone: string, text: string, replyToId?: string) {
   const { phoneNumberId } = getConfig();
   const to = normalizePhone(phone);
 
@@ -86,6 +86,7 @@ export async function sendText(phone: string, text: string) {
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to,
+      ...(replyToId ? { context: { message_id: replyToId } } : {}),
       type: "text",
       text: { preview_url: false, body: text },
     }),
@@ -152,6 +153,7 @@ export async function sendMedia(
   phone: string,
   file: { mimetype: string; fileName: string; base64?: string; url?: string },
   caption?: string,
+  options: { asDocument?: boolean; replyToId?: string } = {},
 ) {
   const { phoneNumberId } = getConfig();
   const to = normalizePhone(phone);
@@ -163,12 +165,16 @@ export async function sendMedia(
   let type: string;
   let payload: Record<string, unknown>;
 
-  if (file.mimetype.startsWith("image/")) {
+  if (!options.asDocument && file.mimetype.startsWith("image/")) {
     type = "image";
     payload = { image: { id: mediaId, ...(caption ? { caption } : {}) } };
-  } else if (file.mimetype.startsWith("video/")) {
+  } else if (!options.asDocument && file.mimetype.startsWith("video/")) {
     type = "video";
     payload = { video: { id: mediaId, ...(caption ? { caption } : {}) } };
+  } else if (!options.asDocument && file.mimetype.startsWith("audio/")) {
+    // Áudio não aceita legenda.
+    type = "audio";
+    payload = { audio: { id: mediaId } };
   } else {
     type = "document";
     payload = {
@@ -186,9 +192,19 @@ export async function sendMedia(
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to,
+      ...(options.replyToId ? { context: { message_id: options.replyToId } } : {}),
       type,
       ...payload,
     }),
+  });
+}
+
+/** Confirma a leitura da mensagem recebida (tiques azuis no celular do cliente). */
+export async function markMessageRead(messageId: string) {
+  const { phoneNumberId } = getConfig();
+  return graph<{ success: boolean }>(`/${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId }),
   });
 }
 

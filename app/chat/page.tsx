@@ -6,11 +6,13 @@ import { ArrowLeft, Bell, BellOff, Info, MessageSquare, Phone } from "lucide-rea
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConversationList } from "@/components/chat/ConversationList";
-import { MessageList } from "@/components/chat/MessageList";
+import { Composer, type ComposerSend } from "@/components/chat/Composer";
+import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
+import type { TemplateChoice } from "@/components/chat/TemplatePicker";
 import { alertsEnabled, disableAlerts, enableAlerts } from "@/lib/chat/alerts";
 import { initials, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
-import { STATUS_LABELS, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
+import { STATUS_LABELS, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
 import { usePulse } from "@/lib/chat/use-pulse";
 
 const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, closed: 0 };
@@ -32,11 +34,28 @@ function ChatWorkspace() {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [alertsOn, setAlertsOn] = useState(false);
+  const [replyTo, setReplyTo] = useState<ChatMessageItem | null>(null);
+  const [sendError, setSendError] = useState("");
+  const [canWrite, setCanWrite] = useState(false);
   const listRequest = useRef(0);
+  const messageList = useRef<MessageListHandle>(null);
 
   useEffect(() => {
     setAlertsOn(alertsEnabled());
+    fetch("/api/me/chat")
+      .then(async (response) => {
+        if (response.ok) setCanWrite(((await response.json()) as { capabilities: Record<string, boolean> }).capabilities["chat.assume"] === true);
+      })
+      .catch((error) => console.error("[chat]", error));
   }, []);
+
+  useEffect(() => {
+    setReplyTo(null);
+    setSendError("");
+    if (selectedId) {
+      void fetch(`/api/chat/conversations/${selectedId}/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    }
+  }, [selectedId]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -96,6 +115,62 @@ function ChatWorkspace() {
     } else {
       await enableAlerts();
       setAlertsOn(true);
+    }
+  };
+
+  const postMessage = async (body: Record<string, unknown>) => {
+    const response = await fetch(`/api/chat/conversations/${selectedId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await response.json().catch(() => null)) as (ChatMessageItem & { error?: string }) | null;
+    if (!response.ok) throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
+    return data as ChatMessageItem;
+  };
+
+  const handleSend = async ({ text, internal, replyTo: quoted }: ComposerSend) => {
+    const temporaryId = `temp-${Date.now()}`;
+    setSendError("");
+    messageList.current?.add({
+      id: temporaryId,
+      author: "agent",
+      authorName: null,
+      text,
+      delivery: internal ? null : "sending",
+      failureReason: null,
+      internal,
+      replyTo: quoted && !internal ? { author: quoted.authorName ?? "Cliente", text: quoted.text, messageId: quoted.id } : null,
+      createdAt: new Date().toISOString(),
+      attachment: null,
+    });
+    try {
+      const saved = await postMessage({ text, internal, replyToId: internal ? undefined : quoted?.id });
+      messageList.current?.replace(temporaryId, saved);
+      setReplyTo(null);
+      void loadList();
+      if (selectedId) void loadDetail(selectedId);
+      if (saved.delivery === "failed") {
+        setSendError(saved.failureReason ?? "Falha no envio.");
+        return false;
+      }
+      return true;
+    } catch (error) {
+      messageList.current?.remove(temporaryId);
+      setSendError(error instanceof Error ? error.message : "Não foi possível enviar a mensagem.");
+      return false;
+    }
+  };
+
+  const handleTemplate = async (template: TemplateChoice) => {
+    setSendError("");
+    try {
+      await postMessage({ template });
+      messageList.current?.refresh();
+      void loadList();
+      if (selectedId) void loadDetail(selectedId);
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Não foi possível enviar o modelo.");
     }
   };
 
@@ -168,7 +243,8 @@ function ChatWorkspace() {
                   </button>
                 </div>
               </div>
-              <MessageList key={open.id} conversationId={open.id} tick={tick} />
+              <MessageList key={open.id} conversationId={open.id} tick={tick} onReply={canWrite ? setReplyTo : undefined} listRef={messageList} />
+              <Composer conversation={open} canWrite={canWrite} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={handleSend} onTemplate={handleTemplate} error={sendError} />
             </>
           ) : selectedId ? (
             <div className="flex flex-1 items-center justify-center"><LoadingSpinner label="Abrindo conversa..." size={32} /></div>

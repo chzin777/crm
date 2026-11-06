@@ -44,8 +44,32 @@ type InboundMessageEvent = {
 
 const statusRank = { queued: 0, sent: 1, delivered: 2, read: 3, replied: 4 } as const;
 
+const chatDeliveryBefore = { sent: ["sending"], delivered: ["sending", "sent"], read: ["sending", "sent", "delivered"] } as const;
+
+// Tiques do atendimento: mesma regra de não regredir, por externalId.
+async function updateChatDelivery(event: StatusEvent) {
+  if (!event.id) return;
+  if (event.status === "failed") {
+    const error = event.errors?.[0];
+    await prisma.chatMessage.updateMany({
+      where: { externalId: event.id, delivery: { not: "read" } },
+      data: { delivery: "failed", failureReason: (error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta").slice(0, 500) },
+    });
+  } else if (event.status === "sent" || event.status === "delivered" || event.status === "read") {
+    await prisma.chatMessage.updateMany({
+      where: { externalId: event.id, delivery: { in: [...chatDeliveryBefore[event.status]] } },
+      data: { delivery: event.status },
+    });
+  } else {
+    return;
+  }
+  const message = await prisma.chatMessage.findUnique({ where: { externalId: event.id }, select: { conversationId: true } });
+  if (message) await prisma.chatConversation.update({ where: { id: message.conversationId }, data: { updatedAt: new Date() } });
+}
+
 // Atualiza o registro da mensagem da campanha; nunca retrocede o status (ex.: read não volta para delivered).
 async function updateMessageStatus(event: StatusEvent) {
+  await updateChatDelivery(event).catch((failure) => console.error("[whatsapp/webhook] atualizar entrega do chat:", failure));
   if (!event.id || !event.status) return;
   const message = await prisma.campaignMessage.findUnique({ where: { whatsappMsgId: event.id }, select: { id: true, status: true } });
   if (!message) return;
