@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CheckCircle2, Clock3, ExternalLink, FileText, Image as ImageIcon, Phone, Plus, RefreshCw, Reply, Search, Send, Trash2, X, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, ExternalLink, FileText, Image as ImageIcon, Pencil, Phone, Plus, RefreshCw, Reply, Search, Send, Trash2, X, XCircle } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import Stepper, { Step } from "@/components/Stepper";
+import { TEMPLATE_EDIT_LIMITS, type TemplateEditUsage } from "@/lib/template-edit-limits";
 
 type TemplateButton = { type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER"; text: string; url?: string; phone_number?: string };
 type ButtonDraft = { type: TemplateButton["type"]; text: string; value: string };
@@ -22,8 +23,26 @@ type Template = {
   footer: string;
   headerFormat: string | null;
   headerText: string;
+  examples: string[];
+  editUsage: TemplateEditUsage;
   rejectedReason?: string;
 };
+
+const EDIT_LIMIT_NOTICE = `Limite da Meta para modelos aprovados: ${TEMPLATE_EDIT_LIMITS.perDay} edição a cada 24 horas e ${TEMPLATE_EDIT_LIMITS.perMonth} em 30 dias. Rejeitados e pausados não têm limite. A contagem considera as edições feitas pelo CRM.`;
+
+const formatDateTime = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
+const editUsageLabel = ({ limited, used, limit }: TemplateEditUsage) => (limited ? `${used} de ${limit} edições em 30 dias` : "Edição sem limite");
+
+/** Motivo de não poder editar pelo CRM; null quando pode. */
+function editBlock(template: Template) {
+  if (!["APPROVED", "REJECTED", "PAUSED"].includes(template.status)) return "A Meta só permite editar modelos aprovados, rejeitados ou pausados.";
+  if (template.editUsage.availableAt) return `Limite de edições atingido. Libera em ${formatDateTime(template.editUsage.availableAt)}.`;
+  if (template.category === "AUTHENTICATION") return "Modelos de autenticação não são editados pelo CRM.";
+  if (template.headerFormat && !["IMAGE", "TEXT"].includes(template.headerFormat)) return "Cabeçalho de vídeo ou documento: edite no WhatsApp Manager.";
+  if (template.buttons?.some((button) => !["QUICK_REPLY", "URL", "PHONE_NUMBER"].includes(button.type) || button.url?.includes("{{"))) return "Botão de tipo não suportado: edite no WhatsApp Manager.";
+  return null;
+}
 
 type Filter = "Todos" | "Aprovados" | "Em análise" | "Rejeitados";
 
@@ -109,6 +128,8 @@ export default function ModelosPage() {
   const [filter, setFilter] = useState<Filter>("Todos");
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Template | null>(null);
+  const [keepImage, setKeepImage] = useState(false);
   const [name, setName] = useState("");
   const [category, setCategory] = useState<"UTILITY" | "MARKETING">("UTILITY");
   const [body, setBody] = useState("");
@@ -231,11 +252,28 @@ export default function ModelosPage() {
   const needsImage = sendTarget?.headerFormat === "IMAGE";
 
   const openCreate = () => {
+    setEditTarget(null);
+    setKeepImage(false);
     setName("");
     setCategory("UTILITY");
     setBody("");
     setFooter("");
     setButtons([]);
+    setExamples([]);
+    setHeaderImage(null);
+    setCreateError("");
+    setIsCreateOpen(true);
+  };
+
+  const openEdit = (template: Template) => {
+    setEditTarget(template);
+    setKeepImage(template.headerFormat === "IMAGE");
+    setName(template.name);
+    setCategory(template.category === "MARKETING" ? "MARKETING" : "UTILITY");
+    setBody(template.body);
+    setFooter(template.footer);
+    setButtons((template.buttons ?? []).map((button) => ({ type: button.type, text: button.text, value: button.url ?? button.phone_number ?? "" })));
+    setExamples(template.examples);
     setHeaderImage(null);
     setCreateError("");
     setIsCreateOpen(true);
@@ -270,10 +308,15 @@ export default function ModelosPage() {
       form.set("buttons", JSON.stringify(buttons.map((button) => ({ type: button.type, text: button.text, url: button.type === "URL" ? button.value : undefined, phone: button.type === "PHONE_NUMBER" ? button.value : undefined }))));
       form.set("examples", JSON.stringify(sampleValues));
       if (headerImage) form.set("headerImage", headerImage);
-      const response = await fetch("/api/whatsapp/templates", { method: "POST", body: form });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Não foi possível criar o modelo.");
-      toast.success("Modelo enviado para análise", "A Meta avalia o modelo antes de liberar o uso.");
+      if (editTarget) {
+        form.set("id", editTarget.id);
+        if (keepImage) form.set("keepHeaderImage", "1");
+      }
+      const response = await fetch("/api/whatsapp/templates", { method: editTarget ? "PUT" : "POST", body: form });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; availableAt?: string };
+      if (result.availableAt) throw new Error(`${result.error} Libera em ${formatDateTime(result.availableAt)}.`);
+      if (!response.ok) throw new Error(result.error ?? (editTarget ? "Não foi possível editar o modelo." : "Não foi possível criar o modelo."));
+      toast.success(editTarget ? "Alteração enviada à Meta" : "Modelo enviado para análise", "A Meta avalia o modelo antes de liberar o uso.");
       setIsCreateOpen(false);
       await load();
     } catch (err) {
@@ -393,6 +436,8 @@ export default function ModelosPage() {
               </div>
             </div>
 
+            <p role="note" className="border-b border-slate-100 bg-[#F7915E]/10 px-4 py-2.5 text-[11px] text-slate-700 dark:border-slate-800 dark:text-slate-200 sm:px-5">{EDIT_LIMIT_NOTICE}</p>
+
             <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-2 2xl:grid-cols-3">
               {loading && templates.length === 0 && <p className="col-span-full py-8 text-center text-xs text-slate-500">Carregando modelos...</p>}
               {!loading && filtered.length === 0 && (
@@ -413,10 +458,18 @@ export default function ModelosPage() {
                   </div>
                   <WhatsAppBubble image={template.headerFormat === "IMAGE" ? template.headerImageUrl || "" : null} body={template.body} footer={template.footer} buttons={template.buttons} />
                   {template.rejectedReason && <p className="text-[10px] text-[#9a3d12] dark:text-[#F7915E]">Motivo: {template.rejectedReason}</p>}
+                  {["APPROVED", "REJECTED", "PAUSED"].includes(template.status) && (
+                    <p className={`text-[10px] ${template.editUsage.availableAt ? "font-semibold text-[#9a3d12] dark:text-[#F7915E]" : "text-slate-400"}`}>{template.editUsage.availableAt ? `Edição liberada em ${formatDateTime(template.editUsage.availableAt)}` : editUsageLabel(template.editUsage)}</p>
+                  )}
                   <div className="mt-auto flex items-center justify-between gap-2">
-                    <button type="button" title="Excluir modelo" aria-label={`Excluir modelo ${template.name}`} onClick={() => openDelete(template)} className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-300">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button type="button" title={editBlock(template) ?? "Editar modelo"} aria-label={`Editar modelo ${template.name}`} disabled={Boolean(editBlock(template))} onClick={() => openEdit(template)} className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-[#002187] disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-[#C4D600]">
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button type="button" title="Excluir modelo" aria-label={`Excluir modelo ${template.name}`} onClick={() => openDelete(template)} className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-300">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                     <button type="button" onClick={() => openSend(template)} disabled={template.status !== "APPROVED"} className={primaryButton}>
                       <Send className="h-3.5 w-3.5" /> Enviar
                     </button>
@@ -429,14 +482,14 @@ export default function ModelosPage() {
       </div>
 
       {isCreateOpen && (
-        <EntityDialog titleId="create-template-title" title="Novo modelo" description="O modelo é enviado para análise da Meta antes de poder ser usado." onClose={() => setIsCreateOpen(false)}>
+        <EntityDialog titleId="create-template-title" title={editTarget ? "Editar modelo" : "Novo modelo"} description={editTarget ? "A alteração passa por nova análise da Meta. Nome, idioma e categoria não mudam." : "O modelo é enviado para análise da Meta antes de poder ser usado."} onClose={() => setIsCreateOpen(false)}>
           <Stepper
             initialStep={1}
             onStepChange={() => setCreateError("")}
             onFinalStepCompleted={() => void createTemplate()}
             backButtonText="Voltar"
             nextButtonText="Continuar"
-            completeButtonText={creating ? "Enviando..." : "Enviar para aprovação"}
+            completeButtonText={creating ? "Enviando..." : editTarget ? "Salvar e enviar para análise" : "Enviar para aprovação"}
             indicator="numbers"
             orientation="horizontal"
             transition="slide"
@@ -454,14 +507,15 @@ export default function ModelosPage() {
             <Step title="Identificação" description="Nome e categoria">
               <div className="space-y-4">
                 <StepHeading title="Identifique o modelo" text="O nome é usado só internamente e na Meta; o cliente nunca o vê." />
+                {editTarget && <p role="note" className="rounded-lg bg-[#F7915E]/10 px-3 py-2 text-[11px] text-slate-700 dark:text-slate-200">{editUsageLabel(editTarget.editUsage)}. {EDIT_LIMIT_NOTICE}</p>}
               <label className={labelClass}>
                 Nome (minúsculas e underscore)
-                <input value={name} onChange={(event) => setName(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} placeholder="confirmacao_atendimento" className={inputClass} />
+                <input value={name} disabled={Boolean(editTarget)} onChange={(event) => setName(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))} placeholder="confirmacao_atendimento" className={`${inputClass} disabled:opacity-70`} />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className={labelClass}>
                   Categoria
-                  <select value={category} onChange={(event) => setCategory(event.target.value as "UTILITY" | "MARKETING")} className={`${inputClass} cursor-pointer`}>
+                  <select value={category} disabled={Boolean(editTarget)} onChange={(event) => setCategory(event.target.value as "UTILITY" | "MARKETING")} className={`${inputClass} cursor-pointer disabled:cursor-not-allowed disabled:opacity-70`}>
                     <option value="UTILITY">Utilidade</option>
                     <option value="MARKETING">Marketing</option>
                   </select>
@@ -480,7 +534,14 @@ export default function ModelosPage() {
               <div className="space-y-1.5">
                 <span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Imagem do cabeçalho (opcional)</span>
                 <input ref={createImageRef} type="file" accept="image/jpeg,image/png" hidden onChange={(event) => { pickImage(event.target.files?.[0], setHeaderImage, setCreateError); event.target.value = ""; }} />
-                {headerImage ? (
+                {!headerImage && keepImage ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs dark:border-slate-700">
+                    <ImageIcon className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+                    <span className="min-w-0 flex-1 truncate text-slate-800 dark:text-slate-100">Imagem atual do modelo</span>
+                    <button type="button" onClick={() => createImageRef.current?.click()} className="rounded px-1.5 py-0.5 font-semibold text-[#002187] hover:bg-slate-100 dark:text-[#C4D600] dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Trocar</button>
+                    <button type="button" aria-label="Remover imagem atual" onClick={() => setKeepImage(false)} className="rounded p-0.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+                ) : headerImage ? (
                   <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs dark:border-slate-700">
                     <ImageIcon className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
                     <span className="min-w-0 flex-1 truncate text-slate-800 dark:text-slate-100">{headerImage.name}</span>
@@ -551,13 +612,14 @@ export default function ModelosPage() {
             <Step title="Revisão" description="Confira antes de enviar">
               <div className="space-y-4">
                 <StepHeading title="Revise o modelo" text="Ao enviar, a Meta analisa o modelo antes de liberar o uso." />
+                {editTarget?.editUsage.limited && <p role="note" className="rounded-lg bg-[#F7915E]/10 px-3 py-2 text-[11px] text-slate-700 dark:text-slate-200">Salvar usa 1 das edições disponíveis e bloqueia nova edição deste modelo por 24 horas.</p>}
                 <div className="grid gap-4 md:grid-cols-2">
                   <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white px-4 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Nome</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{name}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Categoria</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{category === "UTILITY" ? "Utilidade" : "Marketing"} · Português (BR)</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Conteúdo</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{headerImage ? "Imagem + " : ""}texto{bodyVariables > 0 ? ` com ${bodyVariables} variável(is)` : ""}{buttons.length > 0 ? ` · ${buttons.length} botão(ões)` : ""}</dd></div>
                   </dl>
-                  <WhatsAppBubble image={headerPreview ?? (headerImage ? "" : null)} body={body} footer={footer} values={sampleValues} buttons={buttons} />
+                  <WhatsAppBubble image={headerPreview ?? (headerImage ? "" : keepImage ? editTarget?.headerImageUrl ?? "" : null)} body={body} footer={footer} values={sampleValues} buttons={buttons} />
                 </div>
                 {createError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{createError}</p>}
               </div>

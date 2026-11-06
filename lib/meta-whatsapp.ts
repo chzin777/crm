@@ -227,10 +227,11 @@ export type WhatsAppTemplate = {
   footer: string;
   headerFormat: string | null;
   headerText: string;
+  examples: string[];
   rejectedReason?: string;
 };
 
-type TemplateComponent = { type: string; format?: string; text?: string; buttons?: TemplateButton[]; example?: { header_handle?: string[] } };
+type TemplateComponent = { type: string; format?: string; text?: string; buttons?: TemplateButton[]; example?: { header_handle?: string[]; body_text?: string[][] } };
 
 function getAccountId() {
   const { accountId } = getConfig();
@@ -255,6 +256,7 @@ export async function listTemplates(): Promise<WhatsAppTemplate[]> {
     buttons: item.components?.find((component) => component.type === "BUTTONS")?.buttons ?? [],
     headerFormat: item.components?.find((component) => component.type === "HEADER")?.format ?? null,
     headerText: item.components?.find((component) => component.type === "HEADER")?.text ?? "",
+    examples: item.components?.find((component) => component.type === "BODY")?.example?.body_text?.[0] ?? [],
     rejectedReason: item.rejected_reason && item.rejected_reason !== "NONE" ? item.rejected_reason : undefined,
   }));
 }
@@ -283,31 +285,54 @@ async function uploadTemplateSample(file: { mimetype: string; fileName: string; 
   return body.h;
 }
 
-export async function createTemplate(input: {
-  name: string;
-  language: string;
-  category: "UTILITY" | "MARKETING";
+export type TemplateHeaderImage = { mimetype: string; fileName: string; buffer: Buffer };
+
+export type TemplateContent = {
   body: string;
   examples: string[];
   footer?: string;
   buttons?: TemplateButton[];
-  headerImage?: { mimetype: string; fileName: string; buffer: Buffer };
-}) {
-  const accountId = getAccountId();
+  headerImage?: TemplateHeaderImage;
+  headerText?: string;
+};
+
+/** A Meta não aceita de volta a URL da imagem: para manter a atual, ela precisa ser enviada de novo. */
+export async function downloadTemplateImage(url: string): Promise<TemplateHeaderImage> {
+  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
+  if (!response?.ok) throw new Error("Não foi possível recuperar a imagem atual do modelo. Selecione a imagem novamente.");
+  const type = response.headers.get("content-type")?.split(";")[0] ?? "";
+  const mimetype = type === "image/png" ? "image/png" : "image/jpeg";
+  return { mimetype, fileName: mimetype === "image/png" ? "modelo.png" : "modelo.jpg", buffer: Buffer.from(await response.arrayBuffer()) };
+}
+
+async function buildTemplateComponents(input: TemplateContent) {
   const components: Record<string, unknown>[] = [];
   if (input.headerImage) {
     const handle = await uploadTemplateSample(input.headerImage);
     components.push({ type: "HEADER", format: "IMAGE", example: { header_handle: [handle] } });
+  } else if (input.headerText) {
+    components.push({ type: "HEADER", format: "TEXT", text: input.headerText });
   }
   const body: { type: "BODY"; text: string; example?: { body_text: string[][] } } = { type: "BODY", text: input.body };
   if (input.examples.length > 0) body.example = { body_text: [input.examples] };
   components.push(body);
   if (input.footer) components.push({ type: "FOOTER", text: input.footer });
   if (input.buttons && input.buttons.length > 0) components.push({ type: "BUTTONS", buttons: input.buttons });
+  return components;
+}
+
+export async function createTemplate(input: TemplateContent & { name: string; language: string; category: "UTILITY" | "MARKETING" }) {
+  const accountId = getAccountId();
+  const components = await buildTemplateComponents(input);
   return graph<{ id: string; status: string; category: string }>(`/${accountId}/message_templates`, {
     method: "POST",
     body: JSON.stringify({ name: input.name, language: input.language, category: input.category, components }),
   });
+}
+
+/** Nome, idioma e categoria continuam os mesmos; a Meta revisa o conteúdo novo. */
+export async function editTemplate(id: string, input: TemplateContent) {
+  return graph<{ success: boolean }>(`/${id}`, { method: "POST", body: JSON.stringify({ components: await buildTemplateComponents(input) }) });
 }
 
 /** Com hsm_id a Meta apaga só este idioma; só com o nome, apagaria todos. */
