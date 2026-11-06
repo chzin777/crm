@@ -3,11 +3,13 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, Phone, RotateCcw, Target, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, Phone, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EntityDialog } from "@/components/EntityDialog";
+import { useToast } from "@/components/ToastProvider";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
+import { DeleteConversationDialog } from "@/components/chat/DeleteConversationDialog";
 import { FloatingMenu, type FloatingMenuItem } from "@/components/chat/FloatingMenu";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
@@ -25,6 +27,7 @@ const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, close
 function ChatWorkspace() {
   const selectedId = useSearchParams().get("c");
   const tick = usePulse();
+  const toast = useToast();
 
   const [tab, setTab] = useState<ChatTab>("queue");
   const [search, setSearch] = useState("");
@@ -44,6 +47,8 @@ function ChatWorkspace() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [agentName, setAgentName] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [queueOptions, setQueueOptions] = useState<{ id: string; name: string }[]>([]);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -57,9 +62,10 @@ function ChatWorkspace() {
     fetch("/api/me/chat")
       .then(async (response) => {
         if (!response.ok) return;
-        const me = (await response.json()) as { name: string; capabilities: Record<string, boolean> };
+        const me = (await response.json()) as { name: string; isAdmin: boolean; capabilities: Record<string, boolean> };
         setCapabilities(me.capabilities);
         setAgentName(me.name);
+        setIsAdmin(me.isAdmin);
       })
       .catch((error) => console.error("[chat]", error));
     fetch("/api/chat/queues")
@@ -287,6 +293,14 @@ function ChatWorkspace() {
     else setSendError("Não foi possível alterar o bloqueio.");
   };
 
+  const handleDeleted = (id: string) => {
+    setDeleteTarget(null);
+    setItems((current) => current.filter((item) => item.id !== id));
+    if (selectedId === id) select(null);
+    void loadList();
+    toast.success("Conversa excluída", "A conversa e o histórico de mensagens foram removidos.");
+  };
+
   const open = selectedId ? detail?.id === selectedId ? detail : null : null;
   const waiting = open?.status === "waiting" ? waitingLabel(open.waitingSince).text : "";
   const lastContact = open?.lastMessageAt ? `último contato: ${relativeTime(open.lastMessageAt).toLowerCase()}` : "";
@@ -304,6 +318,7 @@ function ChatWorkspace() {
         { label: "Finalizar atendimento", icon: <CheckCircle2 className="h-4 w-4" />, onSelect: () => void conversationAction("/close"), hidden: !capabilities["chat.close"] || !!open.closedAt },
         { label: "Reabrir atendimento", icon: <RotateCcw className="h-4 w-4" />, onSelect: () => void conversationAction("/reopen"), hidden: !capabilities["chat.close"] || !canWrite || !open.closedAt },
         { label: open.blocked ? "Desbloquear contato" : "Bloquear contato", icon: <Ban className="h-4 w-4" />, onSelect: () => void toggleBlock(open.phone, open.blocked), danger: true, hidden: !capabilities["chat.queues"] },
+        { label: "Excluir conversa", icon: <Trash2 className="h-4 w-4" />, onSelect: () => setDeleteTarget({ id: open.id, name: open.name }), danger: true, hidden: !isAdmin },
       ]
     : [];
 
@@ -327,6 +342,7 @@ function ChatWorkspace() {
             error={listError}
             selectedId={selectedId}
             onSelect={select}
+            onDelete={isAdmin ? (item) => setDeleteTarget({ id: item.id, name: item.name }) : undefined}
             onEndReached={() => {
               if (nextCursor) void loadList(nextCursor);
             }}
@@ -470,6 +486,10 @@ function ChatWorkspace() {
 
         {showTransfer && open && (
           <TransferDialog conversationId={open.id} currentQueueId={open.queue?.id ?? null} onClose={() => setShowTransfer(false)} onDone={() => { setShowTransfer(false); refreshOpen(); }} />
+        )}
+
+        {deleteTarget && (
+          <DeleteConversationDialog conversation={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleDeleted} />
         )}
 
         {showNew && (

@@ -1,5 +1,5 @@
 "use client";
-import { MessageSquare, Search, X } from "lucide-react";
+import { MessageSquare, Search, Trash2, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
@@ -54,11 +54,12 @@ type Props = {
   error: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onDelete?: (item: ConversationItem) => void;
   onEndReached: () => void;
   actions?: React.ReactNode;
 };
 
-export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, loading, error, selectedId, onSelect, onEndReached, actions }: Props) {
+export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, loading, error, selectedId, onSelect, onDelete, onEndReached, actions }: Props) {
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const list = event.currentTarget;
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
@@ -133,39 +134,51 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
           </div>
         ) : (
           items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-              className={`flex w-full items-center gap-3 border-b border-slate-100 p-4 text-left transition-colors cursor-pointer hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-white/5 ${selectedId === item.id ? "bg-slate-100 dark:bg-white/10" : ""}`}
-            >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
-                {initials(item.name)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
-                  <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">{relativeTime(item.lastMessageAt)}</span>
+            <div key={item.id} className="group relative">
+              <button
+                type="button"
+                onClick={() => onSelect(item.id)}
+                className={`flex w-full items-center gap-3 border-b border-slate-100 p-4 text-left transition-colors cursor-pointer hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-white/5 ${selectedId === item.id ? "bg-slate-100 dark:bg-white/10" : ""}`}
+              >
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#051647] text-sm font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
+                  {initials(item.name)}
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">{preview(item)}</p>
-                  {item.unreadCount > 0 && (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[10px] font-bold text-white">{item.unreadCount}</span>
-                  )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
+                    <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">{relativeTime(item.lastMessageAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{preview(item)}</p>
+                    {item.unreadCount > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#25D366] px-1.5 text-[10px] font-bold text-white">{item.unreadCount}</span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                    {item.status === "waiting" && <WaitBadge since={item.waitingSince} />}
+                    {item.priority !== "normal" && <span className={`rounded px-1.5 py-0.5 font-semibold ${PRIORITY_STYLES[item.priority]}`}>{PRIORITY_LABELS[item.priority]}</span>}
+                    {item.queue && (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.queue.color }} />
+                        {item.queue.name}
+                      </span>
+                    )}
+                    {item.assignee && <span>· {item.assignee.name}</span>}
+                  </div>
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                  {item.status === "waiting" && <WaitBadge since={item.waitingSince} />}
-                  {item.priority !== "normal" && <span className={`rounded px-1.5 py-0.5 font-semibold ${PRIORITY_STYLES[item.priority]}`}>{PRIORITY_LABELS[item.priority]}</span>}
-                  {item.queue && (
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.queue.color }} />
-                      {item.queue.name}
-                    </span>
-                  )}
-                  {item.assignee && <span>· {item.assignee.name}</span>}
-                </div>
-              </div>
-            </button>
+              </button>
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(item)}
+                  title="Excluir conversa"
+                  aria-label={`Excluir conversa com ${item.name}`}
+                  className="absolute bottom-2 right-2 grid h-7 w-7 cursor-pointer place-items-center rounded-lg text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           ))
         )}
       </div>
