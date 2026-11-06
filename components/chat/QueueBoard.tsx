@@ -17,7 +17,7 @@ type Props = {
   act: (url: string, method: string, body?: unknown, success?: string) => Promise<boolean>;
 };
 
-function Metric({ icon: Icon, label, value, alert = false }: { icon: typeof Inbox; label: string; value: string; alert?: boolean }) {
+export function Metric({ icon: Icon, label, value, alert = false }: { icon: typeof Inbox; label: string; value: string; alert?: boolean }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-slate-800 dark:bg-white/5">
       <Icon className={`h-5 w-5 shrink-0 ${alert ? "text-[#F7915E]" : "text-slate-400"}`} />
