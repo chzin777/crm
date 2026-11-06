@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { FormSelect } from "@/components/FormSelect";
 import { WhatsAppSettings } from "@/components/WhatsAppSettings";
-import { Bell, CheckCircle2, Clock3, MessageSquare, Save, TrendingUp, Users } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, Save, TrendingUp, Users } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
 
@@ -18,9 +17,6 @@ interface CrmSettings {
   npsServiceDelay: string;
   npsProductDelay: string;
   inactiveCustomerDays: string;
-  defaultCampaignDuration: string;
-  defaultCampaignUnit: "horas" | "dias" | "semanas" | "meses";
-  campaignDurationIndefinite: boolean;
   notifyNewContacts: boolean;
   notifyCampaigns: boolean;
   notifyLowNps: boolean;
@@ -33,9 +29,6 @@ const defaultSettings: CrmSettings = {
     npsServiceDelay: "30",
   npsProductDelay: "30",
   inactiveCustomerDays: "180",
-  defaultCampaignDuration: "7",
-  defaultCampaignUnit: "dias",
-  campaignDurationIndefinite: true,
   notifyNewContacts: true,
   notifyCampaigns: true,
   notifyLowNps: true,
@@ -47,8 +40,6 @@ const defaultSettings: CrmSettings = {
     reativacao: { minDiasInativo: 180, minComprasHistoricas: 1 },
   },
 };
-
-const durationUnits: CrmSettings["defaultCampaignUnit"][] = ["horas", "dias", "semanas", "meses"];
 
 function SettingsCard({ title, description, icon: Icon, children }: {
   title: string;
@@ -146,11 +137,10 @@ export default function ConfiguracoesPage() {
       settings.npsServiceDelay,
       settings.npsProductDelay,
       settings.inactiveCustomerDays,
-      ...(settings.campaignDurationIndefinite ? [] : [settings.defaultCampaignDuration]),
     ];
     if (numericValues.some((value) => !Number.isInteger(Number(value)) || Number(value) < 1)) {
       setSaveMessage("");
-      setLoadError("Os intervalos e durações devem ser números inteiros maiores que zero.");
+      setLoadError("Os intervalos devem ser números inteiros maiores que zero.");
       return;
     }
     setLoadError("");
@@ -192,31 +182,6 @@ export default function ConfiguracoesPage() {
               <SettingsTextField label="Enviar NPS de atendimento após (minutos)" value={settings.npsServiceDelay} type="number" onChange={(value) => updateSetting("npsServiceDelay", value)} />
               <SettingsTextField label="Enviar pesquisa de produto após (dias)" value={settings.npsProductDelay} type="number" onChange={(value) => updateSetting("npsProductDelay", value)} />
               <SettingsTextField label="Considerar cliente inativo após (dias)" value={settings.inactiveCustomerDays} type="number" onChange={(value) => updateSetting("inactiveCustomerDays", value)} />
-            </div>
-          </SettingsCard>
-
-          <SettingsCard title="Padrão para campanhas" description="Configure a duração sugerida para novas campanhas. A data começa ao ativar." icon={MessageSquare}>
-            <div className="space-y-3">
-              <SettingsToggle
-                label="Manter campanhas ativas por tempo indeterminado"
-                description="Quando desativado, novas campanhas começam com o período definido abaixo."
-                checked={Boolean(settings.campaignDurationIndefinite)}
-                onChange={(checked) => updateSetting("campaignDurationIndefinite", checked)}
-              />
-              {!settings.campaignDurationIndefinite && (
-                <div className="grid max-w-lg grid-cols-2 gap-3">
-                  <SettingsTextField label="Duração padrão" value={settings.defaultCampaignDuration} type="number" onChange={(value) => updateSetting("defaultCampaignDuration", value)} />
-                  <FormSelect
-                    label="Unidade"
-                    value={settings.defaultCampaignUnit}
-                    options={durationUnits}
-                    onChange={(value) => {
-                      const unit = durationUnits.find((option) => option === value);
-                      if (unit) updateSetting("defaultCampaignUnit", unit);
-                    }}
-                  />
-                </div>
-              )}
             </div>
           </SettingsCard>
 

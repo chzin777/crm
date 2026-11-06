@@ -31,7 +31,6 @@ import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/Camp
 import Stepper, { Step } from "@/components/Stepper";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
@@ -39,7 +38,6 @@ import { useToast } from "@/components/ToastProvider";
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
 type CampaignFilter = "Todas" | CampaignStatus;
-type CampaignDurationUnit = "horas" | "dias" | "semanas" | "meses";
 
 interface CampaignAudienceSegment {
   id: string;
@@ -81,19 +79,9 @@ interface DispatchJobView {
   cursor: number;
   sent: number;
   failed: number;
+  skipped: number;
   errors: string[];
   pause?: { kind: string; code?: number; message: string };
-}
-
-interface CampaignDurationSettings {
-  indefinite: boolean;
-  amount: string;
-  unit: CampaignDurationUnit;
-}
-
-interface ActiveCampaignDuration {
-  amount: number;
-  unit: CampaignDurationUnit;
 }
 
 interface Campaign {
@@ -109,8 +97,6 @@ interface Campaign {
   mensagem: string;
   anexos?: { name: string; size: number; type: string; key?: string; url?: string }[];
   modelo?: CampaignTemplate | null;
-  activeDuration?: ActiveCampaignDuration | null;
-  activeUntil?: string;
 }
 
 const messageVariables = [
@@ -126,92 +112,6 @@ const formatFileSize = (size: number) => {
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
-
-const initialDurationSettings: CampaignDurationSettings = {
-  indefinite: true,
-  amount: "1",
-  unit: "dias",
-};
-
-const durationUnitOptions: CampaignDurationUnit[] = ["horas", "dias", "semanas", "meses"];
-
-const durationSummary = (duration?: ActiveCampaignDuration | null) =>
-  duration ? `${duration.amount} ${duration.unit}` : "Indeterminado";
-
-const getExpirationDate = (start: Date, duration: ActiveCampaignDuration) => {
-  const expiration = new Date(start);
-  if (duration.unit === "horas") expiration.setHours(expiration.getHours() + duration.amount);
-  if (duration.unit === "dias") expiration.setDate(expiration.getDate() + duration.amount);
-  if (duration.unit === "semanas") expiration.setDate(expiration.getDate() + duration.amount * 7);
-  if (duration.unit === "meses") {
-    const day = expiration.getDate();
-    expiration.setDate(1);
-    expiration.setMonth(expiration.getMonth() + duration.amount);
-    const lastDayOfMonth = new Date(expiration.getFullYear(), expiration.getMonth() + 1, 0).getDate();
-    expiration.setDate(Math.min(day, lastDayOfMonth));
-  }
-  return expiration;
-};
-
-function CampaignDurationFields({
-  settings,
-  onChange,
-}: {
-  settings: CampaignDurationSettings;
-  onChange: (settings: CampaignDurationSettings) => void;
-}) {
-  return (
-    <fieldset className="space-y-2.5">
-      <legend className="text-xs font-semibold text-slate-600 dark:text-slate-300">Duração ativa</legend>
-      <div role="radiogroup" aria-label="Duração ativa da campanha" className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={settings.indefinite}
-          onClick={() => onChange({ ...settings, indefinite: true })}
-          className={`h-9 rounded-lg border px-3 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${settings.indefinite ? "border-[#002187] bg-[#002187]/5 text-[#002187] dark:border-[#C4D600] dark:bg-[#C4D600]/10 dark:text-[#C4D600]" : "border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"}`}
-        >
-          Indeterminada
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={!settings.indefinite}
-          onClick={() => onChange({ ...settings, indefinite: false })}
-          className={`h-9 rounded-lg border px-3 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${!settings.indefinite ? "border-[#002187] bg-[#002187]/5 text-[#002187] dark:border-[#C4D600] dark:bg-[#C4D600]/10 dark:text-[#C4D600]" : "border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"}`}
-        >
-          Por período
-        </button>
-      </div>
-      {!settings.indefinite && (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
-          <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-            Quantidade
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={settings.amount}
-              onChange={(event) => onChange({ ...settings, amount: event.target.value })}
-              aria-label="Quantidade da duração"
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-            />
-          </label>
-          <FormSelect
-            label="Unidade"
-            value={settings.unit}
-            options={durationUnitOptions}
-              onChange={(unit) => {
-                const selectedUnit = durationUnitOptions.find((option) => option === unit);
-                if (selectedUnit) onChange({ ...settings, unit: selectedUnit });
-              }}
-          />
-        </div>
-      )}
-      <p className="text-[10px] text-slate-400">O período começa quando a campanha é ativada.</p>
-    </fieldset>
-  );
-}
 
 const statusStyles: Record<CampaignStatus, string> = {
   Ativa: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
@@ -257,7 +157,6 @@ export default function CampanhasPage() {
   const [selectedAttachments, setSelectedAttachments] = useState<File[]>([]);
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<Map<File, string>>(new Map());
   const attachmentPreviewUrlsRef = useRef(new Map<File, string>());
-  const [durationSettings, setDurationSettings] = useState<CampaignDurationSettings>(initialDurationSettings);
   const [form, setForm] = useState({ nome: "", publico: "", mensagem: "" });
   const [campaignTemplate, setCampaignTemplate] = useState<CampaignTemplate | null>(null);
   const changeCampaignTemplate = (template: CampaignTemplate | null) => {
@@ -419,27 +318,6 @@ export default function CampanhasPage() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedCampaign, isCreateOpen, clearSelectedAttachments]);
 
-  useEffect(() => {
-    const expireCampaigns = () => {
-      const now = Date.now();
-      setCampaigns((current) => {
-        let hasExpiredCampaign = false;
-        const updated = current.map((campaign) => {
-          if (campaign.status !== "Ativa" || !campaign.activeUntil || Date.parse(campaign.activeUntil) > now) return campaign;
-          hasExpiredCampaign = true;
-          return { ...campaign, status: "Pausada" as const, activeUntil: undefined, dataAtualizacao: "Período encerrado" };
-        });
-        return hasExpiredCampaign ? updated : current;
-      });
-      setSelectedCampaign((current) => {
-        if (!current || current.status !== "Ativa" || !current.activeUntil || Date.parse(current.activeUntil) > now) return current;
-        return { ...current, status: "Pausada", activeUntil: undefined, dataAtualizacao: "Período encerrado" };
-      });
-    };
-    const intervalId = window.setInterval(expireCampaigns, 10_000);
-    return () => window.clearInterval(intervalId);
-  }, [setCampaigns]);
-
   const filteredCampaigns = sortedCampaigns.filter((campaign) => {
     const matchesSearch = `${campaign.nome} ${campaign.publico} ${campaign.status}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));
     return matchesSearch && (activeFilter === "Todas" || campaign.status === activeFilter);
@@ -460,9 +338,8 @@ export default function CampanhasPage() {
     const nome = form.nome.trim();
     const publico = selectedAudienceSegments.join(", ").trim();
     const mensagem = form.mensagem.trim();
-    const durationAmount = Number(durationSettings.amount);
-    if (!nome || !publico || !mensagem || (!durationSettings.indefinite && (!Number.isInteger(durationAmount) || durationAmount < 1))) {
-      setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : !mensagem ? "Escreva a mensagem da campanha." : "Informe uma duração válida, em quantidade inteira maior que zero.");
+    if (!nome || !publico || !mensagem) {
+      setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : "Escreva a mensagem da campanha.");
       return;
     }
     const campaign: Campaign = {
@@ -478,7 +355,6 @@ export default function CampanhasPage() {
       dataAtualizacao: "Criada agora",
       mensagem,
       anexos: uploadedAttachments.length > 0 ? uploadedAttachments : selectedAttachments.map(({ name, size, type }) => ({ name, size, type })),
-      activeDuration: durationSettings.indefinite ? null : { amount: durationAmount, unit: durationSettings.unit },
     };
     setCampaigns((current) => [campaign, ...current]);
     setActiveFilter("Todas");
@@ -487,7 +363,6 @@ export default function CampanhasPage() {
     setCampaignTemplate(null);
     setSelectedAudienceSegments([]);
     clearSelectedAttachments();
-    setDurationSettings(initialDurationSettings);
     setFormError("");
     setIsCreateOpen(false);
     toast.success("Campanha criada", `"${campaign.nome}" foi adicionada.`);
@@ -497,9 +372,6 @@ export default function CampanhasPage() {
     setSelectedCampaign(campaign);
     clearSelectedAttachments();
     setSelectedAudienceSegments(campaign.publico.split(", ").filter((segment) => segmentOptionSet.has(segment)));
-    setDurationSettings(campaign.activeDuration
-      ? { indefinite: false, amount: String(campaign.activeDuration.amount), unit: campaign.activeDuration.unit }
-      : initialDurationSettings);
     setForm({ nome: campaign.nome, publico: campaign.publico, mensagem: campaign.mensagem });
     setCampaignTemplate(campaign.modelo ?? null);
     setFormError("");
@@ -570,12 +442,10 @@ export default function CampanhasPage() {
     const nome = form.nome.trim();
     const publico = selectedAudienceSegments.join(", ").trim();
     const mensagem = form.mensagem.trim();
-    const durationAmount = Number(durationSettings.amount);
-    if (!nome || !publico || !mensagem || (!durationSettings.indefinite && (!Number.isInteger(durationAmount) || durationAmount < 1))) {
-      setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : !mensagem ? "Escreva a mensagem da campanha." : "Informe uma duração válida, em quantidade inteira maior que zero.");
+    if (!nome || !publico || !mensagem) {
+      setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : "Escreva a mensagem da campanha.");
       return;
     }
-    const activeDuration = durationSettings.indefinite ? null : { amount: durationAmount, unit: durationSettings.unit };
     const updatedCampaign = {
       ...selectedCampaign,
       nome,
@@ -583,10 +453,6 @@ export default function CampanhasPage() {
       publico,
       audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
       mensagem,
-      activeDuration,
-      activeUntil: selectedCampaign.status === "Ativa" && activeDuration
-        ? getExpirationDate(new Date(), activeDuration).toISOString()
-        : selectedCampaign.status === "Ativa" ? undefined : selectedCampaign.activeUntil,
       dataAtualizacao: "Atualizada agora",
     };
     setCampaigns((current) => current.map((campaign) => campaign.id === updatedCampaign.id ? updatedCampaign : campaign));
@@ -601,12 +467,9 @@ export default function CampanhasPage() {
       if (campaign.id !== campaignId) return campaign;
       if (isDispatchLocked(campaign.status)) return campaign;
       if (campaign.status === "Ativa") {
-        return { ...campaign, status: "Pausada", activeUntil: undefined, dataAtualizacao: "Pausada agora" };
+        return { ...campaign, status: "Pausada", dataAtualizacao: "Pausada agora" };
       }
-      const activeUntil = campaign.activeDuration
-        ? getExpirationDate(new Date(), campaign.activeDuration).toISOString()
-        : undefined;
-      return { ...campaign, status: "Ativa", activeUntil, dataAtualizacao: "Ativada agora" };
+      return { ...campaign, status: "Ativa", dataAtualizacao: "Ativada agora" };
     };
     setCampaigns((current) => current.map(updateStatus));
     setSelectedCampaign((current) => current ? updateStatus(current) : current);
@@ -614,43 +477,12 @@ export default function CampanhasPage() {
     if (target) toast.success(target.status === "Ativa" ? "Campanha pausada" : "Campanha ativada", `"${target.nome}" foi atualizada.`);
   };
 
-  const openCreateCampaign = async () => {
+  const openCreateCampaign = () => {
     setForm({ nome: "", publico: "", mensagem: "" });
     setCampaignTemplate(null);
     setSelectedAudienceSegments([]);
     clearSelectedAttachments();
-    setDurationSettings(initialDurationSettings);
     setFormError("");
-    try {
-      const response = await fetch("/api/crm/settings");
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.includes("application/json")) {
-        throw new Error(`Resposta inválida da API (${response.status}). Verifique se o servidor está rodando.`);
-      }
-      const result = await response.json() as { data?: Partial<{
-          campaignDurationIndefinite: boolean;
-          defaultCampaignDuration: string;
-          defaultCampaignUnit: CampaignDurationUnit;
-        }>; error?: string };
-      if (!response.ok) throw new Error(result.error || "Não foi possível carregar as configurações.");
-      const saved = result.data;
-      if (saved) {
-        if (typeof saved.campaignDurationIndefinite === "boolean") {
-          const unit = durationUnitOptions.find((option) => option === saved.defaultCampaignUnit);
-          const amount = saved.defaultCampaignDuration;
-          if (!saved.campaignDurationIndefinite && (!unit || !amount || !Number.isInteger(Number(amount)) || Number(amount) < 1)) {
-            throw new Error("Duração padrão inválida");
-          }
-          setDurationSettings({
-            indefinite: saved.campaignDurationIndefinite,
-            amount: amount ?? initialDurationSettings.amount,
-            unit: unit ?? initialDurationSettings.unit,
-          });
-        }
-      }
-    } catch {
-      setFormError("Não foi possível ler a duração padrão nas configurações. Confira a preferência antes de continuar.");
-    }
     setIsCreateOpen(true);
   };
 
@@ -840,6 +672,7 @@ export default function CampanhasPage() {
                         <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{job.campaignName}</p>
                         <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                           {paused ? "Envio pausado" : "Enviando em segundo plano"} · {job.cursor} de {job.total} contatos · {job.sent} enviadas · {job.failed} falhas
+                          {job.skipped > 0 && ` · ${job.skipped} pulados (receberam campanha nos últimos 7 dias)`}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1019,8 +852,8 @@ export default function CampanhasPage() {
               onStepChange={() => setFormError("")}
               onFinalStepCompleted={createCampaign}
               validateStep={(step) => {
-                  if (step === 1 && (!form.nome.trim() || (!durationSettings.indefinite && (!Number.isInteger(Number(durationSettings.amount)) || Number(durationSettings.amount) < 1)))) {
-                    setFormError(!form.nome.trim() ? "Informe o nome da campanha." : "Informe uma duração válida, em quantidade inteira maior que zero.");
+                  if (step === 1 && !form.nome.trim()) {
+                    setFormError("Informe o nome da campanha.");
                   return false;
                 }
                 if (step === 2 && selectedAudienceSegments.length === 0) {
@@ -1049,11 +882,10 @@ export default function CampanhasPage() {
               width="100%"
               className="min-h-0 flex-1"
             >
-              <Step title="Identificação" description="Nome e duração ativa">
+              <Step title="Identificação" description="Nome da campanha">
                 <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome e por quanto tempo ela ficará ativa.</p></div>
+                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome para encontrá-la depois.</p></div>
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                  <CampaignDurationFields settings={durationSettings} onChange={setDurationSettings} />
                   {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
                 </div>
               </Step>
@@ -1206,17 +1038,6 @@ export default function CampanhasPage() {
                   <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Envios aceitos</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos.toLocaleString("pt-BR")}</p></div>
                   <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Respostas</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">Indisponível</p></div>
                   <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Status</p><p className={`mt-1 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedCampaign.status]}`}>{selectedCampaign.status}</p></div>
-                </div>
-                <div className="space-y-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-                  <CampaignDurationFields settings={durationSettings} onChange={setDurationSettings} />
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Duração configurada: <span className="font-semibold text-slate-700 dark:text-slate-200">{durationSummary(selectedCampaign.activeDuration)}</span>
-                  </p>
-                  {selectedCampaign.activeUntil && selectedCampaign.status === "Ativa" && (
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Ativa até {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(selectedCampaign.activeUntil))}
-                    </p>
-                  )}
                 </div>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 <FormMultiSelect

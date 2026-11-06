@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
 import { getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
+import { phoneVariants } from "@/lib/chat/phone";
 
 export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string };
 
@@ -27,6 +28,7 @@ export type DispatchJob = {
   cursor: number;
   sent: number;
   failed: number;
+  skipped: number;
   baseDisparos: number;
   errors: string[];
   pause?: PauseReason;
@@ -39,6 +41,7 @@ const RATE_LIMIT_WAITS_MS = [30_000, 60_000, 120_000];
 const NETWORK_RETRY_MS = [5_000, 15_000, 30_000];
 const MAX_CONSECUTIVE_API_FAILURES = 8;
 const MAX_STORED_ERRORS = 20;
+const CONTACT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 const RATE_LIMIT_CODES = new Set([130429, 80007, 4, 17, 32, 613]);
 const FATAL_CODES: Record<number, PauseReason["kind"]> = {
@@ -133,7 +136,7 @@ function campaignStatus(job: DispatchJob) {
   if (job.status === "paused") return "Envio pausado";
   if (job.failed === 0 && job.sent > 0) return "Enviada";
   if (job.sent > 0) return "Envio parcial";
-  if (job.status === "cancelled" && job.failed === 0) return "Pronta para envio";
+  if ((job.status === "cancelled" || job.skipped > 0) && job.failed === 0) return "Pronta para envio";
   return "Falha no envio";
 }
 
@@ -141,7 +144,8 @@ function campaignNote(job: DispatchJob) {
   const done = job.cursor;
   if (job.status === "running") return `Disparo em andamento (${done} de ${job.total})`;
   if (job.status === "paused") return `Pausado: ${done} de ${job.total} processados · ${job.pause?.message ?? ""}`.trim();
-  return `${new Date().toLocaleString("pt-BR")} · ${job.sent} enviados, ${job.failed} falhas`;
+  const skipped = job.skipped > 0 ? `, ${job.skipped} pulados (campanha nos últimos 7 dias)` : "";
+  return `${new Date().toLocaleString("pt-BR")} · ${job.sent} enviados, ${job.failed} falhas${skipped}`;
 }
 
 async function syncCampaign(job: DispatchJob) {
@@ -221,6 +225,22 @@ async function recordMessage(campaignId: string, recipient: DispatchRecipient, r
   }
 }
 
+// Quem recebeu campanha na janela de descanso, por contato e por telefone (o cadastro tem números repetidos).
+async function loadRecentlyReached() {
+  const rows = await prisma.campaignMessage.findMany({
+    where: { sentAt: { gte: new Date(Date.now() - CONTACT_COOLDOWN_MS) } },
+    select: { contactId: true, phone: true },
+  });
+  const reached = new Set<string>();
+  for (const row of rows) {
+    if (row.contactId) reached.add(row.contactId);
+    for (const phone of phoneVariants(row.phone)) reached.add(phone);
+  }
+  return reached;
+}
+
+const recipientKeys = (recipient: DispatchRecipient) => [recipient.id, ...phoneVariants(recipient.telefone)];
+
 function addError(job: DispatchJob, message: string) {
   if (job.errors.length < MAX_STORED_ERRORS) job.errors.push(message);
 }
@@ -243,6 +263,8 @@ async function runJob(campaignId: string) {
       return;
     }
 
+    // A fila roda um disparo por vez: aqui já contam os envios da campanha anterior.
+    const reached = await loadRecentlyReached();
     let consecutiveApiFailures = 0;
     while (job.cursor < job.total) {
       const requested = control.get(campaignId);
@@ -257,6 +279,12 @@ async function runJob(campaignId: string) {
       }
 
       const recipient = recipients[job.cursor];
+      if (recipient?.telefone?.trim() && recipientKeys(recipient).some((key) => reached.has(key))) {
+        job.skipped += 1;
+        job.cursor += 1;
+        await writeJob(job);
+        continue;
+      }
       let pause: PauseReason | null = null;
       if (!recipient?.telefone?.trim()) {
         job.failed += 1;
@@ -267,6 +295,7 @@ async function runJob(campaignId: string) {
           try {
             const messageId = await sendToRecipient(campaign, recipient, header);
             await recordMessage(campaignId, recipient, { messageId });
+            for (const key of recipientKeys(recipient)) reached.add(key);
             job.sent += 1;
             consecutiveApiFailures = 0;
             break;
@@ -368,6 +397,7 @@ export async function startDispatch(campaignId: string, recipients: DispatchReci
     cursor: 0,
     sent: 0,
     failed: 0,
+    skipped: 0,
     baseDisparos: campaign.disparos ?? 0,
     errors: [],
     startedAt: new Date().toISOString(),
