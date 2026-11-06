@@ -20,6 +20,7 @@ export type ConversationItem = {
   lastMessageAt: string | null;
   closedAt: string | null;
   tags: string[];
+  campaign: { id: string; name: string } | null;
   queue: { id: string; name: string; color: string } | null;
   assignee: { id: string; name: string } | null;
   windowOpen: boolean;
@@ -28,6 +29,7 @@ export type ConversationItem = {
 
 export type ConversationDetail = ConversationItem & {
   blocked: boolean;
+  campaigns: { id: string; name: string; repliedAt: string }[];
   previous: { id: string; status: ChatStatus; subject: string; createdAt: string; closedAt: string | null; queue: { name: string } | null }[];
 };
 

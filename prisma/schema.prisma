@@ -315,6 +315,8 @@ model ChatConversation {
   lastInboundAt DateTime?
   tags          String[]      @default([])
   menuState     Json?
+  campaignId    String?
+  campaignName  String?
   closedAt      DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt

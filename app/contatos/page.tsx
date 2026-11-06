@@ -132,7 +132,7 @@ function ContactEditTabs({
   const [purchases, setPurchases] = useState<{ produto: string; data: string; valor: string }[]>([]);
   const [purchasesLoading, setPurchasesLoading] = useState(false);
   const [communications, setCommunications] = useState<{
-    whatsapp: { id: string; status: string; sentAt: string | null; deliveredAt: string | null; readAt: string | null; repliedAt: string | null; failedAt: string | null; failureReason: string | null; createdAt: string }[];
+    whatsapp: { id: string; campaignName: string | null; status: string; sentAt: string | null; deliveredAt: string | null; readAt: string | null; repliedAt: string | null; failedAt: string | null; failureReason: string | null; createdAt: string }[];
     inbound: { id: string; text: string; mediaType: string | null; receivedAt: string }[];
     emails: { id: string; subject: string; status: string; sentAt: string | null }[];
     contactPhone: string;
@@ -412,6 +412,7 @@ function ContactEditTabs({
                             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusColor[msg.status] ?? statusColor.queued}`}>
                               {statusLabel[msg.status] ?? msg.status}
                             </span>
+                            {msg.campaignName && <p className="mt-1 truncate text-xs font-medium text-slate-700 dark:text-slate-200">{msg.campaignName}</p>}
                             <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
                               {formatDateDisplay(msg.sentAt ?? msg.createdAt)}
                               {msg.failureReason && <span className="ml-2 text-red-500">· {msg.failureReason.slice(0, 60)}</span>}

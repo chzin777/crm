@@ -37,6 +37,7 @@ export function serializeConversation(row: ConversationRow) {
     lastMessageAt: row.lastMessageAt,
     closedAt: row.closedAt,
     tags: row.tags,
+    campaign: row.campaignId && row.campaignName ? { id: row.campaignId, name: row.campaignName } : null,
     queue: row.queue,
     assignee: row.assignee,
     windowOpen: isWindowOpen(row.lastInboundAt),

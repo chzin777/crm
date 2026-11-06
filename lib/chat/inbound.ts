@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { downloadMedia } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
+import { attributeCampaignReply } from "@/lib/chat/campaign-origin";
 import { openConversationFor } from "@/lib/chat/conversation";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
@@ -180,6 +181,9 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     where: { id: conversation.id, waitingSince: null, status: { not: "bot" } },
     data: { waitingSince: receivedAt },
   });
+  // A mensagem já está gravada: falha aqui não pode fazer a Meta reenviar o evento.
+  await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
+    .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
 
   return { conversationId: conversation.id, messageId: saved.id, text, created };
 }

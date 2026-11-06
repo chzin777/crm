@@ -90,7 +90,7 @@ async function updateMessageStatus(event: StatusEvent) {
   });
 }
 
-// Processa mensagens recebidas (inbound): salva no DB e marca repliedAt na última mensagem enviada ao contato.
+// Salva a mensagem recebida; a resposta à campanha é registrada em recordInbound.
 async function handleInboundMessage(msg: InboundMessageEvent) {
   if (!msg.id || !msg.from) return;
   const receivedAt = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
@@ -109,21 +109,6 @@ async function handleInboundMessage(msg: InboundMessageEvent) {
     create: { whatsappMsgId: msg.id, contactId: contact?.id ?? null, phone: msg.from, text, mediaType, receivedAt },
     update: { text, mediaType, receivedAt },
   });
-
-  // Marca repliedAt na última mensagem enviada ao contato que ainda não foi respondida
-  if (contact?.id) {
-    const lastSent = await prisma.campaignMessage.findFirst({
-      where: { contactId: contact.id, status: { in: ["sent", "delivered", "read"] }, repliedAt: null },
-      orderBy: { sentAt: "desc" },
-      select: { id: true },
-    });
-    if (lastSent) {
-      await prisma.campaignMessage.update({
-        where: { id: lastSent.id },
-        data: { repliedAt: receivedAt, status: "replied" },
-      });
-    }
-  }
 
   console.log(`[whatsapp/webhook] inbound de ${msg.from} (${msg.id})${contact ? ` → contato ${contact.id}` : " → sem contato"}`);
 }

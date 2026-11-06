@@ -1,6 +1,7 @@
 "use client";
 import { MessageSquare, Search, Trash2, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
 
@@ -148,6 +149,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                     <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
                     <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">{relativeTime(item.lastMessageAt)}</span>
                   </div>
+                  {item.campaign && <div className="my-0.5 flex"><CampaignBadge name={item.campaign.name} /></div>}
                   <div className="flex items-center justify-between gap-2">
                     <p className="truncate text-xs text-slate-500 dark:text-slate-400">{preview(item)}</p>
                     {item.unreadCount > 0 && (

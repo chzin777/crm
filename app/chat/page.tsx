@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
+import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { DeleteConversationDialog } from "@/components/chat/DeleteConversationDialog";
@@ -379,7 +380,10 @@ function ChatWorkspace() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{open.name}</h3>
-                  <p title={headerInfo} className="truncate text-xs text-slate-500 dark:text-slate-400">{headerInfo}</p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p title={headerInfo} className="min-w-0 truncate text-xs text-slate-500 dark:text-slate-400">{headerInfo}</p>
+                    {open.campaign && <CampaignBadge name={open.campaign.name} className="max-w-[45%] shrink-0" />}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <PriorityPill key={`${open.id}-priority`} priority={open.priority} onChange={canWrite && !open.closedAt ? (value) => void updateConversation({ priority: value }) : undefined} />
@@ -461,6 +465,17 @@ function ChatWorkspace() {
                   />
                 )}
               </div>
+              {open.campaigns.length > 0 && (
+                <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Campanhas de origem</p>
+                  {open.campaigns.map((campaign) => (
+                    <div key={campaign.id} className="flex items-center justify-between gap-3">
+                      <CampaignBadge name={campaign.name} className="min-w-0" />
+                      <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{new Date(campaign.repliedAt).toLocaleDateString("pt-BR")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {open.previous.length > 0 && (
                 <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
                   <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Conversas anteriores</p>

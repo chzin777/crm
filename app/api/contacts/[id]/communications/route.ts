@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
+import { campaignNames } from "@/lib/chat/campaign-origin";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await requireApiSession();
@@ -7,13 +8,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const { id } = await context.params;
 
-  const [sentMessages, inboundMessages, contact] = await Promise.all([
+  const [names, sentMessages, inboundMessages, contact] = await Promise.all([
+    campaignNames(),
     prisma.campaignMessage.findMany({
       where: { contactId: id },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {
         id: true,
+        campaignId: true,
         status: true,
         sentAt: true,
         deliveredAt: true,
@@ -45,6 +48,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     data: {
       whatsapp: sentMessages.map((msg) => ({
         id: msg.id,
+        campaignName: names.get(msg.campaignId) ?? null,
         status: msg.status,
         sentAt: msg.sentAt?.toISOString() ?? null,
         deliveredAt: msg.deliveredAt?.toISOString() ?? null,

@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteFile } from "@/lib/minio";
 import { chatError, findScopedConversation, requireChatActor, scopeWhere, conversationNotFound } from "@/lib/chat/access";
+import { campaignOrigins } from "@/lib/chat/campaign-origin";
 import { addAudit, isBlocked } from "@/lib/chat/conversation";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { conversationInclude, serializeConversation } from "@/lib/chat/serialize";
@@ -97,8 +98,9 @@ export async function GET(_request: Request, context: Context) {
   });
   if (!row) return conversationNotFound();
 
-  const [blocked, previous] = await Promise.all([
+  const [blocked, campaigns, previous] = await Promise.all([
     isBlocked(row.phone),
+    campaignOrigins(row.contactId, row.phone),
     prisma.chatConversation.findMany({
       where: { AND: [{ contactId: row.contactId, id: { not: row.id } }, scopeWhere(guard.actor)] },
       orderBy: { createdAt: "desc" },
@@ -107,5 +109,5 @@ export async function GET(_request: Request, context: Context) {
     }),
   ]);
 
-  return NextResponse.json({ ...serializeConversation(row), blocked, previous });
+  return NextResponse.json({ ...serializeConversation(row), blocked, campaigns, previous });
 }
