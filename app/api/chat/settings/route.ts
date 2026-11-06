@@ -37,6 +37,7 @@ const settings = z.object({
   silenceAskMinutes: z.number().int().min(1).max(1440),
   silenceCloseMinutes: z.number().int().min(1).max(1440),
   silenceAskText: z.string().max(1000),
+  silenceCloseCustom: z.boolean().default(false),
   silenceCloseText: z.string().max(1000),
   options: z.array(option).max(20),
   canvas: z

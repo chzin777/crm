@@ -1,6 +1,7 @@
 "use client";
-import { useRef } from "react";
-import { Minus, Plus, type LucideIcon } from "lucide-react";
+import { useRef, useState, type SyntheticEvent } from "react";
+import { createPortal } from "react-dom";
+import { Info, Minus, Plus, type LucideIcon } from "lucide-react";
 
 export const fieldClass = "w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 export const labelClass = "mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-200";
@@ -14,11 +15,36 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
   );
 }
 
-export function SwitchRow({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
+const TIP_HALF_WIDTH = 136;
+
+/** Ícone de ajuda com balão no body, para não ser cortado pelos painéis. */
+export function InfoTip({ text }: { text: string }) {
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const show = (event: SyntheticEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
+    setPosition({ top: rect.bottom + 6, left: Math.max(TIP_HALF_WIDTH, Math.min(center, window.innerWidth - TIP_HALF_WIDTH)) });
+  };
+  const hide = () => setPosition(null);
+
+  return (
+    <>
+      <button type="button" aria-label={text} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide} className="inline-flex shrink-0 cursor-pointer rounded-full text-slate-400 hover:text-[#002187] focus-visible:text-[#002187] dark:hover:text-[#C4D600] dark:focus-visible:text-[#C4D600]">
+        <Info className="h-3.5 w-3.5" />
+      </button>
+      {position && createPortal(
+        <span role="tooltip" style={position} className="pointer-events-none fixed z-[90] w-64 -translate-x-1/2 rounded-lg bg-[#051647] px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg ring-1 ring-[#C4D600]/40">{text}</span>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+export function SwitchRow({ title, description, checked, onChange, tip }: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void; tip?: string }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-slate-800 dark:bg-white/5">
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white">{title}{tip && <InfoTip text={tip} />}</p>
         <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>
       </div>
       <Switch checked={checked} onChange={onChange} label={title} />
@@ -26,13 +52,13 @@ export function SwitchRow({ title, description, checked, onChange }: { title: st
   );
 }
 
-export function SettingCard({ icon: Icon, title, description, action, children }: { icon: LucideIcon; title: string; description: string; action?: React.ReactNode; children?: React.ReactNode }) {
+export function SettingCard({ icon: Icon, title, description, tip, action, children }: { icon: LucideIcon; title: string; description: string; tip?: string; action?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-slate-200/80 bg-white shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
       <header className="flex items-center gap-3 p-4 sm:px-5">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#002187]/8 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><Icon className="h-5 w-5" /></span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-bold text-slate-900 dark:text-white">{title}</h2>
+          <h2 className="flex items-center gap-1.5 text-sm font-bold text-slate-900 dark:text-white">{title}{tip && <InfoTip text={tip} />}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>
         </div>
         {action}
@@ -49,11 +75,12 @@ type MessageFieldProps = {
   onChange: (value: string) => void;
   rows?: number;
   hint?: string;
+  placeholder?: string;
   variables?: { mark: string; label: string }[];
 };
 
 /** Campo de mensagem com variáveis clicáveis, inseridas na posição do cursor. */
-export function MessageField({ id, label, value, onChange, rows = 3, hint, variables = [] }: MessageFieldProps) {
+export function MessageField({ id, label, value, onChange, rows = 3, hint, placeholder, variables = [] }: MessageFieldProps) {
   const box = useRef<HTMLTextAreaElement>(null);
 
   const insert = (mark: string) => {
@@ -70,7 +97,7 @@ export function MessageField({ id, label, value, onChange, rows = 3, hint, varia
   return (
     <div>
       <label htmlFor={id} className={labelClass}>{label}</label>
-      <textarea ref={box} id={id} rows={rows} value={value} onChange={(event) => onChange(event.target.value)} className={`${fieldClass} resize-y leading-relaxed`} />
+      <textarea ref={box} id={id} rows={rows} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className={`${fieldClass} resize-y leading-relaxed`} />
       {variables.length > 0 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] text-slate-500 dark:text-slate-400">Inserir:</span>

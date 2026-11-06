@@ -4,7 +4,7 @@ import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { readMenuState, saveMenuState } from "@/lib/chat/menu";
-import { composeWithMenu } from "@/lib/chat/settings";
+import { composeWithMenu, silenceFarewell } from "@/lib/chat/settings";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 
 const MINUTE = 60_000;
@@ -135,7 +135,7 @@ export async function runClock() {
         await sendAutomaticMessage(row, settings.silenceAskText.replaceAll("{minutos}", String(settings.silenceCloseMinutes)));
         summary.silenceAsked += 1;
       } else if (now - new Date(state.warnedAt).getTime() >= settings.silenceCloseMinutes * MINUTE) {
-        await closeConversation(row, null, "Conversa encerrada por falta de resposta", settings.silenceCloseText);
+        await closeConversation(row, null, "Conversa encerrada por falta de resposta", silenceFarewell(settings));
         summary.silenceClosed += 1;
       }
     }

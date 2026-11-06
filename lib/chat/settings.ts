@@ -34,6 +34,8 @@ export type ChatMenuSettings = {
   silenceAskMinutes: number;
   silenceCloseMinutes: number;
   silenceAskText: string;
+  /** Desligado: o encerramento por inatividade herda farewellText. */
+  silenceCloseCustom: boolean;
   silenceCloseText: string;
   options: MenuOption[];
   canvas: MenuCanvas;
@@ -54,10 +56,15 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   silenceAskMinutes: 10,
   silenceCloseMinutes: 3,
   silenceAskText: "Você ainda está por aí? Se não responder, encerro esta conversa em {minutos} minutos.",
-  silenceCloseText: "Encerrei esta conversa por falta de resposta. Quando precisar, é só mandar uma mensagem.",
+  silenceCloseCustom: false,
+  silenceCloseText: "",
   options: [],
   canvas: { positions: {}, drafts: [] },
 };
+
+/** Texto personalizado vazio ou desligado cai na despedida padrão. */
+export const silenceFarewell = (settings: ChatMenuSettings) =>
+  settings.silenceCloseCustom && settings.silenceCloseText.trim() ? settings.silenceCloseText : settings.farewellText;
 
 export const newMenuOption = (overrides: Partial<MenuOption> = {}): MenuOption => ({
   id: crypto.randomUUID(),

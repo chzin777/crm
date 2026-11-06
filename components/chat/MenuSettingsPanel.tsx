@@ -330,9 +330,31 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                     <DurationField label="Esperar antes de perguntar" value={settings.silenceAskMinutes} onChange={(value) => set("silenceAskMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[5, 10, 15, 30].map((value) => ({ value, label: `${value} min` }))} />
                     <MessageField id="menu-silence-ask" label="Pergunta" rows={2} value={settings.silenceAskText} onChange={(value) => set("silenceAskText", value)} variables={[{ mark: "{minutos}", label: "Tempo até encerrar" }]} />
                   </TimelineStep>
-                  <TimelineStep number={3} title="Encerrar a conversa" description="Se ele voltar depois, começa uma conversa nova." last>
+                  <TimelineStep number={3} title="Encerrar a conversa" description="Acontece se o cliente não responder à pergunta dentro do tempo abaixo. Se ele voltar depois, começa uma conversa nova." last>
                     <DurationField label="Esperar depois da pergunta" value={settings.silenceCloseMinutes} onChange={(value) => set("silenceCloseMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[2, 3, 5, 10].map((value) => ({ value, label: `${value} min` }))} />
-                    <MessageField id="menu-silence-close" label="Mensagem de encerramento" rows={2} value={settings.silenceCloseText} onChange={(value) => set("silenceCloseText", value)} />
+                    <div>
+                      <SwitchRow
+                        title="Personalizar mensagem ao encerrar por inatividade"
+                        description={settings.silenceCloseCustom ? "O cliente recebe o texto abaixo." : "Usando a despedida padrão."}
+                        tip="Desligado: envia a Mensagem de Despedida Padrão. Ligado: envia o texto abaixo; se ele ficar vazio, volta para a padrão."
+                        checked={settings.silenceCloseCustom}
+                        onChange={(value) => set("silenceCloseCustom", value)}
+                      />
+                      <div inert={!settings.silenceCloseCustom} className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${settings.silenceCloseCustom ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+                        <div className="min-h-0 overflow-hidden">
+                          <div className="ml-1 mt-3 border-l-2 border-[#C4D600] pl-3">
+                            <MessageField id="menu-silence-close" label="Mensagem de encerramento por inatividade" rows={2} value={settings.silenceCloseText} onChange={(value) => set("silenceCloseText", value)} placeholder="Seu atendimento foi encerrado por falta de retorno. Caso precise, mande um oi novamente." variables={CUSTOMER_VARIABLES} hint="Vazio: a despedida padrão é enviada." />
+                          </div>
+                        </div>
+                      </div>
+                      {!settings.silenceCloseCustom && (
+                        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+                          <p className={labelClass}>O cliente recebe</p>
+                          <p className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">{settings.farewellText.trim() || "Nenhuma mensagem: a despedida padrão está desligada."}</p>
+                          <button type="button" onClick={() => setSection("closing")} className="mt-1 cursor-pointer text-xs font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">Editar em Encerramento e fila</button>
+                        </div>
+                      )}
+                    </div>
                   </TimelineStep>
                 </ol>
               )}
@@ -343,11 +365,12 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
             <>
               <SettingCard
                 icon={Hand}
-                title="Despedida"
-                description="Enviada quando a equipe encerra, se a janela de 24h estiver aberta."
+                title="Mensagem de Despedida Padrão"
+                description="Enviada ao finalizar o atendimento, seja manualmente pelo atendente ou ao concluir a fila."
+                tip="Só é enviada com a janela de 24h aberta. Também vale para o silêncio do cliente, salvo mensagem própria. Opções de menu que encerram usam o texto da opção."
                 action={<Switch checked={settings.farewellText.trim().length > 0} onChange={(value) => set("farewellText", value ? DEFAULT_CHAT_SETTINGS.farewellText : "")} label="Enviar despedida" />}
               >
-                {settings.farewellText.trim().length > 0 && <MessageField id="menu-farewell" label="Mensagem" rows={3} value={settings.farewellText} onChange={(value) => set("farewellText", value)} variables={CUSTOMER_VARIABLES} />}
+                {settings.farewellText.trim().length > 0 && <MessageField id="menu-farewell" label="Texto da mensagem" rows={3} value={settings.farewellText} onChange={(value) => set("farewellText", value)} variables={CUSTOMER_VARIABLES} />}
               </SettingCard>
 
               <SettingCard

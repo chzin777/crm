@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import type { ChatActor } from "@/lib/chat/access";
 import { addAudit, addSystemMessage, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { ChatRuleError, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { fillVariables } from "@/lib/chat/text";
 
 export const openCount = (userId: string) => prisma.chatConversation.count({ where: { assigneeId: userId, closedAt: null } });
 
@@ -100,7 +101,10 @@ export async function closeConversation(conversation: ChatConversation, actor: C
   await addSystemMessage(conversation.id, systemText);
   await addAudit({ userId: actor?.id ?? null, action: "conversation.close", targetId: conversation.id, before: { status: conversation.status } });
   const text = farewell ?? (await readChatSettings()).farewellText;
-  if (text.trim() && isWindowOpen(conversation.lastInboundAt)) await sendAutomaticMessage(conversation, text);
+  if (text.trim() && isWindowOpen(conversation.lastInboundAt)) {
+    const contact = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } });
+    await sendAutomaticMessage(conversation, fillVariables(text, { customer: contact?.name, agent: actor?.name }));
+  }
 }
 
 export async function reopenConversation(actor: ChatActor, conversation: ChatConversation) {
