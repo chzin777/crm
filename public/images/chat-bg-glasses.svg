@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="360" height="360" viewBox="0 0 360 360">
+  <defs>
+    <g id="wayfarer">
+      <rect x="-33" y="-10" width="28" height="21" rx="7"/>
+      <rect x="5" y="-10" width="28" height="21" rx="7"/>
+      <path d="M-5-4q5-4 10 0M-33-6l-9-5M33-6l9-5"/>
+    </g>
+    <g id="round">
+      <circle cx="-16" cy="0" r="13"/>
+      <circle cx="16" cy="0" r="13"/>
+      <path d="M-3-2q3-3 6 0M-29-3l-11-4M29-3l11-4"/>
+    </g>
+    <path id="aviator-lens" d="M-4-8c-8-2-20-2-26 0-5 2-4 8-2 12 3 7 8 10 14 10 9 0 14-10 14-22z"/>
+    <g id="aviator">
+      <use href="#aviator-lens" xlink:href="#aviator-lens"/>
+      <use href="#aviator-lens" xlink:href="#aviator-lens" transform="scale(-1 1)"/>
+      <path d="M-4-8q4-2 8 0M-4-3q4-2 8 0M-31-6l-9-4M31-6l9-4"/>
+    </g>
+    <path id="cat-lens" d="M-5-4c-7 2-18 0-30-8 0 14 8 22 18 22 8 0 12-6 12-14z"/>
+    <g id="cat">
+      <use href="#cat-lens" xlink:href="#cat-lens"/>
+      <use href="#cat-lens" xlink:href="#cat-lens" transform="scale(-1 1)"/>
+      <path d="M-5-3q5-4 10 0"/>
+    </g>
+  </defs>
+  <g fill="none" stroke="#051647" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <use href="#wayfarer" xlink:href="#wayfarer" transform="translate(47 42) rotate(-18) scale(.8)"/>
+    <use href="#aviator" xlink:href="#aviator" transform="translate(133 49) rotate(14) scale(.8)"/>
+    <use href="#round" xlink:href="#round" transform="translate(228 41) rotate(-32) scale(.8)"/>
+    <use href="#cat" xlink:href="#cat" transform="translate(314 48) rotate(22) scale(.8)"/>
+    <use href="#cat" xlink:href="#cat" transform="translate(42 136) rotate(30) scale(.8)"/>
+    <use href="#round" xlink:href="#round" transform="translate(138 131) rotate(8) scale(.8)"/>
+    <use href="#wayfarer" xlink:href="#wayfarer" transform="translate(224 139) rotate(36) scale(.8)"/>
+    <use href="#aviator" xlink:href="#aviator" transform="translate(317 132) rotate(-24) scale(.8)"/>
+    <use href="#aviator" xlink:href="#aviator" transform="translate(48 227) rotate(-8) scale(.8)"/>
+    <use href="#cat" xlink:href="#cat" transform="translate(131 222) rotate(-34) scale(.8)"/>
+    <use href="#round" xlink:href="#round" transform="translate(229 229) rotate(18) scale(.8)"/>
+    <use href="#wayfarer" xlink:href="#wayfarer" transform="translate(312 224) rotate(-12) scale(.8)"/>
+    <use href="#round" xlink:href="#round" transform="translate(43 318) rotate(26) scale(.8)"/>
+    <use href="#wayfarer" xlink:href="#wayfarer" transform="translate(136 313) rotate(-28) scale(.8)"/>
+    <use href="#cat" xlink:href="#cat" transform="translate(226 320) rotate(10) scale(.8)"/>
+    <use href="#aviator" xlink:href="#aviator" transform="translate(315 316) rotate(32) scale(.8)"/>
+  </g>
+</svg>

@@ -193,16 +193,19 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
   };
 
   if (loading) {
-    return <div className="flex min-h-0 flex-1 items-center justify-center bg-[#efe7dd]/30 dark:bg-[#0b1a3a]"><LoadingSpinner label="Carregando mensagens..." size={32} /></div>;
+    return <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100/70 dark:bg-[#040e2e]"><LoadingSpinner label="Carregando mensagens..." size={32} /></div>;
   }
 
   return (
+    <div className="relative isolate min-h-0 flex-1 overflow-hidden bg-slate-100/70 dark:bg-[#040e2e]">
+    {/* Fora da área de rolagem, para a textura cobrir a tela inteira e não rolar com as mensagens. */}
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 bg-repeat opacity-[0.035] [background-size:360px_auto] dark:opacity-[0.025] dark:invert" style={{ backgroundImage: "url('/images/chat-bg-glasses.svg')" }} />
     <div
       ref={scroller}
       onScroll={(event) => {
         if (event.currentTarget.scrollTop < 80) void loadOlder();
       }}
-      className="min-h-0 flex-1 overflow-y-auto bg-[#efe7dd]/30 p-4 dark:bg-[#0b1a3a]"
+      className="absolute inset-0 z-10 overflow-y-auto p-4"
     >
       {messages.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-slate-500 dark:text-slate-400">
@@ -289,6 +292,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
           images={messages.filter((message) => message.attachment?.kind === "image" || message.attachment?.kind === "sticker").map((message) => ({ id: message.id, url: mediaUrl(message), name: message.attachment!.name }))}
         />
       )}
+    </div>
     </div>
   );
 }
