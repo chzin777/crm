@@ -10,6 +10,8 @@ const client = new S3Client({
     secretAccessKey: process.env.MINIO_SECRET_KEY || "",
   },
   forcePathStyle: true,
+  // Com Range, o armazenamento devolve o checksum do objeto inteiro e a validação padrão quebra a leitura.
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
 
 const BUCKET = process.env.MINIO_BUCKET || "crm-campaigns";

@@ -77,12 +77,21 @@ async function findOrCreateContact(waId: string, profileName: string | undefined
     select: { id: true },
   });
   if (contact) return contact;
-  return prisma.contact.upsert({
-    where: { sourceKey: `whatsapp:${waId}` },
-    create: { sourceKey: `whatsapp:${waId}`, name: profileName?.trim() || formatPhone(waId), phone: waId },
-    update: {},
-    select: { id: true },
-  });
+  const sourceKey = `whatsapp:${waId}`;
+  try {
+    return await prisma.contact.upsert({
+      where: { sourceKey },
+      create: { sourceKey, name: profileName?.trim() || formatPhone(waId), phone: waId },
+      update: {},
+      select: { id: true },
+    });
+  } catch (error) {
+    // Duas mensagens do mesmo número novo ao mesmo tempo: quem perdeu a corrida usa o contato criado.
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+    const existing = await prisma.contact.findUnique({ where: { sourceKey }, select: { id: true } });
+    if (!existing) throw error;
+    return existing;
+  }
 }
 
 let bucketReady = false;
