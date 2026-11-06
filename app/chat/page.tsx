@@ -41,6 +41,7 @@ function ChatWorkspace() {
   const [sendError, setSendError] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
+  const [agentName, setAgentName] = useState("");
   const [queueOptions, setQueueOptions] = useState<{ id: string; name: string }[]>([]);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -54,8 +55,9 @@ function ChatWorkspace() {
     fetch("/api/me/chat")
       .then(async (response) => {
         if (!response.ok) return;
-        const me = (await response.json()) as { capabilities: Record<string, boolean> };
+        const me = (await response.json()) as { name: string; capabilities: Record<string, boolean> };
         setCapabilities(me.capabilities);
+        setAgentName(me.name);
       })
       .catch((error) => console.error("[chat]", error));
     fetch("/api/chat/queues")
@@ -273,6 +275,16 @@ function ChatWorkspace() {
 
   const updateConversation = (body: Record<string, unknown>) => conversationAction("", { method: "PATCH", body: JSON.stringify(body) });
 
+  const toggleBlock = async (phone: string, blocked: boolean) => {
+    const response = await fetch(blocked ? `/api/chat/blocked?phone=${encodeURIComponent(phone)}` : "/api/chat/blocked", {
+      method: blocked ? "DELETE" : "POST",
+      headers: { "Content-Type": "application/json" },
+      ...(blocked ? {} : { body: JSON.stringify({ phone }) }),
+    }).catch(() => null);
+    if (response?.ok) refreshOpen();
+    else setSendError("Não foi possível alterar o bloqueio.");
+  };
+
   const open = selectedId ? detail?.id === selectedId ? detail : null : null;
   const waiting = open?.status === "waiting" ? waitingLabel(open.waitingSince).text : "";
 
@@ -369,7 +381,7 @@ function ChatWorkspace() {
                 </div>
               </div>
               <MessageList key={open.id} conversationId={open.id} tick={tick} onReply={canWrite ? setReplyTo : undefined} listRef={messageList} />
-              <Composer key={open.id} conversation={open} canWrite={canWrite} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={handleSend} onTemplate={handleTemplate} onAttach={handleAttach} onError={setSendError} uploadProgress={uploadProgress} error={sendError} />
+              <Composer key={open.id} conversation={open} agentName={agentName} canWrite={canWrite} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={handleSend} onTemplate={handleTemplate} onAttach={handleAttach} onError={setSendError} uploadProgress={uploadProgress} error={sendError} />
             </>
           ) : selectedId ? (
             <div className="flex flex-1 items-center justify-center"><LoadingSpinner label="Abrindo conversa..." size={32} /></div>
@@ -447,7 +459,14 @@ function ChatWorkspace() {
                   ))}
                 </div>
               )}
-              <Link href={`/contatos?busca=${encodeURIComponent(open.phone.replace(/^55/, ""))}`} className="inline-block cursor-pointer text-sm font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Abrir ficha do contato</Link>
+              <div className="flex items-center justify-between gap-3">
+                <Link href={`/contatos?busca=${encodeURIComponent(open.phone.replace(/^55/, ""))}`} className="inline-block cursor-pointer text-sm font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Abrir ficha do contato</Link>
+                {capabilities["chat.queues"] && (
+                  <button type="button" onClick={() => void toggleBlock(open.phone, open.blocked)} className="cursor-pointer text-sm font-medium text-red-600 hover:underline dark:text-red-300">
+                    {open.blocked ? "Desbloquear número" : "Bloquear número"}
+                  </button>
+                )}
+              </div>
             </div>
           </EntityDialog>
         )}

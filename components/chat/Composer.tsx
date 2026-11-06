@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Lock, Mic, Paperclip, Send, Smile, Square, StickyNote, Trash2, X } from "lucide-react";
+import { Lock, Mic, Paperclip, Send, Smile, Square, StickyNote, Trash2, X, Zap } from "lucide-react";
 import { TemplatePicker, type TemplateChoice } from "@/components/chat/TemplatePicker";
+import { fillVariables } from "@/lib/chat/text";
 import type { ChatMessageItem, ConversationDetail } from "@/lib/chat/types";
 import { useRecorder } from "@/lib/chat/use-recorder";
 
@@ -13,8 +14,11 @@ export const EMOJIS = [
 
 export type ComposerSend = { text: string; internal: boolean; replyTo: ChatMessageItem | null };
 
+type QuickReply = { id: string; title: string; text: string; shortcut: string; queueId: string | null };
+
 type Props = {
   conversation: ConversationDetail;
+  agentName: string;
   canWrite: boolean;
   replyTo: ChatMessageItem | null;
   onCancelReply: () => void;
@@ -28,8 +32,10 @@ type Props = {
 
 const iconButton = "cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800";
 
-export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error }: Props) {
+export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error }: Props) {
   const [text, setText] = useState("");
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [showQuick, setShowQuick] = useState(false);
   const [internal, setInternal] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const [sending, setSending] = useState(false);
@@ -61,6 +67,31 @@ export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSen
   useEffect(() => {
     if (replyTo) field.current?.focus();
   }, [replyTo]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/chat/quick-replies")
+      .then(async (response) => {
+        if (response.ok && active) setQuickReplies(((await response.json()) as { data: QuickReply[] }).data);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const slashTerm = text.startsWith("/") ? text.slice(1).toLowerCase() : null;
+  const quickVisible = showQuick || slashTerm !== null;
+  const term = slashTerm ?? "";
+  const quickMatches = quickReplies
+    .filter((item) => !item.queueId || item.queueId === conversation.queue?.id)
+    .filter((item) => !term || item.title.toLowerCase().includes(term) || item.shortcut.toLowerCase().includes(term));
+
+  const chooseQuick = (item: QuickReply) => {
+    setText(fillVariables(item.text, { customer: conversation.name, agent: agentName, queue: conversation.queue?.name }));
+    setShowQuick(false);
+    field.current?.focus();
+  };
 
   const submit = async () => {
     const value = text.trim();
@@ -108,6 +139,18 @@ export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSen
           ))}
         </div>
       )}
+      {quickVisible && !blocked && !windowClosed && (
+        <div className="mb-2 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          {quickMatches.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhuma resposta pronta encontrada.</p>
+          ) : quickMatches.map((item) => (
+            <button key={item.id} type="button" onClick={() => chooseQuick(item)} className="block w-full cursor-pointer px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700">
+              <span className="block text-xs font-semibold text-slate-900 dark:text-white">{item.title}{item.shortcut ? ` · /${item.shortcut}` : ""}</span>
+              <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{item.text}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {blocked ? (
         <p className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300"><Lock className="h-4 w-4 shrink-0" />Este número está bloqueado e não recebe mensagens. Você ainda pode registrar notas internas.</p>
       ) : windowClosed ? (
@@ -122,6 +165,7 @@ export function Composer({ conversation, canWrite, replyTo, onCancelReply, onSen
       ) : (
         <div className="flex items-end gap-2">
           <button type="button" title="Emojis" aria-label="Emojis" onClick={() => setShowEmojis((value) => !value)} className={iconButton}><Smile className="h-5 w-5" /></button>
+          <button type="button" title="Respostas prontas" aria-label="Respostas prontas" onClick={() => setShowQuick((value) => !value)} className={iconButton}><Zap className="h-5 w-5" /></button>
           {!internal && (
             <>
               <input

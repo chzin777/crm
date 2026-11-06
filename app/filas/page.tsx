@@ -5,6 +5,9 @@ import { Archive, Pencil, Plus, UserMinus } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
+import { BlockedPanel } from "@/components/chat/BlockedPanel";
+import { MenuSettingsPanel } from "@/components/chat/MenuSettingsPanel";
+import { QuickRepliesPanel } from "@/components/chat/QuickRepliesPanel";
 import { waitingLabel } from "@/lib/chat/format";
 
 type Member = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean };
@@ -72,7 +75,7 @@ export default function FilasPage() {
 
   const tabs = [
     { id: "queues", label: "Filas" },
-    ...(canManage ? [{ id: "team", label: "Equipe" }] : []),
+    ...(canManage ? [{ id: "team", label: "Equipe" }, { id: "replies", label: "Respostas prontas" }, { id: "menu", label: "Menu e avisos" }, { id: "blocked", label: "Bloqueados" }] : []),
   ];
 
   return (
@@ -99,6 +102,12 @@ export default function FilasPage() {
 
       {!queues ? (
         <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Carregando filas..." /></div>
+      ) : view === "replies" ? (
+        <QuickRepliesPanel queues={queues} />
+      ) : view === "menu" ? (
+        <MenuSettingsPanel queues={queues} />
+      ) : view === "blocked" ? (
+        <BlockedPanel />
       ) : view === "queues" ? (
         queues.length === 0 ? (
           <p className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">Nenhuma fila criada. Sem fila, as conversas ficam visíveis só para quem vê todas.</p>

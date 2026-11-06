@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Star, UserRound, X } from "lucide-react";
+import { MessageSquare, Star, UserRound, X } from "lucide-react";
 
 interface NotificationActivity {
   id: string;
-  tipo: "lead" | "nps";
+  tipo: "lead" | "nps" | "chat";
   titulo: string;
   descricao: string;
   createdAt: string;
+  href?: string;
 }
 
 interface NotificationDropdownProps {
@@ -33,6 +34,7 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
           setError("");
           setHasLoaded(true);
         }
+        void fetch("/api/notifications", { method: "PATCH" }).catch(() => undefined);
       })
       .catch((cause: unknown) => {
         if (active) {
@@ -72,7 +74,7 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
         ) : activities.length === 0 ? (
           <p className="py-10 text-center text-xs text-slate-400">Nenhuma atividade registrada.</p>
         ) : activities.map((activity) => {
-          const Icon = activity.tipo === "nps" ? Star : UserRound;
+          const Icon = activity.tipo === "chat" ? MessageSquare : activity.tipo === "nps" ? Star : UserRound;
           const iconStyle = activity.tipo === "nps"
             ? "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]"
             : "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]";
@@ -82,7 +84,9 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
                 <Icon className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-xs font-bold leading-tight text-slate-900 dark:text-white">{activity.titulo}</p>
+                <p className="text-xs font-bold leading-tight text-slate-900 dark:text-white">
+                  {activity.href ? <a href={activity.href} className="cursor-pointer hover:underline">{activity.titulo}</a> : activity.titulo}
+                </p>
                 <p className="line-clamp-2 text-[11px] text-slate-600 dark:text-slate-300">{activity.descricao}</p>
                 <time dateTime={activity.createdAt} className="block pt-0.5 text-[10px] text-slate-400">
                   {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(activity.createdAt))}

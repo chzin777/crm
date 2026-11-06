@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { runAutomation } from "@/lib/chat/automation";
 import { recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
@@ -155,13 +156,15 @@ export async function POST(request: Request) {
         for (const msg of change.value?.messages ?? []) {
           await handleInboundMessage(msg).catch((failure) => console.error("[whatsapp/webhook] processar inbound:", failure));
           const profile = profiles.find((item) => item.wa_id === msg.from)?.profile?.name ?? profiles[0]?.profile?.name;
+          let recorded;
           try {
-            await recordInbound(msg, profile);
+            recorded = await recordInbound(msg, profile);
           } catch (failure) {
             // Sem a conversa gravada, a mensagem se perderia: 500 faz a Meta reenviar o evento.
             console.error("[whatsapp/webhook] gravar conversa:", failure);
             return new Response("Falha ao gravar", { status: 500 });
           }
+          if (recorded) await runAutomation(recorded).catch((failure) => console.error("[whatsapp/webhook] fluxo automático:", failure));
         }
       }
     }

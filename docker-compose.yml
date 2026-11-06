@@ -81,6 +81,7 @@ services:
       DATABASE_URL: postgres://crm_user:CrmSecure2024!Pass@pgbouncer:5432/crm
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: 172.30.20.15
+      CHAT_CRON_TOKEN: ${CHAT_CRON_TOKEN:-}
     ports:
     - 3000:3000
     networks:
