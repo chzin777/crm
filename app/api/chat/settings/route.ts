@@ -5,16 +5,22 @@ import { prisma } from "@/lib/prisma";
 import { chatError, requireChatActor } from "@/lib/chat/access";
 import { addAudit, readChatSettings } from "@/lib/chat/conversation";
 
-const option: z.ZodType = z.lazy(() =>
-  z.object({
-    id: z.string().min(1),
-    label: z.string().trim().min(1).max(120),
-    action: z.enum(["submenu", "reply", "queue"]),
-    text: z.string().max(4096),
-    queueId: z.string().nullable(),
-    options: z.array(option).max(20),
-  }),
-);
+const option: z.ZodType = z.lazy(() => z.object({ ...optionFields(), label: z.string().trim().min(1).max(120) }));
+
+const optionFields = () => ({
+  id: z.string().min(1),
+  action: z.enum(["submenu", "reply", "queue", "assign", "tag", "close", "none"]),
+  text: z.string().max(4096),
+  queueId: z.string().nullable(),
+  assigneeId: z.string().nullable().default(null),
+  tagTarget: z.enum(["tag", "segment"]).default("tag"),
+  tagMode: z.enum(["add", "remove"]).default("add"),
+  tagValue: z.string().trim().max(40).default(""),
+  options: z.array(option).max(20),
+});
+
+/** Etapa solta no fluxograma: ainda não é opção de nenhum menu, então não tem rótulo. */
+const draft = z.object({ ...optionFields(), label: z.string().trim().max(120) });
 
 const settings = z.object({
   enabled: z.boolean(),
@@ -33,6 +39,12 @@ const settings = z.object({
   silenceAskText: z.string().max(1000),
   silenceCloseText: z.string().max(1000),
   options: z.array(option).max(20),
+  canvas: z
+    .object({
+      positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
+      drafts: z.array(draft).max(50),
+    })
+    .default({ positions: {}, drafts: [] }),
 });
 
 export async function GET() {

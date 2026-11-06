@@ -1,47 +1,25 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, ListOrdered, ListTree, MessageCircleQuestion, MessageSquareText, MessagesSquare, Plus, Save, Timer, Trash2, X } from "lucide-react";
+import dynamic from "next/dynamic";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, List, ListOrdered, ListTree, MessageCircleQuestion, MessageSquareText, MessagesSquare, Plus, Save, Timer, Trash2, Workflow, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { ChoiceCards, DurationField, MessageField, SettingCard, Switch, SwitchRow, fieldClass, labelClass } from "@/components/chat/MenuFormParts";
+import { CUSTOMER_VARIABLES, MenuOptionFields, menuActionSummary, type MenuPeople } from "@/components/chat/MenuOptionFields";
 import { MenuSimulator } from "@/components/chat/MenuSimulator";
-import { DEFAULT_CHAT_SETTINGS, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
+import { DEFAULT_CHAT_SETTINGS, addToTree, moveInTree, newMenuOption, removeFromTree, updateTree, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
 
-type Queues = { id: string; name: string }[];
+const MenuFlowCanvas = dynamic(() => import("@/components/chat/MenuFlowCanvas").then((module) => module.MenuFlowCanvas), {
+  ssr: false,
+  loading: () => <div className="flex h-96 items-center justify-center"><LoadingSpinner label="Carregando fluxograma..." size={32} /></div>,
+});
+
+type Queues = MenuPeople;
 type Section = "menu" | "texts" | "silence" | "closing";
+type MenuView = "list" | "canvas";
 
 const field = fieldClass;
-const CUSTOMER_VARIABLES = [{ mark: "{cliente}", label: "Nome do cliente" }, { mark: "{saudacao}", label: "Bom dia/tarde/noite" }];
 const panel = "min-w-0 rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs sm:p-6 dark:border-slate-700/80 dark:bg-[#07194f]";
-
-const ACTIONS: { id: MenuOption["action"]; label: string; hint: string }[] = [
-  { id: "reply", label: "Responder", hint: "Envia um texto e continua no menu." },
-  { id: "submenu", label: "Abrir submenu", hint: "Mostra outra lista de opções." },
-  { id: "queue", label: "Enviar à fila", hint: "Encerra o menu e passa para a equipe." },
-];
-
-const updateTree = (options: MenuOption[], id: string, patch: Partial<MenuOption>): MenuOption[] =>
-  options.map((option) => (option.id === id ? { ...option, ...patch } : { ...option, options: updateTree(option.options, id, patch) }));
-
-const removeFromTree = (options: MenuOption[], id: string): MenuOption[] =>
-  options.filter((option) => option.id !== id).map((option) => ({ ...option, options: removeFromTree(option.options, id) }));
-
-function moveInTree(options: MenuOption[], id: string, step: number): MenuOption[] {
-  const index = options.findIndex((option) => option.id === id);
-  if (index >= 0) {
-    const target = index + step;
-    if (target < 0 || target >= options.length) return options;
-    const next = [...options];
-    [next[index], next[target]] = [next[target], next[index]];
-    return next;
-  }
-  return options.map((option) => ({ ...option, options: moveInTree(option.options, id, step) }));
-}
-
-const newOption = (): MenuOption => ({ id: crypto.randomUUID(), label: "", action: "reply", text: "", queueId: null, options: [] });
-
-const addToTree = (options: MenuOption[], parentId: string, option: MenuOption): MenuOption[] =>
-  options.map((item) => (item.id === parentId ? { ...item, options: [...item.options, option] } : { ...item, options: addToTree(item.options, parentId, option) }));
 
 function findIssues(settings: ChatMenuSettings) {
   const issues: string[] = [];
@@ -53,13 +31,28 @@ function findIssues(settings: ChatMenuSettings) {
       if (!option.label.trim()) issues.push(`A opção ${name} está sem rótulo.`);
       if (option.action === "reply" && !option.text.trim()) issues.push(`A opção ${name} não tem resposta.`);
       if (option.action === "queue" && !option.queueId) issues.push(`A opção ${name} não tem fila de destino.`);
+      if (option.action === "assign" && !option.assigneeId) issues.push(`A opção ${name} não tem pessoa responsável.`);
+      if (option.action === "tag" && !option.tagValue.trim()) issues.push(`A opção ${name} não tem etiqueta ou segmento definido.`);
+      if (option.action === "close" && !option.text.trim()) issues.push(`A opção ${name} não tem mensagem final.`);
+      if (option.action === "none") issues.push(`A opção ${name} não tem destino.`);
       if (option.action === "submenu") {
         if (option.options.length === 0) issues.push(`O submenu ${name} não tem opções.`);
         walk(option.options, `${name}.`);
       }
     });
   walk(settings.options, "");
+  // Etapas soltas não rodam, mas as opções dentro delas precisam de rótulo para salvar.
+  settings.canvas.drafts.forEach((draft) => walkDraftLabels(draft.options, "solta ", issues));
+  if (settings.canvas.drafts.length > 0) issues.push(`${settings.canvas.drafts.length} ${settings.canvas.drafts.length === 1 ? "etapa solta não está ligada" : "etapas soltas não estão ligadas"} ao menu.`);
   return issues;
+}
+
+function walkDraftLabels(options: MenuOption[], prefix: string, issues: string[]) {
+  options.forEach((option, index) => {
+    const name = `${prefix}${index + 1}`;
+    if (!option.label.trim()) issues.push(`A opção ${name} está sem rótulo.`);
+    walkDraftLabels(option.options, `${name}.`, issues);
+  });
 }
 
 /** Etapa da linha do tempo do silêncio. */
@@ -82,6 +75,7 @@ type TreeProps = {
   prefix: string;
   openId: string | null;
   queues: Queues;
+  agents: MenuPeople;
   onOpen: (id: string | null) => void;
   onPatch: (id: string, patch: Partial<MenuOption>) => void;
   onRemove: (id: string) => void;
@@ -89,13 +83,12 @@ type TreeProps = {
   onAdd: (parentId: string | null) => void;
 };
 
-function OptionTree({ options, prefix, openId, queues, onOpen, onPatch, onRemove, onMove, onAdd }: TreeProps) {
+function OptionTree({ options, prefix, openId, queues, agents, onOpen, onPatch, onRemove, onMove, onAdd }: TreeProps) {
   return (
     <ul className="space-y-2">
       {options.map((option, index) => {
         const open = openId === option.id;
-        const queueName = queues.find((queue) => queue.id === option.queueId)?.name;
-        const summary = option.action === "submenu" ? `Submenu · ${option.options.length} ${option.options.length === 1 ? "opção" : "opções"}` : option.action === "queue" ? `Fila: ${queueName ?? "não escolhida"}` : "Responde um texto";
+        const summary = menuActionSummary(option, queues, agents);
         return (
           <li key={option.id} className={`rounded-xl border transition-colors ${open ? "border-[#002187] dark:border-[#C4D600]" : "border-slate-200/80 dark:border-slate-700/80"}`}>
             <div className="flex items-center gap-2 p-2">
@@ -116,42 +109,13 @@ function OptionTree({ options, prefix, openId, queues, onOpen, onPatch, onRemove
                   <label htmlFor={`label-${option.id}`} className={labelClass}>Rótulo que o cliente lê</label>
                   <input id={`label-${option.id}`} autoFocus={!option.label} value={option.label} placeholder="Ex.: Falar com vendas" onChange={(event) => onPatch(option.id, { label: event.target.value })} className={field} />
                 </div>
-                <div>
-                  <p className={labelClass}>O que acontece ao escolher</p>
-                  <div role="radiogroup" aria-label="Ação da opção" className="grid gap-2 sm:grid-cols-3">
-                    {ACTIONS.map((action) => {
-                      const selected = option.action === action.id;
-                      return (
-                        <button key={action.id} type="button" role="radio" aria-checked={selected} onClick={() => onPatch(option.id, { action: action.id })} className={`cursor-pointer rounded-lg border p-2.5 text-left transition-colors ${selected ? "border-[#002187] bg-[#002187]/5 dark:border-[#C4D600] dark:bg-[#C4D600]/10" : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-white/5"}`}>
-                          <span className="block text-xs font-semibold text-slate-900 dark:text-white">{action.label}</span>
-                          <span className="block text-[11px] leading-snug text-slate-500 dark:text-slate-400">{action.hint}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {option.action === "queue" && (
-                  <div>
-                    <label htmlFor={`queue-${option.id}`} className={labelClass}>Fila de destino</label>
-                    <select id={`queue-${option.id}`} value={option.queueId ?? ""} onChange={(event) => onPatch(option.id, { queueId: event.target.value || null })} className={`${field} cursor-pointer`}>
-                      <option value="">Selecione a fila</option>
-                      {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <MessageField
-                  id={`text-${option.id}`}
-                  variables={CUSTOMER_VARIABLES}
-                  label={option.action === "submenu" ? "Frase antes da lista (opcional)" : option.action === "queue" ? "Mensagem ao encaminhar (opcional)" : "Resposta enviada ao cliente"}
-                  value={option.text}
-                  onChange={(value) => onPatch(option.id, { text: value })}
-                />
+                <MenuOptionFields option={option} queues={queues} agents={agents} onPatch={(patch) => onPatch(option.id, patch)} />
               </div>
             )}
             {option.action === "submenu" && (
               <div className="border-t border-slate-100 p-3 pl-4 dark:border-slate-800">
                 <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400"><CornerDownRight className="h-3.5 w-3.5" />Opções deste submenu</p>
-                <OptionTree options={option.options} prefix={`${prefix}${index + 1}.`} openId={openId} queues={queues} onOpen={onOpen} onPatch={onPatch} onRemove={onRemove} onMove={onMove} onAdd={onAdd} />
+                <OptionTree options={option.options} prefix={`${prefix}${index + 1}.`} openId={openId} queues={queues} agents={agents} onOpen={onOpen} onPatch={onPatch} onRemove={onRemove} onMove={onMove} onAdd={onAdd} />
                 <button type="button" onClick={() => onAdd(option.id)} className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-[#002187] hover:bg-slate-100 dark:text-[#C4D600] dark:hover:bg-slate-800"><Plus className="h-3.5 w-3.5" />Adicionar ao submenu</button>
               </div>
             )}
@@ -162,8 +126,9 @@ function OptionTree({ options, prefix, openId, queues, onOpen, onPatch, onRemove
   );
 }
 
-export function MenuSettingsPanel({ queues }: { queues: Queues }) {
+export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: MenuPeople }) {
   const toast = useToast();
+  const [view, setView] = useState<MenuView>("list");
   const [settings, setSettings] = useState<ChatMenuSettings | null>(null);
   const [saved, setSaved] = useState("");
   const [section, setSection] = useState<Section>("menu");
@@ -194,7 +159,7 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
   const blocking = issues.filter((issue) => issue.includes("sem rótulo"));
 
   const addOption = (parentId: string | null) => {
-    const option = newOption();
+    const option = newMenuOption();
     set("options", parentId ? addToTree(settings.options, parentId, option) : [...settings.options, option]);
     setOpenId(option.id);
   };
@@ -227,8 +192,35 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
     { id: "closing", label: "Encerramento e fila", status: settings.farewellText.trim() ? "Despedida ativa" : "Sem despedida", icon: CheckCircle2 },
   ];
 
+  const issuesBanner = issues.length > 0 && (
+    <div role="status" className="rounded-xl border border-[#F7915E]/50 bg-[#F7915E]/10 px-4 py-3">
+      <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white"><AlertTriangle className="h-4 w-4 text-[#F7915E]" />Falta ajustar</p>
+      <ul className="list-disc space-y-0.5 pl-6 text-xs text-slate-700 dark:text-slate-200">
+        {issues.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
+        {issues.length > 5 && <li>e mais {issues.length - 5}.</li>}
+      </ul>
+    </div>
+  );
+
+  const views: { id: MenuView; label: string; icon: typeof Timer }[] = [
+    { id: "list", label: "Visualização em Lista", icon: List },
+    { id: "canvas", label: "Fluxograma / Canvas", icon: Workflow },
+  ];
+
   return (
     <div className={dirty ? "pb-20" : ""}>
+      <div role="tablist" aria-label="Modo de edição do menu" className="mb-4 inline-flex max-w-full gap-1 rounded-xl border border-slate-200/80 bg-white p-1 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
+        {views.map(({ id, label, icon: Icon }) => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)} className={`inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${view === id ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-white/5"}`}><Icon className="h-4 w-4 shrink-0" />{label}</button>
+        ))}
+      </div>
+
+      {view === "canvas" ? (
+        <div className="space-y-4">
+          {issuesBanner}
+          <MenuFlowCanvas settings={settings} queues={queues} agents={agents} saving={saving} onChange={setSettings} onSave={() => void save()} />
+        </div>
+      ) : (
       <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         <div className="min-w-0 space-y-4">
         <aside className="rounded-xl border border-slate-200/80 bg-white p-2 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
@@ -249,19 +241,11 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
             })}
           </ul>
         </aside>
-        {(section === "menu" || section === "texts") && <MenuSimulator settings={settings} queues={queues} />}
+        {(section === "menu" || section === "texts") && <MenuSimulator settings={settings} queues={queues} agents={agents} />}
         </div>
 
         <div className="min-w-0 space-y-4">
-          {issues.length > 0 && (
-            <div role="status" className="rounded-xl border border-[#F7915E]/50 bg-[#F7915E]/10 px-4 py-3">
-              <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white"><AlertTriangle className="h-4 w-4 text-[#F7915E]" />Falta ajustar</p>
-              <ul className="list-disc space-y-0.5 pl-6 text-xs text-slate-700 dark:text-slate-200">
-                {issues.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
-                {issues.length > 5 && <li>e mais {issues.length - 5}.</li>}
-              </ul>
-            </div>
-          )}
+          {issuesBanner}
 
           {section === "menu" && (
             <section className={`${panel} space-y-5`}>
@@ -283,6 +267,7 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
                       prefix=""
                       openId={openId}
                       queues={queues}
+                      agents={agents}
                       onOpen={setOpenId}
                       onPatch={(id, patch) => set("options", updateTree(settings.options, id, patch))}
                       onRemove={removeOption}
@@ -382,6 +367,7 @@ export function MenuSettingsPanel({ queues }: { queues: Queues }) {
           )}
         </div>
       </div>
+      )}
 
       {dirty && (
         <div className="fixed bottom-6 left-1/2 z-50 flex max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 shadow-2xl dark:border-slate-700 dark:bg-[#07194f]">

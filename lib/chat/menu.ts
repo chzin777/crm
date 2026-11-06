@@ -1,10 +1,12 @@
 import "server-only";
 import type { ChatConversation } from "@/generated/prisma/client";
 import { Prisma } from "@/generated/prisma/client";
+import { invalidateCache } from "@/lib/cache";
 import { prisma } from "@/lib/prisma";
+import { assignFromMenu, closeConversation } from "@/lib/chat/actions";
 import { readChatSettings } from "@/lib/chat/conversation";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
-import { composeWithMenu, optionsAt } from "@/lib/chat/settings";
+import { composeWithMenu, optionsAt, type MenuOption } from "@/lib/chat/settings";
 import { fillVariables } from "@/lib/chat/text";
 
 export type MenuState = {
@@ -38,6 +40,21 @@ function choiceFrom(text: string, count: number) {
   if (!/^\d{1,2}$/.test(text)) return null;
   const value = Number(text);
   return value === 0 || value <= count ? value : null;
+}
+
+async function applyTag(conversation: ChatConversation, option: MenuOption) {
+  const value = option.tagValue.trim();
+  if (!value) return;
+  if (option.tagTarget === "segment") {
+    await prisma.contact.updateMany({
+      where: { id: conversation.contactId, ...(option.tagMode === "remove" ? { segment: value } : {}) },
+      data: { segment: option.tagMode === "add" ? value : null },
+    });
+    await invalidateCache("dashboard", "audience:store:");
+    return;
+  }
+  const others = conversation.tags.filter((tag) => tag !== value);
+  await prisma.chatConversation.update({ where: { id: conversation.id }, data: { tags: option.tagMode === "add" ? [...others, value] : others } });
 }
 
 type Entry = { conversation: ChatConversation; customerName: string; text: string; firstMessage: boolean };
@@ -107,7 +124,28 @@ export async function attendByMenu({ conversation, customerName, text: rawText, 
     return true;
   }
 
-  await say(option.text);
+  if (option.action === "assign") {
+    state.stopped = true;
+    await assignFromMenu(conversation, option.assigneeId, state as unknown as Prisma.InputJsonValue);
+    if (option.text.trim()) await say(option.text);
+    return true;
+  }
+
+  if (option.action === "close") {
+    state.stopped = true;
+    await saveMenuState(conversation.id, state);
+    await closeConversation(conversation, null, "Menu automático encerrou a conversa", fillVariables(option.text, { customer: customerName }));
+    return true;
+  }
+
+  if (option.action === "none") {
+    await show([settings.invalidOptionText]);
+    await saveMenuState(conversation.id, state);
+    return true;
+  }
+
+  if (option.action === "tag") await applyTag(conversation, option);
+  if (option.text.trim()) await say(option.text);
   if (settings.closingDelaySeconds <= 0) {
     if (settings.repeatMenu) await show([settings.closingText]);
     else if (settings.closingText.trim()) await say(settings.closingText);

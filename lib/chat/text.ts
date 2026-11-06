@@ -11,6 +11,7 @@ export type TextVariables = {
 
 export const TEXT_VARIABLES = [
   { mark: "{cliente}", description: "primeiro nome do cliente" },
+  { mark: "{nome}", description: "primeiro nome do cliente" },
   { mark: "{cliente_completo}", description: "nome completo do cliente" },
   { mark: "{atendente}", description: "primeiro nome de quem atende" },
   { mark: "{fila}", description: "fila da conversa" },
@@ -32,6 +33,7 @@ export function fillVariables(text: string, data: TextVariables = {}, now = new 
   const agent = (data.agent ?? "").trim();
   const values: Record<string, string> = {
     cliente: firstName(customer),
+    nome: firstName(customer),
     cliente_completo: customer,
     atendente: agent ? firstName(agent) : "nossa equipe",
     fila: (data.queue ?? "").trim(),

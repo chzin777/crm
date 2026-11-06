@@ -13,7 +13,7 @@ function start(settings: ChatMenuSettings): Line[] {
 }
 
 /** Mostra o que o cliente veria, sem enviar nada pelo WhatsApp. */
-export function MenuSimulator({ settings, queues }: { settings: ChatMenuSettings; queues: { id: string; name: string }[] }) {
+export function MenuSimulator({ settings, queues, agents }: { settings: ChatMenuSettings; queues: { id: string; name: string }[]; agents: { id: string; name: string }[] }) {
   const [path, setPath] = useState<string[]>([]);
   const [lines, setLines] = useState<Line[]>(() => start(settings));
   const [stopped, setStopped] = useState(false);
@@ -46,8 +46,20 @@ export function MenuSimulator({ settings, queues }: { settings: ChatMenuSettings
       const queue = queues.find((item) => item.id === option.queueId);
       next.push({ from: "note", text: `Conversa vai para a fila ${queue?.name ?? "padrão"}` });
       setStopped(true);
+    } else if (option.action === "assign") {
+      if (option.text.trim()) next.push({ from: "bot", text: fill(option.text) });
+      next.push({ from: "note", text: `Conversa atribuída a ${agents.find((agent) => agent.id === option.assigneeId)?.name ?? "ninguém (vai para a fila)"}` });
+      setStopped(true);
+    } else if (option.action === "close") {
+      if (option.text.trim()) next.push({ from: "bot", text: fill(option.text) });
+      next.push({ from: "note", text: "Conversa encerrada" });
+      setStopped(true);
+    } else if (option.action === "none") {
+      next.push({ from: "note", text: "Esta opção ainda não tem destino" });
+      next.push({ from: "bot", text: fill(composeWithMenu(settings, path, [settings.invalidOptionText])) });
     } else {
-      next.push({ from: "bot", text: fill(option.text) || "(sem texto)" });
+      if (option.action === "tag") next.push({ from: "note", text: `${option.tagMode === "add" ? "Aplica" : "Remove"} ${option.tagTarget === "tag" ? "etiqueta" : "segmento"}: ${option.tagValue || "não definido"}` });
+      if (option.action === "reply" || option.text.trim()) next.push({ from: "bot", text: fill(option.text) || "(sem texto)" });
       if (settings.closingText.trim()) next.push({ from: "note", text: `Em ${settings.closingDelaySeconds}s: “${settings.closingText}”` });
     }
     setLines((current) => [...current, ...next]);

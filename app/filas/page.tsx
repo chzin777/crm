@@ -105,7 +105,7 @@ export default function FilasPage() {
       ) : view === "replies" ? (
         <QuickRepliesPanel queues={queues} />
       ) : view === "menu" ? (
-        <MenuSettingsPanel queues={queues} />
+        <MenuSettingsPanel queues={queues} agents={agents.filter((agent) => agent.hasChatAccess)} />
       ) : view === "blocked" ? (
         <BlockedPanel />
       ) : view === "queues" ? (

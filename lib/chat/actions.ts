@@ -57,6 +57,38 @@ export async function transferConversation(actor: ChatActor, conversation: ChatC
   }
 }
 
+/** Atribuição do menu: sem a pessoa disponível, a conversa cai na fila em vez de ficar parada. */
+export async function assignFromMenu(conversation: ChatConversation, userId: string | null, menuState: Prisma.InputJsonValue) {
+  const user = userId ? await prisma.user.findFirst({ where: { id: userId, banned: false }, select: { id: true, name: true } }) : null;
+  let available = Boolean(user);
+  if (user) {
+    try {
+      await assertCanReceive(user.id);
+    } catch (error) {
+      if (!(error instanceof ChatRuleError)) throw error;
+      available = false;
+    }
+  }
+
+  await prisma.chatConversation.updateMany({
+    where: { id: conversation.id, closedAt: null },
+    data: {
+      assigneeId: available ? user?.id : null,
+      status: available ? "in_progress" : "waiting",
+      waitingSince: available ? null : new Date(),
+      menuState,
+    },
+  });
+  if (!user || !available) {
+    await addSystemMessage(conversation.id, `Menu automático não conseguiu atribuir${user ? ` a ${user.name}` : ""}. A conversa foi para a fila.`);
+    return;
+  }
+  await addSystemMessage(conversation.id, `Menu automático atribuiu a ${user.name}`);
+  await prisma.chatNotification.create({
+    data: { userId: user.id, conversationId: conversation.id, type: "transfer", title: "Conversa atribuída a você", detail: "Menu automático", href: `/chat?c=${conversation.id}` },
+  });
+}
+
 /** Grava o encerramento antes da despedida: falha no envio não deixa a conversa aberta. */
 export async function closeConversation(conversation: ChatConversation, actor: ChatActor | null, systemText: string, farewell?: string) {
   const updated = await prisma.chatConversation.updateMany({

@@ -1,10 +1,22 @@
 export type MenuOption = {
   id: string;
   label: string;
-  action: "submenu" | "reply" | "queue";
+  /** "none": opção ainda sem destino, criada ou desligada no fluxograma. */
+  action: "submenu" | "reply" | "queue" | "assign" | "tag" | "close" | "none";
   text: string;
   queueId: string | null;
+  assigneeId: string | null;
+  /** Etiqueta fica na conversa; segmento fica no contato. */
+  tagTarget: "tag" | "segment";
+  tagMode: "add" | "remove";
+  tagValue: string;
   options: MenuOption[];
+};
+
+/** Só o fluxograma lê: posição dos nós e etapas soltas, fora da árvore que o menu executa. */
+export type MenuCanvas = {
+  positions: Record<string, { x: number; y: number }>;
+  drafts: MenuOption[];
 };
 
 export type ChatMenuSettings = {
@@ -24,6 +36,7 @@ export type ChatMenuSettings = {
   silenceAskText: string;
   silenceCloseText: string;
   options: MenuOption[];
+  canvas: MenuCanvas;
 };
 
 export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
@@ -43,7 +56,43 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   silenceAskText: "Você ainda está por aí? Se não responder, encerro esta conversa em {minutos} minutos.",
   silenceCloseText: "Encerrei esta conversa por falta de resposta. Quando precisar, é só mandar uma mensagem.",
   options: [],
+  canvas: { positions: {}, drafts: [] },
 };
+
+export const newMenuOption = (overrides: Partial<MenuOption> = {}): MenuOption => ({
+  id: crypto.randomUUID(),
+  label: "",
+  action: "reply",
+  text: "",
+  queueId: null,
+  assigneeId: null,
+  tagTarget: "tag",
+  tagMode: "add",
+  tagValue: "",
+  options: [],
+  ...overrides,
+});
+
+export const updateTree = (options: MenuOption[], id: string, patch: Partial<MenuOption>): MenuOption[] =>
+  options.map((option) => (option.id === id ? { ...option, ...patch } : { ...option, options: updateTree(option.options, id, patch) }));
+
+export const removeFromTree = (options: MenuOption[], id: string): MenuOption[] =>
+  options.filter((option) => option.id !== id).map((option) => ({ ...option, options: removeFromTree(option.options, id) }));
+
+export function moveInTree(options: MenuOption[], id: string, step: number): MenuOption[] {
+  const index = options.findIndex((option) => option.id === id);
+  if (index >= 0) {
+    const target = index + step;
+    if (target < 0 || target >= options.length) return options;
+    const next = [...options];
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  }
+  return options.map((option) => ({ ...option, options: moveInTree(option.options, id, step) }));
+}
+
+export const addToTree = (options: MenuOption[], parentId: string, option: MenuOption): MenuOption[] =>
+  options.map((item) => (item.id === parentId ? { ...item, options: [...item.options, option] } : { ...item, options: addToTree(item.options, parentId, option) }));
 
 export function optionsAt(settings: ChatMenuSettings, path: string[]): MenuOption[] {
   let list = settings.options;
@@ -70,7 +119,24 @@ export function composeWithMenu(settings: ChatMenuSettings, path: string[], part
     : [...filled, list].join("\n\n");
 }
 
+/** Menus gravados antes das ações novas não têm esses campos. */
+const OPTION_DEFAULTS: Pick<MenuOption, "assigneeId" | "tagTarget" | "tagMode" | "tagValue"> = { assigneeId: null, tagTarget: "tag", tagMode: "add", tagValue: "" };
+
+const withOptionDefaults = (option: MenuOption): MenuOption => ({
+  ...OPTION_DEFAULTS,
+  ...option,
+  options: (option.options ?? []).map(withOptionDefaults),
+});
+
 export function mergeChatSettings(stored: unknown): ChatMenuSettings {
   const value = typeof stored === "object" && stored !== null && !Array.isArray(stored) ? (stored as Partial<ChatMenuSettings>) : {};
-  return { ...DEFAULT_CHAT_SETTINGS, ...value };
+  return {
+    ...DEFAULT_CHAT_SETTINGS,
+    ...value,
+    options: (value.options ?? []).map(withOptionDefaults),
+    canvas: {
+      positions: value.canvas?.positions ?? {},
+      drafts: (value.canvas?.drafts ?? []).map(withOptionDefaults),
+    },
+  };
 }
