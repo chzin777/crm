@@ -365,7 +365,7 @@ function ChatWorkspace() {
             actions={(
               <>
                 {canWrite && (
-                  <button type="button" onClick={() => setShowNew(true)} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#25D366] px-3 text-xs font-medium text-[#051647] shadow-xs transition-opacity hover:opacity-90 dark:bg-[#C4D600]">
+                  <button type="button" onClick={() => setShowNew(true)} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-medium text-[#051647] shadow-xs transition-opacity hover:opacity-90">
                     <MessageSquarePlus className="h-4 w-4" />
                     Nova conversa
                   </button>
@@ -396,7 +396,7 @@ function ChatWorkspace() {
                     {initials(open.name)}
                   </div>
                   {open.windowOpen && !open.closedAt && (
-                    <span title="Janela de 24h aberta" className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#25D366] ring-2 ring-white dark:ring-[#07194f]" />
+                    <span title="Janela de 24h aberta" className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#C4D600] ring-2 ring-white dark:ring-[#07194f]" />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -425,8 +425,8 @@ function ChatWorkspace() {
             <div className="flex flex-1 items-center justify-center"><LoadingSpinner label="Abrindo conversa..." size={32} /></div>
           ) : (
             <div className="hidden flex-1 flex-col items-center justify-center gap-4 md:flex">
-              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#25D366]/10">
-                <MessageSquare className="h-10 w-10 text-[#25D366]" />
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#C4D600]/25">
+  <MessageSquare className="h-10 w-10 text-[#051647] dark:text-[#C4D600]" />
               </div>
               <div className="text-center">
                 <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Suas conversas do WhatsApp</h3>

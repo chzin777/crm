@@ -86,7 +86,7 @@ export default function FilasPage() {
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Quem atende cada fila, carga da equipe e configuração do atendimento</p>
         </div>
         {canManage && view === "queues" && (
-          <button type="button" onClick={() => openForm("new")} className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg bg-[#25D366] px-4 text-sm font-semibold text-[#051647] hover:bg-[#1ebe5b] dark:bg-[#C4D600] dark:hover:bg-[#b3c400]">
+          <button type="button" onClick={() => openForm("new")} className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg bg-[#C4D600] px-4 text-sm font-semibold text-[#051647] hover:bg-[#b3c400]">
             <Plus className="h-4 w-4" /> Nova fila
           </button>
         )}

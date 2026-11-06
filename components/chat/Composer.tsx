@@ -200,11 +200,11 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
           <div className="flex h-[42px] min-w-0 flex-1 items-center gap-3 rounded-2xl bg-slate-100 px-4 dark:bg-slate-800/80">
             <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
             <span role="timer" aria-label="Tempo de gravação" className="shrink-0 text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">{Math.floor(recorder.seconds / 60)}:{String(recorder.seconds % 60).padStart(2, "0")}</span>
-            <span aria-hidden="true" className="recording-wave flex h-5 min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden text-emerald-600 dark:text-[#C4D600]">
+            <span aria-hidden="true" className="recording-wave flex h-5 min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden text-[#C4D600]">
               {WAVE_BARS.map((bar) => <span key={bar} style={{ animationDelay: `${(bar * 0.13) % 1.1}s` }} />)}
             </span>
           </div>
-          <button type="button" onClick={() => void sendRecording()} title="Parar e enviar" aria-label="Parar e enviar" className={`${roundButton} bg-emerald-600 text-white hover:bg-emerald-700`}><Check className="h-5 w-5" /></button>
+          <button type="button" onClick={() => void sendRecording()} title="Parar e enviar" aria-label="Parar e enviar" className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}><Check className="h-5 w-5" /></button>
         </div>
       ) : (
         <div className="flex items-end gap-2">
@@ -254,7 +254,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
             className={`max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-y-auto scroll-smooth rounded-2xl px-4 py-[11px] text-sm leading-5 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-1 focus:ring-[#002187]/30 dark:text-white dark:focus:ring-[#C4D600]/40 ${internal ? "bg-[#F7915E]/15!" : "bg-slate-100 dark:bg-slate-800/80!"}`}
           />
           {text.trim() || internal ? (
-            <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className={`${roundButton} bg-[#25D366] text-[#051647] hover:bg-[#1ebe5b] dark:bg-[#C4D600] dark:hover:bg-[#b3c400]`}>
+            <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}>
               <Send className="h-5 w-5" />
             </button>
           ) : (

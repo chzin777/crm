@@ -31,16 +31,16 @@ import { CUSTOMER_VARIABLES, MenuOptionFields, menuActionSummary, type MenuPeopl
 import { ROOT_NODE, START_NODE, addDraft, buildGraph, connectOption, disconnectOption, findOption, organizeNodes, removeNode, removeOption, updateOption, type GraphNode } from "@/lib/chat/menu-graph";
 import { addToTree, moveInTree, newMenuOption, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
 
-const WHATSAPP = "#25D366";
+const BRAND_GREEN = "#C4D600";
 const MAX_OPTIONS = 20;
-const handleClass = "!h-3 !w-3 !border-2 !border-white !bg-[#25D366] dark:!border-[#07194f]";
+const handleClass = "!h-3 !w-3 !border-2 !border-white !bg-[#C4D600] dark:!border-[#07194f]";
 // Sem overflow-hidden no cartão: os pontos de saída ficam metade para fora dele.
 const card = "w-[300px] rounded-xl border bg-white shadow-md dark:bg-[#07194f]";
 const header = "flex items-center gap-2 rounded-t-[11px] bg-[#051647] px-3 py-2 text-xs font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]";
 const toolButton = "inline-flex h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-white/10";
 
 const cardBorder = (selected: boolean, draft: boolean) =>
-  `${selected ? "border-[#25D366] ring-2 ring-[#25D366]/40" : "border-slate-200 dark:border-slate-700"} ${draft ? "border-dashed" : ""}`;
+  `${selected ? "border-[#C4D600] ring-2 ring-[#C4D600]/40" : "border-slate-200 dark:border-slate-700"} ${draft ? "border-dashed" : ""}`;
 
 type StartData = { kind: "start"; greeting: string };
 type MenuData = { kind: "menu"; title: string; text: string; rows: MenuOption[]; prefix: string; draft: boolean };
@@ -52,7 +52,7 @@ const PeopleContext = createContext<{ queues: MenuPeople; agents: MenuPeople }>(
 const StartNode = memo(function StartNode({ data, selected }: NodeProps<Node<StartData, "start">>) {
   return (
     <div className={`${card} ${cardBorder(selected, false)}`}>
-      <div className={header}><Play className="h-3.5 w-3.5 text-[#25D366] dark:text-[#051647]" />Início</div>
+      <div className={header}><Play className="h-3.5 w-3.5 text-[#C4D600] dark:text-[#051647]" />Início</div>
       <p className="line-clamp-4 whitespace-pre-wrap p-3 text-xs text-slate-700 dark:text-slate-200">{data.greeting || "Saudação vazia"}</p>
       <Handle type="source" id={START_NODE} position={Position.Right} isConnectable={false} className={handleClass} />
     </div>
@@ -75,7 +75,7 @@ const MenuNode = memo(function MenuNode({ id, data, selected }: NodeProps<Node<M
         <ul className="py-1">
           {data.rows.map((row, index) => (
             <li key={row.id} className="relative flex h-10 items-center gap-2 px-3 text-xs text-slate-800 dark:text-slate-100">
-              <span className="grid h-5 min-w-5 place-items-center rounded bg-[#25D366]/15 font-bold text-[#128C4B] dark:text-[#25D366]">{index + 1}</span>
+              <span className="grid h-5 min-w-5 place-items-center rounded bg-[#C4D600]/30 font-bold text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{index + 1}</span>
               <span className="min-w-0 flex-1 truncate">{row.label || "Sem rótulo"}</span>
               {row.action === "none" && <span className="shrink-0 text-[10px] font-semibold text-[#F7915E]">sem destino</span>}
               <Handle type="source" id={row.id} position={Position.Right} className={handleClass} />
@@ -96,7 +96,7 @@ const ActionNode = memo(function ActionNode({ data, selected }: NodeProps<Node<A
       <div className={header}><Zap className="h-3.5 w-3.5" /><span className="truncate">{data.prefix && `${data.prefix} · `}{option.label || "Ação"}</span></div>
       <div className="space-y-1 p-3">
         <p className="truncate text-xs font-semibold text-slate-900 dark:text-white">{menuActionSummary(option, queues, agents)}</p>
-        {option.text && <p className="line-clamp-2 flex gap-1.5 whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300"><MessageCircle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: WHATSAPP }} />{option.text}</p>}
+        {option.text && <p className="line-clamp-2 flex gap-1.5 whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300"><MessageCircle className="mt-0.5 h-3 w-3 shrink-0" style={{ color: BRAND_GREEN }} />{option.text}</p>}
       </div>
     </div>
   );
@@ -239,8 +239,8 @@ function Canvas({ settings, queues, agents, saving, onChange, onSave }: Props) {
         deletable: edge.target !== ROOT_NODE,
         reconnectable: edge.target !== ROOT_NODE,
         animated: edge.target === ROOT_NODE,
-        markerEnd: { type: MarkerType.ArrowClosed, color: WHATSAPP },
-        style: { stroke: WHATSAPP, strokeWidth: 2 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: BRAND_GREEN },
+        style: { stroke: BRAND_GREEN, strokeWidth: 2 },
       })),
     );
   }

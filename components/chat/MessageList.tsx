@@ -21,8 +21,8 @@ function Delivery({ delivery, reason, onLime }: { delivery: ChatDelivery | null;
   if (delivery === "sending") return <Clock className="h-3.5 w-3.5" aria-label="Enviando" />;
   if (delivery === "sent") return <Check className="h-3.5 w-3.5" aria-label="Enviada" />;
   if (delivery === "delivered") return <CheckCheck className="h-3.5 w-3.5" aria-label="Entregue" />;
-  // No tema escuro o balão do atendente é lima: o verde sumiria sobre ele.
-  if (delivery === "read") return <CheckCheck className={`h-3.5 w-3.5 text-[#25D366] ${onLime ? "dark:text-[#002187]" : ""}`} aria-label="Lida" />;
+  // No tema escuro o balão do atendente é lima: o check da mesma cor sumiria sobre ele.
+  if (delivery === "read") return <CheckCheck className={`h-3.5 w-3.5 text-[#C4D600] ${onLime ? "dark:text-[#002187]" : ""}`} aria-label="Lida" />;
   if (delivery === "failed") return <span title={reason ?? "Falha no envio"}><AlertCircle className="h-3.5 w-3.5 text-red-400" aria-label="Falhou" /></span>;
   return null;
 }
