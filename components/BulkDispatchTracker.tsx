@@ -14,6 +14,7 @@ export type { BulkJobView };
 /** Avisa o indicador global que um lote acabou de começar (acelera a atualização). */
 export const BULK_STARTED_EVENT = "bulk-dispatch:started";
 const POLL_MS = 3_000;
+const DETAILS_POLL_MS = 1_500;
 const NOTIFIED_KEY = "bulk-dispatch:notified";
 const DISMISSED_KEY = "bulk-dispatch:dismissed";
 
@@ -105,17 +106,20 @@ export function BulkJobDetailsDialog({ jobId, onClose }: { jobId: string; onClos
     let timer: ReturnType<typeof setTimeout> | null = null;
     const fetchJob = async () => {
       try {
-        const response = await fetch(`/api/whatsapp/bulk-send/${jobId}`, { cache: "no-store" });
+        const response = await fetch(`/api/whatsapp/bulk-send/${jobId}?t=${Date.now()}`, { cache: "no-store" });
         const body = await response.json().catch(() => null) as { data?: BulkJobView; error?: string } | null;
         if (cancelled) return;
         if (!response.ok || !body?.data) {
           setError(body?.error ?? "Não foi possível carregar o envio.");
+          // Falha passageira não congela a tela: tenta de novo, exceto se o lote não existe.
+          if (response.status !== 404 && response.status !== 401) timer = setTimeout(fetchJob, DETAILS_POLL_MS);
           return;
         }
+        setError("");
         setJob(body.data);
-        if (body.data.status === "running") timer = setTimeout(fetchJob, POLL_MS);
+        if (body.data.status === "running") timer = setTimeout(fetchJob, DETAILS_POLL_MS);
       } catch {
-        if (!cancelled) timer = setTimeout(fetchJob, POLL_MS);
+        if (!cancelled) timer = setTimeout(fetchJob, DETAILS_POLL_MS);
       }
     };
     void fetchJob();
@@ -134,7 +138,7 @@ export function BulkJobDetailsDialog({ jobId, onClose }: { jobId: string; onClos
       </div>
       {tab === "resultados" ? (
         <CampaignMetricsPanel type="bulk" id={jobId} />
-      ) : job ? <BulkJobProgress job={job} /> : error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : <LoadingSpinner label="Carregando envio..." className="w-full justify-center py-8" />}
+      ) : job ? <>{error && <p role="status" className="mb-3 rounded-lg bg-[#F7915E]/10 p-2 text-xs text-[#9a3d12] dark:text-[#F7915E]">Não foi possível atualizar ({error}). Tentando de novo...</p>}<BulkJobProgress job={job} /></> : error ?<p className="text-sm text-red-600 dark:text-red-400">{error}</p> : <LoadingSpinner label="Carregando envio..." className="w-full justify-center py-8" />}
     </EntityDialog>
   );
 }

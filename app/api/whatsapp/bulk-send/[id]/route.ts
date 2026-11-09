@@ -14,7 +14,8 @@ async function loadJob(params: Promise<{ id: string }>) {
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const result = await loadJob(params);
   if (result.response) return result.response;
-  return Response.json({ data: toView(result.job, true) });
+  // Andamento ao vivo: nenhum cache (navegador, proxy ou Cloudflare) pode guardar esta resposta.
+  return Response.json({ data: toView(result.job, true) }, { headers: { "Cache-Control": "no-store, max-age=0" } });
 }
 
 /** Pausar, retomar ou cancelar o restante do lote. */

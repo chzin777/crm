@@ -35,7 +35,7 @@ export async function GET(request: Request) {
   const isAdmin = recent ? false : (await getUserAccess(user.id))?.isAdmin ?? false;
   const filterUserId = url.searchParams.get("userId") || undefined;
   const jobs = await listBulkJobs({ userId: user.id, all: isAdmin, filterUserId, recent });
-  if (recent) return Response.json({ data: jobs.map((job) => toView(job)) });
+  if (recent) return Response.json({ data: jobs.map((job) => toView(job)) }, { headers: { "Cache-Control": "no-store, max-age=0" } });
 
   // Operadores para o filtro: todos que já criaram lotes.
   const operators = isAdmin

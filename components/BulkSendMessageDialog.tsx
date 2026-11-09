@@ -72,19 +72,39 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   const [job, setJob] = useState<BulkJobView | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Acompanha o lote no servidor enquanto o modal está aberto.
+  const [pollWarning, setPollWarning] = useState("");
+
+  // Acompanha o lote no servidor enquanto o modal está aberto: busca na hora e a cada 1,5s,
+  // sem requisições sobrepostas, até o lote terminar; para tudo ao fechar o modal.
   const jobId = job?.id;
-  const jobRunning = job?.status === "running";
+  const jobActive = job?.status === "running";
   useEffect(() => {
-    if (!jobId || !jobRunning) return;
-    const timer = setInterval(() => {
-      fetch(`/api/whatsapp/bulk-send/${jobId}`, { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((body: { data?: BulkJobView } | null) => { if (body?.data) setJob(body.data); })
-        .catch(() => undefined);
-    }, 2_000);
-    return () => clearInterval(timer);
-  }, [jobId, jobRunning]);
+    if (!jobId || !jobActive) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let failures = 0;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/whatsapp/bulk-send/${jobId}?t=${Date.now()}`, { cache: "no-store", signal: controller.signal });
+        const body = await response.json().catch(() => null) as { data?: BulkJobView; error?: string } | null;
+        if (!response.ok || !body?.data) throw new Error(body?.error ?? `HTTP ${response.status}`);
+        failures = 0;
+        setPollWarning("");
+        setJob(body.data);
+        if (body.data.status !== "running") return;
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        failures += 1;
+        if (failures >= 3) setPollWarning(`Não foi possível atualizar o andamento (${err instanceof Error ? err.message : "erro"}). Tentando de novo...`);
+      }
+      timer = setTimeout(() => void poll(), 1_500);
+    };
+    void poll();
+    return () => {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [jobId, jobActive]);
 
   useEffect(() => {
     if (step !== "message") return;
@@ -236,6 +256,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
             </div>
           )}
 
+          {step === "progress" && pollWarning && <p role="status" className="mb-3 rounded-lg bg-[#F7915E]/10 p-2 text-xs text-[#9a3d12] dark:text-[#F7915E]">{pollWarning}</p>}
           {step === "progress" && job && <BulkJobProgress job={job} />}
         </div>
 
