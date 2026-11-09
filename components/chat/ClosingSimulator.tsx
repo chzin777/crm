@@ -1,11 +1,11 @@
 "use client";
 import { useState } from "react";
 import { PreviewBubble, PreviewFrame, PreviewHint, PreviewListBubble, PreviewListSheet, PreviewNote, type PreviewRow } from "@/components/chat/ChatPreview";
-import { NPS_SCORE_LABELS, npsPrompt, npsScoreLine, type ChatMenuSettings } from "@/lib/chat/settings";
+import { NPS_SCORE_LABELS, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
 import { fillVariables } from "@/lib/chat/text";
 
 const SURVEY_BUTTON = "Avaliar atendimento";
-const ROWS: PreviewRow[] = NPS_SCORE_LABELS.map((label, index) => ({ id: String(index + 1), title: npsScoreLine(label, index) }));
+const ROWS: PreviewRow[] = NPS_SCORE_LABELS.map((label, index) => ({ id: String(index + 1), title: npsScoreTitle(label, index) }));
 
 /** Encerramento como o cliente vê: despedida, pesquisa e o agradecimento depois da nota. */
 export function ClosingSimulator({ settings }: { settings: ChatMenuSettings }) {

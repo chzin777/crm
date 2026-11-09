@@ -391,7 +391,7 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                       <p className={labelClass}>Escala de notas</p>
                       <ul className="flex flex-wrap gap-1.5" aria-label="Escala de notas">
                         {NPS_SCORE_LABELS.map((label, index) => (
-                          <li key={label} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300"><Star className={`h-3 w-3 ${index >= 3 ? "fill-[#C4D600] text-[#C4D600]" : "text-slate-400"}`} />{npsScoreLine(label, index)}</li>
+                          <li key={label} className={`rounded-full border px-2 py-0.5 text-[11px] ${index >= 3 ? "border-[#C4D600] bg-[#C4D600]/10 text-slate-700 dark:text-slate-200" : "border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300"}`}>{npsScoreLine(label, index)}</li>
                         ))}
                       </ul>
                     </div>

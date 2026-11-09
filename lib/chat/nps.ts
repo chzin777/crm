@@ -5,15 +5,25 @@ import { sendList } from "@/lib/meta-whatsapp";
 import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
-import { NPS_SCALE_TEXT, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreLine as scoreLine } from "@/lib/chat/settings";
+import { NPS_LEGACY_SCALE_TEXT, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreTitle } from "@/lib/chat/settings";
 
 const SURVEY_HOURS = 24;
 const COMMENT_WINDOW_MS = 10 * 60_000;
 const COMMENT_MAX = 1000;
 
-/** Aceita "5", "5 - Muito satisfeito" ou só o rótulo; frase solta como "2 óculos" não vira nota. */
-export function parseNpsScore(text: string) {
-  const clean = text.trim().toLowerCase();
+const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
+
+/**
+ * Aceita o toque na lista (id nps_N), "5", "5 - Muito satisfeito 🤩", só o rótulo ou só o emoji.
+ * Frase solta como "2 óculos" não vira nota.
+ */
+export function parseNpsScore(text: string, choiceId?: string | null) {
+  const picked = choiceId?.match(/^nps_([1-5])$/);
+  if (picked) return Number(picked[1]);
+  const raw = text.trim();
+  const emoji = NPS_SCORE_EMOJIS.indexOf(raw.replace(/\u{FE0F}/gu, ""));
+  if (emoji >= 0) return emoji + 1;
+  const clean = raw.replace(EMOJI, "").trim().toLowerCase();
   const numbered = clean.match(/^([1-5])(?:\s*[-.):]\s*.*)?$/);
   if (numbered) return Number(numbered[1]);
   const label = SCORE_LABELS.findIndex((item) => item.toLowerCase() === clean);
@@ -24,12 +34,13 @@ export function parseNpsScore(text: string) {
 const surveyList = (phone: string, question: string) => () => sendList(phone, {
   body: question.slice(0, 1024),
   button: "Avaliar atendimento",
-  rows: SCORE_LABELS.map((label, index) => ({ id: `nps_${index + 1}`, title: scoreLine(label, index) })),
+  rows: SCORE_LABELS.map((label, index) => ({ id: `nps_${index + 1}`, title: npsScoreTitle(label, index) })),
 });
 
 /** A pergunta é editável; o que marca a pesquisa no histórico é a escala no fim. */
-export const isSurveyMessage = (text: string) => text.endsWith(NPS_SCALE_TEXT);
-const questionOf = (text: string) => text.slice(0, -NPS_SCALE_TEXT.length).trim();
+const scaleOf = (text: string) => [NPS_SCALE_TEXT, NPS_LEGACY_SCALE_TEXT].find((scale) => text.endsWith(scale));
+export const isSurveyMessage = (text: string) => !!scaleOf(text);
+const questionOf = (text: string) => text.slice(0, -(scaleOf(text)?.length ?? 0)).trim();
 
 /** Só a pesquisa que chegou ao cliente fica aguardando nota; vale a mais recente do número. */
 async function openSurvey(conversation: ChatConversation, attendantId: string | null) {
@@ -82,7 +93,7 @@ async function saveComment(phones: string[], text: string, receivedAt: Date) {
  * Devolve true quando a mensagem é a nota: ela fica na conversa encerrada e não abre atendimento.
  * Qualquer outra resposta encerra a pesquisa e segue o fluxo normal, para nada se perder.
  */
-export async function recordSurveyReply(reply: { externalId: string; phone: string; text: string; isText: boolean; receivedAt: Date }) {
+export async function recordSurveyReply(reply: { externalId: string; phone: string; text: string; choiceId?: string | null; isText: boolean; receivedAt: Date }) {
   const phones = phoneVariants(reply.phone);
   const pending = await prisma.npsFeedback.findFirst({ where: { phone: { in: phones }, status: "PENDING" }, orderBy: { createdAt: "desc" } });
   if (!pending) {
@@ -93,7 +104,7 @@ export async function recordSurveyReply(reply: { externalId: string; phone: stri
   // Com conversa aberta, um "2" responde ao atendente, não à pesquisa.
   const open = await prisma.chatConversation.findFirst({ where: { phone: { in: phones }, closedAt: null }, select: { id: true } });
   const fresh = reply.receivedAt.getTime() - pending.createdAt.getTime() < SURVEY_HOURS * 3_600_000;
-  const score = fresh && !open && pending.conversationId ? parseNpsScore(reply.text) : null;
+  const score = fresh && !open && pending.conversationId ? parseNpsScore(reply.text, reply.choiceId) : null;
   if (score === null || !pending.conversationId) {
     await prisma.npsFeedback.update({ where: { id: pending.id }, data: { status: "EXPIRED" } });
     return false;

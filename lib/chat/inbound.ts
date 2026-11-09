@@ -181,6 +181,7 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     externalId: message.id,
     phone: message.from,
     text: content.media ? "" : content.text,
+    choiceId: message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null,
     isText: message.type === "text",
     receivedAt,
   });
