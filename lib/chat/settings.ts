@@ -117,6 +117,29 @@ export function menuText(settings: ChatMenuSettings, path: string[]) {
   return [...lines, "", settings.footer].join("\n").trim();
 }
 
+export const MENU_LIST = { header: "Óticas Brasil 👓", footer: "Selecione uma opção abaixo", button: "Ver opções", backId: "menu_voltar", maxRows: 10 };
+export type MenuListRow = { id: string; title: string; description?: string };
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * Lista nativa do WhatsApp, a mesma no envio e no simulador. Título até 24 caracteres
+ * (o nome inteiro vai na descrição); null quando não cabe e o menu vai como texto.
+ */
+export function menuList(settings: ChatMenuSettings, path: string[], parts: string[]): { body: string; rows: MenuListRow[] } | null {
+  const rows: MenuListRow[] = [
+    ...optionsAt(settings, path).map((option) => ({
+      id: `menu_${option.id}`,
+      title: clip(option.label, 24),
+      ...(option.label.length > 24 ? { description: clip(option.label, 72) } : {}),
+    })),
+    ...(path.length ? [{ id: MENU_LIST.backId, title: "Voltar" }] : []),
+  ];
+  if (rows.length === 0 || rows.length > MENU_LIST.maxRows) return null;
+  const body = parts.map((part) => part.replaceAll("{menu}", "").trim()).filter(Boolean).join("\n\n");
+  return { body: clip(body, 1024), rows };
+}
+
 /** Onde estiver {menu} entra a lista; sem a marca, ela vai no fim. */
 export function composeWithMenu(settings: ChatMenuSettings, path: string[], parts: string[]) {
   const list = menuText(settings, path);
