@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
 import { getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { phoneVariants } from "@/lib/chat/phone";
+import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 
 export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string };
 
@@ -180,7 +181,8 @@ async function sendToRecipient(
   campaign: CampaignRecord,
   recipient: DispatchRecipient,
   header: Awaited<ReturnType<typeof resolveHeader>>,
-): Promise<string | null> {
+  templateInfo?: Awaited<ReturnType<typeof listTemplates>>[number],
+): Promise<{ messageId: string | null; text: string }> {
   const values: Record<string, string> = {
     nome: recipient.nome,
     email: recipient.email,
@@ -191,20 +193,21 @@ async function sendToRecipient(
   if (campaign.modelo) {
     const params = campaign.modelo.params.map((field) => values[field] || "-");
     const sent = await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header);
-    return sent.messages?.[0]?.id ?? null;
+    return { messageId: sent.messages?.[0]?.id ?? null, text: renderTemplateText(templateInfo, campaign.modelo.name, params) };
   }
   const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento)\}\}/g, (_match, key: string) => values[key] ?? "");
   const media = (campaign.anexos ?? []).filter((file) => file.url);
   if (media.length === 0) {
     const sent = await sendText(recipient.telefone, text);
-    return sent.messages?.[0]?.id ?? null;
+    return { messageId: sent.messages?.[0]?.id ?? null, text };
   }
   let firstMessageId: string | null = null;
   for (const [index, file] of media.entries()) {
     const sent = await sendMedia(recipient.telefone, { mimetype: file.type, fileName: file.name, url: file.url }, index === 0 ? text : undefined);
     if (index === 0) firstMessageId = sent.messages?.[0]?.id ?? null;
   }
-  return firstMessageId;
+  const names = media.map((file) => `📎 ${file.name}`).join("\n");
+  return { messageId: firstMessageId, text: text ? `${names}\n\n${text}` : names };
 }
 
 // O registro de entrega nunca pode interromper o disparo.
@@ -253,6 +256,8 @@ async function runJob(campaignId: string) {
     const campaign = await readCampaign(campaignId);
     if (!campaign) throw new Error("Campanha não encontrada.");
     const recipients = await readRecipients(campaignId);
+    const modelo = campaign.modelo;
+    const templateInfo = modelo ? (await listTemplates().catch(() => [])).find((item) => item.name === modelo.name && item.language === modelo.language) : undefined;
     let header: Awaited<ReturnType<typeof resolveHeader>>;
     try {
       header = await resolveHeader(campaign);
@@ -294,8 +299,18 @@ async function runJob(campaignId: string) {
         let attempt = 0;
         for (;;) {
           try {
-            const messageId = await sendToRecipient(campaign, recipient, header);
+            const { messageId, text } = await sendToRecipient(campaign, recipient, header, templateInfo);
             await recordMessage(campaignId, recipient, { messageId });
+            // Fica no /chat do contato: quando ele responder, o atendente vê a campanha que originou o contato.
+            await recordDispatchInChat({
+              contactId: recipient.id,
+              phone: chatPhone(recipient.telefone),
+              text,
+              externalId: messageId,
+              authorName: `Campanha · ${campaign.nome}`,
+              campaignId,
+              campaignName: campaign.nome,
+            });
             for (const key of recipientKeys(recipient)) reached.add(key);
             job.sent += 1;
             consecutiveApiFailures = 0;

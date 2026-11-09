@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { mergeChatSettings } from "@/lib/chat/settings";
+import { DISPATCH_REOPEN_MS, DISPATCH_TAG } from "@/lib/chat/dispatch-history";
 
 export const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -37,6 +38,34 @@ export async function openConversationFor(contactId: string, phone: string) {
       : `[bot] nova conversa de ${phone} -> direto para a fila (menu ${settings.enabled ? "ligado" : "desligado"}, ${settings.options.length} opções)`,
   );
   try {
+    // Cliente respondendo a campanha/envio em massa: reabre a conversa que guarda o envio, para o atendente ver o contexto.
+    const holder = await prisma.chatConversation.findFirst({
+      where: {
+        contactId,
+        status: "closed",
+        openKey: null,
+        tags: { has: DISPATCH_TAG },
+        messages: { none: { author: "customer" } },
+        lastMessageAt: { gte: new Date(Date.now() - DISPATCH_REOPEN_MS) },
+      },
+      orderBy: { lastMessageAt: "desc" },
+      select: { id: true, tags: true },
+    });
+    if (holder) {
+      const conversation = await prisma.chatConversation.update({
+        where: { id: holder.id },
+        data: {
+          phone,
+          openKey: contactId,
+          queueId: queue?.id ?? null,
+          status: useMenu ? "bot" : "waiting",
+          waitingSince: useMenu ? null : new Date(),
+          closedAt: null,
+          tags: holder.tags.filter((tag) => tag !== DISPATCH_TAG),
+        },
+      });
+      return { conversation, created: true };
+    }
     const conversation = await prisma.chatConversation.create({
       data: {
         contactId,

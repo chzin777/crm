@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizePhone } from "@/lib/meta-whatsapp";
 import { chatError, requireChatActor, scopeWhere, type ChatActor } from "@/lib/chat/access";
 import { firstActiveQueue, isWindowOpen } from "@/lib/chat/conversation";
+import { DISPATCH_TAG } from "@/lib/chat/dispatch-history";
 import { ChatRuleError, sendAgentMessage } from "@/lib/chat/outbound";
 import { conversationInclude, serializeConversation } from "@/lib/chat/serialize";
 
@@ -15,7 +16,8 @@ const OPEN: Prisma.ChatConversationWhereInput = { closedAt: null };
 function tabWhere(tab: string, actor: ChatActor): Prisma.ChatConversationWhereInput {
   if (tab === "queue") return { status: "waiting", closedAt: null };
   if (tab === "mine") return { assigneeId: actor.id, ...OPEN };
-  if (tab === "closed") return { status: "closed" };
+  // Conversas que só guardam envios sem resposta não poluem a aba de encerradas.
+  if (tab === "closed") return { status: "closed", NOT: { tags: { has: DISPATCH_TAG } } };
   if (tab === "unread") return { unreadCount: { gt: 0 }, ...OPEN };
   if (tab === "campaigns") return { campaignId: { not: null }, ...OPEN };
   return OPEN;

@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { readFile } from "@/lib/minio";
+import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 
 export type BulkParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
 export type BulkTemplateParam = { source: BulkParamSource; value: string };
@@ -153,14 +154,16 @@ async function resolveTemplateHeader(name: string, language: string) {
 type Prepared = {
   header?: Awaited<ReturnType<typeof resolveTemplateHeader>>;
   files: { mimetype: string; fileName: string; base64: string }[];
+  /** Modelo como está na Meta, para gravar no chat o texto que o cliente recebeu. */
+  templateInfo?: Awaited<ReturnType<typeof listTemplates>>[number];
 };
 
-/** Envia e devolve o id da mensagem na Meta (o da primeira, quando há vários anexos). */
-async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared): Promise<string | null> {
+/** Envia e devolve o id da mensagem na Meta (o da primeira, quando há vários anexos) e o texto enviado. */
+async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared): Promise<{ messageId: string | null; text: string }> {
   if (job.template) {
     const params = job.template.params.map((param) => resolveParam(param, item));
     const sent = await sendTemplate(item.telefone, job.template.name, job.template.language, params, prepared.header);
-    return sent.messages?.[0]?.id ?? null;
+    return { messageId: sent.messages?.[0]?.id ?? null, text: renderTemplateText(prepared.templateInfo, job.template.name, params) };
   }
   const text = job.text
     .replace(/\{\{nome\}\}/gi, item.nome)
@@ -169,14 +172,15 @@ async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared): Promis
     .trim();
   if (prepared.files.length === 0) {
     const sent = await sendText(item.telefone, text);
-    return sent.messages?.[0]?.id ?? null;
+    return { messageId: sent.messages?.[0]?.id ?? null, text };
   }
   let firstId: string | null = null;
   for (const [index, file] of prepared.files.entries()) {
     const sent = await sendMedia(item.telefone, file, index === 0 && text ? text : undefined);
     firstId ??= sent.messages?.[0]?.id ?? null;
   }
-  return firstId;
+  const names = prepared.files.map((file) => `📎 ${file.fileName}`).join("\n");
+  return { messageId: firstId, text: text ? `${names}\n\n${text}` : names };
 }
 
 /** Registra o envio para o funil (entregue, lida, respondeu) e a conversão em vendas. */
@@ -247,6 +251,8 @@ async function runJob(id: string) {
   try {
     if (job.template) {
       prepared.header = await resolveTemplateHeader(job.template.name, job.template.language);
+      const templateName = job.template.name, templateLanguage = job.template.language;
+      prepared.templateInfo = (await listTemplates().catch(() => [])).find((item) => item.name === templateName && item.language === templateLanguage);
     } else {
       prepared.files = await Promise.all(job.attachments.map(async (file) => ({
         mimetype: file.mimetype,
@@ -295,10 +301,20 @@ async function runJob(id: string) {
     item.status = "SENDING";
     await writeJob(job);
     try {
-      const messageId = await sendWithBackoff(job, item, prepared);
+      const { messageId, text } = await sendWithBackoff(job, item, prepared);
       item.status = "SENT";
       job.sent += 1;
       await recordMessage(job, item, { messageId });
+      // Fica no /chat do contato: quando ele responder, o atendente vê o que foi enviado.
+      await recordDispatchInChat({
+        contactId: item.contactId,
+        phone: chatPhone(item.telefone),
+        text,
+        externalId: messageId,
+        authorName: `Envio em massa · ${job.stageName}`,
+        campaignId: bulkCampaignId(job.id),
+        campaignName: `Envio em massa · ${job.stageName}`,
+      });
     } catch (error) {
       console.error(`[bulk-dispatch] falha para ${item.contactId} (${item.telefone}):`, error instanceof MetaApiError ? JSON.stringify(error.details) : error);
       item.status = "FAILED";
