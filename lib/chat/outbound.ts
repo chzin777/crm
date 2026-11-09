@@ -32,11 +32,18 @@ const failureText = (error: unknown) => (error instanceof Error ? error.message 
 async function deliver(messageId: string, send: () => Promise<{ messages?: { id: string }[] }>) {
   try {
     const result = await send();
-    return await prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "sent", externalId: result.messages?.[0]?.id ?? null } });
+    return await prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "sent", failureReason: null, externalId: result.messages?.[0]?.id ?? null } });
   } catch (error) {
     console.error(`[chat] falha no envio da mensagem ${messageId}:`, error);
     return prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "failed", failureReason: failureText(error) } });
   }
+}
+
+/** Nova tentativa de mensagem que falhou; a reserva impede dois relógios de reenviarem a mesma. */
+export async function resendAutomatic(messageId: string, send: () => Promise<{ messages?: { id: string }[] }>) {
+  const claimed = await prisma.chatMessage.updateMany({ where: { id: messageId, delivery: "failed" }, data: { delivery: "sending" } });
+  if (claimed.count === 0) return null;
+  return deliver(messageId, send);
 }
 
 /** Assume para quem responde, só se ninguém assumiu antes. */

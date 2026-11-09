@@ -96,6 +96,9 @@ function getConfig() {
 const CONNECT_ERRORS = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
 const CONNECT_RETRY_MS = [1_000, 3_000];
 
+/** Falha em que a conexão nem abriu: reenviar depois não duplica a mensagem. */
+export const isConnectFailure = (reason: string | null) => !!reason && [...CONNECT_ERRORS].some((code) => reason.includes(`(${code})`));
+
 /** O fetch do Node esconde o motivo em `cause`; sem ele o log não diz se foi DNS, firewall ou tempo esgotado. */
 function networkCause(error: unknown) {
   const cause = error instanceof Error ? (error.cause as { code?: string; message?: string } | undefined) : undefined;

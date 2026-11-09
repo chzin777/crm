@@ -4,13 +4,15 @@ import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { readMenuState, saveMenuState } from "@/lib/chat/menu";
-import { expireSurveys, sendSatisfactionSurvey } from "@/lib/chat/nps";
+import { expireSurveys, isSurveyMessage, resendSurvey, sendSatisfactionSurvey } from "@/lib/chat/nps";
+import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
 import { composeWithMenu, silenceFarewell } from "@/lib/chat/settings";
-import { sendAutomaticMessage } from "@/lib/chat/outbound";
+import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
 const DISPATCH_RETENTION_DAYS = 30;
+const RESEND_WINDOW_MINUTES = 15;
 
 async function supervisors() {
   const users = await prisma.user.findMany({ where: { banned: false }, select: { id: true, role: true, roleRef: { select: { permissions: true } } } });
@@ -32,7 +34,7 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 }
 
 export async function runClock() {
-  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, cleaned: 0, errors: [] as string[] };
+  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, errors: [] as string[] };
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -145,6 +147,28 @@ export async function runClock() {
 
   await block("pesquisa", async () => {
     summary.surveysExpired = await expireSurveys(now);
+  });
+
+  // Mensagem automática que caiu por queda de conexão volta a sair sozinha por alguns minutos.
+  await block("reenvio", async () => {
+    const rows = await prisma.chatMessage.findMany({
+      where: {
+        author: "bot",
+        delivery: "failed",
+        failureReason: { startsWith: "Não foi possível conectar" },
+        createdAt: { gte: new Date(now - RESEND_WINDOW_MINUTES * MINUTE), lte: new Date(now - MINUTE) },
+      },
+      include: { conversation: true },
+      orderBy: { createdAt: "asc" },
+      take: 20,
+    });
+    for (const row of rows) {
+      if (!isConnectFailure(row.failureReason) || !isWindowOpen(row.conversation.lastInboundAt)) continue;
+      const sent = isSurveyMessage(row.text)
+        ? await resendSurvey(row.id, row.conversation)
+        : await resendAutomatic(row.id, () => sendText(row.conversation.phone, row.text));
+      if (sent?.delivery === "sent") summary.resent += 1;
+    }
   });
 
   await block("faxina", async () => {

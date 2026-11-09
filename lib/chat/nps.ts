@@ -3,7 +3,7 @@ import { Prisma, type ChatConversation } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendList } from "@/lib/meta-whatsapp";
 import { isWindowOpen } from "@/lib/chat/conversation";
-import { sendAutomaticMessage } from "@/lib/chat/outbound";
+import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
 
 const QUESTION = "De 1 a 5, como você avalia o atendimento recebido hoje?";
@@ -26,24 +26,38 @@ export function parseNpsScore(text: string) {
 }
 
 /** Roda depois do encerramento: falha aqui nunca desfaz o fechamento da conversa. */
+const surveyList = (phone: string) => () => sendList(phone, {
+  body: QUESTION,
+  button: "Avaliar atendimento",
+  rows: SCORE_LABELS.map((label, index) => ({ id: `nps_${index + 1}`, title: scoreLine(label, index) })),
+});
+
+export const isSurveyMessage = (text: string) => text.startsWith(QUESTION);
+
+/** Só a pesquisa que chegou ao cliente fica aguardando nota; vale a mais recente do número. */
+async function openSurvey(conversation: ChatConversation, attendantId: string | null) {
+  await prisma.npsFeedback.updateMany({ where: { phone: { in: phoneVariants(conversation.phone) }, status: "PENDING" }, data: { status: "EXPIRED" } });
+  await prisma.npsFeedback.create({
+    data: { conversationId: conversation.id, contactId: conversation.contactId, attendantId, queueId: conversation.queueId, phone: conversation.phone },
+  });
+}
+
 export async function sendSatisfactionSurvey(conversation: ChatConversation, attendantId: string | null) {
   try {
     if (!isWindowOpen(conversation.lastInboundAt)) return;
-    const sent = await sendAutomaticMessage(conversation, SURVEY_TEXT, () => sendList(conversation.phone, {
-      body: QUESTION,
-      button: "Avaliar atendimento",
-      rows: SCORE_LABELS.map((label, index) => ({ id: `nps_${index + 1}`, title: scoreLine(label, index) })),
-    }));
+    const sent = await sendAutomaticMessage(conversation, SURVEY_TEXT, surveyList(conversation.phone));
     if (!sent || sent.delivery === "failed") return;
-
-    // Vale só a pesquisa mais recente do número.
-    await prisma.npsFeedback.updateMany({ where: { phone: { in: phoneVariants(conversation.phone) }, status: "PENDING" }, data: { status: "EXPIRED" } });
-    await prisma.npsFeedback.create({
-      data: { conversationId: conversation.id, contactId: conversation.contactId, attendantId, queueId: conversation.queueId, phone: conversation.phone },
-    });
+    await openSurvey(conversation, attendantId);
   } catch (error) {
     console.error("[chat] falha ao enviar pesquisa de satisfação:", error);
   }
+}
+
+/** Reenvio da pesquisa que caiu por falta de conexão. */
+export async function resendSurvey(messageId: string, conversation: ChatConversation) {
+  const sent = await resendAutomatic(messageId, surveyList(conversation.phone));
+  if (sent?.delivery === "sent") await openSurvey(conversation, conversation.assigneeId);
+  return sent;
 }
 
 export async function expireSurveys(now: number) {
