@@ -136,7 +136,7 @@ export async function GET(request: Request) {
 
   const orderBy: Prisma.ChatConversationOrderByWithRelationInput[] = tab === "closed"
     ? [{ closedAt: "desc" }]
-    : [{ waitingSince: { sort: "asc", nulls: "last" } }, { lastMessageAt: { sort: "desc", nulls: "last" } }];
+    : [{ lastMessageAt: { sort: "desc", nulls: "last" } }];
 
   const [rows, queue, mine, all, closed, unread, campaigns] = await Promise.all([
     prisma.chatConversation.findMany({

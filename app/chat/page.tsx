@@ -162,6 +162,14 @@ function ChatWorkspace() {
     }
   };
 
+  /** Sobe a conversa na hora; o recarregamento da lista confirma a ordem do servidor. */
+  const bumpToTop = (id: string, at: string) => {
+    setItems((current) => {
+      const item = current.find((entry) => entry.id === id);
+      return item ? [{ ...item, lastMessageAt: at }, ...current.filter((entry) => entry.id !== id)] : current;
+    });
+  };
+
   const handleSend = async ({ text, internal, replyTo: quoted }: ComposerSend) => {
     const temporaryId = `temp-${Date.now()}`;
     setSendError("");
@@ -177,6 +185,7 @@ function ChatWorkspace() {
       createdAt: new Date().toISOString(),
       attachment: null,
     });
+    if (!internal && selectedId) bumpToTop(selectedId, new Date().toISOString());
     try {
       const saved = await postMessage({ text, internal, replyToId: internal ? undefined : quoted?.id });
       messageList.current?.replace(temporaryId, saved);
