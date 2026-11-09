@@ -93,23 +93,42 @@ function getConfig() {
   return { phoneNumberId, accessToken, accountId };
 }
 
+const CONNECT_ERRORS = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+const CONNECT_RETRY_MS = [1_000, 3_000];
+
+/** O fetch do Node esconde o motivo em `cause`; sem ele o log não diz se foi DNS, firewall ou tempo esgotado. */
+function networkCause(error: unknown) {
+  const cause = error instanceof Error ? (error.cause as { code?: string; message?: string } | undefined) : undefined;
+  return cause?.code ?? cause?.message ?? (error instanceof Error ? error.message : "erro desconhecido");
+}
+
 async function graph<T>(path: string, init?: RequestInit): Promise<T> {
   const { accessToken } = getConfig();
   const url = `${GRAPH_API}${path}`;
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        ...init?.headers,
-      },
-    });
-  } catch {
-    throw new Error("Não foi possível conectar à Meta WhatsApp API. Verifique sua conexão.");
+  let response: Response | undefined;
+  for (let attempt = 0; !response; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        ...init,
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+      });
+    } catch (error) {
+      const cause = networkCause(error);
+      // Só repete quando a conexão nem abriu: a Meta não recebeu nada, então não há envio em dobro.
+      if (CONNECT_ERRORS.has(cause) && attempt < CONNECT_RETRY_MS.length) {
+        console.warn(`[meta] sem conexão com a Graph API (${cause}), nova tentativa ${attempt + 1} de ${CONNECT_RETRY_MS.length}: ${path}`);
+        await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_MS[attempt]));
+        continue;
+      }
+      console.error(`[meta] falha de rede na Graph API (${cause}) após ${attempt + 1} tentativa(s): ${path}`);
+      throw new Error(`Não foi possível conectar à Meta WhatsApp API (${cause}). Verifique sua conexão.`);
+    }
   }
 
   const body = await response.json().catch(() => null);
@@ -117,6 +136,7 @@ async function graph<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const errorMsg = body?.error?.message ?? body?.error?.error_user_msg ?? JSON.stringify(body?.error ?? body);
     const code = Number(body?.error?.code);
+    console.error(`[meta] Graph API respondeu ${response.status} em ${path}: código ${body?.error?.code ?? "?"}, subcódigo ${body?.error?.error_subcode ?? "?"} - ${errorMsg}`);
     throw new MetaApiError(`Meta WhatsApp API: ${errorMsg}`, Number.isFinite(code) ? code : undefined, response.status, body?.error);
   }
 
