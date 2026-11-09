@@ -5,7 +5,8 @@ import { Activity, ArrowLeft, ArrowRight, Check, CheckCircle2, FileText, Image a
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ChatPreview, formatFileSize } from "@/components/WhatsAppPreview";
-import { BULK_STARTED_EVENT, BulkJobProgress, type BulkJobView } from "@/components/BulkDispatchTracker";
+import { BULK_STARTED_EVENT, BulkJobProgress, BulkResultTabs, type BulkJobView, type BulkResultTab } from "@/components/BulkDispatchTracker";
+import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -73,6 +74,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [pollWarning, setPollWarning] = useState("");
+  const [resultTab, setResultTab] = useState<BulkResultTab>("destinatarios");
 
   // Acompanha o lote no servidor enquanto o modal está aberto: busca na hora e a cada 1,5s,
   // sem requisições sobrepostas, até o lote terminar; para tudo ao fechar o modal.
@@ -299,7 +301,14 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
           )}
 
           {step === "progress" && pollWarning && <p role="status" className="mb-3 rounded-lg bg-[#F7915E]/10 p-2 text-xs text-[#9a3d12] dark:text-[#F7915E]">{pollWarning}</p>}
-          {step === "progress" && job && <BulkJobProgress job={job} />}
+          {step === "progress" && job && (
+            <div className="space-y-4">
+              <BulkResultTabs tab={resultTab} onChange={setResultTab} firstLabel="Progresso" />
+              <div key={resultTab} className="soft-pop-in">
+                {resultTab === "resultados" ? <CampaignMetricsPanel type="bulk" id={job.id} /> : <BulkJobProgress job={job} />}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">

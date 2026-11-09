@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Clock3, Loader2, Send, X } from "lucide-react";
+import { AlertCircle, BarChart3, CheckCircle2, ChevronDown, ChevronUp, Clock3, Loader2, Send, Users, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
@@ -138,11 +138,37 @@ export function BulkJobProgress({ job }: { job: BulkJobView }) {
   );
 }
 
+export type BulkResultTab = "destinatarios" | "resultados";
+
+/** Alternância entre a lista de envio e os resultados (funil e vendas), no mesmo estilo do modal de envio. */
+export function BulkResultTabs({ tab, onChange, firstLabel = "Destinatários" }: { tab: BulkResultTab; onChange: (tab: BulkResultTab) => void; firstLabel?: string }) {
+  const tabs = [
+    { key: "destinatarios" as const, label: firstLabel, icon: Users },
+    { key: "resultados" as const, label: "Resultados e vendas", icon: BarChart3 },
+  ];
+  return (
+    <div role="tablist" aria-label="Visualização do envio" className="flex shrink-0 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800/50">
+      {tabs.map(({ key, label, icon: Icon }) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={tab === key}
+          onClick={() => onChange(key)}
+          className={`inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${tab === key ? "bg-white text-[#051647] shadow-sm ring-1 ring-slate-200 dark:bg-[#C4D600] dark:text-[#051647] dark:ring-0" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
+        >
+          <Icon className="h-3.5 w-3.5" />{label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Modal com a lista completa do lote; atualiza sozinho enquanto o lote não termina. */
 export function BulkJobDetailsDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   const [job, setJob] = useState<BulkJobView | null>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"destinatarios" | "resultados">("destinatarios");
+  const [tab, setTab] = useState<BulkResultTab>("destinatarios");
 
   useEffect(() => {
     let cancelled = false;
@@ -174,14 +200,14 @@ export function BulkJobDetailsDialog({ jobId, onClose }: { jobId: string; onClos
 
   return (
     <EntityDialog titleId="bulk-dispatch-details" title={`Envio em massa: ${job?.stageName ?? ""}`} description="Quem já recebeu, quem está na fila e quem falhou." onClose={onClose} size="lg">
-      <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
-        {([["destinatarios", "Destinatários"], ["resultados", "Resultados e vendas"]] as const).map(([key, label]) => (
-          <button key={key} type="button" onClick={() => setTab(key)} className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${tab === key ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700"}`}>{label}</button>
-        ))}
+      <div className="flex h-full min-h-0 flex-col gap-4">
+        <BulkResultTabs tab={tab} onChange={setTab} />
+        <div key={tab} className="soft-pop-in custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+          {tab === "resultados" ? (
+            <CampaignMetricsPanel type="bulk" id={jobId} />
+          ) : job ? <>{error && <p role="status" className="mb-3 rounded-lg bg-[#F7915E]/10 p-2 text-xs text-[#9a3d12] dark:text-[#F7915E]">Não foi possível atualizar ({error}). Tentando de novo...</p>}<BulkJobProgress job={job} /></> : error ?<p className="text-sm text-red-600 dark:text-red-400">{error}</p> : <LoadingSpinner label="Carregando envio..." className="w-full justify-center py-8" />}
+        </div>
       </div>
-      {tab === "resultados" ? (
-        <CampaignMetricsPanel type="bulk" id={jobId} />
-      ) : job ? <>{error && <p role="status" className="mb-3 rounded-lg bg-[#F7915E]/10 p-2 text-xs text-[#9a3d12] dark:text-[#F7915E]">Não foi possível atualizar ({error}). Tentando de novo...</p>}<BulkJobProgress job={job} /></> : error ?<p className="text-sm text-red-600 dark:text-red-400">{error}</p> : <LoadingSpinner label="Carregando envio..." className="w-full justify-center py-8" />}
     </EntityDialog>
   );
 }

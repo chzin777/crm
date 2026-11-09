@@ -11,6 +11,9 @@ export type ConvertedSale = {
   data: string;
   valor: number;
   loja: string;
+  /** Linhas do pedido no ERP e descrição resumida dos produtos. */
+  itens: number;
+  resumo: string;
 };
 
 export type CampaignMetrics = {
@@ -30,7 +33,7 @@ export type CampaignMetrics = {
 
 type Recipient = { contactId: string; phone: string; sentDay: string };
 type ContactRow = { id: string; sourceKey: string; phone: string | null; name: string };
-type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number };
+type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null };
 
 /** Dia (AAAA-MM-DD) no fuso de Brasília: as vendas do ERP só têm data, sem hora. */
 const brDay = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
@@ -109,6 +112,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       SELECT "sourceKey",
         COALESCE("data"->>'NUM_PEDIDO', '') AS pedido,
         COALESCE("data"->>'LOJA', '') AS loja,
+        NULLIF(trim(COALESCE("data"->>'DESCRICAO', '')), '') AS descricao,
         CASE
           WHEN "data"->>'DATA_PEDIDO' ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date("data"->>'DATA_PEDIDO', 'DD/MM/YYYY')
           WHEN "data"->>'DATA_PEDIDO' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN to_date(left("data"->>'DATA_PEDIDO', 10), 'YYYY-MM-DD')
@@ -118,6 +122,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND COALESCE("data"->>'TIPO', 'Venda') = 'Venda'
     )
     SELECT "sourceKey", pedido, to_char(dia, 'YYYY-MM-DD') AS dia, max(loja) AS loja,
+      COUNT(*)::int AS itens, left(string_agg(DISTINCT descricao, ' · '), 180) AS resumo,
       SUM(CASE
         WHEN raw_amount ~ '^-?[0-9][0-9.]*,[0-9]{1,2}$' THEN replace(replace(raw_amount, '.', ''), ',', '.')::numeric
         WHEN raw_amount ~ '^-?[0-9]+(\\.[0-9]{1,2})?$' THEN raw_amount::numeric
@@ -138,7 +143,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     converted.add(ownerKey);
     revenue += sale.total;
     const info = contactInfo.get(owner.contactId);
-    convertedSales.push({ contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total, loja: sale.loja });
+    convertedSales.push({ contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total, loja: sale.loja, itens: Number(sale.itens), resumo: sale.resumo ?? "" });
   }
   convertedSales.sort((a, b) => b.data.localeCompare(a.data) || b.valor - a.valor);
 
