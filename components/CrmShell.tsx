@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { TabSystem } from "@/components/TabSystem";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { BulkDispatchTracker } from "@/components/BulkDispatchTracker";
 import { usePermissions } from "@/hooks/usePermissions";
 import { moduleForPath } from "@/lib/permissions";
 
@@ -54,6 +55,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
+      <BulkDispatchTracker />
     </div>
   );
 }

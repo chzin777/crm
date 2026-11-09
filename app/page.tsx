@@ -7,7 +7,7 @@ import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { EntityDialog } from "@/components/EntityDialog";
 import { StageEditorDialog } from "@/components/StageEditorDialog";
 import { SendMessageDialog } from "@/components/SendMessageDialog";
-import { BulkSendMessageDialog, type BulkRecipient, type BulkSendResult } from "@/components/BulkSendMessageDialog";
+import { BulkSendMessageDialog, type BulkRecipient } from "@/components/BulkSendMessageDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { CustomSelect } from "@/components/CustomSelect";
 import { useCrmData } from "@/hooks/useCrmData";
@@ -1033,12 +1033,6 @@ export default function Home() {
             .filter((card) => card.coluna === bulkSendStage.stageId && card.pipelineId === activePipelineId)
             .map((card) => ({ contactId: card.contactId ?? card.id, nome: card.cliente, telefone: card.telefone }))}
           onClose={() => setBulkSendStage(null)}
-          onComplete={(results: BulkSendResult[]) => {
-            const sent = results.filter((r) => r.status === "sent").length;
-            const failed = results.filter((r) => r.status === "failed").length;
-            if (sent > 0) toast.success("Envio em massa concluído", `${sent} mensagem(ns) enviada(s)${failed > 0 ? ` · ${failed} falharam` : ""}`);
-            else if (failed > 0) toast.error("Falha no envio em massa", `${failed} mensagem(ns) não foram enviadas.`);
-          }}
         />
       )}
 

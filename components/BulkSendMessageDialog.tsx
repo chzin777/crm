@@ -5,6 +5,7 @@ import { Check, FileText, Image as ImageIcon, Paperclip, Send, Video, X } from "
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ChatPreview, formatFileSize } from "@/components/WhatsAppPreview";
+import { BULK_STARTED_EVENT, BulkJobProgress, type BulkJobView } from "@/components/BulkDispatchTracker";
 
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -18,7 +19,8 @@ export interface BulkSendResult { contactId: string; nome: string; telefone: str
 type Step = "recipients" | "message" | "progress";
 const fieldClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 
-interface Props { stageName: string; recipients: BulkRecipient[]; onClose: () => void; onComplete: (results: BulkSendResult[]) => void; }
+// A conclusão é avisada pelo indicador global (BulkDispatchTracker); onComplete fica opcional.
+interface Props { stageName: string; recipients: BulkRecipient[]; onClose: () => void; onComplete?: (results: BulkSendResult[]) => void; }
 
 function isAllowed(file: File) { return file.type.startsWith("image/") || file.type.startsWith("video/") || file.type === "application/pdf"; }
 function formatSize(bytes: number) { return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`; }
@@ -47,19 +49,33 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [templates, setTemplates] = useState<ApiTemplate[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
+  // Começa carregando: a lista só é buscada ao abrir a etapa de mensagem.
+  const [templatesLoading, setTemplatesLoading] = useState(true);
   const [selectedTemplate, setSelectedTemplate] = useState<ApiTemplate | null>(null);
   const [templateParams, setTemplateParams] = useState<TemplateParam[]>([]);
   const [mode, setMode] = useState<"free" | "template">("free");
   const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
-  const [results, setResults] = useState<BulkSendResult[]>([]);
+  const [starting, setStarting] = useState(false);
+  const [job, setJob] = useState<BulkJobView | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Acompanha o lote no servidor enquanto o modal está aberto.
+  const jobId = job?.id;
+  const jobRunning = job?.status === "running";
+  useEffect(() => {
+    if (!jobId || !jobRunning) return;
+    const timer = setInterval(() => {
+      fetch(`/api/whatsapp/bulk-send/${jobId}`, { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((body: { data?: BulkJobView } | null) => { if (body?.data) setJob(body.data); })
+        .catch(() => undefined);
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [jobId, jobRunning]);
 
   useEffect(() => {
     if (step !== "message") return;
     let cancelled = false;
-    setTemplatesLoading(true);
     fetch("/api/whatsapp/templates").then((res) => res.json()).then((data) => { if (!cancelled && Array.isArray(data.data)) setTemplates(data.data); }).catch(() => { if (!cancelled) setTemplates([]); }).finally(() => { if (!cancelled) setTemplatesLoading(false); });
     return () => { cancelled = true; };
   }, [step]);
@@ -87,8 +103,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
 
   const startSending = async () => {
     if (!canSend) return;
-    setStep("progress"); setSending(true); setError("");
-    setResults(selectedRecipients.map((r) => ({ contactId: r.contactId, nome: r.nome, telefone: r.telefone, status: "pending" })));
+    setStarting(true); setError("");
     const formData = new FormData();
     formData.set("contactIds", JSON.stringify(selectedRecipients.map((r) => r.contactId)));
     formData.set("stageName", stageName);
@@ -96,20 +111,22 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
     else { formData.set("text", text); files.forEach((f) => formData.append("files", f)); }
     try {
       const response = await fetch("/api/whatsapp/bulk-send", { method: "POST", body: formData });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Falha ao iniciar envio em massa.");
-      const sendResults = data?.data as { contactId: string; status: string; error?: string }[] | undefined;
-      if (Array.isArray(sendResults)) { setResults((prev) => prev.map((r) => { const m = sendResults.find((s) => s.contactId === r.contactId); return m ? { ...r, status: m.status === "sent" ? "sent" : "failed", error: m.error } : r; })); }
-    } catch (err) { setResults((prev) => prev.map((r) => r.status === "pending" ? { ...r, status: "failed", error: err instanceof Error ? err.message : "Erro desconhecido" } : r)); }
-    finally { setSending(false); }
+      const data = await response.json().catch(() => null) as { data?: BulkJobView; error?: string } | null;
+      if (!response.ok || !data?.data) throw new Error(data?.error ?? "Falha ao iniciar envio em massa.");
+      setJob(data.data);
+      setStep("progress");
+      window.dispatchEvent(new Event(BULK_STARTED_EVENT));
+    } catch (err) { setError(err instanceof Error ? err.message : "Falha ao iniciar envio em massa."); }
+    finally { setStarting(false); }
   };
 
-  const sentCount = results.filter((r) => r.status === "sent").length;
-  const failedCount = results.filter((r) => r.status === "failed").length;
-  const totalDone = sentCount + failedCount;
-  const progressPercent = results.length > 0 ? Math.round((totalDone / results.length) * 100) : 0;
-  const isComplete = totalDone === results.length && results.length > 0;
-  const handleClose = () => { if (isComplete || sending) onComplete(results); onClose(); };
+  const isComplete = job?.status === "completed";
+  const handleClose = () => {
+    if (isComplete && job && onComplete) {
+      onComplete(job.items.map((item) => ({ contactId: item.contactId, nome: item.nome, telefone: item.telefone, status: item.status === "SENT" ? "sent" : item.status === "FAILED" ? "failed" : item.status === "SENDING" ? "sending" : "pending", error: item.error })));
+    }
+    onClose();
+  };
   const stepsArr: { key: Step; label: string }[] = [{ key: "recipients", label: "Destinatários" }, { key: "message", label: "Mensagem" }, { key: "progress", label: "Progresso" }];
   const currentStepIndex = stepsArr.findIndex((s) => s.key === step);
 
@@ -193,36 +210,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
             </div>
           )}
 
-          {step === "progress" && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  <span>{isComplete ? "Envio concluído" : sending ? "Enviando..." : "Envio interrompido"}</span>
-                  <span>{totalDone} de {results.length}</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                  <div className="h-full rounded-full bg-[#051647] transition-all duration-300 dark:bg-[#C4D600]" style={{ width: `${progressPercent}%` }} />
-                </div>
-                {isComplete && <p className="text-xs font-semibold text-slate-900 dark:text-white">✅ {sentCount} enviados com sucesso{failedCount > 0 && <span className="text-red-600 dark:text-red-400"> · {failedCount} falharam</span>}</p>}
-              </div>
-              <div className="max-h-[280px] space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-                {results.map((r) => (
-                  <div key={r.contactId} className="flex items-center justify-between rounded-lg px-3 py-2 text-xs">
-                    <div className="min-w-0 flex-1"><p className="truncate font-semibold text-slate-900 dark:text-white">{r.nome}</p><p className="text-[10px] text-slate-500 dark:text-slate-400">{r.telefone}</p></div>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${r.status === "sent" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : r.status === "failed" ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300" : r.status === "sending" ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"}`}>
-                      {r.status === "pending" ? "Aguardando" : r.status === "sending" ? "Enviando" : r.status === "sent" ? "Enviado" : "Falhou"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {failedCount > 0 && isComplete && (
-                <div className="rounded-lg border border-red-100 bg-red-50/50 p-3 dark:border-red-900/30 dark:bg-red-900/10">
-                  <p className="text-[10px] font-semibold text-red-700 dark:text-red-300">Detalhes das falhas:</p>
-                  {results.filter((r) => r.status === "failed").map((r) => <p key={r.contactId} className="mt-1 text-[10px] text-red-600 dark:text-red-400">• {r.nome}: {r.error ?? "Erro desconhecido"}</p>)}
-                </div>
-              )}
-            </div>
-          )}
+          {step === "progress" && job && <BulkJobProgress job={job} />}
         </div>
 
         <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
@@ -235,11 +223,11 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
             <div className="flex gap-2">
               <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(event) => addFiles(event.target.files)} />
               <button type="button" disabled={mode === "template"} onClick={() => inputRef.current?.click()} className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer"><Paperclip className="h-3.5 w-3.5" />Anexar</button>
-              <button type="button" disabled={!canSend} onClick={startSending} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-bold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer"><Send className="h-3.5 w-3.5" />Enviar para {selectedRecipients.length}</button>
+              <button type="button" disabled={!canSend || starting} onClick={startSending} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-bold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer"><Send className="h-3.5 w-3.5" />{starting ? "Iniciando..." : `Enviar para ${selectedRecipients.length}`}</button>
             </div>
           </>)}
           {step === "progress" && (
-            <button type="button" onClick={handleClose} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer">{isComplete ? "Fechar" : sending ? "Continuar em segundo plano" : "Fechar"}</button>
+            <button type="button" onClick={handleClose} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer">{isComplete ? "Fechar" : "Continuar em segundo plano"}</button>
           )}
         </div>
       </div>

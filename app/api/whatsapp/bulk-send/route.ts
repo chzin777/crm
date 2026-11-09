@@ -1,17 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
-import { ensureInstance, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
+import { ensureInstance } from "@/lib/meta-whatsapp";
+import { ensureBucket, uploadFile } from "@/lib/minio";
+import { friendlyError, listBulkJobs, startBulkJob, toView, type BulkAttachment, type BulkParamSource, type BulkTemplateParam } from "@/lib/bulk-dispatch";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const ALLOWED = (type: string) => type.startsWith("image/") || type.startsWith("video/") || type === "application/pdf";
-// Pausa entre contatos para não estourar o limite de envio da Meta.
-const SEND_DELAY_MS = 300;
+const SOURCES: BulkParamSource[] = ["primeiro_nome", "nome", "telefone", "manual"];
 
-type ParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
-type TemplateParam = { source: ParamSource; value: string };
-
-function parseTemplateParams(raw: FormDataEntryValue | null): TemplateParam[] | null {
+function parseTemplateParams(raw: FormDataEntryValue | null): BulkTemplateParam[] | null {
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(String(raw));
@@ -19,47 +17,21 @@ function parseTemplateParams(raw: FormDataEntryValue | null): TemplateParam[] | 
     // Aceita também o formato antigo (lista de textos fixos).
     return parsed.map((item) => typeof item === "string"
       ? { source: "manual" as const, value: item }
-      : { source: (item?.source ?? "manual") as ParamSource, value: String(item?.value ?? "") });
+      : { source: SOURCES.includes(item?.source) ? item.source : "manual", value: String(item?.value ?? "") });
   } catch {
     return null;
   }
 }
 
-function resolveParam(param: TemplateParam, contact: { name: string; phone: string }) {
-  if (param.source === "primeiro_nome") return contact.name.trim().split(/\s+/)[0] || "-";
-  if (param.source === "nome") return contact.name.trim() || "-";
-  if (param.source === "telefone") return contact.phone;
-  return param.value.trim() || "-";
+/** Lotes do usuário logado, para o indicador global de progresso. */
+export async function GET() {
+  const user = await requireApiSession();
+  if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
+  const jobs = await listBulkJobs(user.id);
+  return Response.json({ data: jobs.map(toView) });
 }
 
-/** Traduz o erro da Meta (ou de rede) num motivo claro para a lista de falhas. */
-function friendlyError(error: unknown) {
-  if (error instanceof MetaApiError) {
-    const code = error.code;
-    if (code === 190) return "Token da Meta inválido ou expirado.";
-    if (code === 131026 || code === 131030 || (code === 100 && /phone|recipient/i.test(error.message))) return "Telefone inválido ou sem WhatsApp.";
-    if (code === 132000 || code === 132001 || code === 132005 || code === 132007 || code === 132012) return `Modelo incompatível: ${error.message.replace(/^Meta WhatsApp API: /, "")}`;
-    if (code === 131047) return "Fora da janela de 24h: use um modelo aprovado.";
-    if (code === 131056 || code === 130429 || code === 80007) return "Limite de envios da Meta atingido. Tente novamente em alguns minutos.";
-    if (code === 131058) return "O modelo hello_world só funciona com números de teste da Meta.";
-    return error.message.replace(/^Meta WhatsApp API: /, "");
-  }
-  return error instanceof Error ? error.message : "Erro desconhecido";
-}
-
-async function resolveTemplateHeader(templateName: string, templateLanguage: string) {
-  const template = (await listTemplates()).find((item) => item.name === templateName && item.language === templateLanguage);
-  if (template?.headerFormat !== "IMAGE") return undefined;
-  if (!template.headerImageUrl) throw new Error("Este modelo exige uma imagem e a Meta não retornou a do modelo.");
-  const downloaded = await fetch(template.headerImageUrl);
-  if (!downloaded.ok) throw new Error("Não foi possível carregar a imagem do modelo.");
-  const mimetype = downloaded.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-  const base64 = Buffer.from(await downloaded.arrayBuffer()).toString("base64");
-  // Sobe a imagem uma vez e reaproveita o id em todos os envios do lote.
-  const mediaId = await uploadMedia({ mimetype, fileName: "header", base64 });
-  return { mimetype, fileName: "header", mediaId };
-}
-
+/** Cria o lote e responde na hora; os envios seguem em fila no servidor. */
 export async function POST(request: Request) {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
@@ -93,61 +65,30 @@ export async function POST(request: Request) {
     where: { id: { in: contactIds } },
     select: { id: true, phone: true, name: true },
   });
+  if (contacts.length === 0) return Response.json({ error: "Nenhum contato encontrado." }, { status: 400 });
 
-  // Prepara uma vez o que é igual para todos: imagem do modelo (enviada à Meta) e anexos lidos.
-  let header: Awaited<ReturnType<typeof resolveTemplateHeader>>;
-  let uploadedFiles: { mimetype: string; fileName: string; base64: string }[] = [];
   try {
     await ensureInstance();
-    if (templateName) {
-      header = await resolveTemplateHeader(templateName, templateLanguage);
-    } else {
-      uploadedFiles = await Promise.all(files.map(async (file) => ({
-        mimetype: file.type,
-        fileName: file.name,
-        base64: Buffer.from(await file.arrayBuffer()).toString("base64"),
-      })));
+    // Anexos ficam no armazenamento para o envio continuar mesmo se o servidor reiniciar.
+    let attachments: BulkAttachment[] = [];
+    if (!templateName && files.length > 0) {
+      await ensureBucket();
+      attachments = await Promise.all(files.map(async (file) => {
+        const { key } = await uploadFile(Buffer.from(await file.arrayBuffer()), file.name, file.type, "bulk");
+        return { key, fileName: file.name, mimetype: file.type };
+      }));
     }
+    const job = await startBulkJob({
+      userId: user.id,
+      stageName,
+      contacts,
+      text,
+      template: templateName ? { name: templateName, language: templateLanguage, params: templateParams } : null,
+      attachments,
+    });
+    return Response.json({ data: toView(job) }, { status: 202 });
   } catch (error) {
-    console.error("[whatsapp/bulk-send] falha ao preparar o envio:", error);
+    console.error("[whatsapp/bulk-send] falha ao criar o lote:", error);
     return Response.json({ error: friendlyError(error) }, { status: 422 });
   }
-
-  const results: { contactId: string; status: "sent" | "failed"; error?: string }[] = [];
-
-  for (const [index, contact] of contacts.entries()) {
-    const phone = contact.phone ?? "";
-    if (phone.replace(/\D/g, "").length < 10) {
-      results.push({ contactId: contact.id, status: "failed", error: "Telefone inválido" });
-      continue;
-    }
-    if (index > 0) await new Promise((resolve) => setTimeout(resolve, SEND_DELAY_MS));
-
-    try {
-      if (templateName) {
-        const params = templateParams.map((param) => resolveParam(param, { name: contact.name, phone }));
-        await sendTemplate(phone, templateName, templateLanguage, params, header);
-      } else {
-        // Substitui variáveis no texto livre
-        const personalizedText = text
-          .replace(/\{\{nome\}\}/gi, contact.name)
-          .replace(/\{\{etapa\}\}/gi, stageName)
-          .replace(/\{\{telefone\}\}/gi, phone)
-          .trim();
-        if (uploadedFiles.length === 0) {
-          await sendText(phone, personalizedText);
-        } else {
-          for (const [fileIndex, file] of uploadedFiles.entries()) {
-            await sendMedia(phone, file, fileIndex === 0 && personalizedText ? personalizedText : undefined);
-          }
-        }
-      }
-      results.push({ contactId: contact.id, status: "sent" });
-    } catch (error) {
-      console.error(`[whatsapp/bulk-send] falha para ${contact.id} (${phone}):`, error instanceof MetaApiError ? JSON.stringify(error.details) : error);
-      results.push({ contactId: contact.id, status: "failed", error: friendlyError(error) });
-    }
-  }
-
-  return Response.json({ data: results });
 }
