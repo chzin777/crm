@@ -31,6 +31,11 @@ export async function openConversationFor(contactId: string, phone: string) {
   const settings = await readChatSettings();
   const useMenu = settings.enabled && settings.options.length > 0;
   const queue = await firstActiveQueue();
+  console.log(
+    useMenu
+      ? `[bot] nova conversa de ${phone} -> menu ativo, saudação será enviada`
+      : `[bot] nova conversa de ${phone} -> direto para a fila (menu ${settings.enabled ? "ligado" : "desligado"}, ${settings.options.length} opções)`,
+  );
   try {
     const conversation = await prisma.chatConversation.create({
       data: {

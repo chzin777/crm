@@ -34,7 +34,7 @@ async function deliver(messageId: string, send: () => Promise<{ messages?: { id:
     const result = await send();
     return await prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "sent", externalId: result.messages?.[0]?.id ?? null } });
   } catch (error) {
-    console.error("[chat] falha no envio:", error);
+    console.error(`[chat] falha no envio da mensagem ${messageId}:`, error);
     return prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "failed", failureReason: failureText(error) } });
   }
 }
@@ -180,7 +180,10 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
 
 /** Mensagem automática: gravada antes de sair, para quem assumir ver o que já foi dito. */
 export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string, send?: () => Promise<{ messages?: { id: string }[] }>) {
-  if (await isBlocked(conversation.phone)) return null;
+  if (await isBlocked(conversation.phone)) {
+    console.log(`[bot] ${conversation.id}: mensagem automática não enviada (número bloqueado)`);
+    return null;
+  }
   const text = withoutDashes(rawText);
   const now = new Date();
   const message = await prisma.chatMessage.create({

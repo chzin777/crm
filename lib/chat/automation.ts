@@ -44,13 +44,20 @@ export async function runAutomation(recorded: RecordedInbound) {
     where: { id: recorded.conversationId },
     include: { contact: { select: { name: true } }, queue: { select: { name: true } } },
   });
-  if (!conversation || conversation.assigneeId || conversation.closedAt) return;
-  if (await isBlocked(conversation.phone)) return;
+  if (!conversation || conversation.assigneeId || conversation.closedAt) {
+    console.log(`[bot] ${recorded.conversationId}: sem automação (${!conversation ? "conversa não encontrada" : conversation.assigneeId ? "já tem atendente" : "conversa encerrada"})`);
+    return;
+  }
+  if (await isBlocked(conversation.phone)) {
+    console.log(`[bot] ${conversation.id}: sem automação (número bloqueado)`);
+    return;
+  }
 
   const inboundCount = await prisma.chatMessage.count({ where: { conversationId: conversation.id, author: "customer" } });
   const firstMessage = inboundCount === 1;
 
   const handled = await attendByMenu({ conversation, customerName: conversation.contact.name, text: recorded.text, firstMessage });
+  console.log(`[bot] ${conversation.id}: status ${conversation.status}, ${firstMessage ? "primeira mensagem" : `mensagem ${inboundCount}`} -> ${handled ? "respondida pelo menu" : "menu não respondeu"}`);
   if (handled) return;
 
   const answered = await answerByQuickReply({
