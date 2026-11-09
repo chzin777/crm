@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Clock, Headphones, Hourglass, Inbox, ListFilter, MapPin, MessageCircleReply, MessagesSquare, RefreshCw, Star, Tags, UserRound, Users } from "lucide-react";
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Clock, Headphones, Hourglass, Inbox, ListFilter, MapPin, MessageCircleReply, MessagesSquare, Star, Tags, UserRound, Users } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import type { PeriodPreset, ServiceMetrics } from "@/lib/service-metrics";
 
 type Options = { queues: { id: string; name: string }[]; operators: { id: string; name: string }[] };
@@ -11,7 +12,13 @@ type Filters = { preset: PeriodPreset; start: string; end: string; queueId: stri
 type SortKey = "name" | "closed" | "tma" | "tmr" | "nps";
 type RankingRow = ServiceMetrics["ranking"][number];
 
-const PRESET_LABELS: Record<PeriodPreset, string> = { today: "Hoje", "7d": "Últimos 7 dias", "30d": "Últimos 30 dias", month: "Mês atual", custom: "Personalizado" };
+const PRESET_OPTIONS: { value: PeriodPreset; label: string; title: string }[] = [
+  { value: "today", label: "Hoje", title: "Hoje" },
+  { value: "7d", label: "7D", title: "Últimos 7 dias" },
+  { value: "30d", label: "30D", title: "Últimos 30 dias" },
+  { value: "month", label: "Mês", title: "Mês atual" },
+  { value: "custom", label: "Personalizado", title: "Escolher datas" },
+];
 
 const todayBrt = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
@@ -29,43 +36,14 @@ function formatDuration(seconds: number | null | undefined) {
 
 const formatDay = (day: string) => day.split("-").reverse().join("/");
 
-/** Variação percentual contra o período anterior; lowerIsBetter para tempos. */
-function Delta({ value, previous, lowerIsBetter = false }: { value: number | null; previous: number | null; lowerIsBetter?: boolean }) {
-  if (value === null || previous === null || previous === 0) return <span className="text-[11px] text-slate-400 dark:text-slate-500">sem comparação</span>;
-  const change = ((value - previous) / previous) * 100;
-  if (Math.abs(change) < 0.5) return <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-white/5 dark:text-slate-400">= anterior</span>;
-  const good = lowerIsBetter ? change < 0 : change > 0;
-  const Icon = change > 0 ? ArrowUp : ArrowDown;
-  return (
-    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${good ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"}`}>
-      <Icon className="h-3 w-3" />{Math.abs(change).toFixed(0)}%
-    </span>
-  );
-}
-
-const cardClass = "rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-white/[0.06] dark:bg-[#0a1b4d]";
-
-function KpiCard({ icon: Icon, label, hint, value, tone, children }: { icon: React.ElementType; label: string; hint: string; value: string; tone: string; children?: React.ReactNode }) {
-  return (
-    <section className={`${cardClass} flex flex-col p-5`} aria-label={label} title={hint}>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">{label}</p>
-        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${tone}`}><Icon className="h-4 w-4" /></span>
-      </div>
-      <p className="mt-2 text-[28px] font-semibold leading-none tabular-nums tracking-tight text-slate-900 dark:text-white">{value}</p>
-      <div className="mt-3 flex flex-1 flex-col justify-end gap-1.5">{children}</div>
-    </section>
-  );
-}
-
 function SlaBadge({ seconds, warn, breach }: { seconds: number | null; warn: number; breach: number }) {
   if (seconds === null) return <span className="text-[11px] text-slate-400">—</span>;
   const [label, style, dot] = seconds > breach
-    ? ["Fora do SLA", "bg-rose-50 text-rose-700 ring-rose-200/70 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-500/20", "bg-rose-500"]
+    ? ["Fora do SLA", "bg-rose-500/10 text-rose-700 ring-rose-500/20 dark:text-rose-300", "bg-rose-500"]
     : seconds > warn
-      ? ["Atenção", "bg-amber-50 text-amber-700 ring-amber-200/70 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20", "bg-amber-500"]
-      : ["No SLA", "bg-emerald-50 text-emerald-700 ring-emerald-200/70 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20", "bg-emerald-500"];
-  return <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${style}`}><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{label}</span>;
+      ? ["Atenção", "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300", "bg-amber-500"]
+      : ["No SLA", "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300", "bg-emerald-500"];
+  return <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${style}`}><span className={`h-1.5 w-1.5 rounded-full ${dot}`} />{label}</span>;
 }
 
 function SortButton({ label, column, align, sort, onSort }: { label: string; column: SortKey; align: "left" | "right"; sort: { key: SortKey; dir: "asc" | "desc" }; onSort: (key: SortKey) => void }) {
@@ -78,87 +56,27 @@ function SortButton({ label, column, align, sort, onSort }: { label: string; col
   );
 }
 
-function PanelHeader({ icon: Icon, title, subtitle, children }: { icon: React.ElementType; title: string; subtitle: string; children?: React.ReactNode }) {
-  return (
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500 dark:bg-white/5 dark:text-slate-300"><Icon className="h-4 w-4" /></span>
-        <div>
-          <h2 className="text-[15px] font-semibold text-slate-900 dark:text-white">{title}</h2>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function EmptyState({ icon: Icon, title, text }: { icon: React.ElementType; title: string; text: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-6 py-10 text-center dark:border-white/10">
-      <span className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-white/5 dark:text-slate-500"><Icon className="h-5 w-5" /></span>
-      <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">{title}</p>
-      <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">{text}</p>
-    </div>
-  );
-}
-
-const Skel = ({ className, style }: { className: string; style?: React.CSSProperties }) => <div className={`animate-pulse rounded-md bg-slate-200/70 dark:bg-white/[0.06] ${className}`} style={style} />;
-
 function DashboardSkeleton() {
   return (
-    <div className="space-y-5" aria-busy="true" aria-label="Carregando métricas">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        {Array.from({ length: 5 }, (_, index) => (
-          <div key={index} className={`${cardClass} p-5`}>
-            <div className="flex justify-between"><Skel className="h-4 w-24" /><Skel className="h-8 w-8 rounded-lg" /></div>
-            <Skel className="mt-3 h-7 w-20" />
-            <Skel className="mt-4 h-4 w-16 rounded-full" />
-          </div>
-        ))}
+    <div className="space-y-6" aria-busy="true" aria-label="Carregando métricas">
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }, (_, index) => <KpiSkeleton key={index} />)}
       </div>
-      <div className={`${cardClass} p-5 sm:p-6`}>
-        <Skel className="h-5 w-48" /><Skel className="mt-2 h-3 w-64" />
-        <div className="mt-6 flex h-56 items-end gap-2">
-          {[40, 65, 50, 80, 55, 70, 45, 85, 60, 75, 50, 66].map((height, index) => <Skel key={index} className="flex-1 rounded-b-none rounded-t-md" style={{ height: `${height}%` }} />)}
+      <div className={`${cardClass} p-6`}>
+        <div className="flex items-center gap-3"><Skel className="h-8 w-8 rounded-xl" /><div className="space-y-2"><Skel className="h-4 w-48" /><Skel className="h-3 w-64" /></div></div>
+        <div className="mt-8 flex h-64 items-end gap-2">
+          {[40, 65, 50, 80, 55, 70, 45, 85, 60, 75, 50, 66, 58, 72].map((height, index) => <Skel key={index} className="flex-1 rounded-b-none rounded-t-lg" style={{ height: `${height}%` }} />)}
         </div>
       </div>
-      <div className={`${cardClass} space-y-3 p-5 sm:p-6`}>
+      <div className={`${cardClass} space-y-4 p-6`}>
         <Skel className="h-5 w-56" />
-        {Array.from({ length: 4 }, (_, index) => <div key={index} className="flex items-center gap-3"><Skel className="h-9 w-9 rounded-full" /><Skel className="h-4 flex-1" /></div>)}
+        {Array.from({ length: 4 }, (_, index) => <div key={index} className="flex items-center gap-3"><Skel className="h-10 w-10 rounded-full" /><Skel className="h-4 flex-1" /><Skel className="h-6 w-20 rounded-full" /></div>)}
       </div>
     </div>
   );
 }
 
-type ChartTooltipProps = { active?: boolean; label?: string | number; payload?: { name?: string; value?: number | string; color?: string }[] };
-
-function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="min-w-[150px] rounded-xl border border-slate-200 bg-white/95 px-3 py-2.5 text-xs shadow-lg backdrop-blur dark:border-white/10 dark:bg-[#0d2160]/95">
-      <p className="mb-1.5 font-semibold text-slate-900 dark:text-white">{label}</p>
-      {payload.map((item) => (
-        <div key={item.name} className="flex items-center justify-between gap-4 py-0.5">
-          <span className="flex items-center gap-2 text-slate-500 dark:text-slate-400"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span>
-          <span className="font-semibold tabular-nums text-slate-900 dark:text-white">{item.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
-const AVATAR_TONES = [
-  "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
-  "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
-  "bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
-  "bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
-  "bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
-];
-
-const selectWrap = "flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 transition-colors hover:border-slate-300 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/15 dark:border-white/10 dark:bg-[#0a1b4d] dark:text-slate-200 dark:hover:border-white/20";
-const selectInner = "min-w-0 max-w-[180px] cursor-pointer truncate bg-transparent outline-none dark:[color-scheme:dark]";
+const AVATAR_TONES: Tone[] = ["indigo", "emerald", "sky", "violet", "amber"];
 
 export default function ServiceMetricsPage() {
   const { isDark } = useCrmTheme();
@@ -211,14 +129,18 @@ export default function ServiceMetricsPage() {
 
   const toggleSort = (key: SortKey) => setSort((current) => ({ key, dir: current.key === key && current.dir === "desc" ? "asc" : "desc" }));
 
-  const colors = { started: isDark ? "#818cf8" : "#4f46e5", closed: isDark ? "#34d399" : "#10b981", grid: isDark ? "rgba(255,255,255,0.05)" : "rgba(15,23,42,0.06)", tick: isDark ? "#64748b" : "#94a3b8" };
+  const theme = chartTheme(isDark);
+  const colors = { started: isDark ? TONES.indigo.strokeDark : TONES.indigo.stroke, closed: isDark ? TONES.emerald.strokeDark : TONES.emerald.stroke };
   const timeline = (data?.timeline ?? []).map((item) => ({ ...item, label: `${item.day.slice(8, 10)}/${item.day.slice(5, 7)}` }));
   const timelineTotal = timeline.reduce((sum, item) => sum + item.started + item.closed, 0);
+  const startedSeries = timeline.map((item) => item.started);
+  const closedSeries = timeline.map((item) => item.closed);
   const maxWord = Math.max(1, ...(data?.words ?? []).map((item) => item.total));
   const maxState = Math.max(1, ...(data?.regions.states ?? []).map((item) => item.total));
   const regionTotal = (data?.regions.states ?? []).reduce((sum, item) => sum + item.total, 0);
   const npsMax = Math.max(1, ...(data?.kpis.nps.distribution ?? []).map((item) => item.total));
   const maxClosed = Math.max(1, ...ranking.map((row) => row.closed));
+  const npsTone: Tone = data?.kpis.nps.value == null ? "slate" : data.kpis.nps.value >= 4 ? "emerald" : data.kpis.nps.value >= 3 ? "amber" : "rose";
 
   const sortButton = (label: string, column: SortKey, align: "left" | "right" = "right") => (
     <SortButton label={label} column={column} align={align} sort={sort} onSort={toggleSort} />
@@ -226,113 +148,102 @@ export default function ServiceMetricsPage() {
 
   return (
     <main className="mx-auto w-full max-w-[1600px] space-y-6 px-4 pb-12 pt-8 sm:px-8">
-      <header className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
+      <LoadingBar active={loading && !!data} />
+      <header className="flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">Métricas de Atendimento</h1>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600 dark:text-[#C4D600]">Atendimento · WhatsApp</p>
+          <h1 className="mt-1 text-[28px] font-semibold tracking-tight text-slate-900 dark:text-white">Métricas de Atendimento</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Tempos, volume, satisfação e desempenho da equipe no WhatsApp
+            Tempos, volume, satisfação e desempenho da equipe
             {data && <span className="text-slate-400 dark:text-slate-500"> · {formatDay(data.period.startDay)} a {formatDay(data.period.endDay)}</span>}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className={selectWrap}>
-            <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
-            <span className="sr-only">Período</span>
-            <select value={filters.preset} onChange={(event) => setFilters((current) => ({ ...current, preset: event.target.value as PeriodPreset }))} className={selectInner}>
-              {(Object.keys(PRESET_LABELS) as PeriodPreset[]).map((preset) => <option key={preset} value={preset}>{PRESET_LABELS[preset]}</option>)}
-            </select>
-          </label>
+          <SegmentedControl label="Período" value={filters.preset} options={PRESET_OPTIONS} onChange={(preset) => setFilters((current) => ({ ...current, preset }))} />
           {filters.preset === "custom" && (
-            <div className={selectWrap}>
-              <input type="date" aria-label="Data inicial" value={filters.start} max={filters.end} onChange={(event) => event.target.value && setFilters((current) => ({ ...current, start: event.target.value }))} className="cursor-pointer bg-transparent outline-none dark:[color-scheme:dark]" />
-              <span className="text-xs text-slate-400">até</span>
-              <input type="date" aria-label="Data final" value={filters.end} min={filters.start} max={todayBrt()} onChange={(event) => event.target.value && setFilters((current) => ({ ...current, end: event.target.value }))} className="cursor-pointer bg-transparent outline-none dark:[color-scheme:dark]" />
-            </div>
+            <DateRange start={filters.start} end={filters.end} max={todayBrt()} onChange={(range) => setFilters((current) => ({ ...current, ...range }))} />
           )}
-          <label className={selectWrap}>
-            <ListFilter className="h-4 w-4 shrink-0 text-slate-400" />
-            <span className="sr-only">Fila</span>
-            <select value={filters.queueId} onChange={(event) => setFilters((current) => ({ ...current, queueId: event.target.value }))} className={selectInner}>
-              <option value="">Todas as filas</option>
-              {options?.queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-            </select>
-          </label>
-          <label className={selectWrap}>
-            <UserRound className="h-4 w-4 shrink-0 text-slate-400" />
-            <span className="sr-only">Atendente</span>
-            <select value={filters.assigneeId} onChange={(event) => setFilters((current) => ({ ...current, assigneeId: event.target.value }))} className={selectInner}>
-              <option value="">Todos os atendentes</option>
-              {options?.operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.name}</option>)}
-            </select>
-          </label>
-          <button type="button" onClick={() => setReloadToken((token) => token + 1)} disabled={loading} aria-label="Atualizar" title="Atualizar" className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-[#0a1b4d] dark:text-slate-300 dark:hover:bg-white/5">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
+          <FilterSelect icon={ListFilter} label="Fila" allLabel="Todas as filas" value={filters.queueId} options={(options?.queues ?? []).map((queue) => ({ value: queue.id, label: queue.name }))} onChange={(queueId) => setFilters((current) => ({ ...current, queueId }))} />
+          <FilterSelect icon={UserRound} label="Atendente" allLabel="Todos os atendentes" value={filters.assigneeId} options={(options?.operators ?? []).map((operator) => ({ value: operator.id, label: operator.name }))} onChange={(assigneeId) => setFilters((current) => ({ ...current, assigneeId }))} />
+          <RefreshButton loading={loading} onClick={() => setReloadToken((token) => token + 1)} />
         </div>
       </header>
 
-      {result?.error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">{result.error}</p>}
+      {result?.error && <p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">{result.error}</p>}
 
       {!data && !result?.error && <DashboardSkeleton />}
 
       {data && (
-        <div className={`space-y-6 transition-opacity duration-300 ${loading ? "pointer-events-none opacity-50" : ""}`} aria-busy={loading}>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            <KpiCard icon={Hourglass} tone="bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300" label="TME · Espera" value={formatDuration(data.kpis.tme.value)} hint="Da primeira mensagem do cliente até a primeira resposta de um atendente.">
-              <div className="flex items-center gap-2"><Delta value={data.kpis.tme.value} previous={data.kpis.tme.previous} lowerIsBetter /><span className="text-[11px] text-slate-400 dark:text-slate-500">até 1ª resposta</span></div>
+        <div className={`space-y-6 transition-opacity duration-300 ${loading ? "pointer-events-none opacity-60" : ""}`} aria-busy={loading}>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-5">
+            <KpiCard icon={Hourglass} tone="sky" label="TME · Espera" value={formatDuration(data.kpis.tme.value)} hint="Da primeira mensagem do cliente até a primeira resposta de um atendente." delta={<DeltaPill value={data.kpis.tme.value} previous={data.kpis.tme.previous} lowerIsBetter suffix="vs anterior" />} meta="Até a 1ª resposta">
+              <CompareBars current={data.kpis.tme.value} previous={data.kpis.tme.previous} tone="sky" format={formatDuration} />
             </KpiCard>
-            <KpiCard icon={Headphones} tone="bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300" label="TMA · Atendimento" value={formatDuration(data.kpis.tma.value)} hint="Da primeira resposta do atendente até o encerramento.">
-              <div className="flex items-center gap-2"><Delta value={data.kpis.tma.value} previous={data.kpis.tma.previous} lowerIsBetter /><span className="text-[11px] text-slate-400 dark:text-slate-500">até encerrar</span></div>
+            <KpiCard icon={Headphones} tone="indigo" label="TMA · Atendimento" value={formatDuration(data.kpis.tma.value)} hint="Da primeira resposta do atendente até o encerramento." delta={<DeltaPill value={data.kpis.tma.value} previous={data.kpis.tma.previous} lowerIsBetter suffix="vs anterior" />} meta="Até encerrar">
+              <CompareBars current={data.kpis.tma.value} previous={data.kpis.tma.previous} tone="indigo" format={formatDuration} />
             </KpiCard>
-            <KpiCard icon={MessageCircleReply} tone="bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-300" label="TMR · Resposta" value={formatDuration(data.kpis.tmr.value)} hint="Tempo para responder cada mensagem do cliente.">
-              <div className="flex items-center gap-2"><Delta value={data.kpis.tmr.value} previous={data.kpis.tmr.previous} lowerIsBetter /><span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500">{data.kpis.tmr.samples} respostas</span></div>
+            <KpiCard icon={MessageCircleReply} tone="violet" label="TMR · Resposta" value={formatDuration(data.kpis.tmr.value)} hint="Tempo para responder cada mensagem do cliente." delta={<DeltaPill value={data.kpis.tmr.value} previous={data.kpis.tmr.previous} lowerIsBetter suffix="vs anterior" />} meta={<><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.tmr.samples}</b> respostas medidas</>}>
+              <CompareBars current={data.kpis.tmr.value} previous={data.kpis.tmr.previous} tone="violet" format={formatDuration} />
             </KpiCard>
-            <KpiCard icon={MessagesSquare} tone="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300" label="Volume" value={String(data.kpis.volume.started)} hint="Atendimentos iniciados e encerrados no período.">
-              <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400"><span>Iniciados</span><Delta value={data.kpis.volume.started} previous={data.kpis.volume.prevStarted} /></div>
-              <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400"><span><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.volume.closed}</b> encerrados</span><Delta value={data.kpis.volume.closed} previous={data.kpis.volume.prevClosed} /></div>
+            <KpiCard icon={MessagesSquare} tone="emerald" label="Volume" value={String(data.kpis.volume.started)} hint="Atendimentos iniciados e encerrados no período." delta={<DeltaPill value={data.kpis.volume.started} previous={data.kpis.volume.prevStarted} suffix="iniciados" />} meta={<span className="inline-flex flex-wrap items-center gap-1.5"><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.volume.closed}</b> encerrados <DeltaPill value={data.kpis.volume.closed} previous={data.kpis.volume.prevClosed} /></span>}>
+              {startedSeries.length > 1 ? <Sparkline data={startedSeries} tone="emerald" isDark={isDark} /> : <CompareBars current={data.kpis.volume.started} previous={data.kpis.volume.prevStarted} tone="emerald" format={(value) => String(value ?? "—")} />}
             </KpiCard>
-            <KpiCard icon={Star} tone="bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300" label="NPS · Satisfação" value={data.kpis.nps.value === null ? "—" : `${data.kpis.nps.value.toFixed(1)}`} hint={`${data.kpis.nps.total} avaliação(ões) respondida(s), notas de 1 a 5.`}>
-              <div className="flex items-center gap-2"><Delta value={data.kpis.nps.value} previous={data.kpis.nps.previous} /><span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500">{data.kpis.nps.total} avaliações</span></div>
-              <div className="flex h-8 items-end gap-1" aria-label="Distribuição das notas">
+            <KpiCard icon={Star} tone={npsTone} label="NPS · Satisfação" value={data.kpis.nps.value === null ? "—" : data.kpis.nps.value.toFixed(1)} hint={`${data.kpis.nps.total} avaliação(ões) respondida(s), notas de 1 a 5.`} delta={<DeltaPill value={data.kpis.nps.value} previous={data.kpis.nps.previous} suffix="vs anterior" />} meta={<><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.nps.total}</b> avaliações</>}>
+              <div className="flex h-11 items-end gap-1.5" aria-label="Distribuição das notas">
                 {data.kpis.nps.distribution.map((item) => (
-                  <div key={item.score} className="flex flex-1 flex-col items-center gap-0.5" title={`Nota ${item.score}: ${item.total}`}>
-                    <div className={`w-full rounded-sm ${item.score >= 4 ? "bg-emerald-400/80" : item.score === 3 ? "bg-amber-300/90" : "bg-rose-300/90"}`} style={{ height: `${Math.max(2, (item.total / npsMax) * 20)}px` }} />
-                    <span className="text-[9px] font-medium text-slate-400">{item.score}</span>
+                  <div key={item.score} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={`Nota ${item.score}: ${item.total}`}>
+                    <div className={`w-full rounded-md bg-gradient-to-t ${item.score >= 4 ? "from-emerald-500/40 to-emerald-500" : item.score === 3 ? "from-amber-400/40 to-amber-400" : "from-rose-400/40 to-rose-400"}`} style={{ height: `${Math.max(3, (item.total / npsMax) * 28)}px` }} />
+                    <span className="text-[9px] font-semibold text-slate-400">{item.score}</span>
                   </div>
                 ))}
               </div>
             </KpiCard>
           </div>
 
-          <section className={`${cardClass} p-5 sm:p-6`} aria-label="Atendimentos por dia">
-            <PanelHeader icon={BarChart3} title="Atendimentos por dia" subtitle="Iniciados e encerrados em cada dia do período.">
-              <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.started }} />Iniciados</span>
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.closed }} />Encerrados</span>
-              </div>
+          <section className={`${cardClass} p-6`} aria-label="Atendimentos por dia">
+            <PanelHeader icon={BarChart3} tone="indigo" title="Atendimentos por dia" subtitle="Iniciados (barras) e encerrados (linha) em cada dia do período.">
+              <Legend items={[{ label: "Iniciados", color: colors.started }, { label: "Encerrados", color: colors.closed, line: true }]} />
             </PanelHeader>
             {timelineTotal === 0 ? <EmptyState icon={Inbox} title="Nenhum atendimento no período" text="Ajuste o período ou os filtros de fila e atendente para ver os dados." /> : (
-              <div className="h-72">
+              <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={timeline} margin={{ top: 4, right: 4, left: -12, bottom: 0 }} barGap={3}>
-                    <CartesianGrid stroke={colors.grid} vertical={false} />
-                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: colors.tick, fontSize: 11 }} dy={8} minTickGap={16} />
-                    <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: colors.tick, fontSize: 11 }} width={40} />
-                    <Tooltip content={<ChartTooltip />} cursor={{ fill: isDark ? "rgba(255,255,255,0.04)" : "rgba(15,23,42,0.04)", radius: 6 }} />
-                    <Bar isAnimationActive={false} dataKey="started" name="Iniciados" fill={colors.started} radius={[5, 5, 0, 0]} maxBarSize={22} />
-                    <Bar isAnimationActive={false} dataKey="closed" name="Encerrados" fill={colors.closed} radius={[5, 5, 0, 0]} maxBarSize={22} />
-                  </BarChart>
+                  <ComposedChart data={timeline} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                    <defs>
+                      <FadeGradient id="svc-started" color={colors.started} from={0.9} to={0.15} />
+                    </defs>
+                    <CartesianGrid stroke={theme.grid} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: theme.tick, fontSize: 11 }} dy={8} minTickGap={16} />
+                    <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: theme.tick, fontSize: 11 }} width={40} />
+                    <Tooltip content={<ChartTooltip />} cursor={{ fill: theme.cursor, radius: 8 }} />
+                    <Bar dataKey="started" name="Iniciados" fill="url(#svc-started)" radius={[8, 8, 0, 0]} maxBarSize={28} animationDuration={600} />
+                    <Line type="monotone" dataKey="closed" name="Encerrados" stroke={colors.closed} strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: isDark ? "#071440" : "#fff" }} animationDuration={800} />
+                  </ComposedChart>
                 </ResponsiveContainer>
+              </div>
+            )}
+            {timelineTotal > 0 && (
+              <div className="mt-5 grid grid-cols-2 gap-3 border-t border-slate-100 pt-5 sm:grid-cols-4 dark:border-white/5">
+                {[
+                  ["Pico de iniciados", Math.max(...startedSeries)],
+                  ["Média diária", Math.round(startedSeries.reduce((sum, value) => sum + value, 0) / Math.max(1, startedSeries.length))],
+                  ["Pico de encerrados", Math.max(...closedSeries)],
+                  ["Dias com atendimento", startedSeries.filter((value) => value > 0).length],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl bg-slate-50/80 px-4 py-3 dark:bg-white/[0.03]">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{label}</p>
+                    <p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900 dark:text-white">{value}</p>
+                  </div>
+                ))}
               </div>
             )}
           </section>
 
-          <section className={`${cardClass} p-5 sm:p-6`} aria-label="Ranking de atendentes">
-            <PanelHeader icon={Users} title="Desempenho dos atendentes" subtitle={`SLA de resposta: até ${formatDuration(data.sla.warn)} ok · até ${formatDuration(data.sla.breach)} atenção · acima disso fora do SLA.`} />
+          <section className={`${cardClass} p-6`} aria-label="Ranking de atendentes">
+            <PanelHeader icon={Users} tone="violet" title="Desempenho dos atendentes" subtitle={`SLA de resposta: até ${formatDuration(data.sla.warn)} ok · até ${formatDuration(data.sla.breach)} atenção · acima disso fora do SLA.`} />
             {ranking.length === 0 ? <EmptyState icon={Users} title="Sem atendimentos humanos" text="Nenhum atendente encerrou ou respondeu conversas com os filtros escolhidos." /> : (
               <div className="custom-scrollbar -mx-2 overflow-x-auto">
-                <div className="min-w-[720px] px-2">
-                  <div className="grid grid-cols-[2rem_minmax(0,1fr)_7rem_6rem_7rem_6rem_7rem] items-center gap-3 border-b border-slate-100 px-3 pb-2.5 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:border-white/5 dark:text-slate-500">
+                <div className="min-w-[760px] px-2">
+                  <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_8rem_6rem_7rem_6rem_7.5rem] items-center gap-3 px-4 pb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                     <span>#</span>
                     {sortButton("Atendente", "name", "left")}
                     {sortButton("Encerrados", "closed")}
@@ -341,17 +252,17 @@ export default function ServiceMetricsPage() {
                     {sortButton("NPS", "nps")}
                     <span className="text-right">SLA</span>
                   </div>
-                  <ul className="divide-y divide-slate-100 dark:divide-white/5">
+                  <ul className="space-y-1.5">
                     {ranking.map((row, index) => (
-                      <li key={row.userId} className="grid grid-cols-[2rem_minmax(0,1fr)_7rem_6rem_7rem_6rem_7rem] items-center gap-3 rounded-lg px-3 py-3 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.03]">
-                        <span className="text-xs font-medium tabular-nums text-slate-400">{index + 1}</span>
+                      <li key={row.userId} className="grid grid-cols-[2.5rem_minmax(0,1fr)_8rem_6rem_7rem_6rem_7.5rem] items-center gap-3 rounded-xl border border-transparent px-4 py-3 text-sm transition-all hover:border-slate-200/80 hover:bg-slate-50/80 dark:hover:border-white/[0.06] dark:hover:bg-white/[0.03]">
+                        <span className={`grid h-6 w-6 place-items-center rounded-lg text-[11px] font-bold tabular-nums ${index === 0 ? "bg-amber-400/15 text-amber-600 dark:text-amber-300" : index === 1 ? "bg-slate-400/15 text-slate-500 dark:text-slate-300" : index === 2 ? "bg-orange-400/15 text-orange-600 dark:text-orange-300" : "text-slate-400"}`}>{index + 1}</span>
                         <div className="flex min-w-0 items-center gap-3">
-                          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold ${AVATAR_TONES[index % AVATAR_TONES.length]}`}>{initials(row.name)}</span>
+                          <Avatar name={row.name} tone={AVATAR_TONES[index % AVATAR_TONES.length]} />
                           <span className="truncate font-medium text-slate-900 dark:text-white">{row.name}</span>
                         </div>
                         <div className="text-right">
                           <p className="font-semibold tabular-nums text-slate-900 dark:text-white">{row.closed}</p>
-                          <div className="ml-auto mt-1 h-1 w-16 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5"><div className="h-full rounded-full bg-indigo-400 dark:bg-indigo-400/80" style={{ width: `${(row.closed / maxClosed) * 100}%` }} /></div>
+                          <div className="ml-auto mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5"><div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-indigo-600 dark:from-indigo-400/70 dark:to-indigo-300" style={{ width: `${(row.closed / maxClosed) * 100}%` }} /></div>
                         </div>
                         <span className="text-right tabular-nums text-slate-700 dark:text-slate-200">{formatDuration(row.tma)}</span>
                         <span className="text-right tabular-nums text-slate-700 dark:text-slate-200">{formatDuration(row.tmr)}{row.responses > 0 && <span className="ml-1 text-[10px] text-slate-400">({row.responses})</span>}</span>
@@ -366,19 +277,19 @@ export default function ServiceMetricsPage() {
           </section>
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <section className={`${cardClass} p-5 sm:p-6`} aria-label="Termos mais frequentes">
-              <PanelHeader icon={Tags} title="Termos mais frequentes" subtitle="Palavras mais usadas pelos clientes, sem palavras comuns." />
+            <section className={`${cardClass} p-6`} aria-label="Termos mais frequentes">
+              <PanelHeader icon={Tags} tone="sky" title="Termos mais frequentes" subtitle="Palavras mais usadas pelos clientes, sem palavras comuns." />
               {data.words.length === 0 ? <EmptyState icon={Tags} title="Sem mensagens de clientes" text="Nenhuma mensagem recebida no período selecionado." /> : (
                 <div className="flex flex-wrap gap-2">
                   {data.words.map((item) => {
                     const weight = item.total / maxWord;
                     const tone = weight > 0.66
-                      ? "bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500"
+                      ? "bg-gradient-to-br from-indigo-500 to-indigo-700 text-white border-transparent shadow-sm shadow-indigo-500/20"
                       : weight > 0.33
-                        ? "bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-200 dark:border-indigo-500/20"
-                        : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-white/[0.03] dark:text-slate-300 dark:border-white/10";
+                        ? "bg-indigo-500/10 text-indigo-700 border-indigo-500/15 dark:text-indigo-200"
+                        : "bg-slate-50 text-slate-600 border-slate-200/80 dark:bg-white/[0.03] dark:text-slate-300 dark:border-white/10";
                     return (
-                      <span key={item.word} title={`${item.word}: ${item.total} vez(es)`} className={`inline-flex cursor-default items-center gap-1.5 rounded-full border px-3 py-1 font-medium transition-transform hover:-translate-y-px ${tone}`} style={{ fontSize: `${0.75 + weight * 0.25}rem` }}>
+                      <span key={item.word} title={`${item.word}: ${item.total} vez(es)`} className={`inline-flex cursor-default items-center gap-1.5 rounded-full border px-3 py-1 font-medium transition-transform hover:-translate-y-0.5 ${tone}`} style={{ fontSize: `${0.75 + weight * 0.25}rem` }}>
                         {item.word}
                         <span className={`text-[10px] tabular-nums ${weight > 0.66 ? "text-white/70" : "text-slate-400 dark:text-slate-500"}`}>{item.total}</span>
                       </span>
@@ -388,29 +299,29 @@ export default function ServiceMetricsPage() {
               )}
             </section>
 
-            <section className={`${cardClass} p-5 sm:p-6`} aria-label="Atendimentos por região">
-              <PanelHeader icon={MapPin} title="Distribuição por região" subtitle="Estado e DDD do telefone de quem iniciou atendimento." />
+            <section className={`${cardClass} p-6`} aria-label="Atendimentos por região">
+              <PanelHeader icon={MapPin} tone="emerald" title="Distribuição por região" subtitle="Estado e DDD do telefone de quem iniciou atendimento." />
               {regionTotal === 0 ? <EmptyState icon={MapPin} title="Sem DDD identificado" text="Nenhum atendimento com telefone brasileiro reconhecido no período." /> : (
-                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
                   <div>
-                    <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">Por estado</p>
-                    <ul className="space-y-2.5">
+                    <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Por estado</p>
+                    <ul className="space-y-3">
                       {data.regions.states.slice(0, 8).map((item) => (
                         <li key={item.uf} title={`${item.uf}: ${item.total} atendimento(s)`}>
                           <div className="flex items-center justify-between gap-2 text-xs">
                             <span className="font-semibold text-slate-800 dark:text-slate-100">{item.uf}</span>
                             <span className="tabular-nums text-slate-500 dark:text-slate-400"><b className="font-semibold text-slate-900 dark:text-white">{item.total}</b> · {Math.round((item.total / regionTotal) * 100)}%</span>
                           </div>
-                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
-                            <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-400" style={{ width: `${(item.total / maxState) * 100}%` }} />
+                          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
+                            <div className="h-full rounded-full bg-gradient-to-r from-indigo-500/60 to-indigo-500" style={{ width: `${(item.total / maxState) * 100}%` }} />
                           </div>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div>
-                    <p className="mb-3 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">Principais DDDs</p>
-                    <ul className="space-y-2.5">
+                    <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Principais DDDs</p>
+                    <ul className="space-y-3">
                       {data.regions.ddds.slice(0, 8).map((item) => (
                         <li key={item.ddd}>
                           <div className="flex items-center justify-between gap-2 text-xs">
@@ -420,8 +331,8 @@ export default function ServiceMetricsPage() {
                             </span>
                             <span className="shrink-0 font-semibold tabular-nums text-slate-900 dark:text-white">{item.total}</span>
                           </div>
-                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
-                            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400" style={{ width: `${(item.total / (data.regions.ddds[0]?.total || 1)) * 100}%` }} />
+                          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
+                            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500/60 to-emerald-500" style={{ width: `${(item.total / (data.regions.ddds[0]?.total || 1)) * 100}%` }} />
                           </div>
                         </li>
                       ))}
