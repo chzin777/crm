@@ -38,6 +38,9 @@ const MISSING_MEDIA: Record<string, { icon: typeof Mic; label: string }> = {
 };
 
 /** Quando o download falha, a mensagem fica gravada só com o rótulo do tipo, sem arquivo. */
+/** Registros antigos de aviso de protocolo da Meta gravados como se fossem do cliente. */
+const LEGACY_PROTOCOL_TEXT = "[Mensagem do tipo system]";
+
 const LABEL_KINDS: Record<string, string> = {
   "[Áudio]": "audio",
   "[Figurinha]": "sticker",
@@ -286,10 +289,10 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                     <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-medium text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300">{dayLabel(message.createdAt)}</span>
                   </div>
                 )}
-                {message.author === "system" ? (
+                {message.author === "system" || message.text === LEGACY_PROTOCOL_TEXT ? (
                   <div className="flex justify-center">
                     <span className="max-w-[85%] rounded-lg bg-slate-200/70 px-3 py-1.5 text-center text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {message.text} · {clockTime(message.createdAt)}
+                      {message.text === LEGACY_PROTOCOL_TEXT ? "Aviso de sistema do WhatsApp" : message.text} · {clockTime(message.createdAt)}
                     </span>
                   </div>
                 ) : (

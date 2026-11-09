@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAutomation } from "@/lib/chat/automation";
 import { notifyChatChange } from "@/lib/chat/events";
-import { recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
+import { isCustomerMessage, recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 import { phoneVariants } from "@/lib/chat/phone";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
@@ -145,6 +145,10 @@ export async function POST(request: Request) {
           );
         }
         for (const msg of change.value?.messages ?? []) {
+          if (!isCustomerMessage(msg.type)) {
+            console.log(`[whatsapp/webhook] evento de protocolo ${msg.type ?? "sem tipo"} de ${msg.from} ignorado (${msg.id})`);
+            continue;
+          }
           await handleInboundMessage(msg).catch((failure) => console.error("[whatsapp/webhook] processar inbound:", failure));
           const profile = profiles.find((item) => item.wa_id === msg.from)?.profile?.name ?? profiles[0]?.profile?.name;
           let recorded;

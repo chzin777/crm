@@ -47,6 +47,14 @@ function describeContacts(contacts: NonNullable<MetaInboundMessage["contacts"]>)
   return contacts.map((item) => `👤 ${item.name?.formatted_name ?? "Contato"} ${item.phones?.[0]?.phone ?? ""}`.trim()).join("\n");
 }
 
+/**
+ * Só o que o cliente realmente enviou. "system" (troca de número, chave de segurança),
+ * "reaction", "ephemeral" e "request_welcome" são avisos de protocolo da Meta.
+ * "unsupported" fica: é mensagem do cliente que a API não sabe ler (ex.: visualização única).
+ */
+const CUSTOMER_TYPES = new Set(["text", "image", "video", "audio", "document", "sticker", "location", "contacts", "button", "interactive", "order", "unsupported"]);
+export const isCustomerMessage = (type: string | undefined) => CUSTOMER_TYPES.has(type ?? "");
+
 function readContent(message: MetaInboundMessage): { text: string; media: (MetaMedia & { kind: AttachmentKind }) | null } {
   switch (message.type) {
     case "text":
@@ -161,7 +169,7 @@ export type RecordedInbound = {
  * e a Meta reenviar; a idempotência fica no externalId.
  */
 export async function recordInbound(message: MetaInboundMessage, profileName: string | undefined): Promise<RecordedInbound | null> {
-  if (!message.id || !message.from || message.type === "reaction") return null;
+  if (!message.id || !message.from || !isCustomerMessage(message.type)) return null;
   const repeated = await prisma.chatMessage.findUnique({ where: { externalId: message.id }, select: { id: true } });
   if (repeated) return null;
 
