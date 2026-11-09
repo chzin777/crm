@@ -62,6 +62,15 @@ interface PurchaseRecord {
   produto: string;
   data: string;
   valor: string;
+  pedido?: string;
+  loja?: string;
+  itens?: number;
+}
+
+/** Datas do ERP chegam como ISO ("2022-12-29T03:00:00.000Z"): exibe só o dia, em DD/MM/AAAA. */
+function formatPurchaseDate(value: string) {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
+  return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : value || "—";
 }
 
 function formatPhone(value: string) {
@@ -1415,14 +1424,29 @@ export default function Home() {
         >
           <div className="flex h-full min-h-0 flex-col">
             {/* Fixed header with avatar and tag */}
-            <div className="flex shrink-0 items-center gap-3 border-b border-slate-100 pb-4 dark:border-slate-700">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#051647] text-xs font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">
+            <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-3 sm:flex-nowrap dark:border-slate-700 dark:from-slate-800/60 dark:to-transparent">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#051647] to-[#002187] text-sm font-bold tracking-wide text-white shadow-sm ring-4 ring-white dark:from-[#C4D600] dark:to-[#9fb000] dark:text-[#051647] dark:ring-slate-900">
                 {selectedCard.iniciais}
               </div>
               <div className="min-w-0 flex-1">
-                <h2 className="truncate text-base font-bold text-slate-900 dark:text-white">{selectedCard.cliente}</h2>
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${selectedCard.tagColor}`}>{selectedCard.tag}</span>
+                <h2 className="truncate text-lg font-semibold tracking-tight text-slate-900 dark:text-white">{selectedCard.cliente}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${selectedCard.tagColor}`}>{selectedCard.tag}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#C4D600]" />{stageTitle(selectedCard.coluna)}
+                  </span>
+                </div>
               </div>
+              {selectedCard.telefone && (
+                <a
+                  href={`tel:+${selectedCard.telefone.replace(/\D/g, "").replace(/^(?!55)/, "55")}`}
+                  title="Ligar"
+                  aria-label="Ligar para o cliente"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer"
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                </a>
+              )}
               {confirmingDelete ? (
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="hidden text-xs text-slate-600 dark:text-slate-300 sm:inline">Excluir da pipeline?</span>
@@ -1445,74 +1469,85 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setConfirmingDelete(true)}
-                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer hover:cursor-pointer"
+                  title="Excluir da pipeline"
+                  className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-red-900/60 dark:hover:bg-red-950/30 dark:hover:text-red-400 cursor-pointer hover:cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Excluir
+                  <span className="hidden sm:inline">Excluir</span>
                 </button>
               )}
-                             <button
-                               type="button"
-                               onClick={() => {
-                                 setMessageCard(selectedCard);
-                                 setSelectedCard(null);
-                               }}
-                               className="flex shrink-0 items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1.5 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
-                               title="Enviar mensagem"
-                             >
-                               <WhatsAppIcon className="h-3.5 w-3.5 fill-white" />
-                               <span>Enviar mensagem</span>
-                             </button>
-                           </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMessageCard(selectedCard);
+                  setSelectedCard(null);
+                }}
+                className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[#25D366] px-3 text-xs font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
+                title="Enviar mensagem"
+              >
+                <WhatsAppIcon className="h-3.5 w-3.5 fill-white" />
+                <span>WhatsApp</span>
+              </button>
+            </div>
 
             {/* Tab bar */}
-            <div className="mt-3 flex shrink-0 gap-1 border-b border-slate-200 dark:border-slate-700">
+            <div role="tablist" aria-label="Detalhes do cliente" className="mt-4 flex shrink-0 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800/50">
               {([
-                { key: "dados", label: "Dados" },
-                { key: "compras", label: "Compras" },
-                { key: "observacoes", label: "Observações" },
-              ] as const).map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setDetailTab(tab.key)}
-                  className={`relative px-4 py-2 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${detailTab === tab.key
-                      ? "text-[#002187] dark:text-[#C4D600]"
-                      : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                    }`}
-                >
-                  {tab.label}
-                  {detailTab === tab.key && (
-                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C4D600] dark:bg-[#C4D600]" />
-                  )}
-                </button>
-              ))}
+                { key: "dados", label: "Dados", icon: UserCheck },
+                { key: "compras", label: "Compras", icon: ShoppingBag },
+                { key: "observacoes", label: "Observações", icon: Pencil },
+              ] as const).map((tab) => {
+                const TabIcon = tab.icon;
+                const active = detailTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setDetailTab(tab.key)}
+                    className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-200 cursor-pointer hover:cursor-pointer ${active
+                        ? "bg-white text-[#051647] shadow-sm ring-1 ring-slate-200 dark:bg-[#C4D600] dark:text-[#051647] dark:ring-0"
+                        : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                      }`}
+                  >
+                    <TabIcon className="h-3.5 w-3.5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Tab content — scrollable area */}
-            <div className="min-h-0 flex-1 overflow-y-auto py-4">
+            <div key={detailTab} className="soft-pop-in custom-scrollbar min-h-0 flex-1 overflow-y-auto py-4 pr-1">
               {detailTab === "dados" && (
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <section>
-                    <h3 className="mb-3 text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Dados do cliente</h3>
-                    <dl className="space-y-3 text-sm">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <section className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                    <h3 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Dados do cliente</h3>
+                    <dl className="space-y-1 text-sm">
                       <InlineField label="Telefone" value={formatPhone(selectedCard.telefone)} onSave={(v) => updateSelectedCardField("telefone", v)} icon={<Phone className="h-3.5 w-3.5" />} />
                       <InlineField label="E-mail" value={selectedCard.email} onSave={(v) => updateSelectedCardField("email", v)} icon={<Mail className="h-3.5 w-3.5" />} />
                       <InlineField label="Data de nascimento" value={selectedCard.dataNascimento} onSave={(v) => updateSelectedCardField("dataNascimento", v)} icon={<CalendarDays className="h-3.5 w-3.5" />} />
                     </dl>
                   </section>
-                  <section>
-                    <h3 className="mb-3 text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Negócio atual</h3>
-                    <dl className="space-y-3 text-sm">
-                      <InlineField label="Título" value={selectedCard.titulo} onSave={(v) => updateSelectedCardField("titulo", v)} />
-                      <InlineField label="Valor" value={selectedCard.valor} onSave={(v) => updateSelectedCardField("valor", v)} />
-                      <div>
-                        <dt className="text-[10px] text-slate-500 dark:text-slate-400">Etapa</dt>
-                        <dd className="font-medium text-slate-900 dark:text-white">{stageTitle(selectedCard.coluna)}</dd>
+                  <section className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                    <h3 className="mb-2 px-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Negócio atual</h3>
+                    <dl className="space-y-1 text-sm">
+                      <InlineField label="Título" value={selectedCard.titulo} onSave={(v) => updateSelectedCardField("titulo", v)} icon={<Pencil className="h-3.5 w-3.5" />} />
+                      <InlineField label="Valor" value={selectedCard.valor} onSave={(v) => updateSelectedCardField("valor", v)} icon={<ShoppingBag className="h-3.5 w-3.5" />} />
+                      <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-[#002187] dark:bg-slate-800 dark:text-[#C4D600]"><ArrowRight className="h-3.5 w-3.5" /></span>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] text-slate-500 dark:text-slate-400">Etapa</dt>
+                          <dd className="font-medium text-slate-900 dark:text-white">{stageTitle(selectedCard.coluna)}</dd>
+                        </div>
                       </div>
-                      <div>
-                        <dt className="text-[10px] text-slate-500 dark:text-slate-400">Dias na etapa</dt>
-                        <dd className="font-medium text-slate-900 dark:text-white">{selectedCard.diasNaEtapa}</dd>
+                      <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-[#002187] dark:bg-slate-800 dark:text-[#C4D600]"><CalendarDays className="h-3.5 w-3.5" /></span>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] text-slate-500 dark:text-slate-400">Dias na etapa</dt>
+                          <dd className="font-medium text-slate-900 dark:text-white">{selectedCard.diasNaEtapa}</dd>
+                        </div>
                       </div>
                     </dl>
                   </section>
@@ -1520,28 +1555,51 @@ export default function Home() {
               )}
 
               {detailTab === "compras" && (
-                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                <div>
                   {(() => {
                     const purchases = selectedCard.ultimasCompras.length > 0
                       ? selectedCard.ultimasCompras
                       : loadedPurchases && loadedPurchases.contactId === selectedCard.contactId ? loadedPurchases.items ?? [] : null;
-                    if (purchases === null) {
-                      return selectedCard.contactId
-                        ? <LoadingSpinner label="Carregando compras..." size={32} className="py-3" />
-                        : <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas.</p>;
-                    }
-                    if (purchases.length === 0) {
-                      return <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Não há compras detalhadas registradas.</p>;
-                    }
-                    return purchases.map((purchase, index) => (
-                      <div key={`${purchase.data}-${purchase.produto}-${index}`} className="flex items-center justify-between gap-4 py-3 text-sm">
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-slate-800 dark:text-slate-100">{purchase.produto}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">{purchase.data}</p>
+                    if (purchases === null && selectedCard.contactId) {
+                      return (
+                        <div className="animate-pulse space-y-2" aria-busy="true" aria-label="Carregando compras">
+                          {Array.from({ length: 3 }, (_, index) => <div key={index} className="h-[76px] rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40" />)}
                         </div>
-                        <span className="shrink-0 font-bold text-slate-900 dark:text-white">{purchase.valor}</span>
-                      </div>
-                    ));
+                      );
+                    }
+                    if (!purchases || purchases.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center rounded-xl border border-dashed border-slate-200 px-6 py-10 text-center dark:border-slate-700">
+                          <span className="relative mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-[#002187]/[0.06] text-[#002187] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
+                            <ShoppingBag className="h-6 w-6" />
+                            <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-white bg-[#C4D600] dark:border-[#051647]" />
+                          </span>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Nenhuma compra no ERP</p>
+                          <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">Quando este cliente comprar em uma loja, os pedidos aparecem aqui automaticamente.</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <ul className="space-y-2">
+                        {purchases.map((purchase, index) => (
+                          <li key={`${purchase.data}-${purchase.produto}-${index}`} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50/60 dark:border-slate-700 dark:bg-slate-900/30 dark:hover:bg-slate-800/40">
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300"><ShoppingBag className="h-4 w-4" /></span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-baseline justify-between gap-3">
+                                <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100" title={purchase.produto}>{purchase.produto}</p>
+                                <span className="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-white">{purchase.valor}</span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" />{formatPurchaseDate(purchase.data)}</span>
+                                {purchase.pedido && <><span aria-hidden>·</span><span>Pedido <strong className="font-semibold text-slate-700 dark:text-slate-200">{purchase.pedido}</strong></span></>}
+                                {purchase.loja && <><span aria-hidden>·</span><span>Loja {purchase.loja}</span></>}
+                                {purchase.itens !== undefined && <><span aria-hidden>·</span><span>{purchase.itens} {purchase.itens === 1 ? "item" : "itens"}</span></>}
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    );
                   })()}
                 </div>
               )}
@@ -1621,19 +1679,20 @@ function InlineField({ label, value, onSave, icon, type = "text" }: { label: str
 
   if (!editing) {
     return (
-      <div onClick={() => { setDraft(value); setEditing(true); }} className="group flex items-center gap-2 rounded px-1 py-0.5 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">
-        {icon && <span className="shrink-0 text-[#002187] dark:text-[#C4D600]">{icon}</span>}
-        <div className="min-w-0">
+      <div onClick={() => { setDraft(value); setEditing(true); }} title="Clique para editar" className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer hover:cursor-pointer">
+        {icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-[#002187] dark:bg-slate-800 dark:text-[#C4D600]">{icon}</span>}
+        <div className="min-w-0 flex-1">
           <dt className="text-[10px] text-slate-500 dark:text-slate-400">{label}</dt>
           <dd className="truncate font-medium text-slate-900 dark:text-white">{value || "—"}</dd>
         </div>
+        <Pencil className="h-3 w-3 shrink-0 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-slate-500" />
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
-      {icon && <span className="shrink-0 text-[#002187] dark:text-[#C4D600]">{icon}</span>}
+    <div className="flex items-center gap-2.5 px-2 py-1.5">
+      {icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-slate-100 text-[#002187] dark:bg-slate-800 dark:text-[#C4D600]">{icon}</span>}
       <div className="min-w-0 flex-1">
         <dt className="text-[10px] text-slate-500 dark:text-slate-400">{label}</dt>
         <input
