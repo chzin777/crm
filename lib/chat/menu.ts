@@ -17,6 +17,8 @@ export type MenuState = {
   closePhrase: string | null;
   warnedAt: string | null;
   notifiedPosition?: number | null;
+  /** Desde quando o cliente está na posição atual da fila. */
+  positionSince?: string | null;
 };
 
 const EMPTY: MenuState = { path: [], stopped: false, closeAt: null, closePhrase: null, warnedAt: null };
@@ -31,6 +33,7 @@ export function readMenuState(raw: unknown): MenuState {
     closePhrase: typeof value.closePhrase === "string" ? value.closePhrase : null,
     warnedAt: typeof value.warnedAt === "string" ? value.warnedAt : null,
     notifiedPosition: typeof value.notifiedPosition === "number" ? value.notifiedPosition : null,
+    positionSince: typeof value.positionSince === "string" ? value.positionSince : null,
   };
 }
 

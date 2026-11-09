@@ -83,8 +83,9 @@ export async function runClock() {
     }
   });
 
+  // A posição é guardada sempre (o painel de /filas mostra há quanto tempo o cliente está nela);
+  // o aviso ao cliente só sai com a opção ligada.
   await block("posição na fila", async () => {
-    if (!settings.notifyQueuePosition) return;
     const rows = await prisma.chatConversation.findMany({
       where: { status: "waiting", closedAt: null, queueId: { not: null } },
       orderBy: { waitingSince: "asc" },
@@ -98,8 +99,9 @@ export async function runClock() {
       const last = state.notifiedPosition ?? null;
       if (last === position) continue;
       state.notifiedPosition = position;
+      state.positionSince = last === null ? row.waitingSince!.toISOString() : new Date(now).toISOString();
       await saveMenuState(row.id, state);
-      if (last !== null && position < last && isWindowOpen(row.lastInboundAt)) {
+      if (settings.notifyQueuePosition && last !== null && position < last && isWindowOpen(row.lastInboundAt)) {
         await sendAutomaticMessage(row, `Você avançou na fila: agora é o ${position}º da fila ${row.queue?.name ?? ""}. Obrigado por aguardar.`);
         summary.positions += 1;
       }

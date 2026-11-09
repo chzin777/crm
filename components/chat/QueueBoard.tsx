@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AlertTriangle, Archive, Clock, Inbox, Pause, Pencil, Play, Search, UserMinus, UserPlus, Users } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { AddMembersDialog } from "@/components/chat/AddMembersDialog";
+import { QueueWaitingList } from "@/components/chat/QueueWaitingList";
 import { initials, waitingLabel } from "@/lib/chat/format";
 
 export type QueueMember = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean };
@@ -111,6 +112,8 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
           <Metric icon={Users} label="Online" value={`${online}/${queue.members.length}`} healthy={online > 0} />
           <Metric icon={UserPlus} label="Carga da fila" value={`${open}/${capacity}`} alert={capacity > 0 && open >= capacity} healthy={capacity > 0} />
         </div>
+
+        <QueueWaitingList queueId={queue.id} act={act} />
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">Pessoas na fila</h3>
