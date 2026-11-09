@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { requireApiSession } from "@/lib/api-auth";
+import { getUserAccess, requireApiSession } from "@/lib/api-auth";
 import { ensureInstance } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
 import { friendlyError, listBulkJobs, startBulkJob, toView, type BulkAttachment, type BulkParamSource, type BulkTemplateParam } from "@/lib/bulk-dispatch";
@@ -23,12 +23,25 @@ function parseTemplateParams(raw: FormDataEntryValue | null): BulkTemplateParam[
   }
 }
 
-/** Lotes do usuário logado, para o indicador global de progresso. */
-export async function GET() {
+/**
+ * recent=1: lotes do próprio usuário ativos ou das últimas 24h (indicador flutuante).
+ * Sem recent: histórico completo; administradores veem todos e podem filtrar por userId.
+ */
+export async function GET(request: Request) {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
-  const jobs = await listBulkJobs(user.id);
-  return Response.json({ data: jobs.map(toView) });
+  const url = new URL(request.url);
+  const recent = url.searchParams.get("recent") === "1";
+  const isAdmin = recent ? false : (await getUserAccess(user.id))?.isAdmin ?? false;
+  const filterUserId = url.searchParams.get("userId") || undefined;
+  const jobs = await listBulkJobs({ userId: user.id, all: isAdmin, filterUserId, recent });
+  if (recent) return Response.json({ data: jobs.map((job) => toView(job)) });
+
+  // Operadores para o filtro: todos que já criaram lotes.
+  const operators = isAdmin
+    ? Object.values(Object.fromEntries((await listBulkJobs({ userId: user.id, all: true })).map((job) => [job.userId, { id: job.userId, name: job.userName || "Sem nome" }])))
+    : [];
+  return Response.json({ data: jobs.map((job) => toView(job)), isAdmin, operators });
 }
 
 /** Cria o lote e responde na hora; os envios seguem em fila no servidor. */
@@ -86,7 +99,7 @@ export async function POST(request: Request) {
       template: templateName ? { name: templateName, language: templateLanguage, params: templateParams } : null,
       attachments,
     });
-    return Response.json({ data: toView(job) }, { status: 202 });
+    return Response.json({ data: toView(job, true) }, { status: 202 });
   } catch (error) {
     console.error("[whatsapp/bulk-send] falha ao criar o lote:", error);
     return Response.json({ error: friendlyError(error) }, { status: 422 });

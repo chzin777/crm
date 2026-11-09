@@ -4,6 +4,7 @@ export const MODULES = [
   { key: "contatos", label: "Contatos & Clientes", href: "/contatos", group: "Vendas" },
   { key: "segmentos", label: "Segmentos", href: "/segmentos", group: "Vendas" },
   { key: "campanhas", label: "Campanhas", href: "/campanhas", group: "Marketing" },
+  { key: "disparos", label: "Envios em massa", href: "/disparos", group: "Marketing" },
   { key: "modelos", label: "Modelos WhatsApp", href: "/modelos", group: "Marketing" },
   { key: "nps", label: "Pesquisas NPS", href: "/nps", group: "Marketing" },
   { key: "lojas", label: "Lojas", href: "/lojas", group: "Gestão" },

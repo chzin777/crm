@@ -16,6 +16,7 @@ import {
   Shield,
   KeyRound,
   Settings,
+  Send,
   X,
 } from "lucide-react";
 
@@ -33,6 +34,7 @@ const TABS: TabDef[] = [
   { id: "segmentos", label: "Segmentos", href: "/segmentos", icon: Tags },
   { id: "lojas", label: "Lojas", href: "/lojas", icon: Store },
   { id: "campanhas", label: "Campanhas", href: "/campanhas", icon: MessageSquare },
+  { id: "disparos", label: "Envios em massa", href: "/disparos", icon: Send },
   { id: "modelos", label: "Modelos", href: "/modelos", icon: FileText },
   { id: "nps", label: "NPS", href: "/nps", icon: Award },
   { id: "usuarios", label: "Usuários", href: "/usuarios", icon: UserCog },

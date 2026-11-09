@@ -2,19 +2,21 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
-import { deleteFile, readFile } from "@/lib/minio";
+import { readFile } from "@/lib/minio";
 
 export type BulkParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
 export type BulkTemplateParam = { source: BulkParamSource; value: string };
-export type BulkItemStatus = "PENDING" | "SENDING" | "SENT" | "FAILED";
+export type BulkItemStatus = "PENDING" | "SENDING" | "SENT" | "FAILED" | "CANCELLED";
 export type BulkItem = { contactId: string; nome: string; telefone: string; status: BulkItemStatus; error?: string };
 export type BulkAttachment = { key: string; fileName: string; mimetype: string };
+export type BulkJobStatus = "running" | "paused" | "completed" | "cancelled";
 
 export type BulkJob = {
   id: string;
   userId: string;
+  userName?: string;
   stageName: string;
-  status: "running" | "completed";
+  status: BulkJobStatus;
   total: number;
   sent: number;
   failed: number;
@@ -22,12 +24,28 @@ export type BulkJob = {
   text: string;
   template: { name: string; language: string; params: BulkTemplateParam[] } | null;
   attachments: BulkAttachment[];
+  retryOf?: string;
   createdAt: string;
   finishedAt?: string;
 };
 
-/** Resumo enviado ao navegador: sem texto, modelo nem anexos. */
-export type BulkJobView = Omit<BulkJob, "text" | "template" | "attachments" | "userId">;
+/** Visão enviada ao navegador: sem texto completo, parâmetros nem anexos. */
+export type BulkJobView = {
+  id: string;
+  userId: string;
+  userName: string;
+  stageName: string;
+  templateName: string | null;
+  status: BulkJobStatus;
+  total: number;
+  sent: number;
+  failed: number;
+  pending: number;
+  retryOf?: string;
+  createdAt: string;
+  finishedAt?: string;
+  items?: BulkItem[];
+};
 
 // Cadência entre envios: base configurável + variação aleatória para não formar um padrão fixo.
 const MIN_DELAY_MS = Number(process.env.BULK_SEND_MIN_DELAY_MS) || 1_000;
@@ -36,8 +54,8 @@ const MAX_DELAY_MS = Math.max(MIN_DELAY_MS, Number(process.env.BULK_SEND_MAX_DEL
 const RATE_LIMIT_CODES = new Set([130429, 131056, 80007, 4]);
 const RATE_LIMIT_BASE_MS = 5_000;
 const RATE_LIMIT_MAX_RETRIES = 5;
-// Lotes concluídos ficam visíveis por um dia e depois são apagados.
-const FINISHED_RETENTION_MS = 24 * 60 * 60 * 1000;
+// O indicador flutuante só mostra lotes concluídos nas últimas 24h; o histórico completo fica em /disparos.
+const RECENT_MS = 24 * 60 * 60 * 1000;
 
 const jobKey = (id: string) => `bulk-job:${id}`;
 const asJson = (value: unknown) => value as Prisma.InputJsonValue;
@@ -45,11 +63,38 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 const jitterDelay = () => MIN_DELAY_MS + Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1));
 
 // Estado compartilhado entre rotas (hot reload cria módulos novos em desenvolvimento).
-const globalState = globalThis as unknown as { __bulkRunning?: Set<string>; __bulkQueue?: Promise<void> };
+const globalState = globalThis as unknown as {
+  __bulkRunning?: Set<string>;
+  __bulkQueue?: Promise<void>;
+  __bulkControl?: Map<string, "pause" | "cancel">;
+};
 const running = (globalState.__bulkRunning ??= new Set());
+const control = (globalState.__bulkControl ??= new Map());
 
-export function toView(job: BulkJob): BulkJobView {
-  return { id: job.id, stageName: job.stageName, status: job.status, total: job.total, sent: job.sent, failed: job.failed, items: job.items, createdAt: job.createdAt, finishedAt: job.finishedAt };
+export class BulkDispatchError extends Error {
+  constructor(message: string, public status = 400) {
+    super(message);
+  }
+}
+
+export function toView(job: BulkJob, withItems = false): BulkJobView {
+  const pending = job.items.filter((item) => item.status === "PENDING" || item.status === "SENDING").length;
+  return {
+    id: job.id,
+    userId: job.userId,
+    userName: job.userName ?? "",
+    stageName: job.stageName,
+    templateName: job.template?.name ?? null,
+    status: job.status,
+    total: job.total,
+    sent: job.sent,
+    failed: job.failed,
+    pending,
+    retryOf: job.retryOf,
+    createdAt: job.createdAt,
+    finishedAt: job.finishedAt,
+    ...(withItems ? { items: job.items } : {}),
+  };
 }
 
 async function readJob(id: string): Promise<BulkJob | null> {
@@ -141,6 +186,18 @@ async function sendWithBackoff(job: BulkJob, item: BulkItem, prepared: Prepared)
   }
 }
 
+/** Marca o que ainda não saiu como cancelado e encerra o lote. */
+function applyCancel(job: BulkJob) {
+  for (const item of job.items) {
+    if (item.status === "PENDING") {
+      item.status = "CANCELLED";
+      item.error = "Cancelado antes do envio.";
+    }
+  }
+  job.status = "cancelled";
+  job.finishedAt = new Date().toISOString();
+}
+
 async function finish(job: BulkJob) {
   job.status = "completed";
   job.finishedAt = new Date().toISOString();
@@ -189,6 +246,16 @@ async function runJob(id: string) {
   let first = true;
   for (const item of job.items) {
     if (item.status !== "PENDING") continue;
+
+    const requested = control.get(id);
+    if (requested) {
+      control.delete(id);
+      if (requested === "pause") job.status = "paused";
+      else applyCancel(job);
+      await writeJob(job);
+      return;
+    }
+
     if (item.telefone.replace(/\D/g, "").length < 10) {
       item.status = "FAILED";
       item.error = "Telefone inválido";
@@ -214,6 +281,7 @@ async function runJob(id: string) {
     await writeJob(job);
   }
 
+  control.delete(id);
   await finish(job);
 }
 
@@ -228,6 +296,11 @@ function enqueue(id: string) {
     .finally(() => running.delete(id));
 }
 
+async function userName(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
+  return user?.name || user?.email || "";
+}
+
 export async function startBulkJob(input: {
   userId: string;
   stageName: string;
@@ -235,10 +308,12 @@ export async function startBulkJob(input: {
   text: string;
   template: BulkJob["template"];
   attachments: BulkAttachment[];
+  retryOf?: string;
 }) {
   const job: BulkJob = {
     id: randomUUID(),
     userId: input.userId,
+    userName: await userName(input.userId),
     stageName: input.stageName,
     status: "running",
     total: input.contacts.length,
@@ -248,6 +323,7 @@ export async function startBulkJob(input: {
     text: input.text,
     template: input.template,
     attachments: input.attachments,
+    retryOf: input.retryOf,
     createdAt: new Date().toISOString(),
   };
   await writeJob(job);
@@ -255,25 +331,70 @@ export async function startBulkJob(input: {
   return job;
 }
 
-export async function getBulkJob(id: string, userId: string) {
+/** Lote visível para o usuário: o próprio, ou qualquer um quando administrador. */
+export async function getBulkJob(id: string, userId: string, isAdmin = false) {
   const job = await readJob(id);
-  return job && job.userId === userId ? job : null;
+  return job && (isAdmin || job.userId === userId) ? job : null;
 }
 
-/** Lotes do usuário (em andamento e concluídos nas últimas 24h); retoma os que pararam com o servidor. */
-export async function listBulkJobs(userId: string): Promise<BulkJob[]> {
-  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "bulk-job:" } }, select: { key: true, value: true } });
+/**
+ * Lotes do usuário (ou de todos, para administradores). `recent` limita aos ativos e
+ * aos concluídos nas últimas 24h. Também retoma lotes que pararam com o servidor.
+ */
+export async function listBulkJobs(options: { userId: string; all?: boolean; filterUserId?: string; recent?: boolean }): Promise<BulkJob[]> {
+  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "bulk-job:" } }, select: { value: true } });
   const now = Date.now();
   const jobs: BulkJob[] = [];
   for (const row of rows) {
     const job = row.value as unknown as BulkJob;
-    if (job.status === "completed" && job.finishedAt && now - Date.parse(job.finishedAt) > FINISHED_RETENTION_MS) {
-      await prisma.crmWorkspaceData.delete({ where: { key: row.key } }).catch(() => undefined);
-      await Promise.all(job.attachments.map((file) => deleteFile(file.key).catch(() => undefined)));
-      continue;
-    }
     if (job.status === "running" && !running.has(job.id)) enqueue(job.id);
-    if (job.userId === userId) jobs.push(job);
+    const owner = options.all ? (options.filterUserId ? job.userId === options.filterUserId : true) : job.userId === options.userId;
+    if (!owner) continue;
+    if (options.recent && job.finishedAt && now - Date.parse(job.finishedAt) > RECENT_MS) continue;
+    jobs.push(job);
   }
   return jobs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function controlBulkJob(job: BulkJob, action: "pause" | "resume" | "cancel") {
+  if (action === "resume") {
+    if (job.status !== "paused") throw new BulkDispatchError("Só é possível retomar um lote pausado.", 409);
+    job.status = "running";
+    await writeJob(job);
+    enqueue(job.id);
+    return job;
+  }
+  if (job.status === "paused") {
+    if (action === "pause") return job;
+    applyCancel(job);
+    await writeJob(job);
+    return job;
+  }
+  if (job.status !== "running") throw new BulkDispatchError("Este lote já terminou.", 409);
+  // Lote na fila de execução: o laço aplica o pedido antes do próximo contato.
+  if (running.has(job.id)) {
+    control.set(job.id, action);
+    return job;
+  }
+  // Lote órfão (servidor reiniciado e ainda não retomado): aplica na hora.
+  if (action === "pause") job.status = "paused";
+  else applyCancel(job);
+  await writeJob(job);
+  return job;
+}
+
+/** Novo lote só com os contatos que falharam, mesma mensagem ou modelo. */
+export async function retryFailures(job: BulkJob, userId: string) {
+  if (job.status === "running" || job.status === "paused") throw new BulkDispatchError("Aguarde o lote terminar para reenviar as falhas.", 409);
+  const failed = job.items.filter((item) => item.status === "FAILED");
+  if (failed.length === 0) throw new BulkDispatchError("Este lote não tem falhas para reenviar.", 400);
+  return startBulkJob({
+    userId,
+    stageName: job.stageName,
+    contacts: failed.map((item) => ({ id: item.contactId, name: item.nome, phone: item.telefone })),
+    text: job.text,
+    template: job.template,
+    attachments: job.attachments,
+    retryOf: job.id,
+  });
 }

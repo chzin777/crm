@@ -120,10 +120,10 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
     finally { setStarting(false); }
   };
 
-  const isComplete = job?.status === "completed";
+  const isComplete = job?.status === "completed" || job?.status === "cancelled";
   const handleClose = () => {
     if (isComplete && job && onComplete) {
-      onComplete(job.items.map((item) => ({ contactId: item.contactId, nome: item.nome, telefone: item.telefone, status: item.status === "SENT" ? "sent" : item.status === "FAILED" ? "failed" : item.status === "SENDING" ? "sending" : "pending", error: item.error })));
+      onComplete((job.items ?? []).map((item) => ({ contactId: item.contactId, nome: item.nome, telefone: item.telefone, status: item.status === "SENT" ? "sent" : item.status === "FAILED" || item.status === "CANCELLED" ? "failed" : item.status === "SENDING" ? "sending" : "pending", error: item.error })));
     }
     onClose();
   };
