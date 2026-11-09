@@ -4,7 +4,7 @@ import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { readMenuState, saveMenuState, sendMenu } from "@/lib/chat/menu";
-import { expireSurveys, isSurveyMessage, resendSurvey, sendSatisfactionSurvey } from "@/lib/chat/nps";
+import { expireSurveys, isSurveyMessage, resendSurvey } from "@/lib/chat/nps";
 import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
 import { silenceFarewell } from "@/lib/chat/settings";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -138,8 +138,8 @@ export async function runClock() {
         await sendAutomaticMessage(row, settings.silenceAskText.replaceAll("{minutos}", String(settings.silenceCloseMinutes)));
         summary.silenceAsked += 1;
       } else if (now - new Date(state.warnedAt).getTime() >= settings.silenceCloseMinutes * MINUTE) {
+        // Sem pesquisa: aqui o cliente só passou pelo menu, nenhum atendente falou com ele.
         await closeConversation(row, null, "Conversa encerrada por falta de resposta", silenceFarewell(settings));
-        await sendSatisfactionSurvey(row, row.assigneeId);
         summary.silenceClosed += 1;
       }
     }
