@@ -135,6 +135,29 @@ export type MenuListRow = { id: string; title: string; description?: string };
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+const graphemes = (text: string) => [...new Intl.Segmenter("pt-BR", { granularity: "grapheme" }).segment(text)].map((part) => part.segment);
+
+/**
+ * Título da linha da lista (limite de 24 da Meta). Corta em caractere inteiro: cortar no meio
+ * de um emoji fazia o WhatsApp mostrar "?". Se só o emoji do fim não couber, ele sai sem reticências.
+ */
+function rowTitle(label: string, max = 24) {
+  if (label.length <= max) return label;
+  const parts = graphemes(label);
+  const fit = (limit: number) => {
+    let text = "";
+    for (const part of parts) {
+      if (text.length + part.length > limit) break;
+      text += part;
+    }
+    return text;
+  };
+  const whole = fit(max);
+  const rest = parts.slice(graphemes(whole).length).join("");
+  if (!/[\p{L}\p{N}]/u.test(rest)) return whole.trimEnd();
+  return `${fit(max - 1).trimEnd()}…`;
+}
+
 /**
  * Lista nativa do WhatsApp, a mesma no envio e no simulador. Título até 24 caracteres
  * (o nome inteiro vai na descrição); null quando não cabe e o menu vai como texto.
@@ -143,8 +166,8 @@ export function menuList(settings: ChatMenuSettings, path: string[], parts: stri
   const rows: MenuListRow[] = [
     ...optionsAt(settings, path).map((option) => ({
       id: `menu_${option.id}`,
-      title: clip(option.label, 24),
-      ...(option.label.length > 24 ? { description: clip(option.label, 72) } : {}),
+      // Só o título: a descrição aparecia junto na resposta do cliente, repetindo a opção.
+      title: rowTitle(option.label),
     })),
     ...(path.length ? [{ id: MENU_LIST.backId, title: "Voltar" }] : []),
   ];
