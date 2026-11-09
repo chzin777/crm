@@ -70,7 +70,7 @@ export async function sendMenu(conversation: Pick<ChatConversation, "id" | "phon
 
   const body = withoutDashes(fill(list.body)).slice(0, 1024) || "Como podemos ajudar?";
   return sendAutomaticMessage(conversation, text, () =>
-    sendList(conversation.phone, { header: MENU_LIST.header, body, footer: MENU_LIST.footer, button: MENU_LIST.button, rows: list.rows }));
+    sendList(conversation.phone, { body, footer: MENU_LIST.footer, button: MENU_LIST.button, rows: list.rows }));
 }
 
 /** Toque na lista: 0 é Voltar, senão a posição da opção no nível atual. */

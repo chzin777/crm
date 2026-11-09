@@ -130,7 +130,7 @@ export function menuText(settings: ChatMenuSettings, path: string[]) {
   return [...lines, "", settings.footer].join("\n").trim();
 }
 
-export const MENU_LIST = { header: "Óticas Brasil 👓", footer: "Selecione uma opção abaixo", button: "Ver opções", backId: "menu_voltar", maxRows: 10 };
+export const MENU_LIST = { footer: "Selecione uma opção abaixo", button: "Ver opções", backId: "menu_voltar", maxRows: 10 };
 export type MenuListRow = { id: string; title: string; description?: string };
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);

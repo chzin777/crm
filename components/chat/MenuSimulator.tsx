@@ -120,7 +120,7 @@ export function MenuSimulator({ settings, queues, agents }: { settings: ChatMenu
         line.from === "note" ? (
           <PreviewNote key={index} text={line.text} />
         ) : line.from === "list" ? (
-          <PreviewListBubble key={index} header={MENU_LIST.header} body={line.body} footer={MENU_LIST.footer} button={MENU_LIST.button} active={index === lastList && !stopped} onOpen={() => setSheet(line.rows)} />
+          <PreviewListBubble key={index} body={line.body} footer={MENU_LIST.footer} button={MENU_LIST.button} active={index === lastList && !stopped} onOpen={() => setSheet(line.rows)} />
         ) : (
           <PreviewBubble key={index} from={line.from} text={line.text} />
         ),
