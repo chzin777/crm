@@ -156,7 +156,8 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
 
   const dirty = JSON.stringify(settings) !== saved;
   const set = <K extends keyof ChatMenuSettings>(key: K, value: ChatMenuSettings[K]) => setSettings({ ...settings, [key]: value });
-  const blocking = issues.filter((issue) => issue.includes("sem rótulo"));
+  // Opção de fila sem fila escolhida mandaria o cliente para a fila padrão sem ninguém perceber.
+  const blocking = issues.filter((issue) => issue.includes("sem rótulo") || issue.includes("não tem fila de destino"));
 
   const addOption = (parentId: string | null) => {
     const option = newMenuOption();
