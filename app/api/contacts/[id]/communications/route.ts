@@ -48,7 +48,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     data: {
       whatsapp: sentMessages.map((msg) => ({
         id: msg.id,
-        campaignName: names.get(msg.campaignId) ?? null,
+        campaignName: names.get(msg.campaignId) ?? (msg.campaignId.startsWith("bulk:") ? "Envio em massa (pipeline)" : null),
         status: msg.status,
         sentAt: msg.sentAt?.toISOString() ?? null,
         deliveredAt: msg.deliveredAt?.toISOString() ?? null,

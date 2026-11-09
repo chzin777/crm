@@ -7,6 +7,16 @@ import { useToast } from "@/components/ToastProvider";
 import { BULK_STARTED_EVENT, BulkJobDetailsDialog, type BulkJobView } from "@/components/BulkDispatchTracker";
 
 type Operator = { id: string; name: string };
+type Pricing = { marketing: number; utility: number; authentication: number };
+
+/** Custo estimado do lote: destinatários × preço da categoria do modelo (mensagem livre não é cobrada). */
+function estimatedCost(job: BulkJobView, pricing: Pricing | null) {
+  if (!pricing || !job.templateName) return job.templateName ? null : 0;
+  const category = (job.templateCategory ?? "").toUpperCase();
+  const unit = category === "MARKETING" ? pricing.marketing : category === "UTILITY" ? pricing.utility : category === "AUTHENTICATION" ? pricing.authentication : null;
+  return unit === null ? null : job.total * unit;
+}
+const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 type ListResponse = { data?: BulkJobView[]; isAdmin?: boolean; operators?: Operator[]; error?: string };
 
 const POLL_MS = 3_000;
@@ -32,6 +42,16 @@ export default function DisparosPage() {
   const [error, setError] = useState("");
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/metrics/pricing", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { data?: Pricing } | null) => { if (!cancelled && body?.data) setPricing(body.data); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
 
@@ -114,13 +134,14 @@ export default function DisparosPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-[#07194f]">
-          <table className="w-full min-w-[960px] text-left text-sm">
+          <table className="w-full min-w-[1060px] text-left text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-3">Lote</th>
                 <th className="px-4 py-3">Criado por</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Progresso</th>
+                <th className="px-4 py-3">Custo est.</th>
                 <th className="px-4 py-3">Início / término</th>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
@@ -151,6 +172,12 @@ export default function DisparosPage() {
                       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                         Total {job.total} · <span className="text-emerald-700 dark:text-emerald-300">{job.sent} enviados</span> · <span className="text-red-600 dark:text-red-400">{job.failed} falhas</span> · {job.pending} na fila
                       </p>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-700 dark:text-slate-200">
+                      {(() => {
+                        const cost = estimatedCost(job, pricing);
+                        return cost === null ? "—" : cost === 0 && !job.templateName ? <span className="text-slate-400">Sem custo</span> : <span className="font-semibold">{brl(cost)}</span>;
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
                       <p>{formatDate(job.createdAt)}</p>

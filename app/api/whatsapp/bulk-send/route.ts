@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getUserAccess, requireApiSession } from "@/lib/api-auth";
-import { ensureInstance } from "@/lib/meta-whatsapp";
+import { ensureInstance, listTemplates } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
 import { friendlyError, listBulkJobs, startBulkJob, toView, type BulkAttachment, type BulkParamSource, type BulkTemplateParam } from "@/lib/bulk-dispatch";
 
@@ -91,12 +91,16 @@ export async function POST(request: Request) {
         return { key, fileName: file.name, mimetype: file.type };
       }));
     }
+    // A categoria (marketing/utilidade) define o custo do lote.
+    const category = templateName
+      ? (await listTemplates().catch(() => [])).find((item) => item.name === templateName && item.language === templateLanguage)?.category
+      : undefined;
     const job = await startBulkJob({
       userId: user.id,
       stageName,
       contacts,
       text,
-      template: templateName ? { name: templateName, language: templateLanguage, params: templateParams } : null,
+      template: templateName ? { name: templateName, language: templateLanguage, params: templateParams, category } : null,
       attachments,
     });
     return Response.json({ data: toView(job, true) }, { status: 202 });

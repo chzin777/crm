@@ -228,7 +228,8 @@ async function recordMessage(campaignId: string, recipient: DispatchRecipient, r
 // Quem recebeu campanha na janela de descanso, por contato e por telefone (o cadastro tem números repetidos).
 async function loadRecentlyReached() {
   const rows = await prisma.campaignMessage.findMany({
-    where: { sentAt: { gte: new Date(Date.now() - CONTACT_COOLDOWN_MS) } },
+    // Envios em massa do pipeline (bulk:*) não contam no descanso entre campanhas.
+    where: { sentAt: { gte: new Date(Date.now() - CONTACT_COOLDOWN_MS) }, NOT: { campaignId: { startsWith: "bulk:" } } },
     select: { contactId: true, phone: true },
   });
   const reached = new Set<string>();

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { WhatsAppSettings } from "@/components/WhatsAppSettings";
-import { Bell, CheckCircle2, Clock3, Save, TrendingUp, Users } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, DollarSign, Save, TrendingUp, Users } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
 
@@ -23,6 +23,10 @@ interface CrmSettings {
   pipelineAutoSyncEnabled: boolean;
   pipelineMaxCardsPerStage: number;
   pipelineRules: PipelineRules;
+  // Custos da Meta por mensagem de modelo entregue (R$) e janela de atribuição de vendas (dias).
+  metaCustoMarketing?: string;
+  metaCustoUtilidade?: string;
+  janelaConversaoDias?: string;
   }
 
 const defaultSettings: CrmSettings = {
@@ -39,6 +43,9 @@ const defaultSettings: CrmSettings = {
     recompra: { minCompras: 2, minTotalGasto: 100, maxDiasDesdeUltimaCompra: 90 },
     reativacao: { minDiasInativo: 180, minComprasHistoricas: 1 },
   },
+  metaCustoMarketing: "0.34",
+  metaCustoUtilidade: "0.04",
+  janelaConversaoDias: "7",
 };
 
 function SettingsCard({ title, description, icon: Icon, children }: {
@@ -143,6 +150,17 @@ export default function ConfiguracoesPage() {
       setLoadError("Os intervalos devem ser números inteiros maiores que zero.");
       return;
     }
+    const prices = [settings.metaCustoMarketing, settings.metaCustoUtilidade].filter((value) => value !== undefined && value !== "");
+    if (prices.some((value) => !(Number(String(value).replace(",", ".")) >= 0))) {
+      setSaveMessage("");
+      setLoadError("Os custos da Meta devem ser valores em reais, como 0,34.");
+      return;
+    }
+    if (settings.janelaConversaoDias && !(Number.isInteger(Number(settings.janelaConversaoDias)) && Number(settings.janelaConversaoDias) >= 1)) {
+      setSaveMessage("");
+      setLoadError("A janela de conversão deve ser um número inteiro de dias maior que zero.");
+      return;
+    }
     setLoadError("");
     setSaveMessage("");
     try {
@@ -204,6 +222,15 @@ export default function ConfiguracoesPage() {
               <SettingsTextField label="Limite de cards por etapa" value={String(settings.pipelineMaxCardsPerStage)} type="number" onChange={(value) => updateSetting("pipelineMaxCardsPerStage", Number(value))} />
               <p className="text-xs text-slate-500 dark:text-slate-400">As regras de cada etapa (filtros, posição, prazo e nome) são editadas na página Pipelines, pelo ícone de lápis no cabeçalho de cada etapa.</p>
             </div>
+          </SettingsCard>
+
+          <SettingsCard title="Custos e conversão das campanhas" description="Preço que a Meta cobra por mensagem de modelo entregue no Brasil (R$) e prazo para atribuir uma venda do ERP à campanha." icon={DollarSign}>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SettingsTextField label="Modelo de marketing (R$ por mensagem)" value={settings.metaCustoMarketing ?? "0.34"} placeholder="0.34" onChange={(value) => updateSetting("metaCustoMarketing", value)} />
+              <SettingsTextField label="Modelo de utilidade (R$ por mensagem)" value={settings.metaCustoUtilidade ?? "0.04"} placeholder="0.04" onChange={(value) => updateSetting("metaCustoUtilidade", value)} />
+              <SettingsTextField label="Janela de conversão (dias após o envio)" value={settings.janelaConversaoDias ?? "7"} type="number" onChange={(value) => updateSetting("janelaConversaoDias", value)} />
+            </div>
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Mensagens livres, dentro da janela de 24h de atendimento, não são cobradas pela Meta.</p>
           </SettingsCard>
 
           <WhatsAppSettings />

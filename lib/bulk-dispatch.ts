@@ -22,12 +22,15 @@ export type BulkJob = {
   failed: number;
   items: BulkItem[];
   text: string;
-  template: { name: string; language: string; params: BulkTemplateParam[] } | null;
+  template: { name: string; language: string; params: BulkTemplateParam[]; category?: string } | null;
   attachments: BulkAttachment[];
   retryOf?: string;
   createdAt: string;
   finishedAt?: string;
 };
+
+/** Id usado em CampaignMessage para os envios de um lote (o webhook da Meta atualiza o status por ele). */
+export const bulkCampaignId = (jobId: string) => `bulk:${jobId}`;
 
 /** Visão enviada ao navegador: sem texto completo, parâmetros nem anexos. */
 export type BulkJobView = {
@@ -36,6 +39,7 @@ export type BulkJobView = {
   userName: string;
   stageName: string;
   templateName: string | null;
+  templateCategory: string | null;
   status: BulkJobStatus;
   total: number;
   sent: number;
@@ -85,6 +89,7 @@ export function toView(job: BulkJob, withItems = false): BulkJobView {
     userName: job.userName ?? "",
     stageName: job.stageName,
     templateName: job.template?.name ?? null,
+    templateCategory: job.template?.category ?? null,
     status: job.status,
     total: job.total,
     sent: job.sent,
@@ -150,11 +155,12 @@ type Prepared = {
   files: { mimetype: string; fileName: string; base64: string }[];
 };
 
-async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared) {
+/** Envia e devolve o id da mensagem na Meta (o da primeira, quando há vários anexos). */
+async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared): Promise<string | null> {
   if (job.template) {
     const params = job.template.params.map((param) => resolveParam(param, item));
-    await sendTemplate(item.telefone, job.template.name, job.template.language, params, prepared.header);
-    return;
+    const sent = await sendTemplate(item.telefone, job.template.name, job.template.language, params, prepared.header);
+    return sent.messages?.[0]?.id ?? null;
   }
   const text = job.text
     .replace(/\{\{nome\}\}/gi, item.nome)
@@ -162,11 +168,32 @@ async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared) {
     .replace(/\{\{telefone\}\}/gi, item.telefone)
     .trim();
   if (prepared.files.length === 0) {
-    await sendText(item.telefone, text);
-    return;
+    const sent = await sendText(item.telefone, text);
+    return sent.messages?.[0]?.id ?? null;
   }
+  let firstId: string | null = null;
   for (const [index, file] of prepared.files.entries()) {
-    await sendMedia(item.telefone, file, index === 0 && text ? text : undefined);
+    const sent = await sendMedia(item.telefone, file, index === 0 && text ? text : undefined);
+    firstId ??= sent.messages?.[0]?.id ?? null;
+  }
+  return firstId;
+}
+
+/** Registra o envio para o funil (entregue, lida, respondeu) e a conversão em vendas. */
+async function recordMessage(job: BulkJob, item: BulkItem, result: { messageId: string | null } | { failure: string }) {
+  try {
+    await prisma.campaignMessage.create({
+      data: {
+        campaignId: bulkCampaignId(job.id),
+        contactId: item.contactId,
+        phone: item.telefone,
+        ...("failure" in result
+          ? { status: "failed" as const, failedAt: new Date(), failureReason: result.failure.slice(0, 500) }
+          : { status: "sent" as const, whatsappMsgId: result.messageId, sentAt: new Date() }),
+      },
+    });
+  } catch (error) {
+    console.error("[bulk-dispatch] registrar mensagem:", error);
   }
 }
 
@@ -174,8 +201,7 @@ async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared) {
 async function sendWithBackoff(job: BulkJob, item: BulkItem, prepared: Prepared) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await sendOne(job, item, prepared);
-      return;
+      return await sendOne(job, item, prepared);
     } catch (error) {
       const limited = error instanceof MetaApiError && error.code !== undefined && RATE_LIMIT_CODES.has(error.code);
       if (!limited || attempt >= RATE_LIMIT_MAX_RETRIES) throw error;
@@ -269,14 +295,16 @@ async function runJob(id: string) {
     item.status = "SENDING";
     await writeJob(job);
     try {
-      await sendWithBackoff(job, item, prepared);
+      const messageId = await sendWithBackoff(job, item, prepared);
       item.status = "SENT";
       job.sent += 1;
+      await recordMessage(job, item, { messageId });
     } catch (error) {
       console.error(`[bulk-dispatch] falha para ${item.contactId} (${item.telefone}):`, error instanceof MetaApiError ? JSON.stringify(error.details) : error);
       item.status = "FAILED";
       item.error = friendlyError(error);
       job.failed += 1;
+      await recordMessage(job, item, { failure: item.error });
     }
     await writeJob(job);
   }

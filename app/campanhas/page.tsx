@@ -34,6 +34,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
+import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
@@ -168,6 +169,7 @@ export default function CampanhasPage() {
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
   const [dispatchConfirmOpen, setDispatchConfirmOpen] = useState(false);
+  const [dispatchEstimate, setDispatchEstimate] = useState<{ loading: boolean; contacts: number; cost: number | null; error?: string } | null>(null);
   const [dispatchTarget, setDispatchTarget] = useState<{ mode: "single" | "batch"; ids: string[] } | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchProgress, setDispatchProgress] = useState<{ completed: number; total: number } | null>(null);
@@ -486,6 +488,100 @@ export default function CampanhasPage() {
     setIsCreateOpen(true);
   };
 
+  /** Calcula os destinatários de cada campanha a partir dos segmentos (usado no disparo e na estimativa de custo). */
+  const buildCampaignRecipients = async (readyCampaigns: Campaign[]) => {
+    const groups: Record<string, AudienceCriterion[]> = {};
+    const contactGroups: Record<string, string[]> = {};
+    const groupKeysByCampaign = new Map<string, string[]>();
+    for (const campaign of readyCampaigns) {
+      const campaignSegments = campaign.audienceSegmentIds?.length
+        ? campaign.audienceSegmentIds.map((id) => segments.find((segment) => segment.id === id))
+        : campaign.publico.split(", ").map((name) => segments.find((segment) => segment.nome === name));
+      if (campaignSegments.length === 0 || campaignSegments.some((segment) => !segment)) {
+        throw new Error(`Não foi possível localizar todos os segmentos de "${campaign.nome}". Revise o público antes de disparar.`);
+      }
+
+      const keys: string[] = [];
+      for (const segment of campaignSegments as CampaignAudienceSegment[]) {
+        const key = `${campaign.id}:${segment.id}`;
+        keys.push(key);
+        if (segment.modoPublico === "contatos") {
+          contactGroups[key] = segment.contatosSelecionados ?? [];
+          continue;
+        }
+
+        const criteria = (segment.criterios ?? []).map((name) => {
+          const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
+          const criterion = audienceCriteria.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
+          if (criterion) return criterion;
+          const deletedStore = /^Loja (\d+)$/i.exec(legacyName);
+          return deletedStore
+            ? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const }
+            : undefined;
+        });
+        if (criteria.some((criterion) => !criterion)) {
+          throw new Error(`Um critério usado no público de "${campaign.nome}" não existe mais. Revise o segmento antes de disparar.`);
+        }
+        groups[key] = criteria as AudienceCriterion[];
+      }
+      groupKeysByCampaign.set(campaign.id, keys);
+    }
+
+    const audienceResponse = await fetch("/api/segments/audience", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups, contactGroups, includeRecipients: true }),
+    });
+    const audienceCt = audienceResponse.headers.get("content-type") ?? "";
+    if (!audienceCt.includes("application/json")) {
+      throw new Error(`Resposta inválida da API (${audienceResponse.status}). Verifique se o servidor está rodando.`);
+    }
+    const audience = await audienceResponse.json() as {
+      recipients?: Record<string, CampaignRecipient[]>;
+      error?: string;
+    };
+    if (!audienceResponse.ok) throw new Error(audience.error || "Não foi possível calcular o público da campanha.");
+    if (!audience.recipients) throw new Error("O servidor não retornou os contatos do público.");
+
+    const recipientsByCampaign = new Map<string, CampaignRecipient[]>();
+    for (const campaign of readyCampaigns) {
+      const recipients = new Map<string, CampaignRecipient>();
+      for (const key of groupKeysByCampaign.get(campaign.id) ?? []) {
+        for (const recipient of audience.recipients[key] ?? []) recipients.set(recipient.id, recipient);
+      }
+      if (recipients.size === 0) throw new Error(`O público de "${campaign.nome}" não contém contatos para envio.`);
+      recipientsByCampaign.set(campaign.id, [...recipients.values()]);
+    }
+    return recipientsByCampaign;
+  };
+
+  // Custo estimado mostrado na confirmação do disparo: contatos com telefone × preço da categoria do modelo.
+  const estimateDispatchCost = async (ids: string[]) => {
+    setDispatchEstimate({ loading: true, contacts: 0, cost: null });
+    try {
+      const readyCampaigns = ids.map((id) => campaigns.find((campaign) => campaign.id === id)).filter((campaign): campaign is Campaign => Boolean(campaign));
+      const [recipientsByCampaign, pricingBody, templatesBody] = await Promise.all([
+        buildCampaignRecipients(readyCampaigns),
+        fetch("/api/metrics/pricing", { cache: "no-store" }).then((response) => response.json()) as Promise<{ data?: { marketing: number; utility: number; authentication: number } }>,
+        fetch("/api/whatsapp/templates", { cache: "no-store" }).then((response) => response.json()).catch(() => ({})) as Promise<{ data?: { name: string; language: string; category?: string }[] }>,
+      ]);
+      const pricing = pricingBody.data;
+      let contacts = 0;
+      let cost: number | null = 0;
+      for (const campaign of readyCampaigns) {
+        const withPhone = (recipientsByCampaign.get(campaign.id) ?? []).filter((recipient) => recipient.telefone.replace(/\D/g, "").length >= 10).length;
+        contacts += withPhone;
+        if (!campaign.modelo) continue;
+        const category = (templatesBody.data ?? []).find((item) => item.name === campaign.modelo?.name && item.language === campaign.modelo?.language)?.category?.toUpperCase();
+        const unit = !pricing ? null : category === "MARKETING" ? pricing.marketing : category === "UTILITY" ? pricing.utility : category === "AUTHENTICATION" ? pricing.authentication : null;
+        cost = unit === null || cost === null ? null : cost + withPhone * unit;
+      }
+      setDispatchEstimate({ loading: false, contacts, cost });
+    } catch (error) {
+      setDispatchEstimate({ loading: false, contacts: 0, cost: null, error: error instanceof Error ? error.message : "Não foi possível estimar o custo." });
+    }
+  };
+
   const dispatchCampaigns = async () => {
     if (!dispatchTarget || isDispatching) return;
     setIsDispatching(true);
@@ -514,68 +610,7 @@ export default function CampanhasPage() {
       if (!connectionResponse.ok) throw new Error(connection.error || "Não foi possível verificar a conexão do WhatsApp.");
       if (connection.state !== "open") throw new Error("WhatsApp desconectado. Conecte a conta em Configurações antes de disparar a campanha.");
 
-      const groups: Record<string, AudienceCriterion[]> = {};
-      const contactGroups: Record<string, string[]> = {};
-      const groupKeysByCampaign = new Map<string, string[]>();
-      for (const campaign of readyCampaigns) {
-        const campaignSegments = campaign.audienceSegmentIds?.length
-          ? campaign.audienceSegmentIds.map((id) => segments.find((segment) => segment.id === id))
-          : campaign.publico.split(", ").map((name) => segments.find((segment) => segment.nome === name));
-        if (campaignSegments.length === 0 || campaignSegments.some((segment) => !segment)) {
-          throw new Error(`Não foi possível localizar todos os segmentos de "${campaign.nome}". Revise o público antes de disparar.`);
-        }
-
-        const keys: string[] = [];
-        for (const segment of campaignSegments as CampaignAudienceSegment[]) {
-          const key = `${campaign.id}:${segment.id}`;
-          keys.push(key);
-          if (segment.modoPublico === "contatos") {
-            contactGroups[key] = segment.contatosSelecionados ?? [];
-            continue;
-          }
-
-          const criteria = (segment.criterios ?? []).map((name) => {
-            const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
-            const criterion = audienceCriteria.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
-            if (criterion) return criterion;
-            const deletedStore = /^Loja (\d+)$/i.exec(legacyName);
-            return deletedStore
-              ? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const }
-              : undefined;
-          });
-          if (criteria.some((criterion) => !criterion)) {
-            throw new Error(`Um critério usado no público de "${campaign.nome}" não existe mais. Revise o segmento antes de disparar.`);
-          }
-          groups[key] = criteria as AudienceCriterion[];
-        }
-        groupKeysByCampaign.set(campaign.id, keys);
-      }
-
-      const audienceResponse = await fetch("/api/segments/audience", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ groups, contactGroups, includeRecipients: true }),
-      });
-      const audienceCt = audienceResponse.headers.get("content-type") ?? "";
-      if (!audienceCt.includes("application/json")) {
-        throw new Error(`Resposta inválida da API (${audienceResponse.status}). Verifique se o servidor está rodando.`);
-      }
-      const audience = await audienceResponse.json() as {
-        recipients?: Record<string, CampaignRecipient[]>;
-        error?: string;
-      };
-      if (!audienceResponse.ok) throw new Error(audience.error || "Não foi possível calcular o público da campanha.");
-      if (!audience.recipients) throw new Error("O servidor não retornou os contatos do público.");
-
-      const recipientsByCampaign = new Map<string, CampaignRecipient[]>();
-      for (const campaign of readyCampaigns) {
-        const recipients = new Map<string, CampaignRecipient>();
-        for (const key of groupKeysByCampaign.get(campaign.id) ?? []) {
-          for (const recipient of audience.recipients[key] ?? []) recipients.set(recipient.id, recipient);
-        }
-        if (recipients.size === 0) throw new Error(`O público de "${campaign.nome}" não contém contatos para envio.`);
-        recipientsByCampaign.set(campaign.id, [...recipients.values()]);
-      }
+      const recipientsByCampaign = await buildCampaignRecipients(readyCampaigns);
 
       const started: string[] = [];
       try {
@@ -819,6 +854,7 @@ export default function CampanhasPage() {
                               setDispatchError("");
                               setDispatchProgress(null);
                               setDispatchConfirmOpen(true);
+                              void estimateDispatchCost([campaign.id]);
                             }}
                             disabled={isDispatching || isDispatchLocked(campaign.status)}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-[#002187] transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer"
@@ -1036,9 +1072,15 @@ export default function CampanhasPage() {
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Envios aceitos</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos.toLocaleString("pt-BR")}</p></div>
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Respostas</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">Indisponível</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Respostas</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos > 0 ? "Veja no funil abaixo" : "—"}</p></div>
                   <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Status</p><p className={`mt-1 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedCampaign.status]}`}>{selectedCampaign.status}</p></div>
                 </div>
+                {selectedCampaign.disparos > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">Resultados da campanha</p>
+                    <CampaignMetricsPanel type="campaign" id={selectedCampaign.id} />
+                  </div>
+                )}
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                 <FormMultiSelect
                   label="Público-alvo"
@@ -1075,6 +1117,7 @@ export default function CampanhasPage() {
                       setDispatchError("");
                       setDispatchProgress(null);
                       setDispatchConfirmOpen(true);
+                      void estimateDispatchCost([selectedCampaign.id]);
                     }}
                     className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#F7915E]/40 bg-[#F7915E]/10 px-3 text-xs font-semibold text-[#9a3d12] transition-colors hover:border-[#F7915E] hover:bg-[#F7915E]/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#F7915E]/30 dark:bg-[#F7915E]/15 dark:text-[#F7915E] dark:hover:bg-[#F7915E]/25 cursor-pointer hover:cursor-pointer"
                   >
@@ -1110,6 +1153,7 @@ export default function CampanhasPage() {
               setDispatchError("");
               setDispatchProgress(null);
               setDispatchConfirmOpen(true);
+              void estimateDispatchCost(Array.from(selectedCampaignIds));
             }}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-[11px] font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
           >
@@ -1143,6 +1187,15 @@ export default function CampanhasPage() {
               </div>
             </div>
 
+            {dispatchEstimate && !dispatchResult && (
+              <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
+                {dispatchEstimate.loading
+                  ? "Calculando o custo estimado do envio..."
+                  : dispatchEstimate.error
+                    ? `Custo estimado indisponível: ${dispatchEstimate.error}`
+                    : <><span className="font-semibold">Custo estimado do envio: {dispatchEstimate.cost === null ? "indisponível (categoria do modelo não encontrada)" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> · {dispatchEstimate.contacts.toLocaleString("pt-BR")} contato(s) com telefone. Contatos que receberam campanha nos últimos 7 dias são pulados, então o valor real tende a ser menor.</>}
+              </p>
+            )}
             {dispatchError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{dispatchError}</p>}
             {isDispatching && dispatchProgress && (
               <p role="status" className="text-xs text-slate-500 dark:text-slate-400">

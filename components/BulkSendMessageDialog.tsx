@@ -11,7 +11,10 @@ const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const MAX_FILES = 5;
 const ACCEPT = "image/*,video/*,application/pdf";
 
-type ApiTemplate = { id: string; name: string; status: string; language: string; body: string; footer: string; headerFormat: string | null; headerImageUrl?: string | null; buttons?: { type: string; text: string }[] };
+type ApiTemplate = { id: string; name: string; status: string; language: string; category?: string; body: string; footer: string; headerFormat: string | null; headerImageUrl?: string | null; buttons?: { type: string; text: string }[] };
+type Pricing = { marketing: number; utility: number; authentication: number };
+const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const CATEGORY_LABEL: Record<string, string> = { MARKETING: "marketing", UTILITY: "utilidade", AUTHENTICATION: "autenticação" };
 
 export interface BulkRecipient { contactId: string; nome: string; telefone: string; }
 export interface BulkSendResult { contactId: string; nome: string; telefone: string; status: "pending" | "sending" | "sent" | "failed"; error?: string; }
@@ -56,6 +59,16 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   const [mode, setMode] = useState<"free" | "template">("free");
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/metrics/pricing", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { data?: Pricing } | null) => { if (!cancelled && body?.data) setPricing(body.data); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const [job, setJob] = useState<BulkJobView | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -206,6 +219,19 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
                   ))}</div>
                 </div>
               )}
+              {(() => {
+                // Custo estimado antes de confirmar: destinatários × preço da categoria do modelo.
+                if (mode === "free") return <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300"><span className="font-semibold">Custo estimado: sem cobrança da Meta.</span> Mensagem livre só é entregue a quem falou com a loja nas últimas 24h.</p>;
+                if (!selectedTemplate) return null;
+                const category = (selectedTemplate.category ?? "").toUpperCase();
+                const unit = !pricing ? null : category === "MARKETING" ? pricing.marketing : category === "UTILITY" ? pricing.utility : category === "AUTHENTICATION" ? pricing.authentication : null;
+                return (
+                  <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
+                    <span className="font-semibold">Custo estimado do envio: {unit === null ? "indisponível" : brl(selectedRecipients.length * unit)}</span>
+                    {unit !== null && <> · {selectedRecipients.length} contato(s) × {brl(unit)} (modelo de {CATEGORY_LABEL[category] ?? category.toLowerCase()})</>}
+                  </p>
+                );
+              })()}
               {error && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
             </div>
           )}

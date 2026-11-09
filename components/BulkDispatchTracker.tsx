@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, ChevronUp, Send, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 import { useToast } from "@/components/ToastProvider";
 import type { BulkItemStatus, BulkJobView } from "@/lib/bulk-dispatch";
 
@@ -97,6 +98,7 @@ export function BulkJobProgress({ job }: { job: BulkJobView }) {
 export function BulkJobDetailsDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   const [job, setJob] = useState<BulkJobView | null>(null);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"destinatarios" | "resultados">("destinatarios");
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +127,14 @@ export function BulkJobDetailsDialog({ jobId, onClose }: { jobId: string; onClos
 
   return (
     <EntityDialog titleId="bulk-dispatch-details" title={`Envio em massa: ${job?.stageName ?? ""}`} description="Quem já recebeu, quem está na fila e quem falhou." onClose={onClose} size="lg">
-      {job ? <BulkJobProgress job={job} /> : error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : <LoadingSpinner label="Carregando envio..." className="w-full justify-center py-8" />}
+      <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+        {([["destinatarios", "Destinatários"], ["resultados", "Resultados e vendas"]] as const).map(([key, label]) => (
+          <button key={key} type="button" onClick={() => setTab(key)} className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${tab === key ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-700"}`}>{label}</button>
+        ))}
+      </div>
+      {tab === "resultados" ? (
+        <CampaignMetricsPanel type="bulk" id={jobId} />
+      ) : job ? <BulkJobProgress job={job} /> : error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : <LoadingSpinner label="Carregando envio..." className="w-full justify-center py-8" />}
     </EntityDialog>
   );
 }
