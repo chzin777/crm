@@ -39,6 +39,10 @@ const settings = z.object({
   silenceAskText: z.string().max(1000),
   silenceCloseCustom: z.boolean().default(false),
   silenceCloseText: z.string().max(1000),
+  npsEnabled: z.boolean().default(true),
+  // A pergunta vai no corpo da lista do WhatsApp, que aceita até 1024 caracteres.
+  npsPromptText: z.string().max(1000).default(""),
+  npsThanksText: z.string().max(1000).default(""),
   options: z.array(option).max(20),
   canvas: z
     .object({

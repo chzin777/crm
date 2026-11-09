@@ -37,6 +37,10 @@ export type ChatMenuSettings = {
   /** Desligado: o encerramento por inatividade herda farewellText. */
   silenceCloseCustom: boolean;
   silenceCloseText: string;
+  /** Pesquisa de 1 a 5 depois que um atendente encerra a conversa. */
+  npsEnabled: boolean;
+  npsPromptText: string;
+  npsThanksText: string;
   options: MenuOption[];
   canvas: MenuCanvas;
 };
@@ -58,9 +62,18 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   silenceAskText: "Você ainda está por aí? Se não responder, encerro esta conversa em {minutos} minutos.",
   silenceCloseCustom: false,
   silenceCloseText: "",
+  npsEnabled: true,
+  npsPromptText: "De 1 a 5, como você avalia o atendimento recebido hoje?",
+  npsThanksText: "Agradecemos pela sua avaliação! Ela é muito importante para nós.",
   options: [],
   canvas: { positions: {}, drafts: [] },
 };
+
+/** Escala fixa: a leitura da nota depende destes rótulos, por isso não são editáveis. */
+export const NPS_SCORE_LABELS = ["Muito insatisfeito", "Insatisfeito", "Neutro", "Satisfeito", "Muito satisfeito"];
+export const npsScoreLine = (label: string, index: number) => `${index + 1} - ${label}`;
+export const NPS_SCALE_TEXT = NPS_SCORE_LABELS.map(npsScoreLine).join("\n");
+export const npsPrompt = (settings: ChatMenuSettings) => settings.npsPromptText.trim() || DEFAULT_CHAT_SETTINGS.npsPromptText;
 
 /** Texto personalizado vazio ou desligado cai na despedida padrão. */
 export const silenceFarewell = (settings: ChatMenuSettings) =>

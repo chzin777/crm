@@ -2,19 +2,14 @@ import "server-only";
 import { Prisma, type ChatConversation } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendList } from "@/lib/meta-whatsapp";
-import { isWindowOpen } from "@/lib/chat/conversation";
+import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
+import { NPS_SCALE_TEXT, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreLine as scoreLine } from "@/lib/chat/settings";
 
-const QUESTION = "De 1 a 5, como você avalia o atendimento recebido hoje?";
-const SCORE_LABELS = ["Muito insatisfeito", "Insatisfeito", "Neutro", "Satisfeito", "Muito satisfeito"];
-const THANKS = "Agradecemos pela sua avaliação! Ela é muito importante para nós.";
 const SURVEY_HOURS = 24;
 const COMMENT_WINDOW_MS = 10 * 60_000;
 const COMMENT_MAX = 1000;
-
-const scoreLine = (label: string, index: number) => `${index + 1} - ${label}`;
-const SURVEY_TEXT = [QUESTION, ...SCORE_LABELS.map(scoreLine)].join("\n");
 
 /** Aceita "5", "5 - Muito satisfeito" ou só o rótulo; frase solta como "2 óculos" não vira nota. */
 export function parseNpsScore(text: string) {
@@ -26,13 +21,15 @@ export function parseNpsScore(text: string) {
 }
 
 /** Roda depois do encerramento: falha aqui nunca desfaz o fechamento da conversa. */
-const surveyList = (phone: string) => () => sendList(phone, {
-  body: QUESTION,
+const surveyList = (phone: string, question: string) => () => sendList(phone, {
+  body: question.slice(0, 1024),
   button: "Avaliar atendimento",
   rows: SCORE_LABELS.map((label, index) => ({ id: `nps_${index + 1}`, title: scoreLine(label, index) })),
 });
 
-export const isSurveyMessage = (text: string) => text.startsWith(QUESTION);
+/** A pergunta é editável; o que marca a pesquisa no histórico é a escala no fim. */
+export const isSurveyMessage = (text: string) => text.endsWith(NPS_SCALE_TEXT);
+const questionOf = (text: string) => text.slice(0, -NPS_SCALE_TEXT.length).trim();
 
 /** Só a pesquisa que chegou ao cliente fica aguardando nota; vale a mais recente do número. */
 async function openSurvey(conversation: ChatConversation, attendantId: string | null) {
@@ -45,7 +42,10 @@ async function openSurvey(conversation: ChatConversation, attendantId: string | 
 export async function sendSatisfactionSurvey(conversation: ChatConversation, attendantId: string | null) {
   try {
     if (!isWindowOpen(conversation.lastInboundAt)) return;
-    const sent = await sendAutomaticMessage(conversation, SURVEY_TEXT, surveyList(conversation.phone));
+    const settings = await readChatSettings();
+    if (!settings.npsEnabled) return;
+    const question = npsPrompt(settings);
+    const sent = await sendAutomaticMessage(conversation, `${question}\n${NPS_SCALE_TEXT}`, surveyList(conversation.phone, question));
     if (!sent || sent.delivery === "failed") return;
     await openSurvey(conversation, attendantId);
   } catch (error) {
@@ -54,8 +54,8 @@ export async function sendSatisfactionSurvey(conversation: ChatConversation, att
 }
 
 /** Reenvio da pesquisa que caiu por falta de conexão. */
-export async function resendSurvey(messageId: string, conversation: ChatConversation) {
-  const sent = await resendAutomatic(messageId, surveyList(conversation.phone));
+export async function resendSurvey(message: { id: string; text: string }, conversation: ChatConversation) {
+  const sent = await resendAutomatic(message.id, surveyList(conversation.phone, questionOf(message.text)));
   if (sent?.delivery === "sent") await openSurvey(conversation, conversation.assigneeId);
   return sent;
 }
@@ -108,7 +108,11 @@ export async function recordSurveyReply(reply: { externalId: string; phone: stri
     throw error;
   }
   await prisma.npsFeedback.update({ where: { id: pending.id }, data: { status: "ANSWERED", score, answeredAt: reply.receivedAt } });
-  await sendAutomaticMessage({ id: pending.conversationId, phone: pending.phone }, THANKS)
-    .catch((error) => console.error("[chat] falha ao agradecer a avaliação:", error));
+  // Agradecimento em branco na configuração: a nota fica gravada sem resposta ao cliente.
+  const thanks = (await readChatSettings()).npsThanksText.trim();
+  if (thanks) {
+    await sendAutomaticMessage({ id: pending.conversationId, phone: pending.phone }, thanks)
+      .catch((error) => console.error("[chat] falha ao agradecer a avaliação:", error));
+  }
   return true;
 }

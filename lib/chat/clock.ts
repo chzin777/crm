@@ -165,7 +165,7 @@ export async function runClock() {
     for (const row of rows) {
       if (!isConnectFailure(row.failureReason) || !isWindowOpen(row.conversation.lastInboundAt)) continue;
       const sent = isSurveyMessage(row.text)
-        ? await resendSurvey(row.id, row.conversation)
+        ? await resendSurvey(row, row.conversation)
         : await resendAutomatic(row.id, () => sendText(row.conversation.phone, row.text));
       if (sent?.delivery === "sent") summary.resent += 1;
     }
