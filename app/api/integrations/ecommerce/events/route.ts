@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
+import { phoneVariants } from "@/lib/chat/phone";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,6 +64,17 @@ async function findContactByEmail(tx: Prisma.TransactionClient, email: string) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+// Mesmo número em qualquer formato (com/sem 55, 9º dígito, máscara); só vincula se houver um único cadastro.
+async function findContactByPhone(tx: Prisma.TransactionClient, phone: string) {
+  if (phone.replace(/\D/g, "").length < 10) return null;
+  const matches = await tx.contact.findMany({
+    where: { phone: { in: phoneVariants(phone) }, ecommerceCustomerId: null },
+    select: { id: true, ecommerceCustomerId: true },
+    take: 2,
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
 function isEmpty(value: string | null | undefined) {
   return !value?.trim();
 }
@@ -84,11 +96,12 @@ async function upsertCustomer(tx: Prisma.TransactionClient, customer: Record<str
   if (!current) {
     const cpf = typeof customer.cpf === "string" ? customer.cpf.replace(/\D/g, "").slice(0, 11) : "";
     const email = typeof customer.email === "string" ? customer.email.trim() : "";
-    const matched = cpf.length === 11
+    const phone = typeof customer.phone === "string" ? customer.phone.trim() : "";
+    const matched = (cpf.length === 11
       ? await findContactByCpf(tx, cpf)
       : email
         ? await findContactByEmail(tx, email)
-        : null;
+        : null) ?? (phone ? await findContactByPhone(tx, phone) : null);
     if (matched && !matched.ecommerceCustomerId) {
       current = await tx.contact.update({
         where: { id: matched.id },

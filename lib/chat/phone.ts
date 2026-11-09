@@ -5,7 +5,8 @@ export function phoneVariants(waId: string): string[] {
   const locals = new Set([local]);
   if (local.length === 11 && local[2] === "9") locals.add(local.slice(0, 2) + local.slice(3));
   if (local.length === 10) locals.add(`${local.slice(0, 2)}9${local.slice(2)}`);
-  return [...new Set([digits, waId, ...[...locals].flatMap((item) => [item, `55${item}`])])];
+  // Inclui a forma formatada "(62) 99999-9999", usada nos cadastros manuais.
+  return [...new Set([digits, waId, ...[...locals].flatMap((item) => [item, `55${item}`, formatPhone(item)])])];
 }
 
 export function formatPhone(phone: string) {

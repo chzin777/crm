@@ -189,7 +189,7 @@ export default function SegmentosPage() {
     setContactsLoading(true);
     setContactsError("");
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(CONTACTS_PAGE_SIZE) });
+      const params = new URLSearchParams({ page: String(page), limit: String(CONTACTS_PAGE_SIZE), unique: "1" });
       if (search.trim()) params.set("q", search.trim());
       const response = await fetch(`/api/contacts/search?${params.toString()}`, { signal });
       const result = await response.json() as { data?: Contact[]; total?: number; totalPages?: number; error?: string };

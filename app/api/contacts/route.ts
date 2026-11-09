@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
+import { phoneVariants } from "@/lib/chat/phone";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -149,6 +150,15 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ error: "Revise os dados do contato." }, { status: 400 });
 
   const values = parsed.data;
+  if (values.telefone.replace(/\D/g, "").length >= 10) {
+    const existing = await prisma.contact.findFirst({
+      where: { phone: { in: phoneVariants(values.telefone) } },
+      select: { name: true },
+    });
+    if (existing) {
+      return Response.json({ error: `Já existe um contato com este telefone (${existing.name}).` }, { status: 409 });
+    }
+  }
   const contact = await prisma.contact.create({
     data: {
       sourceKey: `manual:${randomUUID()}`,

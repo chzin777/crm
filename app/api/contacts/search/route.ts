@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
+import { getDuplicateContactIds } from "@/lib/contact-duplicates";
 
 export async function GET(request: Request) {
   const user = await requireApiSession();
@@ -13,6 +14,9 @@ export async function GET(request: Request) {
   const skip = (page - 1) * limit;
   // No SQL, `phone <> ''` também descarta telefones nulos.
   const phoneFilter = url.searchParams.get("withPhone") === "1" ? { phone: { not: "" } } : null;
+  // unique=1: esconde cadastros que repetem o telefone de outro contato.
+  const duplicateIds = url.searchParams.get("unique") === "1" ? await getDuplicateContactIds() : [];
+  const uniqueFilter = duplicateIds.length > 0 ? { id: { notIn: duplicateIds } } : null;
 
   const rawTokens = q.split(/\s+/).filter(Boolean);
   const strictTokens = rawTokens.filter((t) => t.length >= 2);
@@ -20,9 +24,10 @@ export async function GET(request: Request) {
 
   // Busca sem termo: retorna lista paginada ordenada por nome
   if (rawTokens.length === 0) {
+    const listWhere = { ...(phoneFilter ?? {}), ...(uniqueFilter ?? {}) };
     const [contacts, total] = await Promise.all([
       prisma.contact.findMany({
-        where: phoneFilter ?? {},
+        where: listWhere,
         select: {
           id: true, name: true, phone: true, email: true, category: true,
           segment: true, store: true, purchases: true, totalSpent: true,
@@ -32,7 +37,7 @@ export async function GET(request: Request) {
         skip,
         take: limit,
       }),
-      prisma.contact.count({ where: phoneFilter ?? {} }),
+      prisma.contact.count({ where: listWhere }),
     ]);
 
     return NextResponse.json({
@@ -85,6 +90,7 @@ export async function GET(request: Request) {
   }
 
   if (phoneFilter) andConditions.push({ OR: [phoneFilter] });
+  if (uniqueFilter) andConditions.push({ OR: [uniqueFilter] });
 
   const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
 
