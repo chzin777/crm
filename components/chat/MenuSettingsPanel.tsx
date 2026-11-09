@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, List, ListOrdered, ListTree, MessageCircleQuestion, MessageSquareText, MessagesSquare, Plus, Save, Timer, Trash2, Workflow, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, List, ListOrdered, ListTree, MessageCircleQuestion, MessagesSquare, Plus, Save, Timer, Trash2, Workflow, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { ChoiceCards, DurationField, MessageField, SettingCard, Switch, SwitchRow, fieldClass, labelClass } from "@/components/chat/MenuFormParts";
@@ -15,7 +15,7 @@ const MenuFlowCanvas = dynamic(() => import("@/components/chat/MenuFlowCanvas").
 });
 
 type Queues = MenuPeople;
-type Section = "menu" | "texts" | "silence" | "closing";
+type Section = "menu" | "silence" | "closing";
 type MenuView = "list" | "canvas";
 
 const field = fieldClass;
@@ -187,7 +187,6 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
 
   const sections: { id: Section; label: string; status: string; icon: typeof Timer }[] = [
     { id: "menu", label: "Menu do WhatsApp", status: `${settings.enabled ? "Ligado" : "Desligado"} · ${settings.options.length} ${settings.options.length === 1 ? "opção" : "opções"}`, icon: ListTree },
-    { id: "texts", label: "Textos do menu", status: "Saudação, rodapé e fechamento", icon: MessageSquareText },
     { id: "silence", label: "Silêncio do cliente", status: settings.silenceEnabled ? `${settings.silenceAskMinutes} min + ${settings.silenceCloseMinutes} min` : "Desligado", icon: Timer },
     { id: "closing", label: "Encerramento e fila", status: settings.farewellText.trim() ? "Despedida ativa" : "Sem despedida", icon: CheckCircle2 },
   ];
@@ -241,46 +240,18 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
             })}
           </ul>
         </aside>
-        {(section === "menu" || section === "texts") && <MenuSimulator settings={settings} queues={queues} agents={agents} />}
+        {section === "menu" && <MenuSimulator settings={settings} queues={queues} agents={agents} />}
         </div>
 
         <div className="min-w-0 space-y-4">
           {issuesBanner}
 
           {section === "menu" && (
-            <section className={`${panel} space-y-5`}>
-                <SwitchRow title="Menu automático" description={settings.enabled ? "Conversas novas começam no menu, sem ninguém assumir." : "Desligado: conversas novas vão direto para a primeira fila."} checked={settings.enabled} onChange={(value) => set("enabled", value)} />
-                <div>
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">Opções do menu</h2>
-                    <button type="button" onClick={() => addOption(null)} className="inline-flex h-9 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg bg-[#051647] px-3 text-sm font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]"><Plus className="h-4 w-4" />Adicionar opção</button>
-                  </div>
-                  {settings.options.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center dark:border-slate-700">
-                      <ListTree className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" />
-                      <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">Nenhuma opção ainda</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Comece pelos assuntos mais comuns, como Vendas, Pós-venda e Financeiro.</p>
-                    </div>
-                  ) : (
-                    <OptionTree
-                      options={settings.options}
-                      prefix=""
-                      openId={openId}
-                      queues={queues}
-                      agents={agents}
-                      onOpen={setOpenId}
-                      onPatch={(id, patch) => set("options", updateTree(settings.options, id, patch))}
-                      onRemove={removeOption}
-                      onMove={(id, step) => set("options", moveInTree(settings.options, id, step))}
-                      onAdd={addOption}
-                    />
-                  )}
-                </div>
-            </section>
-          )}
-
-          {section === "texts" && (
             <>
+              <section className={panel}>
+                <SwitchRow title="Menu automático" description={settings.enabled ? "Conversas novas começam no menu, sem ninguém assumir." : "Desligado: conversas novas vão direto para a primeira fila."} checked={settings.enabled} onChange={(value) => set("enabled", value)} />
+              </section>
+
               <SettingCard icon={MessagesSquare} title="Abertura" description="A primeira mensagem que o cliente recebe.">
                 <MessageField id="menu-greeting" label="Saudação" rows={4} value={settings.greeting} onChange={(value) => set("greeting", value)} variables={[...CUSTOMER_VARIABLES, { mark: "{menu}", label: "Lista de opções" }]} hint="Sem a lista de opções no texto, ela entra no fim." />
                 <MessageField id="menu-footer" label="Rodapé da lista" rows={1} value={settings.footer} onChange={(value) => set("footer", value)} />
@@ -313,6 +284,35 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                 <MessageField id="menu-closing" label="Frase de fechamento" rows={2} value={settings.closingText} onChange={(value) => set("closingText", value)} hint="Se o cliente escrever antes, a frase não é enviada." />
                 <SwitchRow title="Repetir a lista junto" description="Mostra as opções de novo com a frase." checked={settings.repeatMenu} onChange={(value) => set("repeatMenu", value)} />
               </SettingCard>
+
+              <section className={`${panel} space-y-5`}>
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">Opções do menu</h2>
+                    <button type="button" onClick={() => addOption(null)} className="inline-flex h-9 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg bg-[#051647] px-3 text-sm font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]"><Plus className="h-4 w-4" />Adicionar opção</button>
+                  </div>
+                  {settings.options.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center dark:border-slate-700">
+                      <ListTree className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600" />
+                      <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">Nenhuma opção ainda</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Comece pelos assuntos mais comuns, como Vendas, Pós-venda e Financeiro.</p>
+                    </div>
+                  ) : (
+                    <OptionTree
+                      options={settings.options}
+                      prefix=""
+                      openId={openId}
+                      queues={queues}
+                      agents={agents}
+                      onOpen={setOpenId}
+                      onPatch={(id, patch) => set("options", updateTree(settings.options, id, patch))}
+                      onRemove={removeOption}
+                      onMove={(id, step) => set("options", moveInTree(settings.options, id, step))}
+                      onAdd={addOption}
+                    />
+                  )}
+                </div>
+              </section>
             </>
           )}
 
