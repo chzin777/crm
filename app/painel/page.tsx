@@ -8,7 +8,7 @@ import { AlertTriangle, CalendarClock, Check, HeartPulse, Inbox, Moon, Receipt, 
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
-import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
+import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, Pagination, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import type { CompareMode, CustomerDashboard, CustomerPeriodPreset, HealthSegment } from "@/lib/customer-dashboard";
 
 type Options = { stores: { id: string; name: string }[]; sellers: string[] };
@@ -118,6 +118,7 @@ function DashboardSkeleton() {
   );
 }
 
+const RISK_PAGE_SIZE = 8;
 const actionButton = "inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50";
 
 export default function PainelPage() {
@@ -127,6 +128,7 @@ export default function PainelPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const [result, setResult] = useState<{ key: string; data?: CustomerDashboard; options?: Options; error?: string } | null>(null);
   const [riskFilter, setRiskFilter] = useState<"all" | "risco" | "critico">("all");
+  const [riskPageState, setRiskPageState] = useState<{ key: string; page: number; dir: number }>({ key: "", page: 0, dir: 1 });
   const [conversation, setConversation] = useState<string | null>(null);
   const [pipelineState, setPipelineState] = useState<Record<string, "saving" | "added" | "exists" | "error">>({});
 
@@ -185,6 +187,12 @@ export default function PainelPage() {
   const segmentTotal = (data?.segments ?? []).reduce((sum, item) => sum + item.total, 0);
   const healthyTotal = (data?.segments ?? []).filter((item) => item.key === "promotor" || item.key === "ativo").reduce((sum, item) => sum + item.total, 0);
   const riskRows = (data?.risk ?? []).filter((row) => riskFilter === "all" || row.segment === riskFilter);
+  // Página volta para 1 quando muda filtro da lista ou da consulta.
+  const riskPageKey = `${query}|${riskFilter}`;
+  const riskPageCount = Math.max(1, Math.ceil(riskRows.length / RISK_PAGE_SIZE));
+  const riskPage = riskPageState.key === riskPageKey ? Math.min(riskPageState.page, riskPageCount - 1) : 0;
+  const riskPageRows = riskRows.slice(riskPage * RISK_PAGE_SIZE, (riskPage + 1) * RISK_PAGE_SIZE);
+  const goToRiskPage = (page: number) => setRiskPageState({ key: riskPageKey, page: Math.max(0, Math.min(riskPageCount - 1, page)), dir: page >= riskPage ? 1 : -1 });
   const answered = data?.kpis.dissatisfaction.answered ?? 0;
   const detractors = data?.kpis.dissatisfaction.detractors ?? 0;
   const activeShare = data && data.kpis.base.total > 0 ? (data.kpis.buyers.value / data.kpis.base.total) * 100 : null;
@@ -346,8 +354,8 @@ export default function PainelPage() {
                   <div className="grid grid-cols-[minmax(0,1.6fr)_8rem_9rem_5rem_7.5rem_4rem_16rem] items-center gap-3 px-4 pb-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                     <span>Cliente</span><span>Situação</span><span>Última compra</span><span className="text-right">Pedidos</span><span className="text-right">LTV</span><span className="text-right">Nota</span><span className="text-right">Ações</span>
                   </div>
-                  <ul className="space-y-2">
-                    {riskRows.map((row) => {
+                  <motion.ul key={riskPage} initial={{ opacity: 0, x: riskPageState.dir * 14 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.22, ease: "easeOut" }} className="space-y-2" style={riskPageCount > 1 ? { minHeight: RISK_PAGE_SIZE * 78 - 8 } : undefined}>
+                    {riskPageRows.map((row) => {
                       const meta = SEGMENTS[row.segment];
                       const state = pipelineState[row.id];
                       return (
@@ -379,9 +387,12 @@ export default function PainelPage() {
                         </li>
                       );
                     })}
-                  </ul>
+                  </motion.ul>
                 </div>
               </div>
+            )}
+            {riskRows.length > 0 && (
+              <Pagination page={riskPage} pageSize={RISK_PAGE_SIZE} total={riskRows.length} noun={riskFilter === "critico" ? "clientes insatisfeitos" : riskFilter === "risco" ? "clientes em risco" : "clientes em risco ou insatisfeitos"} onChange={goToRiskPage} />
             )}
           </section>
 
