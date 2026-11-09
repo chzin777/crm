@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FileText, Image as ImageIcon, Paperclip, Send, Video, X } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, Check, CheckCircle2, FileText, Image as ImageIcon, Loader2, MessageSquareText, Paperclip, Receipt, Send, Users, Video, X, XCircle } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ChatPreview, formatFileSize } from "@/components/WhatsAppPreview";
@@ -160,23 +160,55 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
     }
     onClose();
   };
-  const stepsArr: { key: Step; label: string }[] = [{ key: "recipients", label: "Destinatários" }, { key: "message", label: "Mensagem" }, { key: "progress", label: "Progresso" }];
+  const [cancelling, setCancelling] = useState(false);
+  const cancelJob = async () => {
+    if (!job || !window.confirm("Cancelar o envio para os contatos que ainda estão na fila?")) return;
+    setCancelling(true);
+    try {
+      const response = await fetch(`/api/whatsapp/bulk-send/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
+      const body = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) setPollWarning(body?.error ?? "Não foi possível cancelar o envio.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const stepsArr: { key: Step; label: string; icon: typeof Users }[] = [
+    { key: "recipients", label: "Destinatários", icon: Users },
+    { key: "message", label: "Mensagem", icon: MessageSquareText },
+    { key: "progress", label: "Progresso", icon: Activity },
+  ];
   const currentStepIndex = stepsArr.findIndex((s) => s.key === step);
+  const ghostButton = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer";
+  const outlineButton = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-transparent dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer";
+  const primaryButton = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-[#051647] px-5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#002187] hover:shadow active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer";
 
   return (
-    <EntityDialog titleId="bulk-send-title" title={`Enviar para etapa: ${stageName}`} description={step === "recipients" ? "Selecione os contatos que receberão a mensagem." : step === "message" ? "Componha a mensagem para enviar em massa." : "Acompanhe o progresso do envio."} onClose={handleClose} size="lg">
+    <EntityDialog titleId="bulk-send-title" title="Envio em massa" description={step === "recipients" ? "Escolha quem recebe a mensagem." : step === "message" ? "Escreva a mensagem ou escolha um modelo aprovado." : "Acompanhe o envio em tempo real."} onClose={handleClose} size="lg">
       <div className="flex h-full min-h-0 flex-col gap-4">
-        <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 pb-3 dark:border-slate-800">
-          {stepsArr.map((s, i) => (
-            <div key={s.key} className="flex items-center gap-2">
-              <span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold ${step === s.key ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : currentStepIndex > i ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"}`}>{currentStepIndex > i ? <Check className="h-3 w-3" /> : i + 1}</span>
-              <span className={`text-xs font-semibold ${step === s.key ? "text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>{s.label}</span>
-              {i < 2 && <span className="mx-1 text-slate-300 dark:text-slate-600">→</span>}
-            </div>
-          ))}
+        <div className="flex shrink-0 flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[#002187]/15 bg-[#002187]/5 px-3 py-1 text-xs font-semibold text-[#002187] dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />Etapa: {stageName}
+          </span>
+          <ol className="flex items-center gap-1.5" aria-label="Etapas do envio">
+            {stepsArr.map((s, i) => {
+              const StepIcon = s.icon;
+              const active = step === s.key;
+              const completed = currentStepIndex > i;
+              return (
+                <li key={s.key} className="flex items-center gap-1.5" aria-current={active ? "step" : undefined}>
+                  <span className={`grid h-7 w-7 place-items-center rounded-full border transition-all duration-300 ${active ? "border-[#051647] bg-[#051647] text-white shadow-sm dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : completed ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-transparent dark:text-slate-500"}`}>
+                    {completed ? <Check className="h-3.5 w-3.5" /> : <StepIcon className="h-3.5 w-3.5" />}
+                  </span>
+                  <span className={`hidden text-xs font-semibold transition-colors md:inline ${active ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-slate-500"}`}>{s.label}</span>
+                  {i < stepsArr.length - 1 && <span className={`mx-1 h-px w-5 transition-colors duration-300 sm:w-8 ${completed ? "bg-emerald-500" : "bg-slate-200 dark:bg-slate-700"}`} />}
+                </li>
+              );
+            })}
+          </ol>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div key={step} className="soft-pop-in custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
           {step === "recipients" && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -186,11 +218,12 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
                   <button type="button" onClick={clearSelection} className="rounded-md px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 cursor-pointer">Limpar</button>
                 </div>
               </div>
-              <div className="max-h-[340px] space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-                {validRecipients.length === 0 ? <p className="py-6 text-center text-xs text-slate-500">Nenhum contato com telefone válido nesta etapa.</p> : validRecipients.map((r) => (
-                  <label key={r.contactId} className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                    <input type="checkbox" checked={selectedIds.has(r.contactId)} onChange={() => toggleSelect(r.contactId)} className="h-4 w-4 rounded border-slate-300 accent-[#002187] dark:accent-[#C4D600]" />
-                    <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-slate-900 dark:text-white">{r.nome}</p><p className="text-[10px] text-slate-500 dark:text-slate-400">{r.telefone}</p></div>
+              <div className="custom-scrollbar max-h-[340px] divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+                {validRecipients.length === 0 ? <p className="py-8 text-center text-xs text-slate-500">Nenhum contato com telefone válido nesta etapa.</p> : validRecipients.map((r) => (
+                  <label key={r.contactId} className={`flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${selectedIds.has(r.contactId) ? "" : "opacity-60"}`}>
+                    <input type="checkbox" checked={selectedIds.has(r.contactId)} onChange={() => toggleSelect(r.contactId)} className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-[#002187] dark:accent-[#C4D600]" />
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#002187]/10 text-[11px] font-bold text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{r.nome.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "?"}</span>
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{r.nome}</p><p className="truncate text-[11px] text-slate-500 dark:text-slate-400">{r.telefone}</p></div>
                   </label>
                 ))}
               </div>
@@ -239,17 +272,26 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
                   ))}</div>
                 </div>
               )}
-              {(() => {
-                // Custo estimado antes de confirmar: destinatários × preço da categoria do modelo.
-                if (mode === "free") return <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300"><span className="font-semibold">Custo estimado: sem cobrança da Meta.</span> Mensagem livre só é entregue a quem falou com a loja nas últimas 24h.</p>;
-                if (!selectedTemplate) return null;
-                const category = (selectedTemplate.category ?? "").toUpperCase();
-                const unit = !pricing ? null : category === "MARKETING" ? pricing.marketing : category === "UTILITY" ? pricing.utility : category === "AUTHENTICATION" ? pricing.authentication : null;
+              {(mode === "free" || selectedTemplate) && (() => {
+                // Resumo antes de confirmar: contatos válidos, tipo de mensagem e custo estimado (contatos × preço da categoria).
+                const category = (selectedTemplate?.category ?? "").toUpperCase();
+                const unit = mode === "free" ? 0 : !pricing ? null : category === "MARKETING" ? pricing.marketing : category === "UTILITY" ? pricing.utility : category === "AUTHENTICATION" ? pricing.authentication : null;
+                const typeLabel = mode === "free" ? "Mensagem livre" : `Modelo de ${CATEGORY_LABEL[category] ?? (category.toLowerCase() || "categoria desconhecida")}`;
                 return (
-                  <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
-                    <span className="font-semibold">Custo estimado do envio: {unit === null ? "indisponível" : brl(selectedRecipients.length * unit)}</span>
-                    {unit !== null && <> · {selectedRecipients.length} contato(s) × {brl(unit)} (modelo de {CATEGORY_LABEL[category] ?? category.toLowerCase()})</>}
-                  </p>
+                  <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800/40" aria-label="Resumo do envio">
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="grid h-7 w-7 place-items-center rounded-lg bg-white text-slate-500 shadow-xs dark:bg-slate-900 dark:text-slate-300"><Receipt className="h-3.5 w-3.5" /></span>
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Resumo do envio</p>
+                    </div>
+                    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div><dt className="text-[11px] text-slate-500 dark:text-slate-400">Contatos válidos</dt><dd className="text-base font-bold tabular-nums text-slate-900 dark:text-white">{selectedRecipients.length.toLocaleString("pt-BR")}</dd></div>
+                      <div><dt className="text-[11px] text-slate-500 dark:text-slate-400">Tipo</dt><dd className="text-sm font-semibold text-slate-900 dark:text-white">{typeLabel}</dd></div>
+                      <div><dt className="text-[11px] text-slate-500 dark:text-slate-400">Custo estimado</dt><dd className="text-base font-bold tabular-nums text-[#002187] dark:text-[#C4D600]">{unit === null ? "Indisponível" : unit === 0 ? "Sem custo" : brl(selectedRecipients.length * unit)}</dd></div>
+                    </dl>
+                    <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+                      {mode === "free" ? "Mensagem livre não é cobrada pela Meta, mas só chega a quem falou com a loja nas últimas 24h." : unit === null ? "Não foi possível identificar o preço deste modelo." : `${selectedRecipients.length} × ${brl(unit)} por mensagem entregue.`}
+                    </p>
+                  </section>
                 );
               })()}
               {error && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
@@ -260,22 +302,25 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
           {step === "progress" && job && <BulkJobProgress job={job} />}
         </div>
 
-        <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
           {step === "recipients" && (<>
-            <button type="button" onClick={onClose} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer">Cancelar</button>
-            <button type="button" disabled={!canProceedToMessage} onClick={() => setStep("message")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer"><Send className="h-3.5 w-3.5" />Próximo</button>
+            <button type="button" onClick={onClose} className={ghostButton}>Cancelar</button>
+            <button type="button" disabled={!canProceedToMessage} onClick={() => setStep("message")} className={primaryButton}>Próximo<ArrowRight className="h-4 w-4" /></button>
           </>)}
           {step === "message" && (<>
-            <button type="button" onClick={() => setStep("recipients")} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer">Voltar</button>
-            <div className="flex gap-2">
+            <button type="button" onClick={() => setStep("recipients")} className={ghostButton}><ArrowLeft className="h-4 w-4" />Voltar</button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
               <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden onChange={(event) => addFiles(event.target.files)} />
-              <button type="button" disabled={mode === "template"} onClick={() => inputRef.current?.click()} className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer"><Paperclip className="h-3.5 w-3.5" />Anexar</button>
-              <button type="button" disabled={!canSend || starting} onClick={startSending} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-bold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer"><Send className="h-3.5 w-3.5" />{starting ? "Iniciando..." : `Enviar para ${selectedRecipients.length}`}</button>
+              <button type="button" disabled={mode === "template"} onClick={() => inputRef.current?.click()} className={outlineButton}><Paperclip className="h-4 w-4" />Anexar</button>
+              <button type="button" disabled={!canSend || starting} onClick={startSending} className={primaryButton}>{starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{starting ? "Iniciando..." : `Enviar para ${selectedRecipients.length}`}</button>
             </div>
           </>)}
-          {step === "progress" && (
-            <button type="button" onClick={handleClose} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer">{isComplete ? "Fechar" : "Continuar em segundo plano"}</button>
-          )}
+          {step === "progress" && (<>
+            {isComplete ? <span /> : (
+              <button type="button" disabled={cancelling || job?.status !== "running"} onClick={() => void cancelJob()} className={`${ghostButton} text-[#9a3d12] hover:bg-[#F7915E]/10 hover:text-[#9a3d12] dark:text-[#F7915E] dark:hover:bg-[#F7915E]/10 dark:hover:text-[#F7915E]`}><XCircle className="h-4 w-4" />{cancelling ? "Cancelando..." : "Cancelar envio"}</button>
+            )}
+            <button type="button" onClick={handleClose} className={primaryButton}>{isComplete ? <><CheckCircle2 className="h-4 w-4" />Concluir</> : "Continuar em segundo plano"}</button>
+          </>)}
         </div>
       </div>
     </EntityDialog>

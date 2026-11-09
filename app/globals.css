@@ -190,6 +190,45 @@ body {
   }
 }
 
+/* Rolagem discreta para listas internas (ex.: envio em massa). */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(148 163 184 / 0.45);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(100 116 139 / 0.7);
+}
+
+/* Entrada suave de passos e do aviso de conclusão. */
+@keyframes soft-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.soft-pop-in {
+  animation: soft-pop-in 220ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .soft-pop-in {
+    animation: none;
+  }
+}
+
 @keyframes recording-wave {
   0%, 100% {
     transform: scaleY(0.25);
