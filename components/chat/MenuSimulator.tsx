@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { List, RotateCcw, X } from "lucide-react";
+import { useState } from "react";
+import { PreviewBubble, PreviewFrame, PreviewHint, PreviewListBubble, PreviewListSheet, PreviewNote } from "@/components/chat/ChatPreview";
 import { composeWithMenu, MENU_LIST, menuList, optionsAt, type ChatMenuSettings, type MenuListRow, type MenuOption } from "@/lib/chat/settings";
 import { fillVariables } from "@/lib/chat/text";
 
@@ -21,15 +21,12 @@ function start(settings: ChatMenuSettings): Line[] {
   return [{ from: "customer", text: "Oi" }, menuLine(settings, [], [settings.greeting])];
 }
 
-const bubble = "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white";
-
 /** Mostra o que o cliente veria, sem enviar nada pelo WhatsApp. */
 export function MenuSimulator({ settings, queues, agents }: { settings: ChatMenuSettings; queues: { id: string; name: string }[]; agents: { id: string; name: string }[] }) {
   const [path, setPath] = useState<string[]>([]);
   const [lines, setLines] = useState<Line[]>(() => start(settings));
   const [stopped, setStopped] = useState(false);
   const [sheet, setSheet] = useState<MenuListRow[] | null>(null);
-  const box = useRef<HTMLDivElement>(null);
 
   const reset = () => {
     setPath([]);
@@ -45,10 +42,6 @@ export function MenuSimulator({ settings, queues, agents }: { settings: ChatMenu
     setSeen(signature);
     reset();
   }
-
-  useEffect(() => {
-    box.current?.scrollTo({ top: box.current.scrollHeight });
-  }, [lines]);
 
   const choose = (option: MenuOption, answer: string) => {
     const next: Line[] = [{ from: "customer", text: answer }];
@@ -97,89 +90,41 @@ export function MenuSimulator({ settings, queues, agents }: { settings: ChatMenu
 
   // Só a lista mais recente responde: as antigas ficam como histórico.
   const lastList = lines.reduce((found, line, index) => (line.from === "list" ? index : found), -1);
-  const usesList = lastList >= 0 && lines[lastList].from === "list" && !stopped;
+  const usesList = lastList >= 0 && !stopped;
+
+  const footer = stopped ? (
+    <PreviewHint text="O menu parou. Agora é com a equipe." />
+  ) : options.length === 0 ? (
+    <PreviewHint text="Adicione opções para simular." />
+  ) : usesList ? (
+    <PreviewHint text={`Toque em “${MENU_LIST.button}” na mensagem para escolher.`} />
+  ) : (
+    <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+      {options.map((option, index) => (
+        <button key={option.id} type="button" onClick={() => choose(option, String(index + 1))} className="max-w-full cursor-pointer truncate rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+          {index + 1}. {option.label || "Sem rótulo"}
+        </button>
+      ))}
+      {path.length > 0 && <button type="button" onClick={() => goBack("0")} className="cursor-pointer rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">0. Voltar</button>}
+    </div>
+  );
 
   return (
-    <div className="relative flex h-[440px] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-        <div>
-          <p className="text-sm font-bold text-slate-900 dark:text-white">Simulador</p>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">Nada é enviado ao cliente</p>
-        </div>
-        <button type="button" onClick={reset} title="Recomeçar" aria-label="Recomeçar simulação" className="cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><RotateCcw className="h-4 w-4" /></button>
-      </div>
-      <div ref={box} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efe7dd]/30 p-3 dark:bg-[#0b1a3a]">
-        {lines.map((line, index) => {
-          if (line.from === "note") {
-            return <p key={index} className="mx-auto w-fit max-w-[90%] rounded-lg bg-slate-200/70 px-2.5 py-1 text-center text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">{line.text}</p>;
-          }
-          if (line.from === "list") {
-            const active = index === lastList && !stopped;
-            return (
-              <div key={index} className="flex justify-start">
-                <div className={`w-[85%] overflow-hidden ${bubble}`}>
-                  <div className="px-3 pb-2 pt-2.5">
-                    <p className="text-xs font-bold">{MENU_LIST.header}</p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed">{line.body}</p>
-                    <p className="mt-1.5 text-[10px] text-slate-500 dark:text-slate-400">{MENU_LIST.footer}</p>
-                  </div>
-                  <button type="button" disabled={!active} onClick={() => setSheet(line.rows)} className="flex w-full cursor-pointer items-center justify-center gap-1.5 border-t border-slate-200 py-2 text-xs font-semibold text-[#002187] hover:bg-slate-50 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5">
-                    <List className="h-3.5 w-3.5" />{MENU_LIST.button}
-                  </button>
-                </div>
-              </div>
-            );
-          }
-          return (
-            <div key={index} className={`flex ${line.from === "customer" ? "justify-end" : "justify-start"}`}>
-              <p className={`max-w-[85%] whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed ${line.from === "customer" ? "rounded-2xl rounded-br-sm bg-[#051647] text-white shadow-sm dark:bg-[#C4D600] dark:text-[#051647]" : bubble}`}>{line.text}</p>
-            </div>
-          );
-        })}
-      </div>
-      <div className="shrink-0 border-t border-slate-100 p-2 dark:border-slate-800">
-        {stopped ? (
-          <p className="px-2 py-1.5 text-center text-xs text-slate-500 dark:text-slate-400">O menu parou. Agora é com a equipe.</p>
-        ) : options.length === 0 ? (
-          <p className="px-2 py-1.5 text-center text-xs text-slate-500 dark:text-slate-400">Adicione opções para simular.</p>
-        ) : usesList ? (
-          <p className="px-2 py-1.5 text-center text-xs text-slate-500 dark:text-slate-400">Toque em “{MENU_LIST.button}” na mensagem para escolher.</p>
+    <PreviewFrame
+      onReset={reset}
+      scrollKey={lines}
+      footer={footer}
+      overlay={sheet && <PreviewListSheet title={MENU_LIST.button} rows={sheet} onPick={pickRow} onClose={() => setSheet(null)} />}
+    >
+      {lines.map((line, index) =>
+        line.from === "note" ? (
+          <PreviewNote key={index} text={line.text} />
+        ) : line.from === "list" ? (
+          <PreviewListBubble key={index} header={MENU_LIST.header} body={line.body} footer={MENU_LIST.footer} button={MENU_LIST.button} active={index === lastList && !stopped} onOpen={() => setSheet(line.rows)} />
         ) : (
-          <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
-            {options.map((option, index) => (
-              <button key={option.id} type="button" onClick={() => choose(option, String(index + 1))} className="max-w-full cursor-pointer truncate rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
-                {index + 1}. {option.label || "Sem rótulo"}
-              </button>
-            ))}
-            {path.length > 0 && <button type="button" onClick={() => goBack("0")} className="cursor-pointer rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">0. Voltar</button>}
-          </div>
-        )}
-      </div>
-
-      {sheet && (
-        <div className="absolute inset-0 z-10 flex flex-col justify-end bg-black/40" onClick={() => setSheet(null)}>
-          <div role="dialog" aria-label={MENU_LIST.button} className="max-h-[75%] overflow-hidden rounded-t-2xl bg-white shadow-2xl dark:bg-slate-900" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
-              <button type="button" onClick={() => setSheet(null)} aria-label="Fechar lista" className="cursor-pointer rounded-full p-1 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"><X className="h-4 w-4" /></button>
-              <p className="flex-1 text-center text-sm font-semibold text-slate-900 dark:text-white">{MENU_LIST.button}</p>
-              <span className="w-6" />
-            </div>
-            <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-              {sheet.map((row) => (
-                <li key={row.id}>
-                  <button type="button" onClick={() => pickRow(row)} className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-white/5">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm text-slate-900 dark:text-white">{row.title || "Sem rótulo"}</span>
-                      {row.description && <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">{row.description}</span>}
-                    </span>
-                    <span className="h-4 w-4 shrink-0 rounded-full border-2 border-slate-300 dark:border-slate-600" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+          <PreviewBubble key={index} from={line.from} text={line.text} />
+        ),
       )}
-    </div>
+    </PreviewFrame>
   );
 }
