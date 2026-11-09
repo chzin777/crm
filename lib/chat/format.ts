@@ -35,8 +35,16 @@ export function dayLabel(value: string) {
 export function waitingLabel(since: string | null) {
   if (!since) return { text: "", minutes: 0 };
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60000));
-  const text = minutes < 60 ? `${minutes}min` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
-  return { text, minutes };
+  return { text: elapsedLabel(minutes), minutes };
+}
+
+/** 15min, 4h 20min, 2d 18h: acima de 24h a conta vira dias para não mostrar "66h". */
+export function elapsedLabel(minutes: number) {
+  if (minutes < 1) return "agora";
+  if (minutes < 60) return `${minutes}min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 ? `${hours}h ${minutes % 60}min` : `${hours}h`;
+  return hours % 24 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${Math.floor(hours / 24)}d`;
 }
 
 export const initials = (name: string) => name.split(" ").map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
