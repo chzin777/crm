@@ -56,7 +56,7 @@ export async function runAutomation(recorded: RecordedInbound) {
   const inboundCount = await prisma.chatMessage.count({ where: { conversationId: conversation.id, author: "customer" } });
   const firstMessage = inboundCount === 1;
 
-  const handled = await attendByMenu({ conversation, customerName: conversation.contact.name, text: recorded.text, firstMessage });
+  const handled = await attendByMenu({ conversation, customerName: conversation.contact.name, text: recorded.text, choiceId: recorded.choiceId, firstMessage });
   console.log(`[bot] ${conversation.id}: status ${conversation.status}, ${firstMessage ? "primeira mensagem" : `mensagem ${inboundCount}`} -> ${handled ? "respondida pelo menu" : "menu não respondeu"}`);
   if (handled) return;
 

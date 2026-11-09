@@ -3,10 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
-import { readMenuState, saveMenuState } from "@/lib/chat/menu";
+import { readMenuState, saveMenuState, sendMenu } from "@/lib/chat/menu";
 import { expireSurveys, isSurveyMessage, resendSurvey, sendSatisfactionSurvey } from "@/lib/chat/nps";
 import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
-import { composeWithMenu, silenceFarewell } from "@/lib/chat/settings";
+import { silenceFarewell } from "@/lib/chat/settings";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 
 const MINUTE = 60_000;
@@ -56,8 +56,8 @@ export async function runClock() {
       state.closePhrase = null;
       await saveMenuState(row.id, state);
       if (!isWindowOpen(row.lastInboundAt)) continue;
-      const text = settings.repeatMenu ? composeWithMenu(settings, state.path, [phrase]) : phrase.trim();
-      if (text) await sendAutomaticMessage(row, text);
+      if (settings.repeatMenu) await sendMenu(row, settings, state.path, [phrase]);
+      else if (phrase.trim()) await sendAutomaticMessage(row, phrase.trim());
       summary.closings += 1;
     }
   });

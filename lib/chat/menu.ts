@@ -6,8 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { assignFromMenu, closeConversation } from "@/lib/chat/actions";
 import { readChatSettings } from "@/lib/chat/conversation";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
-import { composeWithMenu, optionsAt, type MenuOption } from "@/lib/chat/settings";
-import { fillVariables } from "@/lib/chat/text";
+import { composeWithMenu, optionsAt, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
+import { fillVariables, withoutDashes } from "@/lib/chat/text";
+import { sendList } from "@/lib/meta-whatsapp";
 
 export type MenuState = {
   path: string[];
@@ -57,10 +58,47 @@ async function applyTag(conversation: ChatConversation, option: MenuOption) {
   await prisma.chatConversation.update({ where: { id: conversation.id }, data: { tags: option.tagMode === "add" ? [...others, value] : others } });
 }
 
-type Entry = { conversation: ChatConversation; customerName: string; text: string; firstMessage: boolean };
+const LIST_HEADER = "Óticas Brasil 👓";
+const LIST_FOOTER = "Selecione uma opção abaixo";
+const LIST_BUTTON = "Ver opções";
+const BACK_ROW = "menu_voltar";
+const MAX_ROWS = 10;
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * Menu como lista nativa do WhatsApp (mais de 3 opções não cabem em botões).
+ * O histórico guarda a versão em texto; acima de 10 linhas a Meta recusa a lista e vai texto mesmo.
+ */
+export async function sendMenu(conversation: Pick<ChatConversation, "id" | "phone">, settings: ChatMenuSettings, path: string[], parts: string[], customerName?: string) {
+  const fill = (value: string) => fillVariables(value, { customer: customerName });
+  const text = fill(composeWithMenu(settings, path, parts));
+  const rows = [
+    ...optionsAt(settings, path).map((option) => ({
+      id: `menu_${option.id}`,
+      title: clip(option.label, 24),
+      ...(option.label.length > 24 ? { description: clip(option.label, 72) } : {}),
+    })),
+    ...(path.length ? [{ id: BACK_ROW, title: "Voltar" }] : []),
+  ];
+  if (rows.length === 0 || rows.length > MAX_ROWS) return sendAutomaticMessage(conversation, text);
+
+  const intro = parts.map((part) => part.replaceAll("{menu}", "").trim()).filter(Boolean).join("\n\n");
+  const body = clip(withoutDashes(fill(intro)) || "Como podemos ajudar?", 1024);
+  return sendAutomaticMessage(conversation, text, () => sendList(conversation.phone, { header: LIST_HEADER, body, footer: LIST_FOOTER, button: LIST_BUTTON, rows }));
+}
+
+/** Toque na lista: 0 é Voltar, senão a posição da opção no nível atual. */
+function choiceFromList(choiceId: string | null | undefined, options: MenuOption[]) {
+  if (!choiceId?.startsWith("menu_")) return null;
+  if (choiceId === BACK_ROW) return 0;
+  const index = options.findIndex((option) => `menu_${option.id}` === choiceId);
+  return index >= 0 ? index + 1 : null;
+}
+
+type Entry = { conversation: ChatConversation; customerName: string; text: string; choiceId?: string | null; firstMessage: boolean };
 
 /** Devolve true quando o menu respondeu a mensagem. Todo estado fica no banco. */
-export async function attendByMenu({ conversation, customerName, text: rawText, firstMessage }: Entry) {
+export async function attendByMenu({ conversation, customerName, text: rawText, choiceId, firstMessage }: Entry) {
   const settings = await readChatSettings();
   if (!settings.enabled || settings.options.length === 0) return false;
 
@@ -74,7 +112,7 @@ export async function attendByMenu({ conversation, customerName, text: rawText, 
 
   const text = rawText.trim();
   const say = (message: string) => sendAutomaticMessage(conversation, fillVariables(message, { customer: customerName }));
-  const show = (parts: string[]) => say(composeWithMenu(settings, state.path, parts));
+  const show = (parts: string[]) => sendMenu(conversation, settings, state.path, parts, customerName);
 
   if (firstMessage && state.path.length === 0) {
     await show([settings.greeting]);
@@ -83,7 +121,7 @@ export async function attendByMenu({ conversation, customerName, text: rawText, 
   }
 
   const options = optionsAt(settings, state.path);
-  const choice = choiceFrom(text, options.length);
+  const choice = choiceFromList(choiceId, options) ?? choiceFrom(text, options.length);
 
   if (choice === null) {
     if (/^(menu|op[çc][õo]es|voltar|in[íi]cio)$/i.test(text)) {

@@ -26,7 +26,7 @@ export type MetaInboundMessage = {
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
   contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string }[] }[];
   button?: { text?: string };
-  interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } };
+  interactive?: { type?: string; button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
 };
 
 const MEDIA_LABELS: Record<AttachmentKind, string> = {
@@ -161,6 +161,8 @@ export type RecordedInbound = {
   conversationId: string;
   messageId: string;
   text: string;
+  /** Id da linha tocada numa lista ou botão; o texto mostra só o título. */
+  choiceId: string | null;
   created: boolean;
 };
 
@@ -233,7 +235,8 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
     .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
 
-  return { conversationId: conversation.id, messageId: saved.id, text, created };
+  const choiceId = message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
+  return { conversationId: conversation.id, messageId: saved.id, text, choiceId, created };
 }
 
 /**

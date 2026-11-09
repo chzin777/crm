@@ -186,7 +186,7 @@ export async function sendText(phone: string, text: string, replyToId?: string) 
 }
 
 /** Lista interativa: comporta mais opções que os botões, limitados a 3 pela Meta. */
-export async function sendList(phone: string, list: { body: string; button: string; rows: { id: string; title: string }[] }) {
+export async function sendList(phone: string, list: { header?: string; body: string; footer?: string; button: string; rows: { id: string; title: string; description?: string }[] }) {
   const { phoneNumberId } = getConfig();
 
   return graph<{ messages: { id: string }[] }>(`/${phoneNumberId}/messages`, {
@@ -198,7 +198,9 @@ export async function sendList(phone: string, list: { body: string; button: stri
       type: "interactive",
       interactive: {
         type: "list",
+        ...(list.header ? { header: { type: "text", text: list.header } } : {}),
         body: { text: list.body },
+        ...(list.footer ? { footer: { text: list.footer } } : {}),
         action: { button: list.button, sections: [{ rows: list.rows }] },
       },
     }),
