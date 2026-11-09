@@ -5,7 +5,7 @@ import { sendList } from "@/lib/meta-whatsapp";
 import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
-import { NPS_LEGACY_SCALE_TEXT, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreTitle } from "@/lib/chat/settings";
+import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreTitle } from "@/lib/chat/settings";
 
 const SURVEY_HOURS = 24;
 const COMMENT_WINDOW_MS = 10 * 60_000;
@@ -38,7 +38,7 @@ const surveyList = (phone: string, question: string) => () => sendList(phone, {
 });
 
 /** A pergunta é editável; o que marca a pesquisa no histórico é a escala no fim. */
-const scaleOf = (text: string) => [NPS_SCALE_TEXT, NPS_LEGACY_SCALE_TEXT].find((scale) => text.endsWith(scale));
+const scaleOf = (text: string) => [NPS_SCALE_TEXT, ...NPS_LEGACY_SCALES].find((scale) => text.endsWith(scale));
 export const isSurveyMessage = (text: string) => !!scaleOf(text);
 const questionOf = (text: string) => text.slice(0, -(scaleOf(text)?.length ?? 0)).trim();
 

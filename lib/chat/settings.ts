@@ -72,15 +72,15 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
 /** Escala fixa: a leitura da nota depende destes rótulos, por isso não são editáveis. */
 export const NPS_SCORE_LABELS = ["Muito insatisfeito", "Insatisfeito", "Neutro", "Satisfeito", "Muito satisfeito"];
 export const NPS_SCORE_EMOJIS = ["😡", "🙁", "😐", "🙂", "🤩"];
-export const npsScoreLine = (label: string, index: number) => `${index + 1} - ${label} ${NPS_SCORE_EMOJIS[index]}`;
-/** Título na lista do WhatsApp (máx. 24): "1 - Muito insatisfeito 😡" passa por um, então perde o espaço. */
-export const npsScoreTitle = (label: string, index: number) => {
-  const line = npsScoreLine(label, index);
-  return line.length <= 24 ? line : `${index + 1} - ${label}${NPS_SCORE_EMOJIS[index]}`;
-};
+/** Emoji colado no rótulo em todas as notas: com espaço, "1 - Muito insatisfeito 😡" passa dos 24 da lista. */
+export const npsScoreLine = (label: string, index: number) => `${index + 1} - ${label}${NPS_SCORE_EMOJIS[index]}`;
+export const npsScoreTitle = npsScoreLine;
 export const NPS_SCALE_TEXT = NPS_SCORE_LABELS.map(npsScoreLine).join("\n");
-/** Escala sem emojis, usada até a v1.4.17: ainda marca pesquisas antigas no histórico. */
-export const NPS_LEGACY_SCALE_TEXT = NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label}`).join("\n");
+/** Formatos anteriores da escala (sem emoji e com emoji separado): ainda marcam pesquisas antigas no histórico. */
+export const NPS_LEGACY_SCALES = [
+  NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label}`).join("\n"),
+  NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label} ${NPS_SCORE_EMOJIS[index]}`).join("\n"),
+];
 export const npsPrompt = (settings: ChatMenuSettings) => settings.npsPromptText.trim() || DEFAULT_CHAT_SETTINGS.npsPromptText;
 
 /** Texto personalizado vazio ou desligado cai na despedida padrão. */
