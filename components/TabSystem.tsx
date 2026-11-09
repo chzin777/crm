@@ -17,6 +17,7 @@ import {
   KeyRound,
   Settings,
   Send,
+  BarChart3,
   X,
 } from "lucide-react";
 
@@ -42,6 +43,7 @@ const TABS: TabDef[] = [
   { id: "permissoes", label: "Permissões", href: "/permissoes", icon: KeyRound },
   { id: "chat", label: "Atendimento", href: "/chat", icon: MessageSquare },
   { id: "filas", label: "Filas", href: "/filas", icon: ListOrdered },
+  { id: "metricas", label: "Métricas", href: "/metricas-atendimento", icon: BarChart3 },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 

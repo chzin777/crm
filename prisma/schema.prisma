@@ -246,6 +246,7 @@ model NpsFeedback {
   @@index([phone, status])
   @@index([status, createdAt])
   @@index([attendantId, createdAt])
+  @@index([answeredAt])
 }
 
 model CampaignMessage {
@@ -400,6 +401,8 @@ model ChatConversation {
   @@index([assigneeId, closedAt])
   @@index([contactId, createdAt])
   @@index([lastMessageAt])
+  @@index([createdAt])
+  @@index([closedAt])
 }
 
 model ChatMessage {
