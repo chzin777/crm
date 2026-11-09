@@ -25,6 +25,22 @@ function formatSize(bytes: number) { return bytes >= 1048576 ? `${(bytes / 10485
 function FileIcon({ file }: { file: File }) { const c = "h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]"; if (file.type.startsWith("image/")) return <ImageIcon className={c} />; if (file.type.startsWith("video/")) return <Video className={c} />; return <FileText className={c} />; }
 function variableCount(body: string) { return new Set(body.match(/\{\{\d+\}\}/g) ?? []).size; }
 
+type ParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
+type TemplateParam = { source: ParamSource; value: string };
+const PARAM_SOURCES: { value: ParamSource; label: string }[] = [
+  { value: "primeiro_nome", label: "Primeiro nome" },
+  { value: "nome", label: "Nome do contato" },
+  { value: "telefone", label: "Telefone" },
+  { value: "manual", label: "Valor fixo" },
+];
+function resolveParam(param: TemplateParam, recipient?: BulkRecipient) {
+  if (param.source === "manual") return param.value;
+  if (!recipient) return "";
+  if (param.source === "primeiro_nome") return recipient.nome.trim().split(/\s+/)[0] ?? "";
+  if (param.source === "nome") return recipient.nome.trim();
+  return recipient.telefone;
+}
+
 export function BulkSendMessageDialog({ stageName, recipients, onClose, onComplete }: Props) {
   const [step, setStep] = useState<Step>("recipients");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(recipients.map((r) => r.contactId)));
@@ -33,7 +49,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   const [templates, setTemplates] = useState<ApiTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<ApiTemplate | null>(null);
-  const [templateParams, setTemplateParams] = useState<string[]>([]);
+  const [templateParams, setTemplateParams] = useState<TemplateParam[]>([]);
   const [mode, setMode] = useState<"free" | "template">("free");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -67,7 +83,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   const removeFile = (index: number) => setFiles((prev) => prev.filter((_, i) => i !== index));
 
   const canProceedToMessage = selectedRecipients.length > 0;
-  const canSend = mode === "free" ? (text.trim().length > 0 || files.length > 0) : (selectedTemplate !== null && templateParams.every((p) => p.trim() !== ""));
+  const canSend = mode === "free" ? (text.trim().length > 0 || files.length > 0) : (selectedTemplate !== null && templateParams.every((p) => p.source !== "manual" || p.value.trim() !== ""));
 
   const startSending = async () => {
     if (!canSend) return;
@@ -141,9 +157,15 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
               {mode === "template" && (
                 <div className="space-y-3">
                   {templatesLoading ? <LoadingSpinner label="Carregando modelos..." className="w-full justify-center py-4" /> : templates.length === 0 ? <p className="py-4 text-center text-xs text-slate-500">Nenhum modelo aprovado disponível.</p> : (<>
-                    <select value={selectedTemplate?.name ?? ""} onChange={(e) => { const t = templates.find((tpl) => tpl.name === e.target.value) ?? null; setSelectedTemplate(t); setTemplateParams(Array.from({ length: variableCount(t?.body ?? "") }, () => "")); }} className={fieldClass}><option value="">Selecione um modelo...</option>{templates.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
-                    {selectedTemplate && Array.from({ length: variableCount(selectedTemplate.body) }).map((_, i) => (<input key={i} value={templateParams[i] ?? ""} onChange={(e) => { const next = [...templateParams]; next[i] = e.target.value; setTemplateParams(next); }} placeholder={`Variável {{${i + 1}}}`} className={fieldClass} />))}
-                    {selectedTemplate && <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700 dark:bg-slate-800/60 dark:text-slate-300"><p className="font-semibold">Prévia:</p><p className="mt-1 whitespace-pre-wrap">{selectedTemplate.body.replace(/\{\{(\d+)\}\}/g, (_, n) => templateParams[Number(n) - 1] || `{{${n}}}`)}</p></div>}
+                    <select value={selectedTemplate?.name ?? ""} onChange={(e) => { const t = templates.find((tpl) => tpl.name === e.target.value) ?? null; setSelectedTemplate(t); setTemplateParams(Array.from({ length: variableCount(t?.body ?? "") }, (_, i) => ({ source: i === 0 ? "primeiro_nome" : "manual", value: "" }))); }} className={fieldClass}><option value="">Selecione um modelo...</option>{templates.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
+                    {selectedTemplate && templateParams.map((param, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="w-12 shrink-0 text-xs font-semibold text-slate-600 dark:text-slate-300">{`{{${i + 1}}}`}</span>
+                        <select value={param.source} onChange={(e) => { const next = [...templateParams]; next[i] = { ...param, source: e.target.value as ParamSource }; setTemplateParams(next); }} className={`${fieldClass} cursor-pointer`}>{PARAM_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>
+                        {param.source === "manual" && <input value={param.value} onChange={(e) => { const next = [...templateParams]; next[i] = { ...param, value: e.target.value }; setTemplateParams(next); }} placeholder="Texto fixo" className={fieldClass} />}
+                      </div>
+                    ))}
+                    {selectedTemplate && <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700 dark:bg-slate-800/60 dark:text-slate-300"><p className="font-semibold">Prévia{selectedRecipients[0] ? ` (${selectedRecipients[0].nome})` : ""}:</p><p className="mt-1 whitespace-pre-wrap">{selectedTemplate.body.replace(/\{\{(\d+)\}\}/g, (_, n) => { const p = templateParams[Number(n) - 1]; return (p && resolveParam(p, selectedRecipients[0])) || `{{${n}}}`; })}</p></div>}
                   </>)}
                 </div>
               )}
