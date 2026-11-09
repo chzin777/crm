@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAutomation } from "@/lib/chat/automation";
 import { notifyChatChange } from "@/lib/chat/events";
-import { isCustomerMessage, recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
+import { isCustomerMessage, recordEcho, recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 import { phoneVariants } from "@/lib/chat/phone";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
@@ -129,12 +129,23 @@ export async function POST(request: Request) {
   }
   try {
     const payload = JSON.parse(raw) as {
-      entry?: { changes?: { field?: string; value?: { statuses?: StatusEvent[]; messages?: (InboundMessageEvent & MetaInboundMessage)[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] } }[] }[];
+      entry?: { changes?: { field?: string; value?: { statuses?: StatusEvent[]; messages?: (InboundMessageEvent & MetaInboundMessage)[]; message_echoes?: (MetaInboundMessage & { to?: string })[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] } }[] }[];
     };
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const profiles = change.value?.contacts ?? [];
         console.log(`[whatsapp/webhook] evento ${change.field ?? "?"}: ${change.value?.messages?.length ?? 0} mensagem(ns), ${change.value?.statuses?.length ?? 0} status`);
+        for (const echo of change.value?.message_echoes ?? []) {
+          let conversationId;
+          try {
+            conversationId = await recordEcho(echo);
+          } catch (failure) {
+            console.error("[whatsapp/webhook] gravar mensagem enviada pelo aparelho:", failure);
+            return new Response("Falha ao gravar", { status: 500 });
+          }
+          console.log(conversationId ? `[whatsapp/webhook] mensagem do aparelho ${echo.id} gravada na conversa ${conversationId}` : `[whatsapp/webhook] mensagem do aparelho ${echo.id} ignorada (repetida ou tipo ${echo.type ?? "?"})`);
+          if (conversationId) notifyChatChange();
+        }
         for (const status of change.value?.statuses ?? []) {
           await updateMessageStatus(status).catch((failure) => console.error("[whatsapp/webhook] atualizar status:", failure));
           notifyChatChange();

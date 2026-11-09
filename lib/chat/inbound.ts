@@ -235,3 +235,57 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
 
   return { conversationId: conversation.id, messageId: saved.id, text, created };
 }
+
+/**
+ * Eco do que a equipe enviou pelo app WhatsApp Business no mesmo número (coexistência).
+ * Entra como mensagem da empresa, nunca dispara menu nem reabre conversa encerrada.
+ */
+export async function recordEcho(message: MetaInboundMessage & { to?: string }): Promise<string | null> {
+  if (!message.id || !message.to || !isCustomerMessage(message.type)) return null;
+  const repeated = await prisma.chatMessage.findUnique({ where: { externalId: message.id }, select: { id: true } });
+  if (repeated) return null;
+
+  const sentAt = message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date();
+  const contact = await findOrCreateContact(message.to, undefined);
+  const latest = await prisma.chatConversation.findFirst({
+    where: { contactId: contact.id },
+    orderBy: [{ closedAt: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }],
+  });
+  const conversation = latest ?? (await openConversationFor(contact.id, message.to)).conversation;
+
+  const content = readContent(message);
+  const attachment = content.media ? await storeMedia(content.media) : null;
+  const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
+  const replyTo = await findQuoted(message.context?.id);
+  const metaMedia: SavedMetaMedia | null = content.media
+    ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind }
+    : null;
+
+  try {
+    await prisma.chatMessage.create({
+      data: {
+        conversationId: conversation.id,
+        author: "agent",
+        authorName: "WhatsApp do aparelho",
+        text,
+        externalId: message.id,
+        delivery: "sent",
+        createdAt: sentAt,
+        ...(attachment ? { attachment: attachment as unknown as Prisma.InputJsonValue } : {}),
+        ...(metaMedia ? { metaMedia: metaMedia as Prisma.InputJsonValue } : {}),
+        ...(replyTo ? { replyTo: replyTo as Prisma.InputJsonValue } : {}),
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;
+    throw error;
+  }
+
+  // Quem respondeu pelo aparelho já leu a conversa.
+  await prisma.chatConversation.update({ where: { id: conversation.id }, data: { unreadCount: 0 } });
+  await prisma.chatConversation.updateMany({
+    where: { id: conversation.id, OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: sentAt } }] },
+    data: { lastMessageAt: sentAt },
+  });
+  return conversation.id;
+}
