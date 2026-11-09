@@ -41,6 +41,8 @@ export type ChatMenuSettings = {
   npsEnabled: boolean;
   npsPromptText: string;
   npsThanksText: string;
+  /** Pergunta enviada depois de nota 1, 2 ou 3; vazia, a nota baixa recebe direto o agradecimento. */
+  npsCommentText: string;
   options: MenuOption[];
   canvas: MenuCanvas;
 };
@@ -65,6 +67,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   npsEnabled: true,
   npsPromptText: "De 1 a 5, como você avalia o atendimento recebido hoje?",
   npsThanksText: "Agradecemos pela sua avaliação! Ela é muito importante para nós.",
+  npsCommentText: "Sentimos muito que sua experiência não tenha sido ideal. Poderia nos contar brevemente o que podemos melhorar?",
   options: [],
   canvas: { positions: {}, drafts: [] },
 };

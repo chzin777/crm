@@ -5,10 +5,12 @@ import { sendList } from "@/lib/meta-whatsapp";
 import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
-import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreTitle } from "@/lib/chat/settings";
+import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
 
 const SURVEY_HOURS = 24;
-const COMMENT_WINDOW_MS = 10 * 60_000;
+/** Depois de uma nota baixa, quanto tempo o próximo texto do cliente ainda conta como comentário. */
+const COMMENT_WINDOW_MS = 5 * 60_000;
+const LOW_SCORE = 4;
 const COMMENT_MAX = 1000;
 
 const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
@@ -79,14 +81,47 @@ export async function expireSurveys(now: number) {
   return count;
 }
 
-/** Texto logo depois da nota vira comentário, mas segue o fluxo: pode ser um novo pedido do cliente. */
-async function saveComment(phones: string[], text: string, receivedAt: Date) {
-  const comment = text.trim().slice(0, COMMENT_MAX);
-  if (!comment || parseNpsScore(comment) !== null) return;
-  await prisma.npsFeedback.updateMany({
-    where: { phone: { in: phones }, status: "ANSWERED", comment: null, answeredAt: { gte: new Date(receivedAt.getTime() - COMMENT_WINDOW_MS) } },
-    data: { comment },
+async function thank(conversationId: string, phone: string, settings: ChatMenuSettings) {
+  // Agradecimento em branco na configuração: a nota fica gravada sem resposta ao cliente.
+  const thanks = settings.npsThanksText.trim();
+  if (!thanks) return;
+  await sendAutomaticMessage({ id: conversationId, phone }, thanks)
+    .catch((error) => console.error("[chat] falha ao agradecer a avaliação:", error));
+}
+
+/**
+ * Espera de comentário: nota abaixo de 4, sem comentário e há menos de 5 minutos. Não há flag
+ * gravada; passado o prazo, a mensagem segue o fluxo normal e abre atendimento.
+ */
+async function recordComment(reply: { externalId: string; text: string; receivedAt: Date }, phones: string[]) {
+  const comment = reply.text.trim().slice(0, COMMENT_MAX);
+  if (!comment) return false;
+  const settings = await readChatSettings();
+  if (!settings.npsCommentText.trim()) return false;
+  const feedback = await prisma.npsFeedback.findFirst({
+    where: {
+      phone: { in: phones },
+      status: "ANSWERED",
+      score: { lt: LOW_SCORE },
+      comment: null,
+      conversationId: { not: null },
+      answeredAt: { gte: new Date(reply.receivedAt.getTime() - COMMENT_WINDOW_MS) },
+    },
+    orderBy: { answeredAt: "desc" },
   });
+  if (!feedback?.conversationId) return false;
+
+  try {
+    await prisma.chatMessage.create({
+      data: { conversationId: feedback.conversationId, author: "customer", text: reply.text, externalId: reply.externalId, createdAt: reply.receivedAt },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return true;
+    throw error;
+  }
+  const saved = await prisma.npsFeedback.updateMany({ where: { id: feedback.id, comment: null }, data: { comment } });
+  if (saved.count > 0) await thank(feedback.conversationId, feedback.phone, settings);
+  return true;
 }
 
 /**
@@ -96,10 +131,7 @@ async function saveComment(phones: string[], text: string, receivedAt: Date) {
 export async function recordSurveyReply(reply: { externalId: string; phone: string; text: string; choiceId?: string | null; isText: boolean; receivedAt: Date }) {
   const phones = phoneVariants(reply.phone);
   const pending = await prisma.npsFeedback.findFirst({ where: { phone: { in: phones }, status: "PENDING" }, orderBy: { createdAt: "desc" } });
-  if (!pending) {
-    if (reply.isText) await saveComment(phones, reply.text, reply.receivedAt);
-    return false;
-  }
+  if (!pending) return reply.isText ? recordComment(reply, phones) : false;
 
   // Com conversa aberta, um "2" responde ao atendente, não à pesquisa.
   const open = await prisma.chatConversation.findFirst({ where: { phone: { in: phones }, closedAt: null }, select: { id: true } });
@@ -119,11 +151,14 @@ export async function recordSurveyReply(reply: { externalId: string; phone: stri
     throw error;
   }
   await prisma.npsFeedback.update({ where: { id: pending.id }, data: { status: "ANSWERED", score, answeredAt: reply.receivedAt } });
-  // Agradecimento em branco na configuração: a nota fica gravada sem resposta ao cliente.
-  const thanks = (await readChatSettings()).npsThanksText.trim();
-  if (thanks) {
-    await sendAutomaticMessage({ id: pending.conversationId, phone: pending.phone }, thanks)
-      .catch((error) => console.error("[chat] falha ao agradecer a avaliação:", error));
+  const settings = await readChatSettings();
+  const askComment = settings.npsCommentText.trim();
+  // Nota baixa pede o motivo; o agradecimento sai depois do comentário.
+  if (score < LOW_SCORE && askComment) {
+    await sendAutomaticMessage({ id: pending.conversationId, phone: pending.phone }, askComment)
+      .catch((error) => console.error("[chat] falha ao pedir comentário da avaliação:", error));
+  } else {
+    await thank(pending.conversationId, pending.phone, settings);
   }
   return true;
 }

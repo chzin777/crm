@@ -386,7 +386,8 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                 {settings.npsEnabled && (
                   <>
                     <MessageField id="menu-nps-prompt" label="Pergunta" rows={2} value={settings.npsPromptText} onChange={(value) => set("npsPromptText", value)} placeholder={DEFAULT_CHAT_SETTINGS.npsPromptText} hint="Vazia: usa a pergunta padrão." />
-                    <MessageField id="menu-nps-thanks" label="Agradecimento após a nota" rows={2} value={settings.npsThanksText} onChange={(value) => set("npsThanksText", value)} hint="Vazio: a nota é gravada sem mensagem de volta." />
+                    <MessageField id="menu-nps-comment" label="Pergunta para notas 1, 2 e 3" rows={2} value={settings.npsCommentText} onChange={(value) => set("npsCommentText", value)} hint="A resposta do cliente nos 5 minutos seguintes vira o comentário da avaliação. Vazia: a nota baixa recebe direto o agradecimento." />
+                    <MessageField id="menu-nps-thanks" label="Agradecimento" rows={2} value={settings.npsThanksText} onChange={(value) => set("npsThanksText", value)} hint="Notas 4 e 5 recebem logo após a nota; notas baixas, depois do comentário. Vazio: nada é enviado." />
                     <div>
                       <p className={labelClass}>Escala de notas</p>
                       <ul className="flex flex-wrap gap-1.5" aria-label="Escala de notas">
