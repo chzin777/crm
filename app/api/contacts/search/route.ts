@@ -243,3 +243,66 @@ export async function GET(request: Request) {
     totalPages: Math.ceil(total / limit),
   });
 }
+/** Contatos de uma lista de IDs (ex.: selecionados no segmento), paginados e com busca restrita a esse subconjunto. */
+export async function POST(request: Request) {
+  const user = await requireApiSession();
+  if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+  const body = await request.json().catch(() => null) as { ids?: unknown; q?: unknown; page?: unknown; limit?: unknown } | null;
+  const ids = Array.isArray(body?.ids) ? body.ids.filter((id): id is string => typeof id === "string").slice(0, 200_000) : [];
+  const q = typeof body?.q === "string" ? body.q.trim() : "";
+  const limit = Math.min(500, Math.max(1, Number(body?.limit) || 50));
+  const page = Math.max(1, Number(body?.page) || 1);
+  if (ids.length === 0) return NextResponse.json({ data: [], total: 0, page, limit, totalPages: 0 });
+
+  const phoneDigits = phoneSearchDigits(q);
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const where = {
+    AND: [
+      { id: { in: ids } },
+      ...(phoneDigits
+        ? [{ OR: phoneDigits.map((digits) => ({ phone: { contains: digits } })) }]
+        : tokens.map((token) => ({
+          OR: [
+            { name: { contains: token, mode: "insensitive" as const } },
+            { phone: { contains: token, mode: "insensitive" as const } },
+            { email: { contains: token, mode: "insensitive" as const } },
+            { segment: { contains: token, mode: "insensitive" as const } },
+          ],
+        }))),
+    ],
+  };
+  const [contacts, total] = await Promise.all([
+    prisma.contact.findMany({
+      where,
+      select: {
+        id: true, name: true, phone: true, email: true, category: true,
+        segment: true, store: true, purchases: true, totalSpent: true,
+        lastPurchaseDate: true, birthDate: true,
+      },
+      orderBy: { name: "asc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.contact.count({ where }),
+  ]);
+  return NextResponse.json({
+    data: contacts.map((c) => ({
+      id: c.id,
+      nome: c.name,
+      telefone: c.phone ?? "",
+      email: c.email ?? "",
+      categoria: c.category,
+      segmento: c.segment ?? "",
+      loja: c.store ?? "",
+      compras: c.purchases,
+      totalGasto: Number(c.totalSpent),
+      ultimoContato: c.lastPurchaseDate ?? "",
+      dataNascimento: c.birthDate ?? "",
+      iniciais: c.name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase(),
+    })),
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  });
+}

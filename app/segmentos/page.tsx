@@ -42,6 +42,7 @@ type SegmentFilter = "Todos" | SegmentStatus;
 type AudienceMode = "criterios" | "contatos";
 type ContactFilter = "Todos" | "Clientes" | "Leads" | "NPS" | "Inativos";
 type CriterionKind = "geral" | "loja";
+type ContactPickerView = "todos" | "selecionados";
 
 interface SegmentCriterion {
   id: string;
@@ -199,9 +200,14 @@ export default function SegmentosPage() {
   const criteriaMenuPortalRef = useRef<HTMLDivElement>(null);
   const [criteriaMenuPosition, setCriteriaMenuPosition] = useState<CSSProperties>({});
 
+  const [contactPickerView, setContactPickerView] = useState<ContactPickerView>("todos");
+  const selectedContactIdsRef = useRef<string[]>([]);
+  useEffect(() => { selectedContactIdsRef.current = selectedContactIds; }, [selectedContactIds]);
+  const selectedContactIdSet = new Set(selectedContactIds);
+
   // Só a busca mais recente pode atualizar a lista: a anterior é cancelada e respostas atrasadas são ignoradas.
   const contactsRequestRef = useRef<{ seq: number; controller: AbortController | null }>({ seq: 0, controller: null });
-  const loadContacts = async (page: number, search: string) => {
+  const loadContacts = async (page: number, search: string, view: ContactPickerView = contactPickerView) => {
     const tracker = contactsRequestRef.current;
     tracker.controller?.abort();
     const controller = new AbortController();
@@ -212,7 +218,15 @@ export default function SegmentosPage() {
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(CONTACTS_PAGE_SIZE), unique: "1" });
       if (search.trim()) params.set("q", search.trim());
-      const response = await fetch(`/api/contacts/search?${params.toString()}`, { signal: controller.signal });
+      // "Selecionados": o servidor pagina e busca apenas dentro dos IDs marcados (funciona com milhares vindos de planilha).
+      const response = view === "selecionados"
+        ? await fetch("/api/contacts/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: selectedContactIdsRef.current, q: search.trim(), page, limit: CONTACTS_PAGE_SIZE }),
+          signal: controller.signal,
+        })
+        : await fetch(`/api/contacts/search?${params.toString()}`, { signal: controller.signal });
       const result = await response.json() as { data?: Contact[]; total?: number; totalPages?: number; error?: string };
       if (seq !== tracker.seq) return;
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
@@ -244,12 +258,12 @@ export default function SegmentosPage() {
     // Mostra "carregando" já ao digitar, para não piscar a lista antiga ou o estado vazio durante a espera.
     setContactsLoading(true);
     contactSearchDebounceRef.current = setTimeout(() => {
-      void loadContactsRef.current(1, contactSearchQuery);
+      void loadContactsRef.current(1, contactSearchQuery, contactPickerView);
     }, 300);
     return () => {
       if (contactSearchDebounceRef.current) clearTimeout(contactSearchDebounceRef.current);
     };
-  }, [contactSearchQuery, isContactPickerOpen]);
+  }, [contactSearchQuery, isContactPickerOpen, contactPickerView]);
 
   useEffect(() => {
     let active = true;
@@ -450,7 +464,7 @@ export default function SegmentosPage() {
     return matchesFilter;
   });
   const allVisibleContactsSelected = availableContacts.length > 0
-    && availableContacts.every((contact) => selectedContactIds.includes(contact.id));
+    && availableContacts.every((contact) => selectedContactIdSet.has(contact.id));
   const selectedContactRecords = contacts.filter((contact) => selectedContactIds.includes(contact.id));
   const selectedCriteria = form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean);
   const normalizedCriteriaSearch = criteriaSearchTerm.trim().toLocaleLowerCase("pt-BR");
@@ -1126,6 +1140,7 @@ export default function SegmentosPage() {
                               onClick={() => {
                                 setContactSearchQuery("");
                                 setContactFilter("Todos");
+                                setContactPickerView("todos");
                                 setIsContactPickerOpen(true);
                               }}
                               className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
@@ -1335,7 +1350,7 @@ export default function SegmentosPage() {
                           </p>
                           <button
                             type="button"
-                            onClick={() => { setContactSearchQuery(""); setContactFilter("Todos"); setIsContactPickerOpen(true); }}
+                            onClick={() => { setContactSearchQuery(""); setContactFilter("Todos"); setContactPickerView("todos"); setIsContactPickerOpen(true); }}
                             className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer"
                           >
                             <Users className="h-3.5 w-3.5" />
@@ -1428,9 +1443,45 @@ export default function SegmentosPage() {
             </header>
 
             <div className="shrink-0 space-y-4 border-b border-slate-100 p-5 dark:border-slate-800 sm:px-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div role="tablist" aria-label="Visão da lista de contatos" className="inline-flex rounded-lg bg-slate-100 p-1 dark:bg-slate-800/80">
+                  {([
+                    { id: "todos", label: "Todos os contatos" },
+                    { id: "selecionados", label: `Selecionados (${selectedContactIds.length.toLocaleString("pt-BR")})` },
+                  ] as const).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={contactPickerView === tab.id}
+                      onClick={() => { if (contactPickerView !== tab.id) { setContactPickerView(tab.id); setContactFilter("Todos"); } }}
+                      className={`h-8 rounded-md px-3 text-xs font-semibold transition-colors cursor-pointer ${contactPickerView === tab.id ? "bg-white text-[#051647] shadow-xs dark:bg-[#051647] dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                {contactPickerView === "selecionados" && selectedContactIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm(`Desmarcar todos os ${selectedContactIds.length.toLocaleString("pt-BR")} contatos selecionados?`)) return;
+                      setSelectedContactIds([]);
+                      selectedContactIdsRef.current = [];
+                      setFormError("");
+                      void loadContacts(1, contactSearchQuery, "selecionados");
+                    }}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-950/30 cursor-pointer"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />Limpar seleção
+                  </button>
+                )}
+              </div>
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Exibindo {availableContacts.length} de {contactsTotal} contatos · Página {contactsPage} de {contactsTotalPages}
+                  {contactPickerView === "selecionados"
+                    ? `Exibindo ${availableContacts.length} de ${contactsTotal.toLocaleString("pt-BR")} selecionados${contactSearchQuery.trim() ? " que casam com a busca" : ""} · Página ${contactsPage} de ${contactsTotalPages}`
+                    : `Exibindo ${availableContacts.length} de ${contactsTotal} contatos · Página ${contactsPage} de ${contactsTotalPages}`}
                 </p>
                 <label className="relative block w-full sm:max-w-md">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1440,7 +1491,7 @@ export default function SegmentosPage() {
                     value={contactSearchQuery}
                     onChange={(event) => setContactSearchQuery(event.target.value)}
                     aria-label="Buscar contatos"
-                    placeholder="Buscar por nome, telefone ou e-mail"
+                    placeholder={contactPickerView === "selecionados" ? "Buscar entre os selecionados" : "Buscar por nome, telefone ou e-mail"}
                     className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800/80 dark:text-white dark:focus:border-[#C4D600]"
                   />
                 </label>
@@ -1492,7 +1543,7 @@ export default function SegmentosPage() {
                   <LoadingSpinner label="Carregando contatos..." className="w-full justify-center" />
                 </li>
               ) : availableContacts.length > 0 ? availableContacts.map((contact) => {
-                const isSelected = selectedContactIds.includes(contact.id);
+                const isSelected = selectedContactIdSet.has(contact.id);
                 return (
                   <li key={contact.id}>
                     <label className="flex cursor-pointer items-center gap-3 px-5 py-3.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60 sm:px-6">
@@ -1526,8 +1577,8 @@ export default function SegmentosPage() {
                 <li className="grid min-h-48 place-items-center px-5 text-center">
                   <div>
                     <Search className="mx-auto h-5 w-5 text-slate-400" />
-                    <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum contato encontrado</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{contactPickerView === "selecionados" && selectedContactIds.length === 0 ? "Nenhum contato selecionado" : "Nenhum contato encontrado"}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{contactPickerView === "selecionados" && selectedContactIds.length === 0 ? "Marque contatos na aba Todos os contatos ou importe uma planilha." : "Tente mudar a busca ou o filtro."}</p>
                   </div>
                 </li>
               )}
