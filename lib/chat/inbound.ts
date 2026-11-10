@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { downloadMedia } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
 import { attributeCampaignReply } from "@/lib/chat/campaign-origin";
+import { AUTO_REPLY_AUTHOR, detectAutoReply } from "@/lib/chat/auto-reply";
 import { openConversationFor } from "@/lib/chat/conversation";
 import { recordSurveyReply } from "@/lib/chat/nps";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
@@ -164,6 +165,8 @@ export type RecordedInbound = {
   /** Id da linha tocada numa lista ou botão; o texto mostra só o título. */
   choiceId: string | null;
   created: boolean;
+  /** Preenchido quando a mensagem foi reconhecida como resposta automática do contato (não aciona o menu). */
+  autoReply: "pattern" | "instant" | "post_dispatch_greeting" | null;
 };
 
 /**
@@ -195,6 +198,17 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   const metaMedia: SavedMetaMedia | null = content.media
     ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind }
     : null;
+  const choiceId = message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
+  // Ausência/saudação automática do WhatsApp Business do contato: fica no histórico, mas não abre menu nem conta como resposta.
+  const autoReply = await detectAutoReply({
+    phone: message.from,
+    text,
+    receivedAt,
+    explicitInteraction: message.type === "button" || message.type === "interactive" || Boolean(choiceId),
+  }).catch((error) => {
+    console.error("[chat] falha ao avaliar resposta automática:", error);
+    return null;
+  });
 
   let saved;
   try {
@@ -202,6 +216,7 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
       data: {
         conversationId: conversation.id,
         author: "customer",
+        ...(autoReply ? { authorName: AUTO_REPLY_AUTHOR } : {}),
         text,
         externalId: message.id,
         createdAt: receivedAt,
@@ -233,11 +248,14 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     data: { waitingSince: receivedAt },
   });
   // A mensagem já está gravada: falha aqui não pode fazer a Meta reenviar o evento.
-  await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
-    .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
+  if (autoReply) {
+    console.log(`[chat] mensagem ${message.id} de ${message.from} tratada como automática (${autoReply.kind}: ${autoReply.detail})`);
+  } else {
+    await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
+      .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
+  }
 
-  const choiceId = message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
-  return { conversationId: conversation.id, messageId: saved.id, text, choiceId, created };
+  return { conversationId: conversation.id, messageId: saved.id, text, choiceId, created, autoReply: autoReply?.kind ?? null };
 }
 
 /**

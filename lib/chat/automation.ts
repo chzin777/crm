@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { firstDispatch, isBlocked } from "@/lib/chat/conversation";
+import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
 import { attendByMenu, readMenuState, saveMenuState } from "@/lib/chat/menu";
 import type { RecordedInbound } from "@/lib/chat/inbound";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -53,7 +54,16 @@ export async function runAutomation(recorded: RecordedInbound) {
     return;
   }
 
-  const inboundCount = await prisma.chatMessage.count({ where: { conversationId: conversation.id, author: "customer" } });
+  // Resposta automática do aparelho do contato (ausência/saudação do WhatsApp Business): nada de menu, evita o ciclo robô × robô.
+  if (recorded.autoReply) {
+    console.log(`[bot] ${conversation.id}: sem automação (resposta automática do contato: ${recorded.autoReply})`);
+    return;
+  }
+
+  // Mensagens automáticas do contato não contam: a primeira mensagem de verdade ainda recebe a saudação do menu.
+  const inboundCount = await prisma.chatMessage.count({
+    where: { conversationId: conversation.id, author: "customer", OR: [{ authorName: null }, { authorName: { not: AUTO_REPLY_AUTHOR } }] },
+  });
   const firstMessage = inboundCount === 1;
 
   const handled = await attendByMenu({ conversation, customerName: conversation.contact.name, text: recorded.text, choiceId: recorded.choiceId, firstMessage });
