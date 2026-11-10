@@ -65,7 +65,8 @@ export async function DELETE(request: Request, context: Context) {
   const conversation = await findScopedConversation(guard.actor, id);
   if (!conversation) return conversationNotFound();
   // Motivo "Não é resposta da campanha" (ex.: robô respondeu ao disparo): limpa a resposta das métricas e evita nova marcação.
-  const reason = new URL(request.url).searchParams.get("motivo") === "nao_resposta_campanha" ? "nao_resposta_campanha" : null;
+  // Só vale para conversa marcada com campanha: sem ela, limparia respostas de qualquer campanha do contato.
+  const reason = conversation.campaignId && new URL(request.url).searchParams.get("motivo") === "nao_resposta_campanha" ? "nao_resposta_campanha" : null;
   const discardedReplies = reason ? await discardCampaignReplies(conversation) : 0;
 
   const [messageCount, withAttachment] = await Promise.all([

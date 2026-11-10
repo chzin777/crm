@@ -50,7 +50,7 @@ function ChatWorkspace() {
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [agentName, setAgentName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; campaign: string | null } | null>(null);
   // Conversas excluídas aguardando o prazo do Desfazer: ocultas da lista mesmo se o recarregamento as trouxer.
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const pendingDeletes = useRef(new Map<string, DeleteReason>());
@@ -412,7 +412,7 @@ function ChatWorkspace() {
         danger: true,
         hidden: !capabilities["chat.queues"] || conversation.blocked === undefined,
       },
-      { label: "Excluir conversa", icon: <Trash2 className="h-4 w-4" />, onSelect: () => setDeleteTarget({ id: conversation.id, name: conversation.name }), danger: true, hidden: !isAdmin },
+      { label: "Excluir conversa", icon: <Trash2 className="h-4 w-4" />, onSelect: () => setDeleteTarget({ id: conversation.id, name: conversation.name, campaign: conversation.campaign?.name ?? null }), danger: true, hidden: !isAdmin },
     ];
   };
   const menuItems: FloatingMenuItem[] = open ? conversationMenu(open) : [];
@@ -440,7 +440,7 @@ function ChatWorkspace() {
             error={listError}
             selectedId={selectedId}
             onSelect={select}
-            onDelete={isAdmin ? (item) => setDeleteTarget({ id: item.id, name: item.name }) : undefined}
+            onDelete={isAdmin ? (item) => setDeleteTarget({ id: item.id, name: item.name, campaign: item.campaign?.name ?? null }) : undefined}
             onContextMenu={(item, point) => {
               if (selectedId !== item.id) select(item.id);
               setContextMenu({ id: item.id, ...point });
