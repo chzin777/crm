@@ -2,7 +2,7 @@ import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/recuperar-senha", "/redefinir-senha", "/api/auth", "/api/whatsapp/webhook", "/api/chat/clock", "/api/contacts/sync", "/api/stores/sync", "/exclusao-de-dados", "/politica-de-privacidade", "/termos-de-servico", "/_next", "/favicon.ico", "/icon.png", "/logos"];
+const PUBLIC_PATHS = ["/login", "/recuperar-senha", "/redefinir-senha", "/api/auth", "/api/whatsapp/webhook", "/api/chat/clock", "/api/contacts/sync", "/api/stores/sync", "/exclusao-de-dados", "/politica-de-privacidade", "/termos-de-servico", "/_next", "/favicon.ico", "/icon.png", "/logos", "/w/"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
