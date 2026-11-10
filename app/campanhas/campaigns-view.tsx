@@ -4,26 +4,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   AlertTriangle,
-  ArrowUpRight,
-  Bell,
-  CheckCircle2,
+  CheckCheck,
   ChevronUp,
   ChevronsUpDown,
   Clock3,
+  Eye,
   FileText,
   Film,
   Image as ImageIcon,
-  MessageSquare,
+  MessageCircleReply,
   Paperclip,
   Pause,
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
-  Square,
   SquareCheck,
+  Users,
   X,
+  XCircle,
 } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
@@ -35,10 +36,15 @@ import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
+import { CampaignRecipientsLog } from "@/components/CampaignRecipientsLog";
+import { BULK_STARTED_EVENT, BulkJobDetailsDialog, type BulkJobView } from "@/components/BulkDispatchTracker";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
-type CampaignFilter = "Todas" | CampaignStatus;
+
+/** Status exibido na listagem unificada (campanhas e lotes do pipeline). */
+type DisplayStatus = "Rascunho" | "Pronta" | "Agendado" | "Enviando" | "Pausado" | "Concluído" | "Parcial" | "Falha" | "Cancelado";
+type DisplayFilter = "Todas" | "Enviando" | "Pausado" | "Agendado" | "Concluído" | "Falha" | "Rascunho";
 
 interface CampaignAudienceSegment {
   id: string;
@@ -63,13 +69,6 @@ interface CampaignRecipient {
   email: string;
   dataNascimento: string;
   segmento: string;
-}
-
-interface CampaignDispatchResult {
-  sent: number;
-  failed: number;
-  campaigns: { nome: string; sent: number; failed: number; status: CampaignStatus }[];
-  errors: string[];
 }
 
 interface DispatchJobView {
@@ -100,6 +99,28 @@ interface Campaign {
   modelo?: CampaignTemplate | null;
 }
 
+interface QuickStats { total: number; sent: number; delivered: number; read: number; replied: number; failed: number }
+const EMPTY_STATS: QuickStats = { total: 0, sent: 0, delivered: 0, read: 0, replied: 0, failed: 0 };
+
+interface UnifiedRow {
+  key: string;
+  kind: "campaign" | "bulk";
+  id: string;
+  nome: string;
+  origem: string;
+  mensagem: string;
+  publico: string;
+  status: DisplayStatus;
+  total: number;
+  processed: number;
+  stats: QuickStats;
+  updatedAt: number;
+  updatedLabel: string;
+  campaign?: Campaign;
+  bulk?: BulkJobView;
+  job?: DispatchJobView;
+}
+
 const messageVariables = [
   { label: "Nome do cliente", value: "{{nome}}" },
   { label: "E-mail", value: "{{email}}" },
@@ -113,21 +134,53 @@ const formatFileSize = (size: number) => {
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
+const int = (value: number) => value.toLocaleString("pt-BR");
+const formatDateTime = (value?: string) => (value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
 
-const statusStyles: Record<CampaignStatus, string> = {
-  Ativa: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
-  "Pronta para envio": "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]",
-  Agendada: "bg-blue-100 text-[#002187] dark:bg-blue-950/50 dark:text-blue-300",
-  Pausada: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+const displayStyles: Record<DisplayStatus, string> = {
   Rascunho: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
+  Pronta: "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]",
+  Agendado: "bg-blue-100 text-[#002187] dark:bg-blue-950/50 dark:text-blue-300",
   Enviando: "bg-[#002187]/10 text-[#002187] dark:bg-[#002187]/30 dark:text-[#C4D600]",
-  "Envio pausado": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
-  Enviada: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
-  "Envio parcial": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
-  "Falha no envio": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
+  Pausado: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+  Concluído: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
+  Parcial: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
+  Falha: "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+  Cancelado: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
 };
 
-const filters: CampaignFilter[] = ["Todas", "Ativa", "Pronta para envio", "Agendada", "Pausada", "Rascunho", "Enviando", "Envio pausado", "Enviada", "Envio parcial", "Falha no envio"];
+const campaignDisplayStatus = (campaign: Campaign): DisplayStatus => {
+  switch (campaign.status) {
+    case "Enviando": return "Enviando";
+    case "Envio pausado": return "Pausado";
+    case "Enviada": return "Concluído";
+    case "Envio parcial": return "Parcial";
+    case "Falha no envio": return "Falha";
+    case "Agendada": return "Agendado";
+    case "Pronta para envio": return "Pronta";
+    default: return "Rascunho";
+  }
+};
+
+const bulkDisplayStatus = (job: BulkJobView): DisplayStatus => {
+  if (job.status === "running") return "Enviando";
+  if (job.status === "paused") return "Pausado";
+  if (job.status === "cancelled") return "Cancelado";
+  if (job.sent === 0 && job.failed > 0) return "Falha";
+  return "Concluído";
+};
+
+const filterMatches: Record<DisplayFilter, DisplayStatus[] | null> = {
+  Todas: null,
+  Enviando: ["Enviando"],
+  Pausado: ["Pausado"],
+  Agendado: ["Agendado"],
+  Concluído: ["Concluído", "Parcial"],
+  Falha: ["Falha"],
+  Rascunho: ["Rascunho", "Pronta"],
+};
+const filters = Object.keys(filterMatches) as DisplayFilter[];
+
 const presetAudienceCriteria: AudienceCriterion[] = [
   { id: "criteria-30d", nome: "Comprou nos últimos 30 dias", tipo: "geral" },
   { id: "criteria-90d", nome: "Comprou nos últimos 90 dias", tipo: "geral" },
@@ -138,11 +191,24 @@ const presetAudienceCriteria: AudienceCriterion[] = [
   { id: "criteria-valid-phone", nome: "Telefone válido", tipo: "geral" },
 ];
 
-/** Lista e criação de campanhas; exibida na aba "Campanhas" de /campanhas. */
+function sortIcon(sortConfig: { field: string; order: "asc" | "desc" }, field: string) {
+  if (sortConfig.field !== field) return <ChevronsUpDown className="h-3 w-3 text-slate-300 dark:text-slate-600" />;
+  return <ChevronUp className={`h-3 w-3 transition-transform ${sortConfig.order === "desc" ? "rotate-180" : ""} text-[#002187] dark:text-[#C4D600]`} />;
+}
+
+function ProgressBar({ percent, tone = "default" }: { percent: number; tone?: "default" | "paused" }) {
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+      <div className={`h-full rounded-full transition-all duration-500 ${tone === "paused" ? "bg-[#F7915E]" : "bg-[#002187] dark:bg-[#C4D600]"}`} style={{ width: `${percent}%` }} />
+    </div>
+  );
+}
+
+/** Listagem única de campanhas/disparos, criação com disparo direto e detalhes com acompanhamento ao vivo. */
 export function CampaignsView() {
   const { isDark } = useCrmTheme();
   const toast = useToast();
-  const { data: campaigns, setData: setCampaigns, isLoading: campaignsLoading, error: campaignsError, reloadData: reloadCampaigns } = useCrmData<Campaign[]>("campaigns", []);
+  const { data: campaigns, setData: setCampaigns, saveData: saveCampaigns, isLoading: campaignsLoading, error: campaignsError, reloadData: reloadCampaigns } = useCrmData<Campaign[]>("campaigns", []);
   const { data: segments, isLoading: segmentsLoading } = useCrmData<CampaignAudienceSegment[]>("segments", []);
   const { data: savedAudienceCriteria, isLoading: criteriaLoading } = useCrmData<AudienceCriterion[]>("criteria", []);
   const segmentOptions = segments.map((segment) => segment.nome);
@@ -151,8 +217,9 @@ export function CampaignsView() {
   const [storesError, setStoresError] = useState("");
   const [dispatchError, setDispatchError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [activeFilter, setActiveFilter] = useState<CampaignFilter>("Todas");
+  const [activeFilter, setActiveFilter] = useState<DisplayFilter>("Todas");
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [bulkDetailsId, setBulkDetailsId] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [selectedAudienceSegments, setSelectedAudienceSegments] = useState<string[]>([]);
@@ -173,9 +240,10 @@ export function CampaignsView() {
   const [dispatchEstimate, setDispatchEstimate] = useState<{ loading: boolean; contacts: number; cost: number | null; error?: string } | null>(null);
   const [dispatchTarget, setDispatchTarget] = useState<{ mode: "single" | "batch"; ids: string[] } | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
-  const [dispatchProgress, setDispatchProgress] = useState<{ completed: number; total: number } | null>(null);
-  const [dispatchResult, setDispatchResult] = useState<CampaignDispatchResult | null>(null);
+  const [isLaunching, setIsLaunching] = useState(false);
   const [dispatchJobs, setDispatchJobs] = useState<DispatchJobView[]>([]);
+  const [bulkJobs, setBulkJobs] = useState<BulkJobView[]>([]);
+  const [stats, setStats] = useState<Record<string, QuickStats>>({});
   const [jobBusy, setJobBusy] = useState<string | null>(null);
   const jobStatusRef = useRef<Map<string, string> | null>(null);
   const toastRef = useRef(toast);
@@ -208,13 +276,27 @@ export function CampaignsView() {
     }
   }, [reloadCampaigns]);
 
-  const hasActiveJob = dispatchJobs.some((job) => job.status === "running");
+  /** Métricas rápidas por disparo e lotes enviados pelo pipeline (entram na mesma listagem). */
+  const loadListExtras = useCallback(async () => {
+    const [statsBody, bulkBody] = await Promise.all([
+      fetch("/api/campaigns/stats", { cache: "no-store" }).then((response) => (response.ok ? response.json() : null)).catch(() => null) as Promise<{ data?: Record<string, QuickStats> } | null>,
+      fetch("/api/whatsapp/bulk-send", { cache: "no-store" }).then((response) => (response.ok ? response.json() : null)).catch(() => null) as Promise<{ data?: BulkJobView[] } | null>,
+    ]);
+    if (statsBody?.data) setStats(statsBody.data);
+    if (bulkBody?.data) setBulkJobs(bulkBody.data);
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadDispatchJobs(), loadListExtras()]);
+  }, [loadDispatchJobs, loadListExtras]);
+
+  const hasActiveJob = dispatchJobs.some((job) => job.status === "running") || bulkJobs.some((job) => job.status === "running");
   useEffect(() => {
     if (campaignsLoading) return;
-    const first = window.setTimeout(() => void loadDispatchJobs(), 0);
-    const timer = window.setInterval(() => void loadDispatchJobs(), hasActiveJob ? 3000 : 15000);
+    const first = window.setTimeout(() => void refreshAll(), 0);
+    const timer = window.setInterval(() => void refreshAll(), hasActiveJob ? 3000 : 15000);
     return () => { window.clearTimeout(first); window.clearInterval(timer); };
-  }, [campaignsLoading, hasActiveJob, loadDispatchJobs]);
+  }, [campaignsLoading, hasActiveJob, refreshAll]);
 
   const controlDispatch = async (campaignId: string, action: "pause" | "resume" | "cancel") => {
     setJobBusy(campaignId);
@@ -235,6 +317,29 @@ export function CampaignsView() {
       setJobBusy(null);
     }
   };
+
+  /** Pausar, retomar, cancelar ou reenviar falhas de um lote enviado pelo pipeline. */
+  const controlBulk = async (job: BulkJobView, action: "pause" | "resume" | "cancel" | "retry") => {
+    if (action === "cancel" && !window.confirm("Cancelar o envio para os contatos que ainda estão na fila?")) return;
+    if (action === "retry" && !window.confirm(`Reenviar a mensagem para os ${job.failed} contato(s) que falharam?`)) return;
+    setJobBusy(job.id);
+    try {
+      const response = action === "retry"
+        ? await fetch(`/api/whatsapp/bulk-send/${job.id}/retry`, { method: "POST" })
+        : await fetch(`/api/whatsapp/bulk-send/${job.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+      const body = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error ?? "Não foi possível concluir a ação.");
+      const messages = { pause: "Pausa solicitada: o envio para antes do próximo contato.", resume: "Envio retomado.", cancel: "Envio cancelado para os contatos restantes.", retry: "Novo lote criado com os contatos que falharam." };
+      toast.success("Disparo", messages[action]);
+      if (action === "resume" || action === "retry") window.dispatchEvent(new Event(BULK_STARTED_EVENT));
+      await loadListExtras();
+    } catch (err) {
+      toast.error("Disparo", err instanceof Error ? err.message : "Não foi possível concluir a ação.");
+    } finally {
+      setJobBusy(null);
+    }
+  };
+
   const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "atualizacao", order: "desc" });
   const handleSort = (field: string) => {
     setSortConfig((prev) => {
@@ -242,30 +347,6 @@ export function CampaignsView() {
       return { field, order: nextOrder };
     });
   };
-  const SortIndicator = ({ field }: { field: string }) => {
-    const isActive = sortConfig.field === field;
-    if (!isActive) return <ChevronsUpDown className="h-3 w-3 text-slate-300 dark:text-slate-600" />;
-    return <ChevronUp className={`h-3 w-3 transition-transform ${sortConfig.order === "desc" ? "rotate-180" : ""} text-[#002187] dark:text-[#C4D600]`} />;
-  };
-  const sortedCampaigns = [...campaigns].sort((a, b) => {
-    const dir = sortConfig.order === "asc" ? 1 : -1;
-    switch (sortConfig.field) {
-      case "nome":
-        return dir * (a.nome ?? "").localeCompare(b.nome ?? "", "pt-BR");
-      case "publico":
-        return dir * (a.publico ?? "").localeCompare(b.publico ?? "", "pt-BR");
-      case "status":
-        return dir * (a.status ?? "").localeCompare(b.status ?? "", "pt-BR");
-      case "envios":
-        return dir * ((a.disparos ?? 0) - (b.disparos ?? 0));
-      case "respostas":
-        return dir * ((a.taxaResposta ?? 0) - (b.taxaResposta ?? 0));
-      case "atualizacao":
-        return dir * (new Date(a.dataAtualizacao ?? 0).getTime() - new Date(b.dataAtualizacao ?? 0).getTime());
-      default:
-        return 0;
-    }
-  });
 
   useEffect(() => {
     let active = true;
@@ -321,31 +402,96 @@ export function CampaignsView() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedCampaign, isCreateOpen, clearSelectedAttachments]);
 
-  const filteredCampaigns = sortedCampaigns.filter((campaign) => {
-    const matchesSearch = `${campaign.nome} ${campaign.publico} ${campaign.status}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));
-    return matchesSearch && (activeFilter === "Todas" || campaign.status === activeFilter);
-  });
-
-  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "Ativa");
-  const scheduledCampaigns = campaigns.filter((campaign) => campaign.status === "Agendada" || campaign.status === "Pronta para envio").length;
-  const sentMessages = campaigns.reduce((total, campaign) => total + (campaign.disparos ?? 0), 0);
-
-  const metrics = [
-    { label: "Campanhas", value: campaigns.length.toString(), detail: "na biblioteca", icon: MessageSquare, color: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
-    { label: "Ativas no CRM", value: activeCampaigns.length.toString(), detail: "status cadastrado", icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
-    { label: "Envios", value: sentMessages.toLocaleString("pt-BR"), detail: "aceitos pelo WhatsApp", icon: Send, color: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
-    { label: "Respostas", value: "—", detail: "indisponível sem provedor", icon: ArrowUpRight, color: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]" },
+  // Listagem unificada: cada campanha e cada lote do pipeline é um disparo.
+  const jobByCampaign = new Map(dispatchJobs.map((job) => [job.campaignId, job]));
+  const rows: UnifiedRow[] = [
+    ...campaigns.map((campaign): UnifiedRow => {
+      const job = jobByCampaign.get(campaign.id);
+      const rowStats = stats[campaign.id] ?? EMPTY_STATS;
+      const total = job?.total ?? rowStats.total;
+      const parsed = new Date(campaign.dataAtualizacao ?? 0).getTime();
+      return {
+        key: `c:${campaign.id}`,
+        kind: "campaign",
+        id: campaign.id,
+        nome: campaign.nome,
+        origem: "Campanha",
+        mensagem: campaign.modelo ? `Modelo: ${campaign.modelo.name}` : "Mensagem livre",
+        publico: campaign.publico,
+        status: campaignDisplayStatus(campaign),
+        total,
+        processed: job ? job.cursor : rowStats.sent + rowStats.failed,
+        stats: rowStats,
+        updatedAt: Number.isNaN(parsed) ? 0 : parsed,
+        updatedLabel: campaign.dataAtualizacao,
+        campaign,
+        job,
+      };
+    }),
+    ...bulkJobs.map((job): UnifiedRow => ({
+      key: `b:${job.id}`,
+      kind: "bulk",
+      id: job.id,
+      nome: `Pipeline · Etapa ${job.stageName}${job.retryOf ? " (reenvio)" : ""}`,
+      origem: job.userName ? `Pipeline · ${job.userName}` : "Pipeline",
+      mensagem: job.templateName ? `Modelo: ${job.templateName}` : "Mensagem livre",
+      publico: `Etapa ${job.stageName}`,
+      status: bulkDisplayStatus(job),
+      total: job.total,
+      processed: job.sent + job.failed,
+      stats: stats[`bulk:${job.id}`] ?? { ...EMPTY_STATS, total: job.total, sent: job.sent, failed: job.failed },
+      updatedAt: new Date(job.finishedAt ?? job.createdAt).getTime(),
+      updatedLabel: formatDateTime(job.finishedAt ?? job.createdAt),
+      bulk: job,
+    })),
   ];
 
-  const createCampaign = () => {
+  const sortedRows = [...rows].sort((a, b) => {
+    const dir = sortConfig.order === "asc" ? 1 : -1;
+    switch (sortConfig.field) {
+      case "nome": return dir * a.nome.localeCompare(b.nome, "pt-BR");
+      case "mensagem": return dir * a.mensagem.localeCompare(b.mensagem, "pt-BR");
+      case "publico": return dir * a.publico.localeCompare(b.publico, "pt-BR");
+      case "status": return dir * a.status.localeCompare(b.status, "pt-BR");
+      case "total": return dir * (a.total - b.total);
+      case "enviados": return dir * (a.stats.sent - b.stats.sent);
+      case "respostas": return dir * (a.stats.replied - b.stats.replied);
+      case "atualizacao": return dir * (a.updatedAt - b.updatedAt);
+      default: return 0;
+    }
+  });
+
+  const filteredRows = sortedRows.filter((row) => {
+    const matchesSearch = `${row.nome} ${row.publico} ${row.mensagem} ${row.status}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));
+    const allowed = filterMatches[activeFilter];
+    return matchesSearch && (!allowed || allowed.includes(row.status));
+  });
+  const selectableRows = filteredRows.filter((row) => row.kind === "campaign" && row.campaign && !isDispatchLocked(row.campaign.status));
+
+  const resetCreateForm = () => {
+    setForm({ nome: "", publico: "", mensagem: "" });
+    setCampaignTemplate(null);
+    setSelectedAudienceSegments([]);
+    clearSelectedAttachments();
+    setUploadedAttachments([]);
+    setFormError("");
+  };
+
+  /** Monta a campanha a partir do formulário de criação (ou devolve null com o erro na tela). */
+  const buildNewCampaign = (): Campaign | null => {
     const nome = form.nome.trim();
     const publico = selectedAudienceSegments.join(", ").trim();
     const mensagem = form.mensagem.trim();
     if (!nome || !publico || !mensagem) {
       setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : "Escreva a mensagem da campanha.");
-      return;
+      return null;
     }
-    const campaign: Campaign = {
+    if (isUploading) {
+      setFormError("Aguarde o envio dos arquivos anexados terminar.");
+      return null;
+    }
+    return {
+      // eslint-disable-next-line react-hooks/purity -- chamado só em handlers de clique, não durante a renderização
       id: `camp-${Date.now()}`,
       nome,
       modelo: campaignTemplate,
@@ -355,20 +501,22 @@ export function CampaignsView() {
       disparos: 0,
       rotuloDisparos: "contatos no público",
       taxaResposta: 0,
-      dataAtualizacao: "Criada agora",
+      dataAtualizacao: new Date().toISOString(),
       mensagem,
       anexos: uploadedAttachments.length > 0 ? uploadedAttachments : selectedAttachments.map(({ name, size, type }) => ({ name, size, type })),
     };
+  };
+
+  /** Botão secundário: guarda a campanha pausada para editar depois. */
+  const saveDraft = () => {
+    const campaign = buildNewCampaign();
+    if (!campaign) return;
     setCampaigns((current) => [campaign, ...current]);
     setActiveFilter("Todas");
     setSearchTerm("");
-    setForm({ nome: "", publico: "", mensagem: "" });
-    setCampaignTemplate(null);
-    setSelectedAudienceSegments([]);
-    clearSelectedAttachments();
-    setFormError("");
+    resetCreateForm();
     setIsCreateOpen(false);
-    toast.success("Campanha criada", `"${campaign.nome}" foi adicionada.`);
+    toast.success("Rascunho salvo", `"${campaign.nome}" ficou salva para disparar depois.`);
   };
 
   const startEditingCampaign = (campaign: Campaign) => {
@@ -489,7 +637,7 @@ export function CampaignsView() {
       publico,
       audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
       mensagem,
-      dataAtualizacao: "Atualizada agora",
+      dataAtualizacao: new Date().toISOString(),
     };
     setCampaigns((current) => current.map((campaign) => campaign.id === updatedCampaign.id ? updatedCampaign : campaign));
     setSelectedCampaign(updatedCampaign);
@@ -498,27 +646,9 @@ export function CampaignsView() {
     toast.success("Campanha atualizada", `"${nome}" foi salva.`);
   };
 
-  const toggleCampaign = (campaignId: string) => {
-    const updateStatus = (campaign: Campaign): Campaign => {
-      if (campaign.id !== campaignId) return campaign;
-      if (isDispatchLocked(campaign.status)) return campaign;
-      if (campaign.status === "Ativa") {
-        return { ...campaign, status: "Pausada", dataAtualizacao: "Pausada agora" };
-      }
-      return { ...campaign, status: "Ativa", dataAtualizacao: "Ativada agora" };
-    };
-    setCampaigns((current) => current.map(updateStatus));
-    setSelectedCampaign((current) => current ? updateStatus(current) : current);
-    const target = campaigns.find((campaign) => campaign.id === campaignId);
-    if (target) toast.success(target.status === "Ativa" ? "Campanha pausada" : "Campanha ativada", `"${target.nome}" foi atualizada.`);
-  };
-
   const openCreateCampaign = () => {
-    setForm({ nome: "", publico: "", mensagem: "" });
-    setCampaignTemplate(null);
-    setSelectedAudienceSegments([]);
-    clearSelectedAttachments();
-    setFormError("");
+    resetCreateForm();
+    setDispatchEstimate(null);
     setIsCreateOpen(true);
   };
 
@@ -589,11 +719,10 @@ export function CampaignsView() {
     return recipientsByCampaign;
   };
 
-  // Custo estimado mostrado na confirmação do disparo: contatos com telefone × preço da categoria do modelo.
-  const estimateDispatchCost = async (ids: string[]) => {
+  // Custo estimado do disparo: contatos com telefone × preço da categoria do modelo.
+  const estimateDispatchCost = async (readyCampaigns: Campaign[]) => {
     setDispatchEstimate({ loading: true, contacts: 0, cost: null });
     try {
-      const readyCampaigns = ids.map((id) => campaigns.find((campaign) => campaign.id === id)).filter((campaign): campaign is Campaign => Boolean(campaign));
       const [recipientsByCampaign, pricingBody, templatesBody] = await Promise.all([
         buildCampaignRecipients(readyCampaigns),
         fetch("/api/metrics/pricing", { cache: "no-store" }).then((response) => response.json()) as Promise<{ data?: { marketing: number; utility: number; authentication: number } }>,
@@ -615,19 +744,77 @@ export function CampaignsView() {
       setDispatchEstimate({ loading: false, contacts: 0, cost: null, error: error instanceof Error ? error.message : "Não foi possível estimar o custo." });
     }
   };
+  const estimateByIds = (ids: string[]) => estimateDispatchCost(ids.map((id) => campaigns.find((campaign) => campaign.id === id)).filter((campaign): campaign is Campaign => Boolean(campaign)));
+
+  /** Confere carregamento dos públicos e conexão do WhatsApp antes de qualquer disparo. */
+  const ensureReadyToDispatch = async () => {
+    if (campaignsLoading || segmentsLoading || criteriaLoading) {
+      throw new Error("Aguarde o carregamento das campanhas e dos públicos antes de disparar.");
+    }
+    if (storesError) throw new Error(`Não foi possível carregar as lojas usadas nos públicos: ${storesError}`);
+    const connectionResponse = await fetch("/api/whatsapp/connection", { cache: "no-store" });
+    const connectionCt = connectionResponse.headers.get("content-type") ?? "";
+    if (!connectionCt.includes("application/json")) {
+      throw new Error(`Resposta inválida da API (${connectionResponse.status}). Verifique se o servidor está rodando.`);
+    }
+    const connection = await connectionResponse.json() as { state?: string; error?: string };
+    if (!connectionResponse.ok) throw new Error(connection.error || "Não foi possível verificar a conexão do WhatsApp.");
+    if (connection.state !== "open") throw new Error("WhatsApp desconectado. Conecte a conta em Configurações antes de disparar a campanha.");
+  };
+
+  const startCampaignDispatch = async (campaign: Campaign, recipients: CampaignRecipient[]) => {
+    const startResponse = await fetch("/api/campaigns/dispatch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients }),
+    });
+    const startResult = await startResponse.json().catch(() => ({})) as { error?: string };
+    if (!startResponse.ok) throw new Error(startResult.error || `Não foi possível iniciar o disparo de "${campaign.nome}".`);
+  };
+
+  /** Botão primário do assistente: cria a campanha, inicia o lote em segundo plano e abre o acompanhamento ao vivo. */
+  const launchNewCampaign = async () => {
+    if (isLaunching) return;
+    const campaign = buildNewCampaign();
+    if (!campaign) return;
+    setIsLaunching(true);
+    setFormError("");
+    let saved = false;
+    try {
+      await ensureReadyToDispatch();
+      const recipients = (await buildCampaignRecipients([campaign])).get(campaign.id) ?? [];
+      // Persiste antes de iniciar: o servidor lê a campanha salva para montar o envio.
+      await saveCampaigns([campaign, ...campaigns]);
+      saved = true;
+      await startCampaignDispatch(campaign, recipients);
+      const refreshed = await reloadCampaigns().catch(() => null);
+      resetCreateForm();
+      setIsCreateOpen(false);
+      setActiveFilter("Todas");
+      setSearchTerm("");
+      startEditingCampaign(refreshed?.find((item) => item.id === campaign.id) ?? campaign);
+      void refreshAll();
+      toast.success("Disparo iniciado", `"${campaign.nome}" está sendo enviada em segundo plano.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Não foi possível disparar a campanha.";
+      if (saved) {
+        await reloadCampaigns().catch(() => null);
+        resetCreateForm();
+        setIsCreateOpen(false);
+        toast.error("Campanha salva como rascunho", `${message} Abra a campanha na lista para tentar de novo.`);
+      } else {
+        setFormError(message);
+      }
+    } finally {
+      setIsLaunching(false);
+    }
+  };
 
   const dispatchCampaigns = async () => {
     if (!dispatchTarget || isDispatching) return;
     setIsDispatching(true);
     setDispatchError("");
-    setDispatchResult(null);
-    setDispatchProgress(null);
     try {
-      if (campaignsLoading || segmentsLoading || criteriaLoading) {
-        throw new Error("Aguarde o carregamento das campanhas e dos públicos antes de disparar.");
-      }
-      if (storesError) throw new Error(`Não foi possível carregar as lojas usadas nos públicos: ${storesError}`);
-
       const currentCampaigns = campaigns;
       const targetCampaigns = dispatchTarget.ids.map((id) => currentCampaigns.find((campaign) => campaign.id === id));
       if (targetCampaigns.some((campaign) => !campaign)) throw new Error("Uma das campanhas selecionadas não foi encontrada. Atualize a página e tente novamente.");
@@ -635,27 +822,13 @@ export function CampaignsView() {
       const blocked = readyCampaigns.find((campaign) => isDispatchLocked(campaign.status));
       if (blocked) throw new Error(`"${blocked.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`);
 
-      const connectionResponse = await fetch("/api/whatsapp/connection", { cache: "no-store" });
-      const connectionCt = connectionResponse.headers.get("content-type") ?? "";
-      if (!connectionCt.includes("application/json")) {
-        throw new Error(`Resposta inválida da API (${connectionResponse.status}). Verifique se o servidor está rodando.`);
-      }
-      const connection = await connectionResponse.json() as { state?: string; error?: string };
-      if (!connectionResponse.ok) throw new Error(connection.error || "Não foi possível verificar a conexão do WhatsApp.");
-      if (connection.state !== "open") throw new Error("WhatsApp desconectado. Conecte a conta em Configurações antes de disparar a campanha.");
-
+      await ensureReadyToDispatch();
       const recipientsByCampaign = await buildCampaignRecipients(readyCampaigns);
 
       const started: string[] = [];
       try {
         for (const campaign of readyCampaigns) {
-          const startResponse = await fetch("/api/campaigns/dispatch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients: recipientsByCampaign.get(campaign.id) ?? [] }),
-          });
-          const startResult = await startResponse.json().catch(() => ({})) as { error?: string };
-          if (!startResponse.ok) throw new Error(startResult.error || `Não foi possível iniciar o disparo de "${campaign.nome}".`);
+          await startCampaignDispatch(campaign, recipientsByCampaign.get(campaign.id) ?? []);
           started.push(campaign.nome);
         }
       } finally {
@@ -665,10 +838,10 @@ export function CampaignsView() {
       }
 
       setDispatchConfirmOpen(false);
-      setDispatchResult(null);
+      void refreshAll();
       toast.success(
         started.length === 1 ? "Disparo iniciado" : "Disparos iniciados",
-        "O envio continua em segundo plano no servidor. Você pode fechar esta página; o andamento aparece na lista de campanhas.",
+        "O envio continua em segundo plano no servidor. Acompanhe o andamento nos detalhes da campanha.",
       );
       if (dispatchTarget.mode === "batch") setSelectedCampaignIds(new Set());
     } catch (error) {
@@ -680,507 +853,604 @@ export function CampaignsView() {
     }
   };
 
+  const openDispatchConfirm = (ids: string[], mode: "single" | "batch") => {
+    setDispatchTarget({ mode, ids });
+    setDispatchError("");
+    setDispatchConfirmOpen(true);
+    void estimateByIds(ids);
+  };
+
+  const openRow = (row: UnifiedRow) => {
+    if (row.kind === "bulk") setBulkDetailsId(row.id);
+    else if (row.campaign) startEditingCampaign(row.campaign);
+  };
+
   if (campaignsLoading) {
     return <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Carregando campanhas..." /></div>;
   }
 
+  const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
+  const ghostButton = "inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer";
+  const primaryButton = "inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer";
+  const iconAction = "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-[#002187] transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer";
+
+  const selectedJob = selectedCampaign ? jobByCampaign.get(selectedCampaign.id) : undefined;
+  const selectedStats = selectedCampaign ? stats[selectedCampaign.id] ?? EMPTY_STATS : EMPTY_STATS;
+  const selectedLocked = selectedCampaign ? isDispatchLocked(selectedCampaign.status) : false;
+  const selectedDisplay = selectedCampaign ? campaignDisplayStatus(selectedCampaign) : "Rascunho";
+
   return (
     <div>
-      <div>
+      <div className="space-y-4 pb-10">
+        {campaignsError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{campaignsError}</p>}
 
-        <div className="space-y-6 pb-10">
-          {campaignsError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{campaignsError}</p>}
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas</h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Crie e organize campanhas segmentadas para relacionamento e conversão.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={() => void reloadCampaigns()} disabled={campaignsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-                <RefreshCw className={`h-4 w-4 ${campaignsLoading ? "animate-spin" : ""}`} />
-                Atualizar
-              </button>
-              <button type="button" onClick={openCreateCampaign} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
-                <Plus className="h-4 w-4" />
-                Nova campanha
-              </button>
-            </div>
-                      </div>
-
-          <section aria-label="Resumo das campanhas" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-            {metrics.map((metric) => {
-              const Icon = metric.icon;
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="relative block w-full sm:w-72 md:w-80">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} aria-label="Buscar campanhas" placeholder="Buscar campanha, modelo ou público" className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+          </label>
+          <div role="tablist" aria-label="Filtrar campanhas" className="flex flex-wrap gap-1.5">
+            {filters.map((filter) => {
+              const allowed = filterMatches[filter];
+              const count = allowed ? rows.filter((row) => allowed.includes(row.status)).length : rows.length;
               return (
-                <article key={metric.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{metric.label}</p>
-                      <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{metric.value}</p>
-                      <p className="mt-1 text-[11px] text-slate-400">{metric.detail}</p>
-                    </div>
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${metric.color}`}><Icon className="h-4 w-4" /></span>
-                  </div>
-                </article>
+                <button key={filter} type="button" role="tab" aria-selected={activeFilter === filter} onClick={() => setActiveFilter(filter)} className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors cursor-pointer ${activeFilter === filter ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"}`}>
+                  {filter}<span className={`text-[10px] ${activeFilter === filter ? "opacity-75" : "text-slate-400"}`}>{count}</span>
+                </button>
               );
             })}
-          </section>
-
-          {dispatchJobs.filter((job) => job.status === "running" || job.status === "paused").length > 0 && (
-            <section aria-label="Envios em andamento" className="space-y-3">
-              {dispatchJobs.filter((job) => job.status === "running" || job.status === "paused").map((job) => {
-                const percent = job.total > 0 ? Math.round((job.cursor / job.total) * 100) : 0;
-                const paused = job.status === "paused";
-                const busy = jobBusy === job.campaignId;
-                return (
-                  <article key={job.campaignId} className={`rounded-xl border p-4 shadow-xs ${paused ? "border-[#F7915E]/50 bg-[#F7915E]/10" : "border-slate-200 bg-white dark:border-slate-800 dark:bg-[#07194f]"}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{job.campaignName}</p>
-                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                          {paused ? "Envio pausado" : "Enviando em segundo plano"} · {job.cursor} de {job.total} contatos · {job.sent} enviadas · {job.failed} falhas
-                          {job.skipped > 0 && ` · ${job.skipped} pulados (receberam campanha nos últimos 7 dias)`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {paused ? (
-                          <button type="button" disabled={busy} onClick={() => void controlDispatch(job.campaignId, "resume")} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer hover:cursor-pointer"><Play className="h-3.5 w-3.5" />Retomar</button>
-                        ) : (
-                          <button type="button" disabled={busy} onClick={() => void controlDispatch(job.campaignId, "pause")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><Pause className="h-3.5 w-3.5" />Pausar</button>
-                        )}
-                        <button type="button" disabled={busy} onClick={() => { if (window.confirm("Cancelar este disparo? Os contatos restantes não receberão a mensagem.")) void controlDispatch(job.campaignId, "cancel"); }} className="inline-flex h-8 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar disparo</button>
-                      </div>
-                    </div>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-                      <div className="h-full rounded-full bg-[#C4D600] transition-all" style={{ width: `${percent}%` }} />
-                    </div>
-                    {paused && job.pause && <p role="alert" className="mt-3 text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{job.pause.message}</p>}
-                    {job.errors.length > 0 && (
-                      <details className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                        <summary className="cursor-pointer">Ver falhas ({job.failed})</summary>
-                        <ul className="mt-1 list-inside list-disc space-y-0.5">{job.errors.slice(0, 5).map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul>
-                      </details>
-                    )}
-                  </article>
-                );
-              })}
-            </section>
-          )}
-
-          <div className="mb-6 flex flex-wrap items-center gap-3">
-            <label className="relative block w-full sm:w-72 md:w-80">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} aria-label="Buscar campanhas" placeholder="Buscar campanha ou público" className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
-            </label>
-            <div role="tablist" aria-label="Filtrar campanhas" className="flex flex-wrap gap-1.5">
-              {filters.map((filter) => {
-                const count = filter === "Todas" ? campaigns.length : campaigns.filter((campaign) => campaign.status === filter).length;
-                return (
-                  <button key={filter} type="button" role="tab" aria-selected={activeFilter === filter} onClick={() => setActiveFilter(filter)} className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activeFilter === filter ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"}`}>
-                    {filter}<span className={`text-[10px] ${activeFilter === filter ? "opacity-75" : "text-slate-400"}`}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
+          <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={() => { void reloadCampaigns(); void refreshAll(); }} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+              <RefreshCw className="h-4 w-4" />
+              Atualizar
+            </button>
+            <button type="button" onClick={openCreateCampaign} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#051647] px-3.5 text-sm font-semibold text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+              <Plus className="h-4 w-4" />
+              Nova campanha
+            </button>
+          </div>
+        </div>
 
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
-            <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Biblioteca de campanhas</h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{filteredCampaigns.length} de {campaigns.length} campanhas</p>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] border-collapse text-left">
-                <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
-                  <tr>
-                    <th className="w-10 px-3 py-3">
-                      <button
-                        type="button"
-                        aria-label={filteredCampaigns.length > 0 && filteredCampaigns.every((c) => selectedCampaignIds.has(c.id)) ? "Desmarcar todas as campanhas" : "Selecionar todas as campanhas"}
-                        onClick={() => {
-                          const allSelected = filteredCampaigns.length > 0 && filteredCampaigns.every((c) => selectedCampaignIds.has(c.id));
-                          setSelectedCampaignIds((prev) => {
-                            const next = new Set(prev);
-                            if (allSelected) {
-                              filteredCampaigns.forEach((c) => next.delete(c.id));
-                            } else {
-                              filteredCampaigns.forEach((c) => next.add(c.id));
-                            }
-                            return next;
-                          });
-                        }}
-                        className="grid h-4 w-4 place-items-center rounded border border-slate-300 text-[#051647] transition-colors hover:border-[#002187] dark:border-slate-600 dark:text-[#C4D600] dark:hover:border-[#C4D600] cursor-pointer hover:cursor-pointer"
-                      >
-                        {filteredCampaigns.length > 0 && filteredCampaigns.every((c) => selectedCampaignIds.has(c.id)) && <SquareCheck className="h-3.5 w-3.5 fill-current" />}
-                      </button>
-                    </th>
-                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("nome")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Campanha<SortIndicator field="nome" /></button></th>
-                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("publico")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Público<SortIndicator field="publico" /></button></th>
-                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status<SortIndicator field="status" /></button></th>
-                    <th className="px-4 py-3 text-right"><button type="button" onClick={() => handleSort("envios")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Envios<SortIndicator field="envios" /></button></th>
-                    <th className="px-4 py-3 text-right"><button type="button" onClick={() => handleSort("respostas")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Respostas<SortIndicator field="respostas" /></button></th>
-                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("atualizacao")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Atualização<SortIndicator field="atualizacao" /></button></th>
-                    <th className="px-4 py-3 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {campaignsLoading && (
-                    <tr><td colSpan={8} className="px-5 py-8">
-                      <LoadingSpinner label="Carregando campanhas..." className="w-full justify-center" />
-                    </td></tr>
-                  )}
-                  {!campaignsLoading && filteredCampaigns.map((campaign) => {
-                    const isSelected = selectedCampaignIds.has(campaign.id);
-                    return (
-                      <tr
-                        key={campaign.id}
-                        tabIndex={0}
-                        aria-label={`Abrir detalhes de ${campaign.nome}`}
-                        onClick={() => startEditingCampaign(campaign)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            startEditingCampaign(campaign);
-                          }
-                        }}
-                        className={`group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600] ${isSelected ? "bg-[#C4D600]/10 dark:bg-[#C4D600]/10" : ""}`}
-                      >
-                        <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1100px] border-collapse text-left">
+              <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
+                <tr>
+                  <th className="w-10 px-3 py-3">
+                    <button
+                      type="button"
+                      aria-label={selectableRows.length > 0 && selectableRows.every((row) => selectedCampaignIds.has(row.id)) ? "Desmarcar todas as campanhas" : "Selecionar todas as campanhas"}
+                      onClick={() => {
+                        const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedCampaignIds.has(row.id));
+                        setSelectedCampaignIds((prev) => {
+                          const next = new Set(prev);
+                          if (allSelected) selectableRows.forEach((row) => next.delete(row.id));
+                          else selectableRows.forEach((row) => next.add(row.id));
+                          return next;
+                        });
+                      }}
+                      className="grid h-4 w-4 place-items-center rounded border border-slate-300 text-[#051647] transition-colors hover:border-[#002187] dark:border-slate-600 dark:text-[#C4D600] dark:hover:border-[#C4D600] cursor-pointer"
+                    >
+                      {selectableRows.length > 0 && selectableRows.every((row) => selectedCampaignIds.has(row.id)) && <SquareCheck className="h-3.5 w-3.5 fill-current" />}
+                    </button>
+                  </th>
+                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("nome")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Campanha{sortIcon(sortConfig, "nome")}</button></th>
+                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("mensagem")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Modelo / mensagem{sortIcon(sortConfig, "mensagem")}</button></th>
+                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("publico")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Segmento{sortIcon(sortConfig, "publico")}</button></th>
+                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status{sortIcon(sortConfig, "status")}</button></th>
+                  <th className="w-44 px-4 py-3"><button type="button" onClick={() => handleSort("total")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Progresso / total{sortIcon(sortConfig, "total")}</button></th>
+                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("enviados")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Enviados · Entregues · Lidos · Respostas{sortIcon(sortConfig, "enviados")}</button></th>
+                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("atualizacao")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Atualização{sortIcon(sortConfig, "atualizacao")}</button></th>
+                  <th className="px-4 py-3 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredRows.map((row) => {
+                  const selectable = row.kind === "campaign" && row.campaign !== undefined && !isDispatchLocked(row.campaign.status);
+                  const isSelected = selectable && selectedCampaignIds.has(row.id);
+                  const percent = row.total > 0 ? Math.min(100, Math.round((row.processed / row.total) * 100)) : 0;
+                  const busy = jobBusy === row.id;
+                  const bulk = row.bulk;
+                  return (
+                    <tr
+                      key={row.key}
+                      tabIndex={0}
+                      aria-label={`Abrir detalhes de ${row.nome}`}
+                      onClick={() => openRow(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openRow(row);
+                        }
+                      }}
+                      className={`group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600] ${isSelected ? "bg-[#C4D600]/10 dark:bg-[#C4D600]/10" : ""}`}
+                    >
+                      <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
+                        {selectable && (
                           <button
                             type="button"
                             role="checkbox"
                             aria-checked={isSelected}
-                            aria-label={`Selecionar campanha ${campaign.nome}`}
+                            aria-label={`Selecionar campanha ${row.nome}`}
                             onClick={() => {
                               setSelectedCampaignIds((prev) => {
                                 const next = new Set(prev);
-                                if (next.has(campaign.id)) next.delete(campaign.id);
-                                else next.add(campaign.id);
+                                if (next.has(row.id)) next.delete(row.id);
+                                else next.add(row.id);
                                 return next;
                               });
                             }}
-                            className={`grid h-4 w-4 place-items-center rounded border transition-colors cursor-pointer hover:cursor-pointer ${isSelected ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-300 text-transparent hover:border-[#002187] dark:border-slate-600 dark:text-transparent dark:hover:border-[#C4D600]"}`}
+                            className={`grid h-4 w-4 place-items-center rounded border transition-colors cursor-pointer ${isSelected ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-300 text-transparent hover:border-[#002187] dark:border-slate-600 dark:text-transparent dark:hover:border-[#C4D600]"}`}
                           >
                             <SquareCheck className="h-3.5 w-3.5 fill-current" />
                           </button>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><WhatsAppIcon className="h-4 w-4 fill-current" /></span>
-                            <span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{campaign.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">WhatsApp</span></span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><WhatsAppIcon className="h-4 w-4 fill-current" /></span>
+                          <span className="min-w-0"><span className="block max-w-56 truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{row.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">{row.origem}</span></span>
+                        </div>
+                      </td>
+                      <td className="max-w-48 truncate px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.mensagem}>{row.mensagem}</td>
+                      <td className="max-w-48 truncate px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.publico}>{row.publico || "—"}</td>
+                      <td className="px-4 py-3.5"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${displayStyles[row.status]}`}>{row.status === "Enviando" && <RefreshCw className="h-3 w-3 animate-spin" />}{row.status}</span></td>
+                      <td className="px-4 py-3.5">
+                        {row.total > 0 ? (
+                          <div className="space-y-1">
+                            <ProgressBar percent={percent} tone={row.status === "Pausado" ? "paused" : "default"} />
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400"><span className="font-semibold text-slate-700 dark:text-slate-200">{percent}%</span> · {int(row.processed)} de {int(row.total)} contatos</p>
                           </div>
-                        </td>
-                        <td className="max-w-52 px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{campaign.publico}</td>
-                        <td className="px-4 py-3.5"><span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[campaign.status]}`}>{campaign.status}</span></td>
-                        <td className="px-4 py-3.5 text-right text-xs text-slate-400" title="A integração de envio ainda não está configurada.">—</td>
-                        <td className="px-4 py-3.5 text-right text-xs text-slate-400" title="A integração de envio ainda não está configurada.">—</td>
-                        <td className="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400">{campaign.dataAtualizacao}</td>
-                        <td className="px-4 py-3.5 text-right" onClick={(event) => event.stopPropagation()}>
-                          <button
-                            type="button"
-                            aria-label={`Disparar campanha ${campaign.nome}`}
-                            onClick={() => {
-                              setDispatchTarget({ mode: "single", ids: [campaign.id] });
-                              setDispatchResult(null);
-                              setDispatchError("");
-                              setDispatchProgress(null);
-                              setDispatchConfirmOpen(true);
-                              void estimateDispatchCost([campaign.id]);
-                            }}
-                            disabled={isDispatching || isDispatchLocked(campaign.status)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-[#002187] transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer"
-                            title={campaign.status === "Enviando" ? "Esta campanha já está em envio" : campaign.status === "Envio pausado" ? "Disparo pausado: retome pelo painel de envios" : campaign.status === "Enviada" || campaign.status === "Envio parcial" ? "Esta campanha já possui envios registrados" : "Disparar campanha"}
-                          >
-                            <Send className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {!campaignsLoading && filteredCampaigns.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center"><Search className="mx-auto h-5 w-5 text-slate-400" /><p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhuma campanha encontrada</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p></td></tr>}
-                </tbody>
-              </table>
-            </div>
-            <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800"><span>Mostrando {filteredCampaigns.length} de {campaigns.length} campanhas salvas</span><span>Banco de dados</span></footer>
-          </section>
-        </div>
+                        ) : <span className="text-xs text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-3 text-[11px] tabular-nums text-slate-600 dark:text-slate-300">
+                          <span className="inline-flex items-center gap-1" title="Enviados"><Send className="h-3 w-3 text-slate-400" />{int(row.stats.sent)}</span>
+                          <span className="inline-flex items-center gap-1" title="Entregues"><CheckCheck className="h-3 w-3 text-slate-400" />{int(row.stats.delivered)}</span>
+                          <span className="inline-flex items-center gap-1" title="Lidos"><Eye className="h-3 w-3 text-slate-400" />{int(row.stats.read)}</span>
+                          <span className="inline-flex items-center gap-1" title="Respostas"><MessageCircleReply className="h-3 w-3 text-slate-400" />{int(row.stats.replied)}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-slate-500 dark:text-slate-400">{row.kind === "campaign" && row.updatedAt > 0 ? formatDateTime(new Date(row.updatedAt).toISOString()) : row.updatedLabel}</td>
+                      <td className="px-4 py-3.5 text-right" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex justify-end gap-1.5">
+                          {row.kind === "campaign" && row.campaign && (
+                            row.job?.status === "running" ? (
+                              <button type="button" disabled={busy} onClick={() => void controlDispatch(row.id, "pause")} aria-label={`Pausar ${row.nome}`} title="Pausar disparo" className={iconAction}><Pause className="h-3.5 w-3.5" /></button>
+                            ) : row.job?.status === "paused" ? (
+                              <button type="button" disabled={busy} onClick={() => void controlDispatch(row.id, "resume")} aria-label={`Retomar ${row.nome}`} title="Retomar disparo" className={iconAction}><Play className="h-3.5 w-3.5" /></button>
+                            ) : !isDispatchLocked(row.campaign.status) ? (
+                              <button type="button" disabled={isDispatching} onClick={() => openDispatchConfirm([row.id], "single")} aria-label={`Disparar ${row.nome}`} title="Disparar agora" className={iconAction}><Send className="h-3.5 w-3.5" /></button>
+                            ) : null
+                          )}
+                          {bulk && bulk.status === "running" && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "pause")} aria-label="Pausar lote" title="Pausar" className={iconAction}><Pause className="h-3.5 w-3.5" /></button>}
+                          {bulk && bulk.status === "paused" && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "resume")} aria-label="Retomar lote" title="Retomar" className={iconAction}><Play className="h-3.5 w-3.5" /></button>}
+                          {bulk && (bulk.status === "running" || bulk.status === "paused") && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "cancel")} aria-label="Cancelar lote" title="Cancelar" className={`${iconAction} text-red-600! dark:text-red-400!`}><XCircle className="h-3.5 w-3.5" /></button>}
+                          {bulk && (bulk.status === "completed" || bulk.status === "cancelled") && bulk.failed > 0 && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "retry")} aria-label="Reenviar falhas" title="Reenviar falhas" className={iconAction}><RotateCcw className="h-3.5 w-3.5" /></button>}
+                          <button type="button" onClick={() => openRow(row)} aria-label={`Ver detalhes de ${row.nome}`} title="Ver detalhes" className={iconAction}><Eye className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filteredRows.length === 0 && (
+                  <tr><td colSpan={9} className="px-5 py-14 text-center">
+                    <Search className="mx-auto h-5 w-5 text-slate-400" />
+                    <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{rows.length === 0 ? "Nenhuma campanha ainda" : "Nenhuma campanha encontrada"}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{rows.length === 0 ? "Clique em Nova campanha para criar e disparar o primeiro envio." : "Tente mudar a busca ou o filtro."}</p>
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800">
+            <span>Mostrando {filteredRows.length} de {rows.length} disparos</span>
+            {hasActiveJob && <span className="inline-flex items-center gap-1"><RefreshCw className="h-3 w-3 animate-spin" />Atualizando ao vivo</span>}
+          </footer>
+        </section>
       </div>
 
-      {(selectedCampaign || isCreateOpen) && (
+      {isCreateOpen && (
         <EntityDialog
-          titleId="campaign-dialog-title"
-          title={isCreateOpen ? "Nova campanha" : selectedCampaign?.nome ?? "Campanha"}
-          description={isCreateOpen ? "Crie um rascunho para configurar o próximo envio." : "Edite os dados e a mensagem da campanha."}
-          onClose={() => { setSelectedCampaign(null); setIsCreateOpen(false); clearSelectedAttachments(); setUploadedAttachments([]); setFormError(""); }}
+          titleId="campaign-create-title"
+          title="Nova campanha"
+          description="Configure, revise e dispare. O envio roda em segundo plano no servidor."
+          size="wizard"
+          onClose={() => { if (isLaunching) return; setIsCreateOpen(false); resetCreateForm(); }}
         >
-          {isCreateOpen ? (
-            <Stepper
-              initialStep={1}
-              onStepChange={() => setFormError("")}
-              onFinalStepCompleted={createCampaign}
-              validateStep={(step) => {
-                  if (step === 1 && !form.nome.trim()) {
-                    setFormError("Informe o nome da campanha.");
-                  return false;
-                }
-                if (step === 2 && selectedAudienceSegments.length === 0) {
-                  setFormError("Selecione pelo menos um segmento para o público-alvo.");
-                  return false;
-                }
-                if (step === 3 && !form.mensagem.trim()) {
-                  setFormError("Escreva a mensagem da campanha.");
-                  return false;
-                }
-                setFormError("");
-                return true;
-              }}
-              backButtonText="Voltar"
-              nextButtonText="Continuar"
-              completeButtonText="Salvar rascunho"
-              indicator="numbers"
-              orientation="horizontal"
-              transition="slide"
-              linear
-              showFooter
-              theme={isDark ? "dark" : "light"}
-              accentColor="#C4D600"
-              frame={false}
-              radius={16}
-              width="100%"
-              className="min-h-0 flex-1"
-            >
-              <Step title="Identificação" description="Nome da campanha">
-                <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome para encontrá-la depois.</p></div>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                </div>
-              </Step>
-              <Step title="Público" description="Quem receberá">
-                <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Defina o público</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Selecione um ou mais segmentos existentes para receber a campanha.</p></div>
-                  <FormMultiSelect
-                    label="Público-alvo"
-                    selected={selectedAudienceSegments}
-                    options={segmentOptions}
-                    onChange={(segments) => { setSelectedAudienceSegments(segments); setFormError(""); }}
-                    placeholder="Selecione os segmentos"
-                    required
-                  />
-                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                </div>
-              </Step>
-              <Step title="Mensagem" description="Revise e salve">
-                <div className="space-y-3">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Escreva a mensagem</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">A campanha será criada como rascunho.</p></div>
-                  <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                  {!campaignTemplate && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Variáveis de personalização</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {messageVariables.map((item) => (
-                        <button
-                          key={item.value}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => insertMessageVariable(item.value)}
-                          className="rounded-lg border border-[#002187]/20 bg-[#002187]/5 px-2.5 py-1.5 text-[10px] font-semibold text-[#002187] transition-colors hover:bg-[#C4D600]/30 dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/20 cursor-pointer hover:cursor-pointer"
-                          title={`Inserir ${item.value}`}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-slate-400">Clique em uma variável para inseri-la no ponto selecionado da mensagem.</p>
-                  </div>
-                  )}
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    <span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
-                    <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
-                  </label>
-                  <div className="space-y-2">
-                    <input
-                      ref={attachmentInputRef}
-                      type="file"
-                      accept="image/*,video/*,application/pdf"
-                      multiple
-                      className="hidden"
-                      aria-label="Adicionar imagens, vídeos ou PDFs"
-                      onChange={(event) => addAttachments(event.currentTarget.files)}
-                    />
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos anexados</p>
-                        <p className="mt-0.5 text-[10px] text-slate-400">Imagens, vídeos ou PDFs</p>
-                      </div>
-                      <button type="button" onClick={() => attachmentInputRef.current?.click()} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-200 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
-                        <Paperclip className="h-3.5 w-3.5" />Adicionar arquivo
-                      </button>
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="url"
-                        value={imageLink}
-                        onChange={(event) => setImageLink(event.target.value)}
-                        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addImageFromLink(); } }}
-                        placeholder="Ou cole o link de uma imagem (JPG ou PNG)"
-                        aria-label="Link da imagem"
-                        className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
-                      />
-                      <button type="button" disabled={!imageLink.trim() || imageLinkLoading} onClick={() => void addImageFromLink()} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
-                        <ImageIcon className="h-3.5 w-3.5" />{imageLinkLoading ? "Baixando..." : "Usar link"}
-                      </button>
-                    </div>
-                    {selectedAttachments.length > 0 && (
-                      <ul aria-label="Arquivos selecionados" className="max-h-16 space-y-1 overflow-y-auto">
-                        {selectedAttachments.map((file, index) => {
-                          const FileIcon = file.type.startsWith("image/") ? ImageIcon : file.type.startsWith("video/") ? Film : FileText;
-                          return (
-                            <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/60">
-                              <FileIcon className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                              <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-700 dark:text-slate-200" title={file.name}>{file.name}</span>
-                              <span className="shrink-0 text-[10px] text-slate-400">{formatFileSize(file.size)}</span>
-                              <button type="button" aria-label={`Remover arquivo ${file.name}`} onClick={() => {
-                                const previewUrl = attachmentPreviewUrlsRef.current.get(file);
-                                if (previewUrl) {
-                                  URL.revokeObjectURL(previewUrl);
-                                  attachmentPreviewUrlsRef.current.delete(file);
-                                  setAttachmentPreviewUrls((current) => {
-                                    const next = new Map(current);
-                                    next.delete(file);
-                                    return next;
-                                  });
-                                }
-                                setSelectedAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index));
-                              }} className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white cursor-pointer hover:cursor-pointer">
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                  <section aria-label="Prévia para o destinatário" className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Prévia para o destinatário</p>
-                    <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-900/60">
-                      {selectedAttachments.length > 0 || form.mensagem.trim() ? (
-                        <div className="flex justify-end">
-                          <div className="w-fit max-w-[90%] space-y-2 rounded-xl rounded-br-sm bg-[#C4D600]/20 p-2.5 text-sm text-[#051647] shadow-sm dark:bg-[#C4D600]/15 dark:text-slate-100">
-                            {campaignTemplate?.hasImage && campaignTemplate.headerImageUrl && !selectedAttachments.some((file) => ["image/jpeg", "image/png"].includes(file.type)) && (
-                              <div className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
-                                {/* eslint-disable-next-line @next/next/no-img-element -- imagem hospedada pela Meta */}
-                                <img src={campaignTemplate.headerImageUrl} alt="Imagem do cabeçalho do modelo" className="aspect-[1.91/1] w-72 max-w-full object-cover" />
-                              </div>
-                            )}
-                            {selectedAttachments.map((file, index) => {
-                              const previewUrl = attachmentPreviewUrls.get(file);
-                              return (
-                                <div key={`${file.name}-${file.lastModified}-${index}`} className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
-                                  {file.type.startsWith("image/") && previewUrl ? (
-                                    <Image
-                                      src={previewUrl}
-                                      alt={file.name}
-                                      width={480}
-                                      height={320}
-                                      unoptimized
-                                      className="max-h-48 w-full object-contain"
-                                    />
-                                  ) : file.type.startsWith("video/") && previewUrl ? (
-                                    <video src={previewUrl} controls className="max-h-48 w-full" aria-label={file.name}>
-                                      Seu navegador não oferece suporte à reprodução de vídeo.
-                                    </video>
-                                  ) : (
-                                    <div className="flex max-w-72 items-center gap-2.5 p-3">
-                                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">
-                                        {file.type.startsWith("video/") ? <Film className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                                      </span>
-                                      <span className="min-w-0">
-                                        <span className="block truncate text-xs font-semibold" title={file.name}>{file.name}</span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Documento · {formatFileSize(file.size)}</span>
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {form.mensagem.trim() && <p className="whitespace-pre-wrap break-words">{form.mensagem.trim()}</p>}
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-400 dark:bg-slate-800/80 dark:text-slate-500">
-                          A mensagem e os arquivos aparecerão aqui.
-                        </p>
-                      )}
-                    </div>
-                  </section>
-                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                </div>
-              </Step>
-            </Stepper>
-          ) : selectedCampaign && (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Envios aceitos</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos.toLocaleString("pt-BR")}</p></div>
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Respostas</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos > 0 ? "Veja no funil abaixo" : "—"}</p></div>
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Status</p><p className={`mt-1 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedCampaign.status]}`}>{selectedCampaign.status}</p></div>
-                </div>
-                {selectedCampaign.disparos > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">Resultados da campanha</p>
-                    <CampaignMetricsPanel type="campaign" id={selectedCampaign.id} />
-                  </div>
-                )}
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+          <Stepper
+            initialStep={1}
+            onStepChange={(step) => {
+              setFormError("");
+              if (step === 4) {
+                const draft = buildNewCampaign();
+                if (draft) void estimateDispatchCost([draft]);
+              }
+            }}
+            onFinalStepCompleted={() => void launchNewCampaign()}
+            validateStep={(step) => {
+              if (step === 1 && !form.nome.trim()) {
+                setFormError("Informe o nome da campanha.");
+                return false;
+              }
+              if (step === 2 && selectedAudienceSegments.length === 0) {
+                setFormError("Selecione pelo menos um segmento para o público-alvo.");
+                return false;
+              }
+              if (step === 3 && !form.mensagem.trim()) {
+                setFormError("Escreva a mensagem da campanha.");
+                return false;
+              }
+              if (step === 3 && isUploading) {
+                setFormError("Aguarde o envio dos arquivos anexados terminar.");
+                return false;
+              }
+              setFormError("");
+              return true;
+            }}
+            backButtonText="Voltar"
+            nextButtonText="Continuar"
+            completeButtonText={isLaunching ? "Disparando..." : "Disparar agora"}
+            nextButtonProps={{ disabled: isLaunching }}
+            backButtonProps={{ disabled: isLaunching }}
+            lastStepSecondaryAction={(
+              <button type="button" disabled={isLaunching} onClick={saveDraft} className="inline-flex h-[38px] items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">
+                Salvar como rascunho
+              </button>
+            )}
+            indicator="numbers"
+            orientation="horizontal"
+            transition="slide"
+            linear
+            showFooter
+            theme={isDark ? "dark" : "light"}
+            accentColor="#C4D600"
+            frame={false}
+            radius={16}
+            width="100%"
+            className="min-h-0 flex-1"
+          >
+            <Step title="Identificação" description="Nome da campanha">
+              <div className="space-y-4">
+                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome para encontrá-la depois.</p></div>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className={inputClass} /></label>
+                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+              </div>
+            </Step>
+            <Step title="Público" description="Quem receberá">
+              <div className="space-y-4">
+                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Defina o público</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Selecione um ou mais segmentos salvos para receber a campanha.</p></div>
                 <FormMultiSelect
                   label="Público-alvo"
                   selected={selectedAudienceSegments}
                   options={segmentOptions}
-                  onChange={(segments) => { setSelectedAudienceSegments(segments); setFormError(""); }}
+                  onChange={(segmentNames) => { setSelectedAudienceSegments(segmentNames); setFormError(""); }}
                   placeholder="Selecione os segmentos"
                   required
                 />
-                <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos da campanha</p>
-                    {selectedCampaign.anexos.map((file, index) => (
-                      <p key={`${file.name}-${index}`} className="truncate text-xs text-slate-500 dark:text-slate-400" title={file.name}>{file.name} · {formatFileSize(file.size)}</p>
-                    ))}
-                  </div>
-                )}
                 {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>
-              <footer className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-                <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />{selectedCampaign.dataAtualizacao}</span>
-                <div className="flex items-center gap-2">
-                  {!isDispatchLocked(selectedCampaign.status) && (
-                    <button type="button" onClick={() => toggleCampaign(selectedCampaign.id)} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">{selectedCampaign.status === "Ativa" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}{selectedCampaign.status === "Ativa" ? "Pausar no CRM" : "Ativar no CRM"}</button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={isDispatching || isDispatchLocked(selectedCampaign.status)}
-                    onClick={() => {
-                      setDispatchTarget({ mode: "single", ids: [selectedCampaign.id] });
-                      setDispatchResult(null);
-                      setDispatchError("");
-                      setDispatchProgress(null);
-                      setDispatchConfirmOpen(true);
-                      void estimateDispatchCost([selectedCampaign.id]);
-                    }}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#F7915E]/40 bg-[#F7915E]/10 px-3 text-xs font-semibold text-[#9a3d12] transition-colors hover:border-[#F7915E] hover:bg-[#F7915E]/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#F7915E]/30 dark:bg-[#F7915E]/15 dark:text-[#F7915E] dark:hover:bg-[#F7915E]/25 cursor-pointer hover:cursor-pointer"
-                  >
-                    <Send className="h-3.5 w-3.5" />Disparar agora
-                  </button>
-                  <button type="button" onClick={saveCampaign} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer">Salvar alterações</button>
+            </Step>
+            <Step title="Mensagem" description="Modelo e mídia">
+              <div className="space-y-3">
+                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Escolha o modelo ou escreva a mensagem</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Modelos aprovados pela Meta podem ter imagem no cabeçalho.</p></div>
+                <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
+                {!campaignTemplate && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Variáveis de personalização</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {messageVariables.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => insertMessageVariable(item.value)}
+                        className="rounded-lg border border-[#002187]/20 bg-[#002187]/5 px-2.5 py-1.5 text-[10px] font-semibold text-[#002187] transition-colors hover:bg-[#C4D600]/30 dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/20 cursor-pointer"
+                        title={`Inserir ${item.value}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-400">Clique em uma variável para inseri-la no ponto selecionado da mensagem.</p>
                 </div>
-              </footer>
-            </div>
-          )}
+                )}
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  <span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
+                  <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+                </label>
+                <div className="space-y-2">
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    accept="image/*,video/*,application/pdf"
+                    multiple
+                    className="hidden"
+                    aria-label="Adicionar imagens, vídeos ou PDFs"
+                    onChange={(event) => addAttachments(event.currentTarget.files)}
+                  />
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Imagem ou mídia {isUploading && <span className="font-normal text-slate-400">(enviando...)</span>}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-400">Imagens, vídeos ou PDFs</p>
+                    </div>
+                    <button type="button" onClick={() => attachmentInputRef.current?.click()} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-200 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
+                      <Paperclip className="h-3.5 w-3.5" />Adicionar arquivo
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={imageLink}
+                      onChange={(event) => setImageLink(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addImageFromLink(); } }}
+                      placeholder="Ou cole o link de uma imagem (JPG ou PNG)"
+                      aria-label="Link da imagem"
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"
+                    />
+                    <button type="button" disabled={!imageLink.trim() || imageLinkLoading} onClick={() => void addImageFromLink()} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
+                      <ImageIcon className="h-3.5 w-3.5" />{imageLinkLoading ? "Baixando..." : "Usar link"}
+                    </button>
+                  </div>
+                  {selectedAttachments.length > 0 && (
+                    <ul aria-label="Arquivos selecionados" className="max-h-16 space-y-1 overflow-y-auto">
+                      {selectedAttachments.map((file, index) => {
+                        const FileIcon = file.type.startsWith("image/") ? ImageIcon : file.type.startsWith("video/") ? Film : FileText;
+                        return (
+                          <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/60">
+                            <FileIcon className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+                            <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-700 dark:text-slate-200" title={file.name}>{file.name}</span>
+                            <span className="shrink-0 text-[10px] text-slate-400">{formatFileSize(file.size)}</span>
+                            <button type="button" aria-label={`Remover arquivo ${file.name}`} onClick={() => {
+                              const previewUrl = attachmentPreviewUrlsRef.current.get(file);
+                              if (previewUrl) {
+                                URL.revokeObjectURL(previewUrl);
+                                attachmentPreviewUrlsRef.current.delete(file);
+                                setAttachmentPreviewUrls((current) => {
+                                  const next = new Map(current);
+                                  next.delete(file);
+                                  return next;
+                                });
+                              }
+                              setSelectedAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index));
+                            }} className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white cursor-pointer">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <section aria-label="Prévia para o destinatário" className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Prévia para o destinatário</p>
+                  <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-900/60">
+                    {selectedAttachments.length > 0 || form.mensagem.trim() ? (
+                      <div className="flex justify-end">
+                        <div className="w-fit max-w-[90%] space-y-2 rounded-xl rounded-br-sm bg-[#C4D600]/20 p-2.5 text-sm text-[#051647] shadow-sm dark:bg-[#C4D600]/15 dark:text-slate-100">
+                          {campaignTemplate?.hasImage && campaignTemplate.headerImageUrl && !selectedAttachments.some((file) => ["image/jpeg", "image/png"].includes(file.type)) && (
+                            <div className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
+                              {/* eslint-disable-next-line @next/next/no-img-element -- imagem hospedada pela Meta */}
+                              <img src={campaignTemplate.headerImageUrl} alt="Imagem do cabeçalho do modelo" className="aspect-[1.91/1] w-72 max-w-full object-cover" />
+                            </div>
+                          )}
+                          {selectedAttachments.map((file, index) => {
+                            const previewUrl = attachmentPreviewUrls.get(file);
+                            return (
+                              <div key={`${file.name}-${file.lastModified}-${index}`} className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
+                                {file.type.startsWith("image/") && previewUrl ? (
+                                  <Image
+                                    src={previewUrl}
+                                    alt={file.name}
+                                    width={480}
+                                    height={320}
+                                    unoptimized
+                                    className="max-h-48 w-full object-contain"
+                                  />
+                                ) : file.type.startsWith("video/") && previewUrl ? (
+                                  <video src={previewUrl} controls className="max-h-48 w-full" aria-label={file.name}>
+                                    Seu navegador não oferece suporte à reprodução de vídeo.
+                                  </video>
+                                ) : (
+                                  <div className="flex max-w-72 items-center gap-2.5 p-3">
+                                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">
+                                      {file.type.startsWith("video/") ? <Film className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                                    </span>
+                                    <span className="min-w-0">
+                                      <span className="block truncate text-xs font-semibold" title={file.name}>{file.name}</span>
+                                      <span className="text-[10px] text-slate-500 dark:text-slate-400">Documento · {formatFileSize(file.size)}</span>
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {form.mensagem.trim() && <p className="whitespace-pre-wrap break-words">{form.mensagem.trim()}</p>}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-400 dark:bg-slate-800/80 dark:text-slate-500">
+                        A mensagem e os arquivos aparecerão aqui.
+                      </p>
+                    )}
+                  </div>
+                </section>
+                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+              </div>
+            </Step>
+            <Step title="Disparo" description="Revise e envie">
+              <div className="space-y-4">
+                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Revise e dispare</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ao disparar, o envio começa em segundo plano e você acompanha o progresso ao vivo.</p></div>
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Campanha</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "—"}</dd></div>
+                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Segmento</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{selectedAudienceSegments.join(", ") || "—"}</dd></div>
+                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Modelo / mensagem</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{campaignTemplate ? campaignTemplate.name : "Mensagem livre"}</dd></div>
+                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Mídia</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{selectedAttachments.length > 0 ? `${selectedAttachments.length} arquivo(s)` : campaignTemplate?.hasImage ? "Imagem do modelo" : "Sem mídia"}</dd></div>
+                </dl>
+                <div className="rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
+                  {!dispatchEstimate || dispatchEstimate.loading ? (
+                    <span className="inline-flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Calculando público e custo estimado...</span>
+                  ) : dispatchEstimate.error ? (
+                    <span className="text-[#9a3d12] dark:text-[#F7915E]">{dispatchEstimate.error}</span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+                      <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /><b>{int(dispatchEstimate.contacts)}</b> contato(s) com telefone</span>
+                      <span>Custo estimado: <b>{dispatchEstimate.cost === null ? "indisponível" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</b></span>
+                      <span className="w-full text-[10px] text-slate-500 dark:text-slate-400">Quem recebeu campanha nos últimos 7 dias é pulado, então o valor real tende a ser menor.</span>
+                    </div>
+                  )}
+                </div>
+                {formError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{formError}</p>}
+              </div>
+            </Step>
+          </Stepper>
         </EntityDialog>
       )}
+
+      {selectedCampaign && (
+        <EntityDialog
+          titleId="campaign-dialog-title"
+          title={selectedCampaign.nome}
+          description={selectedLocked ? "Acompanhe o envio, o funil de conversão e o status de cada contato." : "Edite e dispare quando estiver pronta."}
+          size="xl"
+          onClose={() => { setSelectedCampaign(null); clearSelectedAttachments(); setUploadedAttachments([]); setFormError(""); }}
+        >
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+              <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
+                <section aria-label="Andamento do disparo" className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${displayStyles[selectedDisplay]}`}>{selectedDisplay === "Enviando" && <RefreshCw className="h-3 w-3 animate-spin" />}{selectedDisplay}</span>
+                    {selectedJob && (selectedJob.status === "running" || selectedJob.status === "paused") && (
+                      <div className="flex items-center gap-2">
+                        {selectedJob.status === "paused" ? (
+                          <button type="button" disabled={jobBusy === selectedCampaign.id} onClick={() => void controlDispatch(selectedCampaign.id, "resume")} className={primaryButton}><Play className="h-3.5 w-3.5" />Retomar</button>
+                        ) : (
+                          <button type="button" disabled={jobBusy === selectedCampaign.id} onClick={() => void controlDispatch(selectedCampaign.id, "pause")} className={ghostButton}><Pause className="h-3.5 w-3.5" />Pausar</button>
+                        )}
+                        <button type="button" disabled={jobBusy === selectedCampaign.id} onClick={() => { if (window.confirm("Cancelar este disparo? Os contatos restantes não receberão a mensagem.")) void controlDispatch(selectedCampaign.id, "cancel"); }} className={`${ghostButton} text-red-600 dark:text-red-400`}><XCircle className="h-3.5 w-3.5" />Cancelar</button>
+                      </div>
+                    )}
+                  </div>
+                  {selectedJob ? (
+                    <div className="mt-3 space-y-1.5">
+                      <ProgressBar percent={selectedJob.total > 0 ? Math.round((selectedJob.cursor / selectedJob.total) * 100) : 0} tone={selectedJob.status === "paused" ? "paused" : "default"} />
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {int(selectedJob.cursor)} de {int(selectedJob.total)} contatos processados · {int(selectedJob.sent)} enviadas · {int(selectedJob.failed)} falhas
+                        {selectedJob.skipped > 0 && ` · ${int(selectedJob.skipped)} pulados (receberam campanha nos últimos 7 dias)`}
+                      </p>
+                      {selectedJob.status === "paused" && selectedJob.pause && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{selectedJob.pause.message}</p>}
+                      {selectedJob.errors.length > 0 && (
+                        <details className="text-[11px] text-slate-500 dark:text-slate-400">
+                          <summary className="cursor-pointer">Ver últimas falhas ({selectedJob.failed})</summary>
+                          <ul className="mt-1 list-inside list-disc space-y-0.5">{selectedJob.errors.slice(0, 5).map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul>
+                        </details>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">{selectedLocked ? "Disparo registrado." : "Esta campanha ainda não foi disparada."}</p>
+                  )}
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {[
+                      { label: "Enviados", value: selectedStats.sent, icon: Send, base: selectedStats.sent },
+                      { label: "Entregues", value: selectedStats.delivered, icon: CheckCheck, base: selectedStats.sent },
+                      { label: "Lidos", value: selectedStats.read, icon: Eye, base: selectedStats.delivered },
+                      { label: "Respostas", value: selectedStats.replied, icon: MessageCircleReply, base: selectedStats.delivered },
+                    ].map((step) => {
+                      const Icon = step.icon;
+                      return (
+                        <div key={step.label} className="rounded-lg bg-slate-50 p-2.5 dark:bg-slate-800/50">
+                          <p className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400"><Icon className="h-3 w-3" />{step.label}</p>
+                          <p className="mt-1 text-base font-bold tabular-nums text-slate-900 dark:text-white">{int(step.value)}</p>
+                          <p className="text-[10px] text-slate-400">{step.label !== "Enviados" && step.base > 0 ? `${Math.round((step.value / step.base) * 100)}%` : " "}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {selectedLocked ? (
+                  <section aria-label="Conteúdo enviado" className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">Conteúdo enviado</p>
+                    <dl className="grid gap-2 text-xs sm:grid-cols-2">
+                      <div><dt className="text-[10px] font-semibold uppercase text-slate-400">Segmento</dt><dd className="mt-0.5 text-slate-700 dark:text-slate-200">{selectedCampaign.publico || "—"}</dd></div>
+                      <div><dt className="text-[10px] font-semibold uppercase text-slate-400">Modelo</dt><dd className="mt-0.5 text-slate-700 dark:text-slate-200">{selectedCampaign.modelo ? `${selectedCampaign.modelo.name} (${selectedCampaign.modelo.language})` : "Mensagem livre"}</dd></div>
+                    </dl>
+                    <div className="flex justify-end rounded-xl bg-slate-100 p-3 dark:bg-slate-900/60">
+                      <div className="w-fit max-w-[90%] space-y-2 rounded-xl rounded-br-sm bg-[#C4D600]/20 p-2.5 text-sm text-[#051647] shadow-sm dark:bg-[#C4D600]/15 dark:text-slate-100">
+                        {(selectedCampaign.anexos ?? []).filter((file) => file.type.startsWith("image/") && file.url).slice(0, 1).map((file) => (
+                          // eslint-disable-next-line @next/next/no-img-element -- arquivo enviado pelo CRM
+                          <img key={file.url} src={file.url} alt={file.name} className="max-h-48 w-72 max-w-full rounded-lg object-cover" />
+                        ))}
+                        {!(selectedCampaign.anexos ?? []).some((file) => file.type.startsWith("image/") && file.url) && selectedCampaign.modelo?.hasImage && selectedCampaign.modelo.headerImageUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element -- imagem hospedada pela Meta
+                          <img src={selectedCampaign.modelo.headerImageUrl} alt="Imagem do cabeçalho do modelo" className="aspect-[1.91/1] w-72 max-w-full rounded-lg object-cover" />
+                        )}
+                        <p className="whitespace-pre-wrap break-words">{selectedCampaign.mensagem}</p>
+                      </div>
+                    </div>
+                    {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
+                      <ul className="space-y-0.5">
+                        {selectedCampaign.anexos.map((file, index) => (
+                          <li key={`${file.name}-${index}`} className="truncate text-[11px] text-slate-500 dark:text-slate-400" title={file.name}><Paperclip className="mr-1 inline h-3 w-3" />{file.name} · {formatFileSize(file.size)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                ) : (
+                  <section aria-label="Configuração da campanha" className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">Configuração</p>
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className={inputClass} /></label>
+                    <FormMultiSelect
+                      label="Público-alvo"
+                      selected={selectedAudienceSegments}
+                      options={segmentOptions}
+                      onChange={(segmentNames) => { setSelectedAudienceSegments(segmentNames); setFormError(""); }}
+                      placeholder="Selecione os segmentos"
+                      required
+                    />
+                    <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                    {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos da campanha</p>
+                        {selectedCampaign.anexos.map((file, index) => (
+                          <p key={`${file.name}-${index}`} className="truncate text-xs text-slate-500 dark:text-slate-400" title={file.name}>{file.name} · {formatFileSize(file.size)}</p>
+                        ))}
+                      </div>
+                    )}
+                    {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+                  </section>
+                )}
+
+                {(selectedCampaign.disparos > 0 || selectedStats.total > 0) && (
+                  <section aria-label="Custos, funil e vendas" className="space-y-2">
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">Custos, conversão e vendas no ERP</p>
+                    <CampaignMetricsPanel type="campaign" id={selectedCampaign.id} />
+                  </section>
+                )}
+              </div>
+
+              <div className="min-h-[360px] lg:min-h-0">
+                <CampaignRecipientsLog campaignId={selectedCampaign.id} live={selectedJob?.status === "running"} />
+              </div>
+            </div>
+
+            <footer className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+              <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />Atualizada em {(() => { const time = new Date(selectedCampaign.dataAtualizacao).getTime(); return Number.isNaN(time) ? selectedCampaign.dataAtualizacao : formatDateTime(selectedCampaign.dataAtualizacao); })()}</span>
+              {!selectedLocked && (
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={saveCampaign} className={ghostButton}>Salvar alterações</button>
+                  <button type="button" disabled={isDispatching} onClick={() => openDispatchConfirm([selectedCampaign.id], "single")} className={primaryButton}><Send className="h-3.5 w-3.5" />Disparar agora</button>
+                </div>
+              )}
+            </footer>
+          </div>
+        </EntityDialog>
+      )}
+
+      {bulkDetailsId && <BulkJobDetailsDialog jobId={bulkDetailsId} onClose={() => setBulkDetailsId(null)} />}
 
       {/* Barra de ações em lote */}
       {selectedCampaignIds.size > 0 && (
@@ -1191,113 +1461,63 @@ export function CampaignsView() {
           <button
             type="button"
             onClick={() => setSelectedCampaignIds(new Set())}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
           >
             <X className="h-3.5 w-3.5" />Limpar
           </button>
           <button
             type="button"
             disabled={isDispatching}
-            onClick={() => {
-              setDispatchTarget({ mode: "batch", ids: Array.from(selectedCampaignIds) });
-              setDispatchResult(null);
-              setDispatchError("");
-              setDispatchProgress(null);
-              setDispatchConfirmOpen(true);
-              void estimateDispatchCost(Array.from(selectedCampaignIds));
-            }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-[11px] font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
+            onClick={() => openDispatchConfirm(Array.from(selectedCampaignIds), "batch")}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-[11px] font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer"
           >
             <Send className="h-3.5 w-3.5" />Disparar selecionadas
           </button>
         </div>
       )}
 
-      {/* Modal de confirmação de disparo */}
+      {/* Confirmação de disparo de campanhas já salvas (rascunhos) */}
       {dispatchConfirmOpen && dispatchTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confirmar disparo de campanha"
-            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-          >
+        <EntityDialog
+          titleId="campaign-dispatch-confirm"
+          title={dispatchTarget.mode === "single" ? "Disparar campanha" : `Disparar ${dispatchTarget.ids.length} campanhas`}
+          description="O envio roda no servidor: você pode fechar a página e acompanhar depois."
+          size="sm"
+          onClose={() => { if (!isDispatching) setDispatchConfirmOpen(false); }}
+        >
+          <div className="space-y-4">
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#F7915E]/15 text-[#F7915E]">
                 <AlertTriangle className="h-5 w-5" />
               </span>
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  {dispatchTarget.mode === "single" ? "Disparar campanha" : `Disparar ${dispatchTarget.ids.length} campanhas`}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {dispatchTarget.mode === "single"
-                    ? "A campanha será enviada imediatamente para o público configurado."
-                    : "As campanhas selecionadas serão enviadas imediatamente para seus respectivos públicos."} O envio roda no servidor: você pode fechar a página e acompanhar depois.
-                </p>
-              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {dispatchTarget.mode === "single"
+                  ? "A campanha será enviada imediatamente para o público configurado."
+                  : "As campanhas selecionadas serão enviadas imediatamente para seus respectivos públicos."}
+              </p>
             </div>
-
-            {dispatchEstimate && !dispatchResult && (
+            {dispatchEstimate && (
               <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
                 {dispatchEstimate.loading
                   ? "Calculando o custo estimado do envio..."
                   : dispatchEstimate.error
                     ? `Custo estimado indisponível: ${dispatchEstimate.error}`
-                    : <><span className="font-semibold">Custo estimado do envio: {dispatchEstimate.cost === null ? "indisponível (categoria do modelo não encontrada)" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> · {dispatchEstimate.contacts.toLocaleString("pt-BR")} contato(s) com telefone. Contatos que receberam campanha nos últimos 7 dias são pulados, então o valor real tende a ser menor.</>}
+                    : <><span className="font-semibold">Custo estimado do envio: {dispatchEstimate.cost === null ? "indisponível (categoria do modelo não encontrada)" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> · {int(dispatchEstimate.contacts)} contato(s) com telefone. Contatos que receberam campanha nos últimos 7 dias são pulados, então o valor real tende a ser menor.</>}
               </p>
             )}
             {dispatchError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{dispatchError}</p>}
-            {isDispatching && dispatchProgress && (
-              <p role="status" className="text-xs text-slate-500 dark:text-slate-400">
-                Enviando mensagens: {dispatchProgress.completed} de {dispatchProgress.total} contatos processados.
-              </p>
-            )}
-            {dispatchResult && (
-              <div className={`space-y-2 rounded-lg border p-3 text-xs ${dispatchResult.failed === 0 ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-200" : "border-[#F7915E]/30 bg-[#F7915E]/10 text-[#9a3d12] dark:text-[#F7915E]"}`}>
-                <p className="font-semibold">{dispatchResult.sent} mensagem{dispatchResult.sent === 1 ? "" : "s"} enviada{dispatchResult.sent === 1 ? "" : "s"}; {dispatchResult.failed} falha{dispatchResult.failed === 1 ? "" : "s"}.</p>
-                {dispatchResult.campaigns.map((campaign) => (
-                  <p key={campaign.nome}>{campaign.nome}: {campaign.status} · {campaign.sent} enviadas · {campaign.failed} falhas</p>
-                ))}
-                {dispatchResult.errors.length > 0 && (
-                  <ul className="list-inside list-disc border-t border-current/15 pt-2">
-                    {dispatchResult.errors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
-                    {dispatchResult.failed > dispatchResult.errors.length && <li>Há outras falhas; consulte os contatos sem telefone e o estado da conexão.</li>}
-                  </ul>
-                )}
-              </div>
-            )}
-
             <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                disabled={isDispatching}
-                onClick={() => setDispatchConfirmOpen(false)}
-                className="inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
-              >
-                {dispatchResult || dispatchError ? "Fechar" : "Cancelar"}
+              <button type="button" disabled={isDispatching} onClick={() => setDispatchConfirmOpen(false)} className="inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer">
+                {dispatchError ? "Fechar" : "Cancelar"}
               </button>
-              {!dispatchResult && !dispatchError && (
-                <button
-                  type="button"
-                  disabled={isDispatching}
-                  onClick={() => void dispatchCampaigns()}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
-                >
-                  {isDispatching ? (
-                    <>
-                      <Clock3 className="h-3.5 w-3.5 animate-spin" />Disparando...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-3.5 w-3.5" />Confirmar disparo
-                    </>
-                  )}
+              {!dispatchError && (
+                <button type="button" disabled={isDispatching} onClick={() => void dispatchCampaigns()} className={primaryButton}>
+                  {isDispatching ? <><Clock3 className="h-3.5 w-3.5 animate-spin" />Disparando...</> : <><Send className="h-3.5 w-3.5" />Confirmar disparo</>}
                 </button>
               )}
             </div>
           </div>
-        </div>
+        </EntityDialog>
       )}
     </div>
   );

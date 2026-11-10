@@ -62,6 +62,8 @@ contentClassName?: string;
 footerClassName?: string;
 style?: CSSProperties;
 validateStep?: (step: number) => boolean;
+/** Botão extra exibido ao lado do botão de conclusão, apenas no último passo. */
+lastStepSecondaryAction?: ReactNode;
 }
 interface View {
 step: number;
@@ -235,6 +237,7 @@ contentClassName = '',
 footerClassName = '',
 style,
 validateStep,
+lastStepSecondaryAction,
 ...rest
 }: StepperProps) {
 const steps = Children.toArray(children).filter(isValidElement) as ReactElement<StepProps>[];
@@ -645,12 +648,13 @@ if (!event.defaultPrevented) go(current - 1);
 <HugeiconsIcon icon={ArrowLeft01Icon} size={16} strokeWidth={2} />
 <span>{backButtonText}</span>
 </button>
+{isLast && lastStepSecondaryAction && <div className="ml-auto flex items-center">{lastStepSecondaryAction}</div>}
 <button
 ref={nextBtnRef}
 type="button"
 {...nextRest}
 data-stepper="next"
-className={`${BUTTON_CLASS} ${NEXT_CLASS} ${nextClass}`.trim()}
+className={`${BUTTON_CLASS} ${NEXT_CLASS} ${isLast && lastStepSecondaryAction ? 'ml-0!' : ''} ${nextClass}`.trim()}
 tabIndex={completed ? -1 : nextRest.tabIndex}
 onClick={event => {
 onNextClick?.(event);

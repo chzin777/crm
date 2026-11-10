@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import { CheckCheck, Eye, MessageCircleReply, Send, ShoppingBag, TrendingUp } from "lucide-react";
 import { CampaignsView } from "@/app/campanhas/campaigns-view";
-import { BulkDispatchHistory } from "@/components/BulkDispatchHistory";
-import { usePermissions } from "@/hooks/usePermissions";
 
 type Overview = {
   campaigns: number;
@@ -15,8 +13,6 @@ type Overview = {
   roi: number | null;
   windowDays: number;
 };
-
-type Tab = "campanhas" | "envios";
 
 const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const int = (value: number) => value.toLocaleString("pt-BR");
@@ -57,7 +53,7 @@ function CampaignsOverview() {
         <div>
           <h2 className="text-sm font-bold text-slate-900 dark:text-white">Funil de todos os disparos</h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            Campanhas e envios em massa somados. Vendas do ERP contam quando o cliente compra até {data?.windowDays || "—"} dias depois de receber.
+            Campanhas e envios pelo pipeline somados. Vendas do ERP contam quando o cliente compra até {data?.windowDays || "—"} dias depois de receber.
           </p>
         </div>
       </div>
@@ -100,59 +96,18 @@ function CampaignsOverview() {
   );
 }
 
-/** Tela única de campanhas e disparos: criação, lotes em andamento, histórico e funil consolidado. */
+/** Tela única de campanhas: cada campanha é um envio em massa (criação, disparo, acompanhamento ao vivo e retorno em vendas). */
 export default function CampanhasPage() {
-  const { modules } = usePermissions();
-  const canCampaigns = modules?.campanhas === true;
-  const canBulk = modules?.disparos === true || canCampaigns;
-  const [tab, setTab] = useState<Tab>("campanhas");
-
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("aba") === "envios") setTab("envios");
-  }, []);
-
-  const current: Tab = !canCampaigns && modules !== null ? "envios" : tab;
-  const changeTab = (next: Tab) => {
-    setTab(next);
-    const url = new URL(window.location.href);
-    if (next === "envios") url.searchParams.set("aba", "envios");
-    else url.searchParams.delete("aba");
-    window.history.replaceState(null, "", url);
-  };
-
-  const tabs: { id: Tab; label: string; visible: boolean }[] = [
-    { id: "campanhas", label: "Campanhas", visible: canCampaigns || modules === null },
-    { id: "envios", label: "Envios em massa", visible: canBulk || modules === null },
-  ];
-
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas e disparos</h1>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Crie campanhas, acompanhe os lotes em andamento, o histórico e o retorno em vendas.</p>
-        </div>
-        <div role="tablist" aria-label="Seções" className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800/70">
-          {tabs.filter((item) => item.visible).map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={current === item.id}
-              onClick={() => changeTab(item.id)}
-              className={`h-9 rounded-lg px-4 text-sm font-semibold transition-colors cursor-pointer ${current === item.id ? "bg-white text-[#051647] shadow-xs dark:bg-[#051647] dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas</h1>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Crie e dispare envios em massa, acompanhe o progresso ao vivo e o retorno em vendas.</p>
       </div>
 
       <CampaignsOverview />
 
-      <div role="tabpanel">
-        {current === "campanhas" ? <CampaignsView /> : <BulkDispatchHistory />}
-      </div>
+      <CampaignsView />
     </div>
   );
 }

@@ -4,7 +4,7 @@ export const MODULES = [
   { key: "contatos", label: "Contatos & Clientes", href: "/contatos", group: "Vendas" },
   { key: "segmentos", label: "Segmentos", href: "/segmentos", group: "Vendas" },
   { key: "campanhas", label: "Campanhas", href: "/campanhas", group: "Marketing" },
-  { key: "disparos", label: "Envios em massa", href: "/disparos", group: "Marketing" },
+  { key: "disparos", label: "Disparos pelo pipeline", href: "/campanhas", group: "Marketing" },
   { key: "modelos", label: "Modelos WhatsApp", href: "/modelos", group: "Marketing" },
   { key: "nps", label: "Pesquisas NPS", href: "/nps", group: "Marketing" },
   { key: "lojas", label: "Lojas", href: "/lojas", group: "Gestão" },
@@ -45,7 +45,7 @@ export function resolveChatCapabilities(role: string | null | undefined, permiss
   return Object.fromEntries(CHAT_CAPABILITIES.map((capability) => [capability.key, admin || stored[capability.key] === true])) as ChatCapabilities;
 }
 
-/** /campanhas reúne campanhas e envios em massa: quem tem qualquer um dos dois módulos abre a tela. */
+/** /campanhas é a tela única de disparos: quem tem campanhas ou disparos pelo pipeline abre a tela. */
 export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAccess> | null | undefined): boolean {
   if (key === null) return true;
   if (modules?.[key] === true) return true;

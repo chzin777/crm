@@ -59,7 +59,7 @@ const MAX_DELAY_MS = Math.max(MIN_DELAY_MS, Number(process.env.BULK_SEND_MAX_DEL
 const RATE_LIMIT_CODES = new Set([130429, 131056, 80007, 4]);
 const RATE_LIMIT_BASE_MS = 5_000;
 const RATE_LIMIT_MAX_RETRIES = 5;
-// O indicador flutuante só mostra lotes concluídos nas últimas 24h; o histórico completo fica em /campanhas (aba Envios em massa).
+// O indicador flutuante só mostra lotes concluídos nas últimas 24h; o histórico completo fica na listagem unificada de /campanhas.
 const RECENT_MS = 24 * 60 * 60 * 1000;
 
 const jobKey = (id: string) => `bulk-job:${id}`;
