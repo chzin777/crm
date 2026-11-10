@@ -3,6 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { getDuplicateContactIds } from "@/lib/contact-duplicates";
 
+/**
+ * Variações em dígitos de um termo que parece telefone (só números e máscara, ao menos 4 dígitos), ou null.
+ * Tira o 55 do país e, com DDD, aceita o número com e sem o 9 inicial do celular.
+ */
+function phoneSearchDigits(term: string): string[] | null {
+  if (!/^[\d\s()+.\-]+$/.test(term)) return null;
+  let digits = term.replace(/\D/g, "");
+  if (digits.length < 4) return null;
+  if (digits.startsWith("55") && digits.length >= 12) digits = digits.slice(2);
+  const variants = new Set([digits]);
+  if (digits.length === 11 && digits[2] === "9") variants.add(digits.slice(0, 2) + digits.slice(3));
+  if (digits.length === 10) variants.add(`${digits.slice(0, 2)}9${digits.slice(2)}`);
+  return [...variants];
+}
+
 export async function GET(request: Request) {
   const user = await requireApiSession();
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
@@ -17,6 +32,52 @@ export async function GET(request: Request) {
   // unique=1: esconde cadastros que repetem o telefone de outro contato.
   const duplicateIds = url.searchParams.get("unique") === "1" ? await getDuplicateContactIds() : [];
   const uniqueFilter = duplicateIds.length > 0 ? { id: { notIn: duplicateIds } } : null;
+
+  // Busca por telefone: "(62) 98123-4567", "62981234567" e "+55 62 98123-4567" viram só dígitos (os telefones são gravados assim).
+  const phoneDigits = phoneSearchDigits(q);
+  if (phoneDigits) {
+    const where = {
+      AND: [
+        { OR: phoneDigits.map((digits) => ({ phone: { contains: digits } })) },
+        ...(phoneFilter ? [phoneFilter] : []),
+        ...(uniqueFilter ? [uniqueFilter] : []),
+      ],
+    };
+    const [contacts, total] = await Promise.all([
+      prisma.contact.findMany({
+        where,
+        select: {
+          id: true, name: true, phone: true, email: true, category: true,
+          segment: true, store: true, purchases: true, totalSpent: true,
+          lastPurchaseDate: true, birthDate: true,
+        },
+        orderBy: { name: "asc" },
+        skip,
+        take: limit,
+      }),
+      prisma.contact.count({ where }),
+    ]);
+    return NextResponse.json({
+      data: contacts.map((c) => ({
+        id: c.id,
+        nome: c.name,
+        telefone: c.phone ?? "",
+        email: c.email ?? "",
+        categoria: c.category,
+        segmento: c.segment ?? "",
+        loja: c.store ?? "",
+        compras: c.purchases,
+        totalGasto: Number(c.totalSpent),
+        ultimoContato: c.lastPurchaseDate ?? "",
+        dataNascimento: c.birthDate ?? "",
+        iniciais: c.name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase(),
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  }
 
   const rawTokens = q.split(/\s+/).filter(Boolean);
   const strictTokens = rawTokens.filter((t) => t.length >= 2);

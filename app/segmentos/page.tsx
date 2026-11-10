@@ -185,52 +185,52 @@ export default function SegmentosPage() {
   const criteriaMenuPortalRef = useRef<HTMLDivElement>(null);
   const [criteriaMenuPosition, setCriteriaMenuPosition] = useState<CSSProperties>({});
 
-  const fetchContactsPage = async (page: number, search: string, signal?: AbortSignal) => {
+  // Só a busca mais recente pode atualizar a lista: a anterior é cancelada e respostas atrasadas são ignoradas.
+  const contactsRequestRef = useRef<{ seq: number; controller: AbortController | null }>({ seq: 0, controller: null });
+  const loadContacts = async (page: number, search: string) => {
+    const tracker = contactsRequestRef.current;
+    tracker.controller?.abort();
+    const controller = new AbortController();
+    const seq = ++tracker.seq;
+    tracker.controller = controller;
     setContactsLoading(true);
     setContactsError("");
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(CONTACTS_PAGE_SIZE), unique: "1" });
       if (search.trim()) params.set("q", search.trim());
-      const response = await fetch(`/api/contacts/search?${params.toString()}`, { signal });
+      const response = await fetch(`/api/contacts/search?${params.toString()}`, { signal: controller.signal });
       const result = await response.json() as { data?: Contact[]; total?: number; totalPages?: number; error?: string };
+      if (seq !== tracker.seq) return;
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
-      return { data: result.data ?? [], total: result.total ?? 0, totalPages: result.totalPages ?? 1 };
+      setContacts(result.data ?? []);
+      setContactsTotal(result.total ?? 0);
+      setContactsTotalPages(Math.max(1, result.totalPages ?? 1));
+      setContactsPage(page);
     } catch (error: unknown) {
-      if ((error as Error).name !== "AbortError") {
-        setContactsError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
-      }
-      return null;
+      if (seq !== tracker.seq || controller.signal.aborted) return;
+      setContactsError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
     } finally {
-      setContactsLoading(false);
+      if (seq === tracker.seq) setContactsLoading(false);
     }
   };
+  const loadContactsRef = useRef(loadContacts);
+  useEffect(() => {
+    loadContactsRef.current = loadContacts;
+  });
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetchContactsPage(1, "", controller.signal).then((result) => {
-      if (result) {
-        setContacts(result.data);
-        setContactsTotal(result.total);
-        setContactsTotalPages(result.totalPages);
-        setContactsPage(1);
-      }
-    });
-    return () => controller.abort();
+    void loadContactsRef.current(1, "");
+    const tracker = contactsRequestRef.current;
+    return () => tracker.controller?.abort();
   }, []);
 
   useEffect(() => {
     if (!isContactPickerOpen) return;
     if (contactSearchDebounceRef.current) clearTimeout(contactSearchDebounceRef.current);
+    // Mostra "carregando" já ao digitar, para não piscar a lista antiga ou o estado vazio durante a espera.
+    setContactsLoading(true);
     contactSearchDebounceRef.current = setTimeout(() => {
-      const controller = new AbortController();
-      fetchContactsPage(1, contactSearchQuery, controller.signal).then((result) => {
-        if (result) {
-          setContacts(result.data);
-          setContactsTotal(result.total);
-          setContactsTotalPages(result.totalPages);
-          setContactsPage(1);
-        }
-      });
+      void loadContactsRef.current(1, contactSearchQuery);
     }, 300);
     return () => {
       if (contactSearchDebounceRef.current) clearTimeout(contactSearchDebounceRef.current);
@@ -1368,17 +1368,7 @@ export default function SegmentosPage() {
                 <button
                   type="button"
                   disabled={contactsPage <= 1 || contactsLoading}
-                  onClick={() => {
-                    const nextPage = contactsPage - 1;
-                    setContactsPage(nextPage);
-                    fetchContactsPage(nextPage, contactSearchQuery).then((result) => {
-                      if (result) {
-                        setContacts(result.data);
-                        setContactsTotal(result.total);
-                        setContactsTotalPages(result.totalPages);
-                      }
-                    });
-                  }}
+                  onClick={() => void loadContacts(contactsPage - 1, contactSearchQuery)}
                   className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
                 >
                   Anterior
@@ -1389,17 +1379,7 @@ export default function SegmentosPage() {
                 <button
                   type="button"
                   disabled={contactsPage >= contactsTotalPages || contactsLoading}
-                  onClick={() => {
-                    const nextPage = contactsPage + 1;
-                    setContactsPage(nextPage);
-                    fetchContactsPage(nextPage, contactSearchQuery).then((result) => {
-                      if (result) {
-                        setContacts(result.data);
-                        setContactsTotal(result.total);
-                        setContactsTotalPages(result.totalPages);
-                      }
-                    });
-                  }}
+                  onClick={() => void loadContacts(contactsPage + 1, contactSearchQuery)}
                   className="inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
                 >
                   Próxima
