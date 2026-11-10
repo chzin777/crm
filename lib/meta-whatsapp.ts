@@ -14,11 +14,17 @@ import { connect, type TLSSocket } from "node:tls";
 const GRAPH_API = "https://graph.facebook.com/v21.0";
 
 /**
- * Certificado que o FortiGate apresenta para *.fbsbx.com enquanto inspeciona o tráfego, sem enviar a CA.
- * Vence em 14/11/2026: depois disso o download falha até este valor ser atualizado.
+ * Certificados que o FortiGate (emissor FGT91GTK23002401) apresenta para *.fbsbx.com ao inspecionar o tráfego, sem enviar a CA.
+ * O firewall troca o certificado quando o da Meta renova; o atual vence em 18/11/2026.
+ * Novo valor sem novo deploy: META_MEDIA_CERT_FINGERPRINTS no .env (separados por vírgula). O valor a usar aparece
+ * no log "Certificado de mídia não reconhecido (...)".
  * Remover quando lookaside.fbsbx.com entrar na exceção de inspeção SSL do firewall.
  */
-const INSPECTED_MEDIA_FINGERPRINT = "39:B7:52:85:A6:CA:37:09:7F:40:CF:E6:31:6D:98:56:BA:EC:EB:CF:BB:AC:C8:74:C5:C5:E9:E3:E9:CC:9D:31";
+const INSPECTED_MEDIA_FINGERPRINTS = new Set([
+  "6B:AE:C7:95:86:61:F9:60:91:02:E9:D4:8F:D2:D6:68:01:7C:01:10:A0:15:D5:CE:06:5B:35:D8:4D:28:4C:FD",
+  "39:B7:52:85:A6:CA:37:09:7F:40:CF:E6:31:6D:98:56:BA:EC:EB:CF:BB:AC:C8:74:C5:C5:E9:E3:E9:CC:9D:31",
+  ...(process.env.META_MEDIA_CERT_FINGERPRINTS ?? "").split(",").map((value) => value.trim().toUpperCase()).filter(Boolean),
+]);
 const MEDIA_TIMEOUT_MS = 20_000;
 const CHAIN_ERRORS = new Set([
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
@@ -39,10 +45,13 @@ function pinnedMediaSocket(host: string) {
     socket.setTimeout(MEDIA_TIMEOUT_MS, () => socket.destroy(new Error("Tempo esgotado ao baixar mídia.")));
     socket.once("error", reject);
     socket.once("secureConnect", () => {
-      const { fingerprint256 } = socket.getPeerCertificate();
-      if (fingerprint256 !== INSPECTED_MEDIA_FINGERPRINT) {
+      const { fingerprint256, issuer, valid_to } = socket.getPeerCertificate();
+      if (!INSPECTED_MEDIA_FINGERPRINTS.has(fingerprint256)) {
         socket.destroy();
-        reject(new Error(`Certificado de mídia não reconhecido (${fingerprint256}).`));
+        reject(new Error(
+          `Certificado de mídia não reconhecido (${fingerprint256}; emissor ${issuer?.CN ?? "?"}; vence ${valid_to}). ` +
+          "Se o emissor for o FortiGate, adicione o valor em META_MEDIA_CERT_FINGERPRINTS.",
+        ));
         return;
       }
       socket.off("error", reject);

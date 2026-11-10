@@ -1,5 +1,7 @@
 import "server-only";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { retryInboundMedia } from "@/lib/chat/inbound";
 import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
@@ -13,6 +15,8 @@ const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
 const DISPATCH_RETENTION_DAYS = 30;
 const RESEND_WINDOW_MINUTES = 15;
+const MEDIA_RETRY_HOURS = 48;
+const MEDIA_RETRY_BATCH = 5;
 
 async function supervisors() {
   const users = await prisma.user.findMany({ where: { banned: false }, select: { id: true, role: true, roleRef: { select: { permissions: true } } } });
@@ -34,7 +38,7 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 }
 
 export async function runClock() {
-  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, errors: [] as string[] };
+  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, errors: [] as string[] };
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -177,6 +181,20 @@ export async function runClock() {
     if (!(await firstDispatch(`cleanup:${new Date(now).toISOString().slice(0, 10)}`))) return;
     const removed = await prisma.chatDispatch.deleteMany({ where: { createdAt: { lt: new Date(now - DISPATCH_RETENTION_DAYS * 24 * 60 * MINUTE) } } });
     summary.cleaned = removed.count;
+  });
+
+  // Mídia recebida que não baixou (rede, certificado do firewall): tenta de novo enquanto a Meta ainda guarda o arquivo.
+  await block("mídias pendentes", async () => {
+    const rows = await prisma.chatMessage.findMany({
+      where: { author: "customer", attachment: { equals: Prisma.DbNull }, metaMedia: { not: Prisma.DbNull }, createdAt: { gte: new Date(now - MEDIA_RETRY_HOURS * 60 * MINUTE) } },
+      orderBy: { createdAt: "desc" },
+      take: MEDIA_RETRY_BATCH,
+      select: { id: true, text: true, metaMedia: true },
+    });
+    for (const row of rows) {
+      if (!(row.metaMedia as { id?: string } | null)?.id) continue;
+      if (await retryInboundMedia(row)) summary.mediaRecovered += 1;
+    }
   });
 
   return summary;
