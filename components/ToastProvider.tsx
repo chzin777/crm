@@ -12,11 +12,21 @@ interface ToastItem {
   title: string;
   description?: string;
   dark: boolean;
+  action?: ToastAction;
+}
+
+/** Botão no aviso (ex.: Desfazer). `onExpire` roda quando o aviso some sem o clique no botão. */
+export interface ToastAction {
+  label: string;
+  onAction: () => void;
+  onExpire?: () => void;
+  duration?: number;
 }
 
 interface ToastApi {
   success: (title: string, description?: string) => void;
   error: (title: string, description?: string) => void;
+  withAction: (title: string, description: string | undefined, action: ToastAction) => void;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -25,14 +35,15 @@ let nextToastId = 0;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const push = useCallback((kind: ToastKind, title: string, description?: string) => {
+  const push = useCallback((kind: ToastKind, title: string, description?: string, action?: ToastAction) => {
     const dark = document.documentElement.classList.contains("dark");
-    setToasts((current) => [...current, { id: ++nextToastId, kind, title, description, dark }]);
+    setToasts((current) => [...current, { id: ++nextToastId, kind, title, description, dark, action }]);
   }, []);
 
   const api = useMemo<ToastApi>(() => ({
     success: (title, description) => push("success", title, description),
     error: (title, description) => push("error", title, description),
+    withAction: (title, description, action) => push("success", title, description, action),
   }), [push]);
 
   return (
@@ -53,9 +64,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 }
                 color={toast.dark ? "#ffffff" : toast.kind === "error" ? "#7f1d1d" : "#051647"}
                 fuseColor={toast.kind === "error" ? "#F7915E" : "#C4D600"}
-                duration={4000}
+                duration={toast.action?.duration ?? 4000}
                 closeButton
-                onClose={() => setToasts((current) => current.filter((item) => item.id !== toast.id))}
+                actionLabel={toast.action?.label}
+                onAction={toast.action?.onAction}
+                onClose={(reason) => {
+                  if (reason !== "action") toast.action?.onExpire?.();
+                  setToasts((current) => current.filter((item) => item.id !== toast.id));
+                }}
               />
             </div>
           ))}

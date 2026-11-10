@@ -9,7 +9,9 @@ import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
-import { DeleteConversationDialog } from "@/components/chat/DeleteConversationDialog";
+import { DeleteConversationDialog, deleteConversation, type DeleteReason } from "@/components/chat/DeleteConversationDialog";
+
+const UNDO_DELETE_MS = 7000;
 import { ContextMenu, FloatingMenu, type FloatingMenuItem } from "@/components/chat/FloatingMenu";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
@@ -49,6 +51,9 @@ function ChatWorkspace() {
   const [agentName, setAgentName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  // Conversas excluídas aguardando o prazo do Desfazer: ocultas da lista mesmo se o recarregamento as trouxer.
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  const pendingDeletes = useRef(new Map<string, DeleteReason>());
   const [queueOptions, setQueueOptions] = useState<{ id: string; name: string }[]>([]);
   const [showTransfer, setShowTransfer] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -315,13 +320,58 @@ function ChatWorkspace() {
     else setSendError("Não foi possível alterar o bloqueio.");
   };
 
-  const handleDeleted = (id: string) => {
+  /**
+   * Exclusão com prazo para desfazer: some da lista na hora e só vai ao servidor quando o aviso expira.
+   * Fechar a aba no meio do prazo conclui a exclusão (keepalive), para não ficar meio apagada.
+   */
+  const handleDeleteConfirmed = (id: string, reason: DeleteReason) => {
     setDeleteTarget(null);
-    setItems((current) => current.filter((item) => item.id !== id));
-    if (selectedId === id) select(null);
-    void loadList();
-    toast.success("Conversa excluída", "A conversa e o histórico de mensagens foram removidos.");
+    const wasOpen = selectedId === id;
+    setHiddenIds((current) => new Set(current).add(id));
+    if (wasOpen) select(null);
+    const unhide = () => setHiddenIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    const commit = async () => {
+      if (!pendingDeletes.current.delete(id)) return;
+      const error = await deleteConversation(id, reason);
+      if (error) {
+        unhide();
+        toast.error("Conversa não excluída", error);
+        return;
+      }
+      setItems((current) => current.filter((item) => item.id !== id));
+      unhide();
+      void loadList();
+    };
+    pendingDeletes.current.set(id, reason);
+    toast.withAction("Conversa excluída", "A conversa e o histórico serão removidos.", {
+      label: "Desfazer",
+      duration: UNDO_DELETE_MS,
+      onAction: () => {
+        pendingDeletes.current.delete(id);
+        unhide();
+        if (wasOpen) select(id);
+        toast.success("Exclusão cancelada");
+      },
+      onExpire: () => void commit(),
+    });
   };
+
+  // Aba fechada ou recarregada com exclusão pendente: conclui agora.
+  useEffect(() => {
+    const flush = () => {
+      for (const [id, reason] of pendingDeletes.current) void deleteConversation(id, reason);
+      pendingDeletes.current.clear();
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
 
   const open = selectedId ? detail?.id === selectedId ? detail : null : null;
 
@@ -375,7 +425,7 @@ function ChatWorkspace() {
       <div className="flex flex-1 min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-[#07194f]">
         <div className={`flex min-h-0 flex-col border-r border-slate-200 dark:border-slate-800 ${selectedId ? "hidden md:flex" : "flex"} w-full md:w-[35%] lg:w-[35%]`}>
           <ConversationList
-            items={items}
+            items={hiddenIds.size ? items.filter((item) => !hiddenIds.has(item.id)) : items}
             counts={counts}
             tab={tab}
             onTab={setTab}
@@ -493,7 +543,7 @@ function ChatWorkspace() {
         )}
 
         {deleteTarget && (
-          <DeleteConversationDialog conversation={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleDeleted} />
+          <DeleteConversationDialog conversation={deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirmed} />
         )}
 
         {showNew && (

@@ -1,16 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 
 type Props = {
   conversation: { id: string; name: string };
   onClose: () => void;
-  onDeleted: (id: string) => void;
+  /** A exclusão de fato fica com quem chama: ela só vai ao servidor depois do prazo para desfazer. */
+  onConfirm: (id: string, reason: DeleteReason) => void;
 };
 
-type DeleteReason = "outro" | "nao_resposta_campanha";
+export type DeleteReason = "outro" | "nao_resposta_campanha";
+
+/** Exclusão definitiva no servidor. `keepalive` deixa terminar mesmo se a aba for fechada. */
+export async function deleteConversation(id: string, reason: DeleteReason) {
+  const query = reason === "nao_resposta_campanha" ? "?motivo=nao_resposta_campanha" : "";
+  const response = await fetch(`/api/chat/conversations/${id}${query}`, { method: "DELETE", keepalive: true }).catch(() => null);
+  if (response?.ok) return null;
+  const data = (await response?.json().catch(() => null)) as { error?: string } | null;
+  return data?.error ?? "Não foi possível excluir a conversa.";
+}
 
 const REASONS: { value: DeleteReason; label: string; hint: string }[] = [
   { value: "outro", label: "Outro motivo", hint: "Só apaga a conversa e o histórico." },
@@ -21,24 +30,8 @@ const REASONS: { value: DeleteReason; label: string; hint: string }[] = [
   },
 ];
 
-export function DeleteConversationDialog({ conversation, onClose, onDeleted }: Props) {
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState("");
+export function DeleteConversationDialog({ conversation, onClose, onConfirm }: Props) {
   const [reason, setReason] = useState<DeleteReason>("outro");
-
-  const confirm = async () => {
-    setDeleting(true);
-    setError("");
-    const query = reason === "nao_resposta_campanha" ? "?motivo=nao_resposta_campanha" : "";
-    const response = await fetch(`/api/chat/conversations/${conversation.id}${query}`, { method: "DELETE" }).catch(() => null);
-    if (response?.ok) {
-      onDeleted(conversation.id);
-      return;
-    }
-    const data = (await response?.json().catch(() => null)) as { error?: string } | null;
-    setError(data?.error ?? "Não foi possível excluir a conversa.");
-    setDeleting(false);
-  };
 
   return (
     <EntityDialog
@@ -46,14 +39,12 @@ export function DeleteConversationDialog({ conversation, onClose, onDeleted }: P
       title="Excluir conversa"
       description={`Conversa com ${conversation.name}`}
       size="sm"
-      onClose={() => {
-        if (!deleting) onClose();
-      }}
+      onClose={onClose}
     >
       <p className="text-sm text-slate-700 dark:text-slate-200">
-        Tem certeza de que deseja excluir esta conversa e todo o histórico de mensagens? Esta ação não pode ser desfeita.
+        Tem certeza de que deseja excluir esta conversa e todo o histórico de mensagens? Você terá alguns segundos para desfazer no aviso que aparece embaixo.
       </p>
-      <fieldset className="mt-4 space-y-2" disabled={deleting}>
+      <fieldset className="mt-4 space-y-2">
         <legend className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Motivo da exclusão</legend>
         {REASONS.map((item) => (
           <label
@@ -75,14 +66,12 @@ export function DeleteConversationDialog({ conversation, onClose, onDeleted }: P
           </label>
         ))}
       </fieldset>
-      {error && <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-300">{error}</p>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
-        <button type="button" onClick={onClose} disabled={deleting} className="cursor-pointer rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/10">
+        <button type="button" onClick={onClose} className="cursor-pointer rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/10">
           Cancelar
         </button>
-        <button type="button" onClick={() => void confirm()} disabled={deleting} className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70">
-          {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {deleting ? "Excluindo..." : "Sim, excluir conversa"}
+        <button type="button" onClick={() => onConfirm(conversation.id, reason)} className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+          Sim, excluir conversa
         </button>
       </div>
     </EntityDialog>
