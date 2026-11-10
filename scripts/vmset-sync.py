@@ -4,11 +4,11 @@
 REGRA: apenas SELECT no Oracle. Nenhuma escrita na VMSET.
 
 Roda no host de produção como serviço (crm-vmset-sync.service):
-  - a cada 60 s: reconcilia os pedidos dos últimos 3 dias;
-  - a cada 30 min: reconcilia os últimos 62 dias e atualiza o resumo diário de vendas;
+  - a cada 60 s: busca só as linhas novas pelo índice único do Oracle (ITEM_MOVI_ESTOQUE_ID), consulta leve;
+  - a cada 2 h: reconcilia os últimos 62 dias (alterações e cancelamentos) e atualiza o resumo diário;
   - 1x por dia (a partir das 03h) e na primeira execução: espelho completo da tabela.
 
-Uso manual: vmset-sync.py --once DIAS | --full
+Uso manual: vmset-sync.py --once DIAS | --new | --full
 
 Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN, ORACLE_LIB_DIR, PG_CONTAINER (padrão crm-postgres).
 O Postgres é acessado pelo psql do container (credenciais do próprio container).
@@ -26,8 +26,8 @@ import time
 import oracledb
 
 PG_CONTAINER = os.environ.get("PG_CONTAINER", "crm-postgres")
-FAST_DAYS, SLOW_DAYS = 3, 62
-FAST_EVERY, SLOW_EVERY = 60, 1800
+SLOW_DAYS = 62
+FAST_EVERY, SLOW_EVERY = 60, 7200
 FULL_HOUR = 3
 
 # Colunas que identificam uma linha do Oracle (dados voláteis como idade ficam de fora).
@@ -153,14 +153,17 @@ def psql(script_head, rows, script_tail):
     return out.strip(), count
 
 
-def oracle_rows(days):
+def oracle_rows(days, after=None):
     conn = oracledb.connect(
         user=os.environ["ORACLE_USER"], password=os.environ["ORACLE_PASSWORD"], dsn=os.environ["ORACLE_DSN"],
     )
     try:
         cur = conn.cursor()
         cur.arraysize = 5000
-        if days is None:
+        if after is not None:
+            # Linhas novas: o ID do item cresce a cada inserção e tem índice único (consulta sem varrer a tabela).
+            cur.execute("SELECT * FROM tab_dados_dinamicos WHERE ITEM_MOVI_ESTOQUE_ID > :a", a=after)
+        elif days is None:
             cur.execute("SELECT * FROM tab_dados_dinamicos")
         else:
             cur.execute("SELECT * FROM tab_dados_dinamicos WHERE DATA_PEDIDO >= TRUNC(SYSDATE) - :d", d=days)
@@ -179,13 +182,13 @@ def quoted(cols):
     return ", ".join(f'"{c}"' for c in cols)
 
 
-def sync(days):
+def sync(days, after=None):
     """Espelha no CRM as linhas do Oracle (todas ou as dos últimos `days` dias). Retorna as contagens."""
     today = dt.date.today()
     raw_since = (today - dt.timedelta(days=SLOW_DAYS)).isoformat()
-    scope = "TRUE" if days is None else f"v.\"orderDate\" >= DATE '{(today - dt.timedelta(days=days)).isoformat()}'"
+    scope = "FALSE" if after is not None else "TRUE" if days is None else f"v.\"orderDate\" >= DATE '{(today - dt.timedelta(days=days)).isoformat()}'"
     ordinal = {}
-    records = (to_record(row, ordinal, raw_since) for row in oracle_rows(days))
+    records = (to_record(row, ordinal, raw_since) for row in oracle_rows(days, after))
     changed_cols = [c for c in SALE_COLS if c != "key"]
     head = f"""
 BEGIN;
@@ -262,15 +265,21 @@ def refresh(view):
     psql(f'REFRESH MATERIALIZED VIEW CONCURRENTLY "{view}";\n', None, "")
 
 
-def run(days, refresh_daily=False):
+def latest_item_id():
+    out, _ = psql('SELECT max("itemMovementId" COLLATE "C") FROM "VmsetSale";\n', None, "")
+    return out.strip() or None
+
+
+def run(days, refresh_daily=False, after=None):
     started = time.monotonic()
-    stats = sync(days)
+    stats = sync(days, after)
     if stats.get("upserted", 0) or stats.get("removed", 0):
         refresh("VmsetCustomerOrder")
     if refresh_daily:
         refresh("DailySalesSummary")
-    label = "completo" if days is None else f"{days}d"
-    log(f"sync {label}: {stats} em {time.monotonic() - started:.1f}s")
+    label = "novas" if after is not None else "completo" if days is None else f"{days}d"
+    if after is None or stats.get("read", 0):
+        log(f"sync {label}: {stats} em {time.monotonic() - started:.1f}s")
     return stats
 
 
@@ -282,17 +291,20 @@ def main():
         run(None, refresh_daily=True)
         return
     if args[:1] == ["--once"]:
-        run(int(args[1]) if len(args) > 1 else FAST_DAYS)
+        run(int(args[1]) if len(args) > 1 else SLOW_DAYS)
+        return
+    if args[:1] == ["--new"]:
+        run(None, after=latest_item_id() or "")
         return
 
+    # Ao iniciar: espelho completo só se o espelho ainda estiver vazio; senão, reconcilia os últimos dias.
+    last_full = None if latest_item_id() is None else dt.date.today()
     last_slow = 0.0
-    last_full = None
     imported_pending = False
     while True:
         cycle = time.monotonic()
         now = dt.datetime.now()
         try:
-            # Espelho completo ao iniciar o serviço e uma vez por dia a partir das 03h.
             if last_full is None or (now.hour >= FULL_HOUR and last_full != now.date()):
                 run(None, refresh_daily=True)
                 last_full, last_slow, imported_pending = now.date(), time.monotonic(), False
@@ -303,8 +315,10 @@ def main():
                 imported_pending = False
                 last_slow = time.monotonic()
             else:
-                stats = run(FAST_DAYS)
-                imported_pending = imported_pending or stats.get("imported", 0) > 0
+                after = latest_item_id()
+                if after:
+                    stats = run(None, after=after)
+                    imported_pending = imported_pending or stats.get("imported", 0) > 0
         except Exception as error:  # noqa: BLE001 - o serviço não pode parar por uma falha pontual
             log(f"erro: {error}")
         time.sleep(max(5.0, FAST_EVERY - (time.monotonic() - cycle)))
