@@ -25,7 +25,7 @@ async function ignoredReplyMessageIds() {
 
 /** Quem cita o disparo responde a ele; sem citação, vale o disparo só se ele foi o último envio ao contato. */
 async function findRepliedCampaign(contactIds: string[], receivedAt: Date, quotedId: string | undefined) {
-  const select = { id: true, campaignId: true, sentAt: true } as const;
+  const select = { id: true, campaignId: true, sentAt: true, whatsappMsgId: true } as const;
   const ignored = await ignoredReplyMessageIds();
   const quoted = quotedId ? await prisma.campaignMessage.findUnique({ where: { whatsappMsgId: quotedId }, select }) : null;
   if (quoted) return ignored.has(quoted.id) ? null : quoted;
@@ -44,6 +44,8 @@ async function findRepliedCampaign(contactIds: string[], receivedAt: Date, quote
       author: { in: ["agent", "bot"] },
       internal: false,
       createdAt: { gt: latest.sentAt, lte: receivedAt },
+      // A cópia do próprio disparo no histórico do chat (gravada ms depois do envio) não é conversa posterior.
+      ...(latest.whatsappMsgId ? { OR: [{ externalId: null }, { externalId: { not: latest.whatsappMsgId } }] } : {}),
     },
     select: { id: true },
   });
