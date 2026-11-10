@@ -103,14 +103,17 @@ export default function PermissoesPage() {
     }));
   };
 
-  const setAllForGroup = (group: string, value: boolean) => {
+  const setKeys = (keys: string[], value: boolean) => {
     if (!selectedRoleId) return;
-    const keys = MODULES.filter((m) => m.group === group).map((m) => m.key);
     setDraft((current) => ({
       ...current,
       [selectedRoleId]: { ...current[selectedRoleId], ...Object.fromEntries(keys.map((k) => [k, value])) },
     }));
   };
+  const setAllForGroup = (group: string, value: boolean) => setKeys(MODULES.filter((m) => m.group === group).map((m) => m.key), value);
+  // Global: telas e ações do Atendimento, sem exceção.
+  const setAll = (value: boolean) => setKeys([...MODULES, ...CHAT_CAPABILITIES].map((item) => item.key), value);
+  const setAllChatCapabilities = (value: boolean) => setKeys(CHAT_CAPABILITIES.map((capability) => capability.key), value);
 
   const discardChanges = () => {
     if (!selectedRole) return;
@@ -298,14 +301,14 @@ export default function PermissoesPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => MODULES.forEach((m) => { if (!selectedDraft[m.key]) toggle(m.key); })}
+                onClick={() => setAll(true)}
                 className="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold text-[#002187] hover:bg-slate-100 dark:text-[#C4D600] dark:hover:bg-slate-800"
               >
                 Marcar todas
               </button>
               <button
                 type="button"
-                onClick={() => MODULES.forEach((m) => { if (selectedDraft[m.key]) toggle(m.key); })}
+                onClick={() => setAll(false)}
                 className="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
               >
                 Desmarcar todas
@@ -381,9 +384,29 @@ export default function PermissoesPage() {
               );
             })}
             <div className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
-              <div className="mb-4 flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-[#051647] dark:text-[#C4D600]" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Ações no Atendimento</h3>
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-[#051647] dark:text-[#C4D600]" />
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Ações no Atendimento</h3>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setAllChatCapabilities(true)}
+                    disabled={CHAT_CAPABILITIES.every((c) => selectedDraft[c.key] === true)}
+                    className="cursor-pointer rounded px-2 py-1 text-[10px] font-semibold text-[#002187] hover:bg-slate-100 disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-slate-800"
+                  >
+                    Marcar todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllChatCapabilities(false)}
+                    disabled={CHAT_CAPABILITIES.every((c) => selectedDraft[c.key] !== true)}
+                    className="cursor-pointer rounded px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800"
+                  >
+                    Desmarcar
+                  </button>
+                </div>
               </div>
               <div className="space-y-3">
                 {CHAT_CAPABILITIES.map((capability) => {
