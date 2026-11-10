@@ -660,6 +660,7 @@ export function CampaignsView() {
   const buildCampaignRecipients = async (readyCampaigns: Campaign[]) => {
     const groups: Record<string, AudienceCriterion[]> = {};
     const contactGroups: Record<string, string[]> = {};
+    const contactCriteria: Record<string, AudienceCriterion[]> = {};
     const groupKeysByCampaign = new Map<string, string[]>();
     for (const campaign of readyCampaigns) {
       const campaignSegments = campaign.audienceSegmentIds?.length
@@ -673,11 +674,6 @@ export function CampaignsView() {
       for (const segment of campaignSegments as CampaignAudienceSegment[]) {
         const key = `${campaign.id}:${segment.id}`;
         keys.push(key);
-        if (segment.modoPublico === "contatos") {
-          contactGroups[key] = segment.contatosSelecionados ?? [];
-          continue;
-        }
-
         const criteria = (segment.criterios ?? []).map((name) => {
           const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
           const criterion = audienceCriteria.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
@@ -690,6 +686,12 @@ export function CampaignsView() {
         if (criteria.some((criterion) => !criterion)) {
           throw new Error(`Um critério usado no público de "${campaign.nome}" não existe mais. Revise o segmento antes de disparar.`);
         }
+        if (segment.modoPublico === "contatos") {
+          // Contatos da planilha, refinados pelos critérios do segmento (interseção) quando houver.
+          contactGroups[key] = segment.contatosSelecionados ?? [];
+          if (criteria.length > 0) contactCriteria[key] = criteria as AudienceCriterion[];
+          continue;
+        }
         groups[key] = criteria as AudienceCriterion[];
       }
       groupKeysByCampaign.set(campaign.id, keys);
@@ -698,7 +700,7 @@ export function CampaignsView() {
     const audienceResponse = await fetch("/api/segments/audience", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groups, contactGroups, includeRecipients: true }),
+      body: JSON.stringify({ groups, contactGroups, contactCriteria, includeRecipients: true }),
     });
     const audienceCt = audienceResponse.headers.get("content-type") ?? "";
     if (!audienceCt.includes("application/json")) {

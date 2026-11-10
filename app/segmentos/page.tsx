@@ -65,6 +65,18 @@ interface Segment {
   campanhas: number;
 }
 
+/** Converte nomes de critérios do segmento nas definições atuais (aceita nomes legados de loja); null se algum não existir mais. */
+function resolveCriterionNames(names: string[], options: SegmentCriterion[]): SegmentCriterion[] | null {
+  const resolved = names.map((name) => {
+    const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
+    const option = options.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
+    if (option) return option;
+    const deletedStore = /^Loja (\d+)$/i.exec(legacyName);
+    return deletedStore ? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const } : undefined;
+  });
+  return resolved.some((option) => !option) ? null : resolved as SegmentCriterion[];
+}
+
 const statusStyles: Record<SegmentStatus, string> = {
   Ativo: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
   Rascunho: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -110,6 +122,7 @@ export default function SegmentosPage() {
   const [contactSearchQuery, setContactSearchQuery] = useState("");
   const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
   const [audienceCounts, setAudienceCounts] = useState<Record<string, number>>({});
+  const [refinedCounts, setRefinedCounts] = useState<Record<string, number>>({});
   const requestedAudienceKeysRef = useRef(new Set<string>());
   const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "nome", order: "asc" });
   const handleSort = (field: string) => {
@@ -321,7 +334,7 @@ export default function SegmentosPage() {
   const audienceKey = (criterionNames: string[]) => criterionNames.join("\n");
   const countByCriteria = (criterionNames: string[]) => audienceCounts[audienceKey(criterionNames)] ?? 0;
   const segmentMemberCount = (segment: Segment) => segment.modoPublico === "contatos"
-    ? segment.contatosSelecionados.length
+    ? (segment.criterios?.length ? refinedCounts[segment.id] ?? segment.membros : segment.contatosSelecionados.length)
     : countByCriteria(segment.criterios);
 
   // Counts are computed by the server over the whole contact base, never from the paged contact list.
@@ -364,6 +377,58 @@ export default function SegmentosPage() {
       })
       .catch(() => undefined);
   }, [neededAudiencesSignature, criteriaOptionsSignature]);
+
+  // Interseção planilha × critérios: conta, no servidor, quantos contatos importados atendem aos critérios.
+  const DRAFT_REFINE_KEY = "__draft__";
+  const draftCriteria = form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean);
+  const refineRequests = [
+    ...segments
+      .filter((segment) => segment.modoPublico === "contatos" && (segment.criterios?.length ?? 0) > 0)
+      .map((segment) => ({ key: segment.id, ids: segment.contatosSelecionados, names: segment.criterios })),
+    ...((isCreateOpen || isEditingSegment) && audienceMode === "contatos" && selectedContactIds.length > 0 && draftCriteria.length > 0
+      ? [{ key: DRAFT_REFINE_KEY, ids: selectedContactIds, names: draftCriteria }]
+      : []),
+  ];
+  const refineSignature = JSON.stringify(refineRequests);
+  useEffect(() => {
+    const requests = JSON.parse(refineSignature) as { key: string; ids: string[]; names: string[] }[];
+    const options = JSON.parse(criteriaOptionsSignature) as SegmentCriterion[];
+    const contactGroups: Record<string, string[]> = {};
+    const contactCriteria: Record<string, SegmentCriterion[]> = {};
+    for (const request of requests) {
+      const resolved = resolveCriterionNames(request.names, options);
+      if (!resolved) continue;
+      contactGroups[request.key] = request.ids;
+      contactCriteria[request.key] = resolved;
+    }
+    if (Object.keys(contactGroups).length === 0) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      // Some a contagem antiga da prévia enquanto a nova é calculada.
+      setRefinedCounts((current) => {
+        const next = { ...current };
+        delete next[DRAFT_REFINE_KEY];
+        return next;
+      });
+      fetch("/api/segments/audience", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: {}, contactGroups, contactCriteria }),
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          const result = await response.json() as { counts?: Record<string, number> };
+          if (response.ok && result.counts) setRefinedCounts((current) => ({ ...current, ...result.counts }));
+        })
+        .catch(() => undefined);
+    }, 400);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [refineSignature, criteriaOptionsSignature]);
+  const draftRefinedCount = refinedCounts[DRAFT_REFINE_KEY];
+  const draftMemberCount = audienceMode === "contatos" && draftCriteria.length > 0
+    ? draftRefinedCount ?? selectedContactIds.length
+    : selectedContactIds.length;
+
   const segmentCampaignCount = (segment: Segment) =>
     campaigns.filter((campaign) => campaign.publico.split(", ").includes(segment.nome)).length;
 
@@ -392,6 +457,76 @@ export default function SegmentosPage() {
   const filteredCriteriaOptions = criteriaOptions.filter((criterion) =>
     (!criterion.inativo || selectedCriteria.includes(criterion.nome))
     && criterion.nome.toLocaleLowerCase("pt-BR").includes(normalizedCriteriaSearch));
+  const toggleDraftCriterion = (name: string) => {
+    setForm((current) => {
+      const currentCriteria = current.criterios.split("\n").map((item) => item.trim()).filter(Boolean);
+      return { ...current, criterios: (currentCriteria.includes(name) ? currentCriteria.filter((item) => item !== name) : [...currentCriteria, name]).join("\n") };
+    });
+    setFormError("");
+  };
+  // Refino da lista importada: critérios aplicados somente sobre os contatos da planilha.
+  const refineBlock = (
+    <div className="space-y-2.5 rounded-lg border border-[#002187]/15 bg-white p-3 dark:border-[#C4D600]/20 dark:bg-[#07194f]">
+      {selectedContactIds.length > 0 && (
+        <p className="rounded-md bg-[#002187]/5 px-2.5 py-1.5 text-[11px] text-[#051647] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
+          📋 Filtrando sobre os <b>{selectedContactIds.length.toLocaleString("pt-BR")} contatos</b> importados da planilha
+        </p>
+      )}
+      <div>
+        <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Refinar com critérios <span className="font-normal text-slate-400">(opcional)</span></p>
+        <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">Só entram os contatos da lista que atendem a todos os critérios. Sem critérios, a lista inteira é mantida.</p>
+      </div>
+      <select
+        value=""
+        onChange={(event) => { if (event.target.value) toggleDraftCriterion(event.target.value); }}
+        aria-label="Adicionar critério de refino"
+        className="h-9 w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:focus:border-[#C4D600]"
+      >
+        <option value="">Adicionar critério...</option>
+        {criterionKinds.map((kind) => {
+          const available = criteriaOptions.filter((criterion) => criterion.tipo === kind && !criterion.inativo && !selectedCriteria.includes(criterion.nome));
+          return available.length === 0 ? null : (
+            <optgroup key={kind} label={criterionKindLabels[kind]}>
+              {available.map((criterion) => <option key={criterion.id} value={criterion.nome}>{criterion.nome}</option>)}
+            </optgroup>
+          );
+        })}
+      </select>
+      {selectedCriteria.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5">
+          {selectedCriteria.map((criterion) => (
+            <li key={criterion}>
+              <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-[#C4D600]/20 py-1 pl-2.5 pr-1.5 text-[10px] font-semibold text-[#051647] dark:text-[#C4D600]">
+                <span className="truncate">{criterion}</span>
+                <button type="button" onClick={() => toggleDraftCriterion(criterion)} aria-label={`Remover critério ${criterion}`} title="Remover critério" className="grid h-4 w-4 shrink-0 place-items-center rounded-full hover:bg-[#C4D600]/30 cursor-pointer"><X className="h-3 w-3" /></button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {selectedCriteria.length > 0 && selectedContactIds.length > 0 && (
+        <p role="status" className="text-xs text-slate-700 dark:text-slate-200">
+          🎯 {draftRefinedCount === undefined
+            ? <span className="text-slate-400">Calculando quantos contatos atendem aos critérios...</span>
+            : <><b>{draftRefinedCount.toLocaleString("pt-BR")} de {selectedContactIds.length.toLocaleString("pt-BR")} contatos</b> atendem aos critérios selecionados</>}
+        </p>
+      )}
+      {(selectedCriteria.length > 0 || selectedContactIds.length > 0) && (
+        <div className="flex flex-wrap gap-2">
+          {selectedCriteria.length > 0 && (
+            <button type="button" onClick={() => { setForm((current) => ({ ...current, criterios: "" })); setFormError(""); }} className="inline-flex h-7 items-center rounded-md border border-slate-200 px-2 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer">
+              Limpar critérios (manter planilha)
+            </button>
+          )}
+          {selectedContactIds.length > 0 && (
+            <button type="button" onClick={() => { setSelectedContactIds([]); if (selectedCriteria.length > 0) setAudienceMode("criterios"); setFormError(""); }} className="inline-flex h-7 items-center rounded-md border border-slate-200 px-2 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer">
+              {selectedCriteria.length > 0 ? "Remover planilha (manter critérios)" : "Remover contatos da planilha"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
   const [managerSearch, setManagerSearch] = useState("");
   const [collapsedKinds, setCollapsedKinds] = useState<CriterionKind[]>(criterionKinds);
   const highlightMatch = (text: string, term: string) => {
@@ -561,9 +696,10 @@ export default function SegmentosPage() {
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       status: "Rascunho",
-      membros: audienceMode === "contatos" ? selectedContactIds.length : countByCriteria(criterios),
+      membros: audienceMode === "contatos" ? draftMemberCount : countByCriteria(criterios),
       atualizado: "Criado agora",
-      criterios: audienceMode === "criterios" ? criterios : [],
+      // No modo planilha, os critérios refinam a lista importada (interseção).
+      criterios,
       modoPublico: audienceMode,
       contatosSelecionados: audienceMode === "contatos" ? [...selectedContactIds] : [],
       objetivo: form.descricao.trim(),
@@ -618,10 +754,11 @@ export default function SegmentosPage() {
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       membros: audienceMode === "contatos"
-        ? selectedContactIds.length
+        ? draftMemberCount
         : countByCriteria(criterios),
       atualizado: "Atualizado agora",
-      criterios: audienceMode === "criterios" ? criterios : [],
+      // No modo planilha, os critérios refinam a lista importada (interseção).
+      criterios,
       modoPublico: audienceMode,
       contatosSelecionados: audienceMode === "contatos" ? [...selectedContactIds] : [],
     };
@@ -770,7 +907,7 @@ export default function SegmentosPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-200">{segmentMemberCount(segment).toLocaleString("pt-BR")}</td>
-                      <td className="px-4 py-3.5"><span className="inline-flex max-w-56 items-center gap-1.5 truncate text-xs text-slate-600 dark:text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{segment.modoPublico === "contatos" ? `${segment.contatosSelecionados.length} contatos selecionados` : segment.criterios[0] || "Sem critérios"}</span><span className="ml-1 text-[10px] text-slate-400">{segment.modoPublico === "criterios" && segment.criterios.length > 1 ? `+${segment.criterios.length - 1}` : ""}</span></td>
+                      <td className="px-4 py-3.5"><span className="inline-flex max-w-56 items-center gap-1.5 truncate text-xs text-slate-600 dark:text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{segment.modoPublico === "contatos" ? `${segment.contatosSelecionados.length} contatos selecionados${segment.criterios?.length ? ` · refinado por ${segment.criterios.length} critério${segment.criterios.length === 1 ? "" : "s"}` : ""}` : segment.criterios[0] || "Sem critérios"}</span><span className="ml-1 text-[10px] text-slate-400">{segment.modoPublico === "criterios" && segment.criterios.length > 1 ? `+${segment.criterios.length - 1}` : ""}</span></td>
                       <td className="px-4 py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[segment.status]}`}>{segment.status}</span></td>
                       <td className="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400">{segment.atualizado}</td>
                       <td className="px-4 py-3.5 text-right text-xs font-semibold text-slate-700 dark:text-slate-200">{segmentCampaignCount(segment)}</td>
@@ -1013,6 +1150,7 @@ export default function SegmentosPage() {
                               )}
                             </ul>
                           )}
+                          {refineBlock}
                         </div>
                       )}
                       {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
@@ -1027,7 +1165,7 @@ export default function SegmentosPage() {
                       <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white px-4 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
                         <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Nome</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "Não informado"}</dd></div>
                         <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Descrição</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{form.descricao || "Não informada"}</dd></div>
-                        <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Público</dt><dd className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-200">{audienceMode === "criterios" ? "Definido por critérios" : `${selectedContactIds.length} contatos selecionados`}</dd></div>
+                        <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Público</dt><dd className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-200">{audienceMode === "criterios" ? "Definido por critérios" : selectedCriteria.length > 0 ? `${draftMemberCount.toLocaleString("pt-BR")} de ${selectedContactIds.length.toLocaleString("pt-BR")} contatos da planilha (refinado por ${selectedCriteria.join(", ")})` : `${selectedContactIds.length} contatos selecionados`}</dd></div>
                         <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">{audienceMode === "criterios" ? "Critérios" : "Contatos"}</dt><dd className="mt-1 space-y-1 text-xs text-slate-700 dark:text-slate-200">{audienceMode === "criterios" ? form.criterios.split("\n").filter((criterion) => criterion.trim()).map((criterion) => <p key={criterion}>· {criterion}</p>) : selectedContactRecords.map((contact) => <p key={contact.id}>· {contact.nome}</p>)}</dd></div>
                       </dl>
                     </div>
@@ -1216,6 +1354,7 @@ export default function SegmentosPage() {
                             {selectedContactRecords.length > 4 && <li className="inline-flex items-center rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">+{selectedContactRecords.length - 4}</li>}
                           </ul>
                         )}
+                        {refineBlock}
                       </div>
                     )}
                     {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
@@ -1242,7 +1381,16 @@ export default function SegmentosPage() {
                 {selectedSegment.modoPublico === "criterios" ? (
                   <section className="mt-5"><h3 className="text-[10px] font-bold uppercase text-slate-400">Critérios do público</h3><ul className="mt-2 space-y-2">{selectedSegment.criterios.map((criterion) => <li key={criterion} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{criterion}</li>)}</ul></section>
                 ) : (
+                  <>
+                  {selectedSegment.criterios?.length > 0 && (
+                    <section className="mt-5">
+                      <h3 className="text-[10px] font-bold uppercase text-slate-400">Refinado pelos critérios</h3>
+                      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">🎯 {(refinedCounts[selectedSegment.id] ?? selectedSegment.membros).toLocaleString("pt-BR")} de {selectedSegment.contatosSelecionados.length.toLocaleString("pt-BR")} contatos da planilha atendem aos critérios.</p>
+                      <ul className="mt-2 space-y-1">{selectedSegment.criterios.map((criterion) => <li key={criterion} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{criterion}</li>)}</ul>
+                    </section>
+                  )}
                   <section className="mt-5"><h3 className="text-[10px] font-bold uppercase text-slate-400">Contatos selecionados</h3><ul className="mt-2 space-y-2">{contacts.filter((contact) => selectedSegment.contatosSelecionados.includes(contact.id)).map((contact) => <li key={contact.id} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"><span className="grid h-7 w-7 place-items-center rounded-full bg-[#C4D600]/20 text-[9px] font-bold text-[#051647] dark:text-[#C4D600]">{contact.iniciais}</span><span>{contact.nome}</span></li>)}</ul></section>
+                  </>
                 )}
                 <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs dark:border-slate-800"><span className="text-slate-500 dark:text-slate-400">Campanhas vinculadas</span><span className="font-semibold text-slate-900 dark:text-white">{segmentCampaignCount(selectedSegment)}</span></div>
               </div>
@@ -1437,6 +1585,12 @@ export default function SegmentosPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#002187] dark:text-[#C4D600]">Segmentação</p>
                 <h2 id="criteria-manager-title" className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{editingCriterionId ? "Editar critério" : "Novo critério de segmentação"}</h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Ligue os filtros que definem o público. O contato entra quando atende a todos eles.</p>
+                {(isCreateOpen || isEditingSegment) && audienceMode === "contatos" && selectedContactIds.length > 0 && (
+                  <p className="mt-2 inline-flex rounded-lg bg-[#C4D600]/20 px-3 py-1.5 text-xs text-[#051647] dark:text-[#C4D600]">
+                    📋 Filtrando sobre os&nbsp;<b>{selectedContactIds.length.toLocaleString("pt-BR")} contatos</b>&nbsp;importados da planilha
+                    {selectedCriteria.length > 0 && draftRefinedCount !== undefined && <> · 🎯&nbsp;<b>{draftRefinedCount.toLocaleString("pt-BR")} de {selectedContactIds.length.toLocaleString("pt-BR")}</b>&nbsp;atendem aos critérios</>}
+                  </p>
+                )}
               </div>
               <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} aria-label="Fechar critérios de segmentação" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer"><X className="h-5 w-5" /></button>
             </header>

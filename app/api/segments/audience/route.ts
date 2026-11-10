@@ -17,6 +17,9 @@ const bodySchema = z.object({
   groups: z.record(z.string().max(100), z.array(criterionSchema).max(30)).refine((groups) => Object.keys(groups).length <= 200),
   contactGroups: z.record(z.string().max(100), z.array(z.string().max(200)).max(100_000))
     .refine((groups) => Object.keys(groups).length <= 200).optional(),
+  // Critérios aplicados só sobre os contatos do grupo de mesma chave em contactGroups (refino da planilha).
+  contactCriteria: z.record(z.string().max(100), z.array(criterionSchema).max(30))
+    .refine((groups) => Object.keys(groups).length <= 200).optional(),
   includeRecipients: z.boolean().optional(),
 });
 
@@ -221,9 +224,11 @@ export async function GET() {
   return Response.json({ data: stores });
 }
 
-async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean): Promise<{ count: number; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
-  if (criteria.length === 0) return { count: 0, recipients: includeRecipients ? [] : undefined };
+async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean, restrictToIds?: string[]): Promise<{ count: number; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
+  if (criteria.length === 0 || (restrictToIds && restrictToIds.length === 0)) return { count: 0, recipients: includeRecipients ? [] : undefined };
   const conditions = criteria.map((criterion) => criterionCondition(criterion, stores));
+  // Interseção: os critérios filtram apenas dentro da lista importada.
+  if (restrictToIds) conditions.unshift(Prisma.sql`c.id = ANY(${restrictToIds}::text[])`);
   if (includeRecipients) {
     const rows = await prisma.$queryRaw<Array<{
       id: string;
@@ -282,7 +287,17 @@ export async function POST(request: Request) {
     }
   }
   for (const [key, contactIds] of Object.entries(parsed.data.contactGroups ?? {})) {
-    if (!parsed.data.includeRecipients) continue;
+    const refine = parsed.data.contactCriteria?.[key] ?? [];
+    if (refine.length > 0) {
+      const result = await computeGroupCount(key, refine, stores, !!parsed.data.includeRecipients, contactIds);
+      counts[key] = result.count;
+      if (parsed.data.includeRecipients && result.recipients) recipients[key] = result.recipients;
+      continue;
+    }
+    if (!parsed.data.includeRecipients) {
+      counts[key] = contactIds.length === 0 ? 0 : await prisma.contact.count({ where: { id: { in: contactIds } } });
+      continue;
+    }
     const contacts = contactIds.length === 0 ? [] : await prisma.contact.findMany({
       where: { id: { in: contactIds } },
       orderBy: { name: "asc" },
