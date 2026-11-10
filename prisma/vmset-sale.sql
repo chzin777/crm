@@ -42,3 +42,14 @@ WHERE "type" = 'Venda' AND "category" IS DISTINCT FROM 'SERVICOS'
 GROUP BY "sourceKey", "store" || '-' || "orderNumber", "orderDate";
 CREATE UNIQUE INDEX IF NOT EXISTS "VmsetCustomerOrder_key" ON "VmsetCustomerOrder" ("sourceKey", "orderKey", day);
 CREATE INDEX IF NOT EXISTS "VmsetCustomerOrder_day_idx" ON "VmsetCustomerOrder" (day);
+
+-- v1.9.3: mesma regra do BI — o período conta pela data da nota (DATA_NOTA); pedidos sem nota ainda não entram.
+CREATE MATERIALIZED VIEW IF NOT EXISTS "VmsetInvoiceOrder" AS
+SELECT "sourceKey", "store" || '-' || "orderNumber" AS "orderKey", "invoiceDate" AS day,
+  max("store") AS store, max("seller") AS seller, SUM("amount")::numeric(14, 2) AS total
+FROM "VmsetSale"
+WHERE "type" = 'Venda' AND "category" IS DISTINCT FROM 'SERVICOS'
+  AND "sourceKey" IS NOT NULL AND "invoiceDate" IS NOT NULL AND "orderNumber" IS NOT NULL
+GROUP BY "sourceKey", "store" || '-' || "orderNumber", "invoiceDate";
+CREATE UNIQUE INDEX IF NOT EXISTS "VmsetInvoiceOrder_key" ON "VmsetInvoiceOrder" ("sourceKey", "orderKey", day);
+CREATE INDEX IF NOT EXISTS "VmsetInvoiceOrder_day_idx" ON "VmsetInvoiceOrder" (day);

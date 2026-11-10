@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Whitelist de views permitidas para evitar injeção SQL
-    const allowedViews = ["DailySalesSummary", "CustomerOrderSummary", "VmsetCustomerOrder"];
+    const allowedViews = ["DailySalesSummary", "CustomerOrderSummary", "VmsetCustomerOrder", "VmsetInvoiceOrder"];
     if (!allowedViews.includes(view)) {
       return NextResponse.json({ error: "View not allowed" }, { status: 403 });
     }

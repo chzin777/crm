@@ -274,7 +274,7 @@ def run(days, refresh_daily=False, after=None):
     started = time.monotonic()
     stats = sync(days, after)
     if stats.get("upserted", 0) or stats.get("removed", 0):
-        refresh("VmsetCustomerOrder")
+        refresh("VmsetInvoiceOrder")
     if refresh_daily:
         refresh("DailySalesSummary")
     label = "novas" if after is not None else "completo" if days is None else f"{days}d"

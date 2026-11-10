@@ -89,7 +89,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
         COUNT(DISTINCT o."sourceKey") FILTER (WHERE o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date) AS "buyersCmp",
         SUM(o.total) FILTER (WHERE o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date)::text AS "revenueCmp",
         COUNT(*) FILTER (WHERE o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date) AS "ordersCmp"
-      FROM "VmsetCustomerOrder" o
+      FROM "VmsetInvoiceOrder" o
       WHERE ((o.day BETWEEN ${startDay}::date AND ${endDay}::date) OR (o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date))${orderFilter}
     `),
     prisma.$queryRaw<{ result: CustomerJson }[]>(Prisma.sql`
@@ -97,7 +97,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
         SELECT o."sourceKey" AS sk, min(o.day) AS first_day, max(o.day) AS last_p,
           max(o.day) FILTER (WHERE o.day <= ${compareEnd}::date) AS last_c,
           COUNT(*)::int AS orders, SUM(o.total) AS ltv
-        FROM "VmsetCustomerOrder" o
+        FROM "VmsetInvoiceOrder" o
         WHERE o.day <= ${endDay}::date${orderFilter}
         GROUP BY o."sourceKey"
       ),
@@ -158,12 +158,12 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
       ),
       buyers AS (
         SELECT date_trunc('month', o.day)::date AS ms, COUNT(DISTINCT o."sourceKey") AS buyers
-        FROM "VmsetCustomerOrder" o
+        FROM "VmsetInvoiceOrder" o
         WHERE o.day BETWEEN ${firstMonth}::date AND ${endDay}::date${orderFilter}
         GROUP BY 1
       )
       SELECT to_char(months.ms, 'YYYY-MM') AS m, COALESCE(buyers.buyers, 0) AS buyers,
-        (SELECT COUNT(DISTINCT o."sourceKey") FROM "VmsetCustomerOrder" o
+        (SELECT COUNT(DISTINCT o."sourceKey") FROM "VmsetInvoiceOrder" o
           WHERE o.day >= months.ms - ${inactiveDays}::int AND o.day < months.ms${orderFilter}) AS base
       FROM months LEFT JOIN buyers USING (ms)
       ORDER BY months.ms
@@ -244,7 +244,7 @@ export function getCustomerDashboardOptions() {
     const [stores, sellers] = await Promise.all([
       prisma.store.findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { number: true, name: true } }),
       prisma.$queryRaw<{ seller: string }[]>`
-        SELECT seller FROM "VmsetCustomerOrder"
+        SELECT seller FROM "VmsetInvoiceOrder"
         WHERE day >= CURRENT_DATE - 365 AND seller IS NOT NULL
         GROUP BY seller ORDER BY seller LIMIT 500
       `,
