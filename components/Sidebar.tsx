@@ -98,8 +98,8 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos"), byHref("/chat"), byHref("/filas"), byHref("/metricas-atendimento")] },
-    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
+    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/filas"), byHref("/metricas-atendimento")] },
+    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
   ]
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))
