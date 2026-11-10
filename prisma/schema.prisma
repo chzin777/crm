@@ -483,3 +483,34 @@ model ChatSettings {
   menu      Json
   updatedAt DateTime @updatedAt
 }
+
+/// Espelho das vendas do VMSet (Oracle), mantido por scripts/vmset-sync.py. Ver prisma/vmset-sale.sql.
+model VmsetSale {
+  key            String    @id
+  sourceKey      String?
+  partnerId      String?
+  customerName   String?
+  store          String?
+  seller         String?
+  orderNumber    String?
+  invoiceNumber  String?
+  orderDate      DateTime? @db.Date
+  invoiceDate    DateTime? @db.Date
+  type           String?
+  category       String?
+  subcategory    String?
+  productCode    String?
+  description    String?
+  brand          String?
+  quantity       Decimal?  @db.Decimal(14, 3)
+  amount         Decimal?  @db.Decimal(14, 2)
+  discount       Decimal?  @db.Decimal(14, 2)
+  payment        String?
+  paymentTerms   String?
+  paymentAmount  Decimal?  @db.Decimal(14, 2)
+  itemMovementId String?
+  syncedAt       DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([orderDate])
+  @@index([sourceKey])
+}

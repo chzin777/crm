@@ -247,7 +247,7 @@ export default function PainelPage() {
             <KpiCard icon={HeartPulse} tone="rose" label="Índice de insatisfação" value={formatPercent(data.kpis.dissatisfaction.value)} hint="Avaliações de atendimento com nota 1, 2 ou 3 sobre o total respondido no período." delta={<DeltaPill value={data.kpis.dissatisfaction.value} previous={data.kpis.dissatisfaction.previous} lowerIsBetter points suffix={compareLabel} />} meta={<><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{formatInt(data.kpis.dissatisfaction.detractors)}</b> notas baixas de {formatInt(data.kpis.dissatisfaction.answered)} avaliações</>}>
               <CompareBars current={data.kpis.dissatisfaction.value} previous={data.kpis.dissatisfaction.previous} tone="rose" format={formatPercent} />
             </KpiCard>
-            <KpiCard icon={Receipt} tone="sky" label="Ticket médio por cliente" value={formatMoney(data.kpis.ticket.value)} hint="Faturamento do período dividido pelos clientes que compraram." delta={<DeltaPill value={data.kpis.ticket.value} previous={data.kpis.ticket.previous} suffix={compareLabel} />} meta={<>Faturamento <b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{formatMoney(data.kpis.ticket.revenue)}</b></>}>
+            <KpiCard icon={Receipt} tone="sky" label="Ticket médio por pedido" value={formatMoney(data.kpis.ticket.value)} hint="Faturamento do período (sem serviços) dividido pela quantidade de pedidos." delta={<DeltaPill value={data.kpis.ticket.value} previous={data.kpis.ticket.previous} suffix={compareLabel} />} meta={<>Faturamento <b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{formatMoney(data.kpis.ticket.revenue)}</b></>}>
               <CompareBars current={data.kpis.ticket.value} previous={data.kpis.ticket.previous} tone="sky" format={(value) => formatMoney(value)} />
             </KpiCard>
           </div>
@@ -396,7 +396,7 @@ export default function PainelPage() {
             )}
           </section>
 
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">Vendas do ERP atualizadas a cada importação; indicadores recalculados a cada 5 minutos. Insatisfação usa a pesquisa de 1 a 5 enviada no WhatsApp ao fim do atendimento e não filtra por vendedor.</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">Vendas do ERP sincronizadas a cada minuto (itens de serviço não entram no faturamento); indicadores recalculados a cada minuto. Insatisfação usa a pesquisa de 1 a 5 enviada no WhatsApp ao fim do atendimento e não filtra por vendedor.</p>
         </div>
       )}
 

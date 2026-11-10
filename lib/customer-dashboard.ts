@@ -89,7 +89,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
         COUNT(DISTINCT o."sourceKey") FILTER (WHERE o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date) AS "buyersCmp",
         SUM(o.total) FILTER (WHERE o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date)::text AS "revenueCmp",
         COUNT(*) FILTER (WHERE o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date) AS "ordersCmp"
-      FROM "CustomerOrderSummary" o
+      FROM "VmsetCustomerOrder" o
       WHERE ((o.day BETWEEN ${startDay}::date AND ${endDay}::date) OR (o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date))${orderFilter}
     `),
     prisma.$queryRaw<{ result: CustomerJson }[]>(Prisma.sql`
@@ -97,7 +97,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
         SELECT o."sourceKey" AS sk, min(o.day) AS first_day, max(o.day) AS last_p,
           max(o.day) FILTER (WHERE o.day <= ${compareEnd}::date) AS last_c,
           COUNT(*)::int AS orders, SUM(o.total) AS ltv
-        FROM "CustomerOrderSummary" o
+        FROM "VmsetCustomerOrder" o
         WHERE o.day <= ${endDay}::date${orderFilter}
         GROUP BY o."sourceKey"
       ),
@@ -158,12 +158,12 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
       ),
       buyers AS (
         SELECT date_trunc('month', o.day)::date AS ms, COUNT(DISTINCT o."sourceKey") AS buyers
-        FROM "CustomerOrderSummary" o
+        FROM "VmsetCustomerOrder" o
         WHERE o.day BETWEEN ${firstMonth}::date AND ${endDay}::date${orderFilter}
         GROUP BY 1
       )
       SELECT to_char(months.ms, 'YYYY-MM') AS m, COALESCE(buyers.buyers, 0) AS buyers,
-        (SELECT COUNT(DISTINCT o."sourceKey") FROM "CustomerOrderSummary" o
+        (SELECT COUNT(DISTINCT o."sourceKey") FROM "VmsetCustomerOrder" o
           WHERE o.day >= months.ms - ${inactiveDays}::int AND o.day < months.ms${orderFilter}) AS base
       FROM months LEFT JOIN buyers USING (ms)
       ORDER BY months.ms
@@ -188,6 +188,8 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
   const buyersCmp = num(stats?.buyersCmp);
   const revenue = num(stats?.revenue);
   const revenueCmp = num(stats?.revenueCmp);
+  const ordersNow = num(stats?.orders);
+  const ordersCmp = num(stats?.ordersCmp);
   const answered = num(nps?.answered);
   const answeredCmp = num(nps?.answeredCmp);
 
@@ -221,7 +223,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
         answered,
         detractors: num(nps?.detractors),
       },
-      ticket: { value: buyers > 0 ? revenue / buyers : null, previous: buyersCmp > 0 ? revenueCmp / buyersCmp : null, revenue, revenuePrevious: revenueCmp },
+      ticket: { value: ordersNow > 0 ? revenue / ordersNow : null, previous: ordersCmp > 0 ? revenueCmp / ordersCmp : null, revenue, revenuePrevious: revenueCmp },
     },
     timeline,
     segments,
@@ -233,7 +235,7 @@ export type CustomerDashboard = Awaited<ReturnType<typeof loadCustomerDashboard>
 
 export function getCustomerDashboard(filters: CustomerDashboardFilters) {
   const key = ["painel", filters.preset, filters.start ?? "", filters.end ?? "", filters.compare, filters.store ?? "", filters.seller ?? "", filters.inactiveDays, brtToday()].join(":");
-  return cached(key, 300, () => loadCustomerDashboard(filters));
+  return cached(key, 60, () => loadCustomerDashboard(filters));
 }
 
 /** Lojas cadastradas e vendedores com vendas nos últimos 12 meses (para os filtros). */
@@ -242,7 +244,7 @@ export function getCustomerDashboardOptions() {
     const [stores, sellers] = await Promise.all([
       prisma.store.findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { number: true, name: true } }),
       prisma.$queryRaw<{ seller: string }[]>`
-        SELECT seller FROM "CustomerOrderSummary"
+        SELECT seller FROM "VmsetCustomerOrder"
         WHERE day >= CURRENT_DATE - 365 AND seller IS NOT NULL
         GROUP BY seller ORDER BY seller LIMIT 500
       `,
