@@ -107,30 +107,16 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   }
 
   const firstDay = recipientList.reduce<string | null>((min, recipient) => (!min || recipient.sentDay < min ? recipient.sentDay : min), null);
+  // Vendas do espelho do VMSet (uma linha por item, sem duplicidade), atualizado a cada minuto.
   const sales = owners.size === 0 || !firstDay ? [] : await prisma.$queryRaw<SaleRow[]>`
-    WITH parsed AS (
-      SELECT "sourceKey",
-        COALESCE("data"->>'NUM_PEDIDO', '') AS pedido,
-        COALESCE("data"->>'LOJA', '') AS loja,
-        NULLIF(trim(COALESCE("data"->>'DESCRICAO', '')), '') AS descricao,
-        CASE
-          WHEN "data"->>'DATA_PEDIDO' ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date("data"->>'DATA_PEDIDO', 'DD/MM/YYYY')
-          WHEN "data"->>'DATA_PEDIDO' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN to_date(left("data"->>'DATA_PEDIDO', 10), 'YYYY-MM-DD')
-        END AS dia,
-        regexp_replace(COALESCE("data"->>'VALOR_ITEM_VENDA', ''), '[^0-9,.-]', '', 'g') AS raw_amount
-      FROM "ImportedSale"
-      WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND COALESCE("data"->>'TIPO', 'Venda') = 'Venda'
-    )
-    SELECT "sourceKey", pedido, to_char(dia, 'YYYY-MM-DD') AS dia, max(loja) AS loja,
-      COUNT(*)::int AS itens, left(string_agg(DISTINCT descricao, ' · '), 180) AS resumo,
-      SUM(CASE
-        WHEN raw_amount ~ '^-?[0-9][0-9.]*,[0-9]{1,2}$' THEN replace(replace(raw_amount, '.', ''), ',', '.')::numeric
-        WHEN raw_amount ~ '^-?[0-9]+(\\.[0-9]{1,2})?$' THEN raw_amount::numeric
-        ELSE 0
-      END)::float8 AS total
-    FROM parsed
-    WHERE dia >= ${firstDay}::date AND dia <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date
-    GROUP BY "sourceKey", pedido, dia
+    SELECT "sourceKey", COALESCE("orderNumber", '') AS pedido, to_char("orderDate", 'YYYY-MM-DD') AS dia,
+      COALESCE(max("store"), '') AS loja, COUNT(*)::int AS itens,
+      left(string_agg(DISTINCT NULLIF(btrim("description"), ''), ' · '), 180) AS resumo,
+      COALESCE(SUM("amount"), 0)::float8 AS total
+    FROM "VmsetSale"
+    WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "type" = 'Venda'
+      AND "orderDate" >= ${firstDay}::date AND "orderDate" <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date
+    GROUP BY "sourceKey", "store", "orderNumber", "orderDate"
   `;
 
   const converted = new Set<string>();
@@ -148,8 +134,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   convertedSales.sort((a, b) => b.data.localeCompare(a.data) || b.valor - a.valor);
 
   const lastSale = await prisma.$queryRaw<{ last: string | null }[]>`
-    SELECT max(left("data"->>'DATA_PEDIDO', 10)) AS last FROM "ImportedSale"
-    WHERE "id" > (SELECT COALESCE(max("id"), 0) - 20000 FROM "ImportedSale") AND "data"->>'DATA_PEDIDO' ~ '^\\d{4}-\\d{2}-\\d{2}'
+    SELECT to_char(max("orderDate"), 'YYYY-MM-DD') AS last FROM "VmsetSale"
   `;
 
   const realCost = delivered * unitPrice;

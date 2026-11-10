@@ -20,10 +20,17 @@ const bodySchema = z.object({
   includeRecipients: z.boolean().optional(),
 });
 
-const LAST_PURCHASE_DATE = Prisma.sql`(CASE
-  WHEN c."lastPurchaseDate" ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$' THEN to_date(c."lastPurchaseDate", 'DD/MM/YYYY')
-  WHEN c."lastPurchaseDate" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN to_date(left(c."lastPurchaseDate", 10), 'YYYY-MM-DD')
-END)`;
+// Compras do ERP por cliente (espelho do VMSet, só vendas e sem serviços): ver prisma/vmset-sale.sql.
+const FROM_CONTACTS = Prisma.sql`FROM "Contact" c LEFT JOIN "VmsetCustomerStats" s ON s."sourceKey" = c."sourceKey"`;
+const LAST_PURCHASE_DATE = Prisma.sql`s."lastDay"`;
+const ERP_ORDERS = Prisma.sql`COALESCE(s.orders, 0)`;
+const ERP_TOTAL = Prisma.sql`COALESCE(s.total, 0)`;
+const ERP_TICKET = Prisma.sql`(s.total / NULLIF(s.orders, 0))`;
+const PHONE_DIGITS = Prisma.sql`regexp_replace(regexp_replace(COALESCE(c.phone, ''), '[^0-9]', '', 'g'), '^55(?=[0-9]{10,11}$)', '')`;
+const PIPELINE_CARDS = Prisma.sql`SELECT card->>'contactId' AS contact_id, card->>'coluna' AS stage
+  FROM "CrmWorkspaceData" w
+  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(w.value) = 'array' THEN w.value ELSE '[]'::jsonb END) card
+  WHERE w.key = 'pipeline' AND card->>'contactId' IS NOT NULL`;
 
 type StoreRecord = { id: string; name: string; neighborhoods: string[]; city: string | null; radiusKm: number; lat: number | null; lng: number | null };
 
@@ -75,10 +82,42 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
   const column = (name: string) => Prisma.raw(`c."${name}"`);
 
   switch (rule.campo) {
-    case "purchases": return numberComparison(Prisma.sql`c.purchases`, rule);
-    case "totalSpent": return numberComparison(Prisma.sql`c."totalSpent"`, rule);
+    case "purchases": return numberComparison(ERP_ORDERS, rule);
+    case "totalSpent": return numberComparison(ERP_TOTAL, rule);
+    case "avgTicket": return Prisma.sql`s.orders > 0 AND ${numberComparison(ERP_TICKET, rule)}`;
+    case "ddd": {
+      const ddd = Prisma.sql`left(${PHONE_DIGITS}, 2)`;
+      const digits = value.replace(/\D/g, "");
+      switch (rule.operador) {
+        case "eq": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND ${ddd} = ${digits}`;
+        case "neq": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND ${ddd} <> ${digits}`;
+        case "contains": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND position(${digits} in ${ddd}) > 0`;
+        case "filled": return Prisma.sql`length(${PHONE_DIGITS}) >= 10`;
+        case "empty": return Prisma.sql`length(${PHONE_DIGITS}) < 10`;
+        default: return Prisma.sql`FALSE`;
+      }
+    }
+    case "tag": {
+      const anyTag = (match: Prisma.Sql) => Prisma.sql`EXISTS (
+        SELECT 1 FROM "ChatConversation" cc CROSS JOIN LATERAL unnest(cc.tags) AS t(tag)
+        WHERE cc."contactId" = c.id AND ${match})`;
+      const tag = normalizeText(Prisma.sql`t.tag`);
+      const needle = normalizeText(Prisma.sql`${value}`);
+      switch (rule.operador) {
+        case "eq": return anyTag(Prisma.sql`${tag} = ${needle}`);
+        case "neq": return Prisma.sql`NOT ${anyTag(Prisma.sql`${tag} = ${needle}`)}`;
+        case "contains": return anyTag(Prisma.sql`position(${needle} in ${tag}) > 0`);
+        case "filled": return anyTag(Prisma.sql`TRUE`);
+        case "empty": return Prisma.sql`NOT ${anyTag(Prisma.sql`TRUE`)}`;
+        default: return Prisma.sql`FALSE`;
+      }
+    }
+    case "pipelineStage":
+      return rule.operador === "neq"
+        ? Prisma.sql`c.id NOT IN (SELECT contact_id FROM (${PIPELINE_CARDS}) p WHERE p.stage = ${value})`
+        : Prisma.sql`c.id IN (SELECT contact_id FROM (${PIPELINE_CARDS}) p WHERE p.stage = ${value})`;
     case "lastPurchase": {
-      const hasPurchase = Prisma.sql`c.purchases > 0 AND ${LAST_PURCHASE_DATE} IS NOT NULL`;
+      const hasPurchase = Prisma.sql`${LAST_PURCHASE_DATE} IS NOT NULL`;
       switch (rule.operador) {
         case "within_days": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} <= CURRENT_DATE AND ${LAST_PURCHASE_DATE} >= CURRENT_DATE - ${Math.floor(Number(value))}::int`;
         case "older_days": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} < CURRENT_DATE - ${Math.floor(Number(value))}::int`;
@@ -88,7 +127,7 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
           const [start, end] = [value, rule.valor2 ?? ""].sort();
           return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} BETWEEN ${start}::date AND ${end}::date`;
         }
-        case "empty": return Prisma.sql`(c.purchases = 0 OR ${LAST_PURCHASE_DATE} IS NULL)`;
+        case "empty": return Prisma.sql`${LAST_PURCHASE_DATE} IS NULL`;
         default: return Prisma.sql`FALSE`;
       }
     }
@@ -151,13 +190,13 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
   }
 
   const withinDays = (days: number) =>
-    Prisma.sql`c.purchases > 0 AND ${LAST_PURCHASE_DATE} <= CURRENT_DATE AND ${LAST_PURCHASE_DATE} >= CURRENT_DATE - ${days}::int`;
+    Prisma.sql`${LAST_PURCHASE_DATE} <= CURRENT_DATE AND ${LAST_PURCHASE_DATE} >= CURRENT_DATE - ${days}::int`;
   switch (criterion.id) {
     case "criteria-30d": return withinDays(30);
     case "criteria-90d": return withinDays(90);
     case "criteria-180d": return withinDays(180);
     case "criteria-inactive-180d":
-      return Prisma.sql`c.purchases > 0 AND ${LAST_PURCHASE_DATE} < CURRENT_DATE - 180`;
+      return Prisma.sql`${LAST_PURCHASE_DATE} < CURRENT_DATE - 180`;
     case "criteria-no-nps":
       return Prisma.sql`NOT EXISTS (SELECT 1 FROM "NpsResponse" n WHERE n."contactId" = c.id)`;
     case "criteria-low-nps":
@@ -189,7 +228,7 @@ async function computeGroupCount(key: string, criteria: z.infer<typeof criterion
       segment: string | null;
     }>>(Prisma.sql`
       SELECT c.id, c.name, c.phone, c.email, c."birthDate", c.segment
-      FROM "Contact" c
+      ${FROM_CONTACTS}
       WHERE ${Prisma.join(conditions, " AND ")}
       ORDER BY c.name
     `);
@@ -206,7 +245,7 @@ async function computeGroupCount(key: string, criteria: z.infer<typeof criterion
     };
   }
   const rows = await prisma.$queryRaw<Array<{ n: bigint }>>(
-    Prisma.sql`SELECT count(*) AS n FROM "Contact" c WHERE ${Prisma.join(conditions, " AND ")}`
+    Prisma.sql`SELECT count(*) AS n ${FROM_CONTACTS} WHERE ${Prisma.join(conditions, " AND ")}`
   );
   return { count: Number(rows[0]?.n ?? 0) };
 }

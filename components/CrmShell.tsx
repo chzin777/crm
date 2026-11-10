@@ -7,7 +7,7 @@ import { TabSystem } from "@/components/TabSystem";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { BulkDispatchTracker } from "@/components/BulkDispatchTracker";
 import { usePermissions } from "@/hooks/usePermissions";
-import { moduleForPath } from "@/lib/permissions";
+import { canAccessModule, moduleForPath } from "@/lib/permissions";
 
 export function CrmShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -15,7 +15,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   const { isLoading, modules } = usePermissions();
   const moduleKey = moduleForPath(pathname);
   // Enquanto modules estiver null (carregando ou falha), não bloquear — tratar como loading
-  const allowed = moduleKey === null || modules === null || modules[moduleKey] === true;
+  const allowed = modules === null || canAccessModule(moduleKey, modules);
 
   return (
     <div className="h-dvh bg-[#f5f7fb] dark:bg-[#030d29]">

@@ -1,6 +1,7 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, Plus, Trash2, Users } from "lucide-react";
 import { BirthdayDatePicker } from "@/components/BirthdayDatePicker";
 import { FormSelect } from "@/components/FormSelect";
 import {
@@ -9,8 +10,50 @@ import {
   getOperators,
   getRuleField,
   ruleFields,
+  validateRule,
   type SegmentRule,
 } from "@/lib/segment-rules";
+
+const DAY_SHORTCUTS = [30, 60, 90, 180];
+const MONEY_FIELDS = new Set(["avgTicket", "totalSpent"]);
+const PREVIEW_DELAY_MS = 500;
+
+/** Prévia ao vivo: quantos contatos da base atendem a todas as regras (calculado no servidor). */
+function useRulesPreview(rules: SegmentRule[]) {
+  const [state, setState] = useState<{ loading: boolean; count: number | null; error: string }>({ loading: false, count: null, error: "" });
+  const signature = JSON.stringify(rules);
+  useEffect(() => {
+    const current = JSON.parse(signature) as SegmentRule[];
+    if (current.length === 0 || current.some((rule) => validateRule(rule))) {
+      setState({ loading: false, count: null, error: "" });
+      return;
+    }
+    const controller = new AbortController();
+    setState((previous) => ({ ...previous, loading: true, error: "" }));
+    const timer = setTimeout(() => {
+      fetch("/api/segments/audience", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: { preview: [{ id: "preview", nome: "Prévia", tipo: "geral", regras: current }] } }),
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          const body = (await response.json().catch(() => null)) as { counts?: Record<string, number>; error?: string } | null;
+          if (!response.ok) throw new Error(body?.error ?? "Não foi possível calcular a prévia.");
+          setState({ loading: false, count: body?.counts?.preview ?? 0, error: "" });
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          setState({ loading: false, count: null, error: error instanceof Error ? error.message : "Não foi possível calcular a prévia." });
+        });
+    }, PREVIEW_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [signature]);
+  return state;
+}
 
 interface CriterionRulesEditorProps {
   rules: SegmentRule[];
@@ -38,6 +81,7 @@ export function CriterionRulesEditor({ rules, onChange }: CriterionRulesEditorPr
   };
 
   const changeOperator = (index: number, operatorId: string) => updateRule(index, { operador: operatorId, valor2: "" });
+  const preview = useRulesPreview(rules);
 
   return (
     <div className="space-y-3">
@@ -96,10 +140,25 @@ export function CriterionRulesEditor({ rules, onChange }: CriterionRulesEditorPr
                         value={rule.valor ?? ""}
                         inputMode={field.type === "text" ? "text" : "decimal"}
                         onChange={(event) => updateRule(index, { valor: event.target.value })}
-                        placeholder={field.type === "text" ? "Digite o valor" : "0"}
+                        placeholder={field.type === "text" ? (rule.campo === "ddd" ? "Ex.: 62" : "Digite o valor") : isDays ? "Dias" : MONEY_FIELDS.has(rule.campo) ? "Ex.: 2000" : "0"}
                         className={inputClass}
                       />
                     </label>
+                  )}
+                  {isDays && (
+                    <div className="flex flex-wrap gap-1" aria-label="Atalhos de dias">
+                      {DAY_SHORTCUTS.map((days) => (
+                        <button
+                          key={days}
+                          type="button"
+                          onClick={() => updateRule(index, { valor: String(days) })}
+                          aria-pressed={rule.valor === String(days)}
+                          className={`h-7 rounded-lg border px-2 text-[11px] font-semibold transition-colors cursor-pointer ${rule.valor === String(days) ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-200 text-slate-600 hover:border-[#002187] dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600]"}`}
+                        >
+                          {days === 180 ? "6 meses" : `${days} dias`}
+                        </button>
+                      ))}
+                    </div>
                   )}
                   {operator?.input === "two" && field?.type === "number" && (
                     <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -152,6 +211,18 @@ export function CriterionRulesEditor({ rules, onChange }: CriterionRulesEditorPr
           <Plus className="h-4 w-4" />Adicionar regra
         </button>
       )}
+      <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-xl border border-[#002187]/15 bg-[#002187]/5 px-3 py-2.5 text-xs text-[#051647] dark:border-[#C4D600]/25 dark:bg-[#C4D600]/10 dark:text-slate-100">
+        {preview.loading ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Users className="h-4 w-4 shrink-0" />}
+        {preview.error ? (
+          <span className="text-[#9a3d12] dark:text-[#F7915E]">{preview.error}</span>
+        ) : preview.count === null && !preview.loading ? (
+          <span className="text-slate-500 dark:text-slate-400">Preencha as regras para ver quantos contatos atendem a elas.</span>
+        ) : (
+          <span>
+            {preview.loading && preview.count === null ? "Calculando..." : <><b className="font-bold tabular-nums">{(preview.count ?? 0).toLocaleString("pt-BR")}</b> contatos atendem a todas as regras</>}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

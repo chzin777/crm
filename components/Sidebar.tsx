@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { authClient } from "@/lib/auth-client";
 import { usePermissions } from "@/hooks/usePermissions";
-import { moduleForPath } from "@/lib/permissions";
+import { canAccessModule, moduleForPath } from "@/lib/permissions";
 import {
   Kanban,
   LayoutDashboard,
@@ -21,7 +21,6 @@ import {
   Settings,
   ChevronDown,
   Megaphone,
-  Send,
   LogOut,
   User as UserIcon,
   ShieldCheck,
@@ -45,10 +44,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const { data: session } = authClient.useSession();
   const { modules } = usePermissions();
-  const canAccess = (href: string) => {
-    const key = moduleForPath(href);
-    return key === null || modules?.[key] === true;
-  };
+  const canAccess = (href: string) => canAccessModule(moduleForPath(href), modules);
 
   const userName = session?.user?.name ?? "Usuário";
   const userEmail = session?.user?.email ?? "";
@@ -90,8 +86,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Métricas de Atendimento", href: "/metricas-atendimento", icon: BarChart3 },
     { title: "Lojas", href: "/lojas", icon: Store },
-    { title: "Campanhas", href: "/campanhas", icon: Megaphone },
-    { title: "Envios em massa", href: "/disparos", icon: Send },
+    { title: "Campanhas e disparos", href: "/campanhas", icon: Megaphone },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
     { title: "Pesquisas NPS", href: "/nps", icon: Award },
     { title: "Usuários", href: "/usuarios", icon: UserCog },
@@ -104,7 +99,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
 
   const navGroups = [
     { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/contatos"), byHref("/segmentos"), byHref("/chat"), byHref("/filas"), byHref("/metricas-atendimento")] },
-    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/campanhas"), byHref("/disparos"), byHref("/modelos"), byHref("/nps")] },
+    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
   ]
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))

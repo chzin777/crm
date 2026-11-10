@@ -1,1253 +1,158 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
-import {
-  AlertTriangle,
-  ArrowUpRight,
-  Bell,
-  CheckCircle2,
-  ChevronUp,
-  ChevronsUpDown,
-  Clock3,
-  FileText,
-  Film,
-  Image as ImageIcon,
-  MessageSquare,
-  Paperclip,
-  Pause,
-  Play,
-  Plus,
-  RefreshCw,
-  Search,
-  Send,
-  Square,
-  SquareCheck,
-  X,
-} from "lucide-react";
-import { useCrmTheme } from "@/hooks/useCrmTheme";
-import { WhatsAppIcon } from "@/components/WhatsAppIcon";
-import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/CampaignTemplatePicker";
-import Stepper, { Step } from "@/components/Stepper";
-import { EntityDialog } from "@/components/EntityDialog";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { FormMultiSelect } from "@/components/FormMultiSelect";
-import { useCrmData } from "@/hooks/useCrmData";
-import { useToast } from "@/components/ToastProvider";
-import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
+import { useEffect, useState } from "react";
+import { CheckCheck, Eye, MessageCircleReply, Send, ShoppingBag, TrendingUp } from "lucide-react";
+import { CampaignsView } from "@/app/campanhas/campaigns-view";
+import { BulkDispatchHistory } from "@/components/BulkDispatchHistory";
+import { usePermissions } from "@/hooks/usePermissions";
 
-type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio";
-const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
-type CampaignFilter = "Todas" | CampaignStatus;
-
-interface CampaignAudienceSegment {
-  id: string;
-  nome: string;
-  modoPublico?: "criterios" | "contatos";
-  criterios?: string[];
-  contatosSelecionados?: string[];
-}
-
-interface AudienceCriterion {
-  id: string;
-  nome: string;
-  tipo: "geral" | "loja";
-  inativo?: boolean;
-  regras?: { campo: string; operador: string; valor?: string; valor2?: string }[];
-}
-
-interface CampaignRecipient {
-  id: string;
-  nome: string;
-  telefone: string;
-  email: string;
-  dataNascimento: string;
-  segmento: string;
-}
-
-interface CampaignDispatchResult {
-  sent: number;
-  failed: number;
-  campaigns: { nome: string; sent: number; failed: number; status: CampaignStatus }[];
-  errors: string[];
-}
-
-interface DispatchJobView {
-  campaignId: string;
-  campaignName: string;
-  status: "running" | "paused" | "completed" | "cancelled";
-  total: number;
-  cursor: number;
-  sent: number;
-  failed: number;
-  skipped: number;
-  errors: string[];
-  pause?: { kind: string; code?: number; message: string };
-}
-
-interface Campaign {
-  id: string;
-  nome: string;
-  publico: string;
-  audienceSegmentIds?: string[];
-  status: CampaignStatus;
-  disparos: number;
-  rotuloDisparos: string;
-  taxaResposta: number;
-  dataAtualizacao: string;
-  mensagem: string;
-  anexos?: { name: string; size: number; type: string; key?: string; url?: string }[];
-  modelo?: CampaignTemplate | null;
-}
-
-const messageVariables = [
-  { label: "Nome do cliente", value: "{{nome}}" },
-  { label: "E-mail", value: "{{email}}" },
-  { label: "Telefone", value: "{{telefone}}" },
-  { label: "Segmento", value: "{{segmento}}" },
-  { label: "Data de nascimento", value: "{{data_nascimento}}" },
-];
-
-const formatFileSize = (size: number) => {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+type Overview = {
+  campaigns: number;
+  funnel: { dispatched: number; delivered: number; read: number; replied: number; converted: number };
+  revenue: number;
+  orders: number;
+  cost: number;
+  roi: number | null;
+  windowDays: number;
 };
 
-const statusStyles: Record<CampaignStatus, string> = {
-  Ativa: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
-  "Pronta para envio": "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]",
-  Agendada: "bg-blue-100 text-[#002187] dark:bg-blue-950/50 dark:text-blue-300",
-  Pausada: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-  Rascunho: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
-  Enviando: "bg-[#002187]/10 text-[#002187] dark:bg-[#002187]/30 dark:text-[#C4D600]",
-  "Envio pausado": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
-  Enviada: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
-  "Envio parcial": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
-  "Falha no envio": "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
-};
+type Tab = "campanhas" | "envios";
 
-const filters: CampaignFilter[] = ["Todas", "Ativa", "Pronta para envio", "Agendada", "Pausada", "Rascunho", "Enviando", "Envio pausado", "Enviada", "Envio parcial", "Falha no envio"];
-const presetAudienceCriteria: AudienceCriterion[] = [
-  { id: "criteria-30d", nome: "Comprou nos últimos 30 dias", tipo: "geral" },
-  { id: "criteria-90d", nome: "Comprou nos últimos 90 dias", tipo: "geral" },
-  { id: "criteria-180d", nome: "Comprou nos últimos 180 dias", tipo: "geral" },
-  { id: "criteria-inactive-180d", nome: "Sem compra há mais de 180 dias", tipo: "geral" },
-  { id: "criteria-no-nps", nome: "Ainda não respondeu ao NPS", tipo: "geral" },
-  { id: "criteria-low-nps", nome: "Recebeu NPS abaixo de 7", tipo: "geral" },
-  { id: "criteria-valid-phone", nome: "Telefone válido", tipo: "geral" },
-];
+const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const int = (value: number) => value.toLocaleString("pt-BR");
+const rate = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : "—");
 
-export default function CampanhasPage() {
-  const { isDark } = useCrmTheme();
-  const toast = useToast();
-  const { data: campaigns, setData: setCampaigns, isLoading: campaignsLoading, error: campaignsError, reloadData: reloadCampaigns } = useCrmData<Campaign[]>("campaigns", []);
-  const { data: segments, isLoading: segmentsLoading } = useCrmData<CampaignAudienceSegment[]>("segments", []);
-  const { data: savedAudienceCriteria, isLoading: criteriaLoading } = useCrmData<AudienceCriterion[]>("criteria", []);
-  const segmentOptions = segments.map((segment) => segment.nome);
-  const segmentOptionSet = new Set(segmentOptions);
-  const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
-  const [storesError, setStoresError] = useState("");
-  const [dispatchError, setDispatchError] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeFilter, setActiveFilter] = useState<CampaignFilter>("Todas");
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [selectedAudienceSegments, setSelectedAudienceSegments] = useState<string[]>([]);
-  const [selectedAttachments, setSelectedAttachments] = useState<File[]>([]);
-  const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<Map<File, string>>(new Map());
-  const attachmentPreviewUrlsRef = useRef(new Map<File, string>());
-  const [form, setForm] = useState({ nome: "", publico: "", mensagem: "" });
-  const [campaignTemplate, setCampaignTemplate] = useState<CampaignTemplate | null>(null);
-  const changeCampaignTemplate = (template: CampaignTemplate | null) => {
-    setForm((current) => ({ ...current, mensagem: template ? template.body : campaignTemplate ? "" : current.mensagem }));
-    setCampaignTemplate(template);
-    setFormError("");
-  };
-  const messageInputRef = useRef<HTMLTextAreaElement>(null);
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
-  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
-  const [dispatchConfirmOpen, setDispatchConfirmOpen] = useState(false);
-  const [dispatchEstimate, setDispatchEstimate] = useState<{ loading: boolean; contacts: number; cost: number | null; error?: string } | null>(null);
-  const [dispatchTarget, setDispatchTarget] = useState<{ mode: "single" | "batch"; ids: string[] } | null>(null);
-  const [isDispatching, setIsDispatching] = useState(false);
-  const [dispatchProgress, setDispatchProgress] = useState<{ completed: number; total: number } | null>(null);
-  const [dispatchResult, setDispatchResult] = useState<CampaignDispatchResult | null>(null);
-  const [dispatchJobs, setDispatchJobs] = useState<DispatchJobView[]>([]);
-  const [jobBusy, setJobBusy] = useState<string | null>(null);
-  const jobStatusRef = useRef<Map<string, string> | null>(null);
-  const toastRef = useRef(toast);
-  useEffect(() => { toastRef.current = toast; });
-
-  const loadDispatchJobs = useCallback(async () => {
-    try {
-      const response = await fetch("/api/campaigns/dispatch", { cache: "no-store" });
-      if (!response.ok) return;
-      const { jobs } = await response.json() as { jobs: DispatchJobView[] };
-      const previous = jobStatusRef.current;
-      const next = new Map(jobs.map((job) => [job.campaignId, job.status]));
-      jobStatusRef.current = next;
-      setDispatchJobs(jobs);
-      if (!previous) return;
-      let changed = false;
-      for (const job of jobs) {
-        const before = previous.get(job.campaignId);
-        if (before === job.status || (before === undefined && job.status === "completed")) continue;
-        changed = true;
-        if (job.status === "paused" && job.pause?.kind !== "manual") toastRef.current.error(`Disparo pausado: ${job.campaignName}`, job.pause?.message ?? "O disparo foi pausado.");
-        if (job.status === "completed") toastRef.current.success(`Disparo concluído: ${job.campaignName}`, `${job.sent} enviadas, ${job.failed} falhas.`);
-      }
-      if (changed) {
-        const refreshed = await reloadCampaigns().catch(() => null);
-        if (refreshed) setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
-      }
-    } catch {
-      // A próxima consulta tenta de novo.
-    }
-  }, [reloadCampaigns]);
-
-  const hasActiveJob = dispatchJobs.some((job) => job.status === "running");
-  useEffect(() => {
-    if (campaignsLoading) return;
-    const first = window.setTimeout(() => void loadDispatchJobs(), 0);
-    const timer = window.setInterval(() => void loadDispatchJobs(), hasActiveJob ? 3000 : 15000);
-    return () => { window.clearTimeout(first); window.clearInterval(timer); };
-  }, [campaignsLoading, hasActiveJob, loadDispatchJobs]);
-
-  const controlDispatch = async (campaignId: string, action: "pause" | "resume" | "cancel") => {
-    setJobBusy(campaignId);
-    try {
-      const response = await fetch("/api/campaigns/dispatch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, campaignId }),
-      });
-      const result = await response.json().catch(() => ({})) as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Não foi possível executar a ação.");
-      await loadDispatchJobs();
-      const refreshed = await reloadCampaigns().catch(() => null);
-      if (refreshed) setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
-    } catch (error) {
-      toast.error("Ação não concluída", error instanceof Error ? error.message : "Tente novamente.");
-    } finally {
-      setJobBusy(null);
-    }
-  };
-  const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "atualizacao", order: "desc" });
-  const handleSort = (field: string) => {
-    setSortConfig((prev) => {
-      const nextOrder = prev.field === field && prev.order === "desc" ? "asc" : "desc";
-      return { field, order: nextOrder };
-    });
-  };
-  const SortIndicator = ({ field }: { field: string }) => {
-    const isActive = sortConfig.field === field;
-    if (!isActive) return <ChevronsUpDown className="h-3 w-3 text-slate-300 dark:text-slate-600" />;
-    return <ChevronUp className={`h-3 w-3 transition-transform ${sortConfig.order === "desc" ? "rotate-180" : ""} text-[#002187] dark:text-[#C4D600]`} />;
-  };
-  const sortedCampaigns = [...campaigns].sort((a, b) => {
-    const dir = sortConfig.order === "asc" ? 1 : -1;
-    switch (sortConfig.field) {
-      case "nome":
-        return dir * (a.nome ?? "").localeCompare(b.nome ?? "", "pt-BR");
-      case "publico":
-        return dir * (a.publico ?? "").localeCompare(b.publico ?? "", "pt-BR");
-      case "status":
-        return dir * (a.status ?? "").localeCompare(b.status ?? "", "pt-BR");
-      case "envios":
-        return dir * ((a.disparos ?? 0) - (b.disparos ?? 0));
-      case "respostas":
-        return dir * ((a.taxaResposta ?? 0) - (b.taxaResposta ?? 0));
-      case "atualizacao":
-        return dir * (new Date(a.dataAtualizacao ?? 0).getTime() - new Date(b.dataAtualizacao ?? 0).getTime());
-      default:
-        return 0;
-    }
-  });
+/** Funil somado de todas as campanhas e envios em massa, com o retorno em vendas do ERP. */
+function CampaignsOverview() {
+  const [data, setData] = useState<Overview | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    let active = true;
-    fetch("/api/segments/audience")
+    const controller = new AbortController();
+    fetch("/api/metrics/campaigns-overview", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
-        const result = await response.json() as { data?: { number: number; active: boolean }[]; error?: string };
-        if (!response.ok) throw new Error(result.error || "Não foi possível carregar as lojas.");
-        if (active) setStores(result.data ?? []);
+        const body = (await response.json().catch(() => null)) as { data?: Overview; error?: string } | null;
+        if (!response.ok || !body?.data) throw new Error(body?.error ?? "Não foi possível carregar o resumo.");
+        setData(body.data);
       })
-      .catch((error: unknown) => {
-        if (active) setStoresError(error instanceof Error ? error.message : "Não foi possível carregar as lojas.");
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Não foi possível carregar o resumo.");
       });
-    return () => { active = false; };
+    return () => controller.abort();
   }, []);
 
-  const clearSelectedAttachments = useCallback(() => {
-    attachmentPreviewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    attachmentPreviewUrlsRef.current.clear();
-    setAttachmentPreviewUrls(new Map());
-    setSelectedAttachments([]);
-  }, []);
-
-  const audienceCriteria: AudienceCriterion[] = [
-    ...presetAudienceCriteria.map((preset) => ({
-      ...preset,
-      inativo: savedAudienceCriteria.find((saved) => saved.id === preset.id)?.inativo === true,
-    })),
-    ...[...stores].sort((a, b) => a.number - b.number).map((store) => ({
-      id: `store-${store.number}`,
-      nome: `Loja ${store.number}`,
-      tipo: "loja" as const,
-      inativo: !store.active,
-    })),
-    ...savedAudienceCriteria.filter((criterion) =>
-      !presetAudienceCriteria.some((preset) => preset.id === criterion.id) && !criterion.id.startsWith("store-")),
-  ];
-
-  useEffect(() => () => {
-    attachmentPreviewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    attachmentPreviewUrlsRef.current.clear();
-  }, []);
-
-  useEffect(() => {
-    if (!selectedCampaign && !isCreateOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelectedCampaign(null);
-        setIsCreateOpen(false);
-        clearSelectedAttachments();
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedCampaign, isCreateOpen, clearSelectedAttachments]);
-
-  const filteredCampaigns = sortedCampaigns.filter((campaign) => {
-    const matchesSearch = `${campaign.nome} ${campaign.publico} ${campaign.status}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));
-    return matchesSearch && (activeFilter === "Todas" || campaign.status === activeFilter);
-  });
-
-  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "Ativa");
-  const scheduledCampaigns = campaigns.filter((campaign) => campaign.status === "Agendada" || campaign.status === "Pronta para envio").length;
-  const sentMessages = campaigns.reduce((total, campaign) => total + (campaign.disparos ?? 0), 0);
-
-  const metrics = [
-    { label: "Campanhas", value: campaigns.length.toString(), detail: "na biblioteca", icon: MessageSquare, color: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
-    { label: "Ativas no CRM", value: activeCampaigns.length.toString(), detail: "status cadastrado", icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
-    { label: "Envios", value: sentMessages.toLocaleString("pt-BR"), detail: "aceitos pelo WhatsApp", icon: Send, color: "bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" },
-    { label: "Respostas", value: "—", detail: "indisponível sem provedor", icon: ArrowUpRight, color: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]" },
-  ];
-
-  const createCampaign = () => {
-    const nome = form.nome.trim();
-    const publico = selectedAudienceSegments.join(", ").trim();
-    const mensagem = form.mensagem.trim();
-    if (!nome || !publico || !mensagem) {
-      setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : "Escreva a mensagem da campanha.");
-      return;
-    }
-    const campaign: Campaign = {
-      id: `camp-${Date.now()}`,
-      nome,
-      modelo: campaignTemplate,
-      publico: selectedAudienceSegments.join(", "),
-      audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
-      status: "Rascunho",
-      disparos: 0,
-      rotuloDisparos: "contatos no público",
-      taxaResposta: 0,
-      dataAtualizacao: "Criada agora",
-      mensagem,
-      anexos: uploadedAttachments.length > 0 ? uploadedAttachments : selectedAttachments.map(({ name, size, type }) => ({ name, size, type })),
-    };
-    setCampaigns((current) => [campaign, ...current]);
-    setActiveFilter("Todas");
-    setSearchTerm("");
-    setForm({ nome: "", publico: "", mensagem: "" });
-    setCampaignTemplate(null);
-    setSelectedAudienceSegments([]);
-    clearSelectedAttachments();
-    setFormError("");
-    setIsCreateOpen(false);
-    toast.success("Campanha criada", `"${campaign.nome}" foi adicionada.`);
-  };
-
-  const startEditingCampaign = (campaign: Campaign) => {
-    setSelectedCampaign(campaign);
-    clearSelectedAttachments();
-    setSelectedAudienceSegments(campaign.publico.split(", ").filter((segment) => segmentOptionSet.has(segment)));
-    setForm({ nome: campaign.nome, publico: campaign.publico, mensagem: campaign.mensagem });
-    setCampaignTemplate(campaign.modelo ?? null);
-    setFormError("");
-  };
-
-  const insertMessageVariable = (variable: string) => {
-    const textarea = messageInputRef.current;
-    const start = textarea?.selectionStart ?? form.mensagem.length;
-    const end = textarea?.selectionEnd ?? form.mensagem.length;
-    const mensagem = `${form.mensagem.slice(0, start)}${variable}${form.mensagem.slice(end)}`;
-    setForm((current) => ({ ...current, mensagem }));
-    setFormError("");
-    requestAnimationFrame(() => {
-      textarea?.focus();
-      textarea?.setSelectionRange(start + variable.length, start + variable.length);
-    });
-  };
-
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadedAttachments, setUploadedAttachments] = useState<{ name: string; size: number; type: string; key: string; url: string }[]>([]);
-
-  const addAttachments = async (files: FileList | null) => {
-    if (!files?.length) return;
-    const selectedFiles = Array.from(files);
-    const allowedFiles = selectedFiles.filter((file) =>
-      file.type.startsWith("image/") || file.type.startsWith("video/") || file.type === "application/pdf");
-    if (allowedFiles.length !== selectedFiles.length) {
-      setFormError("Adicione apenas imagens, vídeos ou arquivos PDF.");
-    } else {
-      setFormError("");
-    }
-    if (!allowedFiles.length) return;
-
-    const newPreviewUrls = new Map<File, string>();
-    allowedFiles.forEach((file) => {
-      if ((file.type.startsWith("image/") || file.type.startsWith("video/")) && !attachmentPreviewUrlsRef.current.has(file)) {
-        const url = URL.createObjectURL(file);
-        attachmentPreviewUrlsRef.current.set(file, url);
-        newPreviewUrls.set(file, url);
-      }
-    });
-    if (newPreviewUrls.size > 0) {
-      setAttachmentPreviewUrls((current) => new Map([...current, ...newPreviewUrls]));
-    }
-    setSelectedAttachments((current) => [...current, ...allowedFiles]);
-
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      allowedFiles.forEach((file) => formData.append("files", file));
-      const response = await fetch("/api/upload", { method: "POST", body: formData });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        setFormError(data.error || "Falha ao enviar arquivos.");
-        return;
-      }
-      setUploadedAttachments((current) => [...current, ...data.files]);
-    } catch {
-      setFormError("Erro de conexão ao enviar arquivos.");
-    } finally {
-      setIsUploading(false);
-      if (attachmentInputRef.current) attachmentInputRef.current.value = "";
-    }
-  };
-
-  const saveCampaign = () => {
-    if (!selectedCampaign) return;
-    const nome = form.nome.trim();
-    const publico = selectedAudienceSegments.join(", ").trim();
-    const mensagem = form.mensagem.trim();
-    if (!nome || !publico || !mensagem) {
-      setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : "Escreva a mensagem da campanha.");
-      return;
-    }
-    const updatedCampaign = {
-      ...selectedCampaign,
-      nome,
-      modelo: campaignTemplate,
-      publico,
-      audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
-      mensagem,
-      dataAtualizacao: "Atualizada agora",
-    };
-    setCampaigns((current) => current.map((campaign) => campaign.id === updatedCampaign.id ? updatedCampaign : campaign));
-    setSelectedCampaign(updatedCampaign);
-    setSelectedAudienceSegments(publico.split(", "));
-    setFormError("");
-    toast.success("Campanha atualizada", `"${nome}" foi salva.`);
-  };
-
-  const toggleCampaign = (campaignId: string) => {
-    const updateStatus = (campaign: Campaign): Campaign => {
-      if (campaign.id !== campaignId) return campaign;
-      if (isDispatchLocked(campaign.status)) return campaign;
-      if (campaign.status === "Ativa") {
-        return { ...campaign, status: "Pausada", dataAtualizacao: "Pausada agora" };
-      }
-      return { ...campaign, status: "Ativa", dataAtualizacao: "Ativada agora" };
-    };
-    setCampaigns((current) => current.map(updateStatus));
-    setSelectedCampaign((current) => current ? updateStatus(current) : current);
-    const target = campaigns.find((campaign) => campaign.id === campaignId);
-    if (target) toast.success(target.status === "Ativa" ? "Campanha pausada" : "Campanha ativada", `"${target.nome}" foi atualizada.`);
-  };
-
-  const openCreateCampaign = () => {
-    setForm({ nome: "", publico: "", mensagem: "" });
-    setCampaignTemplate(null);
-    setSelectedAudienceSegments([]);
-    clearSelectedAttachments();
-    setFormError("");
-    setIsCreateOpen(true);
-  };
-
-  /** Calcula os destinatários de cada campanha a partir dos segmentos (usado no disparo e na estimativa de custo). */
-  const buildCampaignRecipients = async (readyCampaigns: Campaign[]) => {
-    const groups: Record<string, AudienceCriterion[]> = {};
-    const contactGroups: Record<string, string[]> = {};
-    const groupKeysByCampaign = new Map<string, string[]>();
-    for (const campaign of readyCampaigns) {
-      const campaignSegments = campaign.audienceSegmentIds?.length
-        ? campaign.audienceSegmentIds.map((id) => segments.find((segment) => segment.id === id))
-        : campaign.publico.split(", ").map((name) => segments.find((segment) => segment.nome === name));
-      if (campaignSegments.length === 0 || campaignSegments.some((segment) => !segment)) {
-        throw new Error(`Não foi possível localizar todos os segmentos de "${campaign.nome}". Revise o público antes de disparar.`);
-      }
-
-      const keys: string[] = [];
-      for (const segment of campaignSegments as CampaignAudienceSegment[]) {
-        const key = `${campaign.id}:${segment.id}`;
-        keys.push(key);
-        if (segment.modoPublico === "contatos") {
-          contactGroups[key] = segment.contatosSelecionados ?? [];
-          continue;
-        }
-
-        const criteria = (segment.criterios ?? []).map((name) => {
-          const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
-          const criterion = audienceCriteria.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
-          if (criterion) return criterion;
-          const deletedStore = /^Loja (\d+)$/i.exec(legacyName);
-          return deletedStore
-            ? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const }
-            : undefined;
-        });
-        if (criteria.some((criterion) => !criterion)) {
-          throw new Error(`Um critério usado no público de "${campaign.nome}" não existe mais. Revise o segmento antes de disparar.`);
-        }
-        groups[key] = criteria as AudienceCriterion[];
-      }
-      groupKeysByCampaign.set(campaign.id, keys);
-    }
-
-    const audienceResponse = await fetch("/api/segments/audience", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groups, contactGroups, includeRecipients: true }),
-    });
-    const audienceCt = audienceResponse.headers.get("content-type") ?? "";
-    if (!audienceCt.includes("application/json")) {
-      throw new Error(`Resposta inválida da API (${audienceResponse.status}). Verifique se o servidor está rodando.`);
-    }
-    const audience = await audienceResponse.json() as {
-      recipients?: Record<string, CampaignRecipient[]>;
-      error?: string;
-    };
-    if (!audienceResponse.ok) throw new Error(audience.error || "Não foi possível calcular o público da campanha.");
-    if (!audience.recipients) throw new Error("O servidor não retornou os contatos do público.");
-
-    const recipientsByCampaign = new Map<string, CampaignRecipient[]>();
-    for (const campaign of readyCampaigns) {
-      const recipients = new Map<string, CampaignRecipient>();
-      for (const key of groupKeysByCampaign.get(campaign.id) ?? []) {
-        for (const recipient of audience.recipients[key] ?? []) recipients.set(recipient.id, recipient);
-      }
-      if (recipients.size === 0) throw new Error(`O público de "${campaign.nome}" não contém contatos para envio.`);
-      recipientsByCampaign.set(campaign.id, [...recipients.values()]);
-    }
-    return recipientsByCampaign;
-  };
-
-  // Custo estimado mostrado na confirmação do disparo: contatos com telefone × preço da categoria do modelo.
-  const estimateDispatchCost = async (ids: string[]) => {
-    setDispatchEstimate({ loading: true, contacts: 0, cost: null });
-    try {
-      const readyCampaigns = ids.map((id) => campaigns.find((campaign) => campaign.id === id)).filter((campaign): campaign is Campaign => Boolean(campaign));
-      const [recipientsByCampaign, pricingBody, templatesBody] = await Promise.all([
-        buildCampaignRecipients(readyCampaigns),
-        fetch("/api/metrics/pricing", { cache: "no-store" }).then((response) => response.json()) as Promise<{ data?: { marketing: number; utility: number; authentication: number } }>,
-        fetch("/api/whatsapp/templates", { cache: "no-store" }).then((response) => response.json()).catch(() => ({})) as Promise<{ data?: { name: string; language: string; category?: string }[] }>,
-      ]);
-      const pricing = pricingBody.data;
-      let contacts = 0;
-      let cost: number | null = 0;
-      for (const campaign of readyCampaigns) {
-        const withPhone = (recipientsByCampaign.get(campaign.id) ?? []).filter((recipient) => recipient.telefone.replace(/\D/g, "").length >= 10).length;
-        contacts += withPhone;
-        if (!campaign.modelo) continue;
-        const category = (templatesBody.data ?? []).find((item) => item.name === campaign.modelo?.name && item.language === campaign.modelo?.language)?.category?.toUpperCase();
-        const unit = !pricing ? null : category === "MARKETING" ? pricing.marketing : category === "UTILITY" ? pricing.utility : category === "AUTHENTICATION" ? pricing.authentication : null;
-        cost = unit === null || cost === null ? null : cost + withPhone * unit;
-      }
-      setDispatchEstimate({ loading: false, contacts, cost });
-    } catch (error) {
-      setDispatchEstimate({ loading: false, contacts: 0, cost: null, error: error instanceof Error ? error.message : "Não foi possível estimar o custo." });
-    }
-  };
-
-  const dispatchCampaigns = async () => {
-    if (!dispatchTarget || isDispatching) return;
-    setIsDispatching(true);
-    setDispatchError("");
-    setDispatchResult(null);
-    setDispatchProgress(null);
-    try {
-      if (campaignsLoading || segmentsLoading || criteriaLoading) {
-        throw new Error("Aguarde o carregamento das campanhas e dos públicos antes de disparar.");
-      }
-      if (storesError) throw new Error(`Não foi possível carregar as lojas usadas nos públicos: ${storesError}`);
-
-      const currentCampaigns = campaigns;
-      const targetCampaigns = dispatchTarget.ids.map((id) => currentCampaigns.find((campaign) => campaign.id === id));
-      if (targetCampaigns.some((campaign) => !campaign)) throw new Error("Uma das campanhas selecionadas não foi encontrada. Atualize a página e tente novamente.");
-      const readyCampaigns = targetCampaigns as Campaign[];
-      const blocked = readyCampaigns.find((campaign) => isDispatchLocked(campaign.status));
-      if (blocked) throw new Error(`"${blocked.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`);
-
-      const connectionResponse = await fetch("/api/whatsapp/connection", { cache: "no-store" });
-      const connectionCt = connectionResponse.headers.get("content-type") ?? "";
-      if (!connectionCt.includes("application/json")) {
-        throw new Error(`Resposta inválida da API (${connectionResponse.status}). Verifique se o servidor está rodando.`);
-      }
-      const connection = await connectionResponse.json() as { state?: string; error?: string };
-      if (!connectionResponse.ok) throw new Error(connection.error || "Não foi possível verificar a conexão do WhatsApp.");
-      if (connection.state !== "open") throw new Error("WhatsApp desconectado. Conecte a conta em Configurações antes de disparar a campanha.");
-
-      const recipientsByCampaign = await buildCampaignRecipients(readyCampaigns);
-
-      const started: string[] = [];
-      try {
-        for (const campaign of readyCampaigns) {
-          const startResponse = await fetch("/api/campaigns/dispatch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients: recipientsByCampaign.get(campaign.id) ?? [] }),
-          });
-          const startResult = await startResponse.json().catch(() => ({})) as { error?: string };
-          if (!startResponse.ok) throw new Error(startResult.error || `Não foi possível iniciar o disparo de "${campaign.nome}".`);
-          started.push(campaign.nome);
-        }
-      } finally {
-        // O servidor altera o status das campanhas; recarrega para não salvar uma versão antiga.
-        const refreshed = await reloadCampaigns().catch(() => null);
-        if (refreshed) setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
-      }
-
-      setDispatchConfirmOpen(false);
-      setDispatchResult(null);
-      toast.success(
-        started.length === 1 ? "Disparo iniciado" : "Disparos iniciados",
-        "O envio continua em segundo plano no servidor. Você pode fechar esta página; o andamento aparece na lista de campanhas.",
-      );
-      if (dispatchTarget.mode === "batch") setSelectedCampaignIds(new Set());
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Não foi possível disparar a campanha.";
-      setDispatchError(message);
-      toast.error("Disparo não concluído", message);
-    } finally {
-      setIsDispatching(false);
-    }
-  };
-
-  if (campaignsLoading) {
-    return <LoadingSpinner fullScreen label="Carregando campanhas..." size={96} />;
-  }
+  const steps = data
+    ? [
+        { label: "Enviados", value: data.funnel.dispatched, hint: `${int(data.campaigns)} disparos`, icon: Send },
+        { label: "Entregues", value: data.funnel.delivered, hint: rate(data.funnel.delivered, data.funnel.dispatched), icon: CheckCheck },
+        { label: "Lidos", value: data.funnel.read, hint: rate(data.funnel.read, data.funnel.delivered), icon: Eye },
+        { label: "Responderam", value: data.funnel.replied, hint: rate(data.funnel.replied, data.funnel.delivered), icon: MessageCircleReply },
+      ]
+    : [];
+  const top = Math.max(1, data?.funnel.dispatched ?? 1);
 
   return (
-    <div>
-      <div>
-
-        <main className="space-y-6 px-6 pb-10 pt-8 sm:px-8">
-          {campaignsError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{campaignsError}</p>}
-          <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
-            Campanhas e status são salvos no banco. Os disparos usam o WhatsApp conectado; o rastreamento de respostas ainda não está disponível.
+    <section aria-label="Funil consolidado" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">Funil de todos os disparos</h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Campanhas e envios em massa somados. Vendas do ERP contam quando o cliente compra até {data?.windowDays || "—"} dias depois de receber.
           </p>
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas</h1>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Crie e organize campanhas segmentadas para relacionamento e conversão.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button type="button" onClick={() => void reloadCampaigns()} disabled={campaignsLoading} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
-                <RefreshCw className={`h-4 w-4 ${campaignsLoading ? "animate-spin" : ""}`} />
-                Atualizar
-              </button>
-              <button type="button" onClick={openCreateCampaign} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
-                <Plus className="h-4 w-4" />
-                Nova campanha
-              </button>
-            </div>
-                      </div>
+        </div>
+      </div>
+      {error ? (
+        <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>
+      ) : !data ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-busy="true">
+          {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-20 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800/60" />)}
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          {steps.map((step) => {
+            const Icon = step.icon;
+            return (
+              <article key={step.label} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400"><Icon className="h-3.5 w-3.5" />{step.label}</p>
+                <p className="mt-1.5 text-xl font-bold tabular-nums text-slate-900 dark:text-white">{int(step.value)}</p>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                  <div className="h-full rounded-full bg-[#002187] dark:bg-[#C4D600]" style={{ width: `${Math.round((step.value / top) * 100)}%` }} />
+                </div>
+                <p className="mt-1 text-[10px] text-slate-400">{step.hint}</p>
+              </article>
+            );
+          })}
+          <article className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"><ShoppingBag className="h-3.5 w-3.5" />Vendas no ERP</p>
+            <p className="mt-1.5 text-xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">{brl(data.revenue)}</p>
+            <p className="mt-1 text-[10px] text-emerald-700/80 dark:text-emerald-300/80">{int(data.funnel.converted)} clientes · {int(data.orders)} pedidos</p>
+          </article>
+          <article className="rounded-xl bg-[#C4D600]/15 p-3 dark:bg-[#C4D600]/10">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#051647] dark:text-[#C4D600]"><TrendingUp className="h-3.5 w-3.5" />ROI</p>
+            <p className="mt-1.5 text-xl font-bold tabular-nums text-[#051647] dark:text-white">
+              {data.roi === null ? "—" : `${(data.roi * 100).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%`}
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Custo Meta {data.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+          </article>
+        </div>
+      )}
+    </section>
+  );
+}
 
-          <section aria-label="Resumo das campanhas" className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-            {metrics.map((metric) => {
-              const Icon = metric.icon;
-              return (
-                <article key={metric.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{metric.label}</p>
-                      <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{metric.value}</p>
-                      <p className="mt-1 text-[11px] text-slate-400">{metric.detail}</p>
-                    </div>
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${metric.color}`}><Icon className="h-4 w-4" /></span>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
+/** Tela única de campanhas e disparos: criação, lotes em andamento, histórico e funil consolidado. */
+export default function CampanhasPage() {
+  const { modules } = usePermissions();
+  const canCampaigns = modules?.campanhas === true;
+  const canBulk = modules?.disparos === true || canCampaigns;
+  const [tab, setTab] = useState<Tab>("campanhas");
 
-          {dispatchJobs.filter((job) => job.status === "running" || job.status === "paused").length > 0 && (
-            <section aria-label="Envios em andamento" className="space-y-3">
-              {dispatchJobs.filter((job) => job.status === "running" || job.status === "paused").map((job) => {
-                const percent = job.total > 0 ? Math.round((job.cursor / job.total) * 100) : 0;
-                const paused = job.status === "paused";
-                const busy = jobBusy === job.campaignId;
-                return (
-                  <article key={job.campaignId} className={`rounded-xl border p-4 shadow-xs ${paused ? "border-[#F7915E]/50 bg-[#F7915E]/10" : "border-slate-200 bg-white dark:border-slate-800 dark:bg-[#07194f]"}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{job.campaignName}</p>
-                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                          {paused ? "Envio pausado" : "Enviando em segundo plano"} · {job.cursor} de {job.total} contatos · {job.sent} enviadas · {job.failed} falhas
-                          {job.skipped > 0 && ` · ${job.skipped} pulados (receberam campanha nos últimos 7 dias)`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {paused ? (
-                          <button type="button" disabled={busy} onClick={() => void controlDispatch(job.campaignId, "resume")} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer hover:cursor-pointer"><Play className="h-3.5 w-3.5" />Retomar</button>
-                        ) : (
-                          <button type="button" disabled={busy} onClick={() => void controlDispatch(job.campaignId, "pause")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><Pause className="h-3.5 w-3.5" />Pausar</button>
-                        )}
-                        <button type="button" disabled={busy} onClick={() => { if (window.confirm("Cancelar este disparo? Os contatos restantes não receberão a mensagem.")) void controlDispatch(job.campaignId, "cancel"); }} className="inline-flex h-8 items-center rounded-lg px-3 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar disparo</button>
-                      </div>
-                    </div>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-                      <div className="h-full rounded-full bg-[#C4D600] transition-all" style={{ width: `${percent}%` }} />
-                    </div>
-                    {paused && job.pause && <p role="alert" className="mt-3 text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{job.pause.message}</p>}
-                    {job.errors.length > 0 && (
-                      <details className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                        <summary className="cursor-pointer">Ver falhas ({job.failed})</summary>
-                        <ul className="mt-1 list-inside list-disc space-y-0.5">{job.errors.slice(0, 5).map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul>
-                      </details>
-                    )}
-                  </article>
-                );
-              })}
-            </section>
-          )}
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("aba") === "envios") setTab("envios");
+  }, []);
 
-          <div className="mb-6 flex flex-wrap items-center gap-3">
-            <label className="relative block w-full sm:w-72 md:w-80">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} aria-label="Buscar campanhas" placeholder="Buscar campanha ou público" className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
-            </label>
-            <div role="tablist" aria-label="Filtrar campanhas" className="flex flex-wrap gap-1.5">
-              {filters.map((filter) => {
-                const count = filter === "Todas" ? campaigns.length : campaigns.filter((campaign) => campaign.status === filter).length;
-                return (
-                  <button key={filter} type="button" role="tab" aria-selected={activeFilter === filter} onClick={() => setActiveFilter(filter)} className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors cursor-pointer hover:cursor-pointer ${activeFilter === filter ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"}`}>
-                    {filter}<span className={`text-[10px] ${activeFilter === filter ? "opacity-75" : "text-slate-400"}`}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+  const current: Tab = !canCampaigns && modules !== null ? "envios" : tab;
+  const changeTab = (next: Tab) => {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === "envios") url.searchParams.set("aba", "envios");
+    else url.searchParams.delete("aba");
+    window.history.replaceState(null, "", url);
+  };
 
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
-            <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Biblioteca de campanhas</h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{filteredCampaigns.length} de {campaigns.length} campanhas</p>
-            </div>
+  const tabs: { id: Tab; label: string; visible: boolean }[] = [
+    { id: "campanhas", label: "Campanhas", visible: canCampaigns || modules === null },
+    { id: "envios", label: "Envios em massa", visible: canBulk || modules === null },
+  ];
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] border-collapse text-left">
-                <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
-                  <tr>
-                    <th className="w-10 px-3 py-3">
-                      <button
-                        type="button"
-                        aria-label={filteredCampaigns.length > 0 && filteredCampaigns.every((c) => selectedCampaignIds.has(c.id)) ? "Desmarcar todas as campanhas" : "Selecionar todas as campanhas"}
-                        onClick={() => {
-                          const allSelected = filteredCampaigns.length > 0 && filteredCampaigns.every((c) => selectedCampaignIds.has(c.id));
-                          setSelectedCampaignIds((prev) => {
-                            const next = new Set(prev);
-                            if (allSelected) {
-                              filteredCampaigns.forEach((c) => next.delete(c.id));
-                            } else {
-                              filteredCampaigns.forEach((c) => next.add(c.id));
-                            }
-                            return next;
-                          });
-                        }}
-                        className="grid h-4 w-4 place-items-center rounded border border-slate-300 text-[#051647] transition-colors hover:border-[#002187] dark:border-slate-600 dark:text-[#C4D600] dark:hover:border-[#C4D600] cursor-pointer hover:cursor-pointer"
-                      >
-                        {filteredCampaigns.length > 0 && filteredCampaigns.every((c) => selectedCampaignIds.has(c.id)) && <SquareCheck className="h-3.5 w-3.5 fill-current" />}
-                      </button>
-                    </th>
-                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("nome")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Campanha<SortIndicator field="nome" /></button></th>
-                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("publico")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Público<SortIndicator field="publico" /></button></th>
-                    <th className="px-4 py-3"><button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status<SortIndicator field="status" /></button></th>
-                    <th className="px-4 py-3 text-right"><button type="button" onClick={() => handleSort("envios")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Envios<SortIndicator field="envios" /></button></th>
-                    <th className="px-4 py-3 text-right"><button type="button" onClick={() => handleSort("respostas")} className="ml-auto inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Respostas<SortIndicator field="respostas" /></button></th>
-                    <th className="px-5 py-3"><button type="button" onClick={() => handleSort("atualizacao")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Atualização<SortIndicator field="atualizacao" /></button></th>
-                    <th className="px-4 py-3 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {campaignsLoading && (
-                    <tr><td colSpan={8} className="px-5 py-8">
-                      <LoadingSpinner label="Carregando campanhas..." className="w-full justify-center" />
-                    </td></tr>
-                  )}
-                  {!campaignsLoading && filteredCampaigns.map((campaign) => {
-                    const isSelected = selectedCampaignIds.has(campaign.id);
-                    return (
-                      <tr
-                        key={campaign.id}
-                        tabIndex={0}
-                        aria-label={`Abrir detalhes de ${campaign.nome}`}
-                        onClick={() => startEditingCampaign(campaign)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            startEditingCampaign(campaign);
-                          }
-                        }}
-                        className={`group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600] ${isSelected ? "bg-[#C4D600]/10 dark:bg-[#C4D600]/10" : ""}`}
-                      >
-                        <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
-                          <button
-                            type="button"
-                            role="checkbox"
-                            aria-checked={isSelected}
-                            aria-label={`Selecionar campanha ${campaign.nome}`}
-                            onClick={() => {
-                              setSelectedCampaignIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(campaign.id)) next.delete(campaign.id);
-                                else next.add(campaign.id);
-                                return next;
-                              });
-                            }}
-                            className={`grid h-4 w-4 place-items-center rounded border transition-colors cursor-pointer hover:cursor-pointer ${isSelected ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-300 text-transparent hover:border-[#002187] dark:border-slate-600 dark:text-transparent dark:hover:border-[#C4D600]"}`}
-                          >
-                            <SquareCheck className="h-3.5 w-3.5 fill-current" />
-                          </button>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><WhatsAppIcon className="h-4 w-4 fill-current" /></span>
-                            <span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{campaign.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">WhatsApp</span></span>
-                          </div>
-                        </td>
-                        <td className="max-w-52 px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{campaign.publico}</td>
-                        <td className="px-4 py-3.5"><span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[campaign.status]}`}>{campaign.status}</span></td>
-                        <td className="px-4 py-3.5 text-right text-xs text-slate-400" title="A integração de envio ainda não está configurada.">—</td>
-                        <td className="px-4 py-3.5 text-right text-xs text-slate-400" title="A integração de envio ainda não está configurada.">—</td>
-                        <td className="px-5 py-3.5 text-xs text-slate-500 dark:text-slate-400">{campaign.dataAtualizacao}</td>
-                        <td className="px-4 py-3.5 text-right" onClick={(event) => event.stopPropagation()}>
-                          <button
-                            type="button"
-                            aria-label={`Disparar campanha ${campaign.nome}`}
-                            onClick={() => {
-                              setDispatchTarget({ mode: "single", ids: [campaign.id] });
-                              setDispatchResult(null);
-                              setDispatchError("");
-                              setDispatchProgress(null);
-                              setDispatchConfirmOpen(true);
-                              void estimateDispatchCost([campaign.id]);
-                            }}
-                            disabled={isDispatching || isDispatchLocked(campaign.status)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-[#002187] transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer"
-                            title={campaign.status === "Enviando" ? "Esta campanha já está em envio" : campaign.status === "Envio pausado" ? "Disparo pausado: retome pelo painel de envios" : campaign.status === "Enviada" || campaign.status === "Envio parcial" ? "Esta campanha já possui envios registrados" : "Disparar campanha"}
-                          >
-                            <Send className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {!campaignsLoading && filteredCampaigns.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center"><Search className="mx-auto h-5 w-5 text-slate-400" /><p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhuma campanha encontrada</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p></td></tr>}
-                </tbody>
-              </table>
-            </div>
-            <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800"><span>Mostrando {filteredCampaigns.length} de {campaigns.length} campanhas salvas</span><span>Banco de dados</span></footer>
-          </section>
-        </main>
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Campanhas e disparos</h1>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Crie campanhas, acompanhe os lotes em andamento, o histórico e o retorno em vendas.</p>
+        </div>
+        <div role="tablist" aria-label="Seções" className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800/70">
+          {tabs.filter((item) => item.visible).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={current === item.id}
+              onClick={() => changeTab(item.id)}
+              className={`h-9 rounded-lg px-4 text-sm font-semibold transition-colors cursor-pointer ${current === item.id ? "bg-white text-[#051647] shadow-xs dark:bg-[#051647] dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {(selectedCampaign || isCreateOpen) && (
-        <EntityDialog
-          titleId="campaign-dialog-title"
-          title={isCreateOpen ? "Nova campanha" : selectedCampaign?.nome ?? "Campanha"}
-          description={isCreateOpen ? "Crie um rascunho para configurar o próximo envio." : "Edite os dados e a mensagem da campanha."}
-          onClose={() => { setSelectedCampaign(null); setIsCreateOpen(false); clearSelectedAttachments(); setUploadedAttachments([]); setFormError(""); }}
-        >
-          {isCreateOpen ? (
-            <Stepper
-              initialStep={1}
-              onStepChange={() => setFormError("")}
-              onFinalStepCompleted={createCampaign}
-              validateStep={(step) => {
-                  if (step === 1 && !form.nome.trim()) {
-                    setFormError("Informe o nome da campanha.");
-                  return false;
-                }
-                if (step === 2 && selectedAudienceSegments.length === 0) {
-                  setFormError("Selecione pelo menos um segmento para o público-alvo.");
-                  return false;
-                }
-                if (step === 3 && !form.mensagem.trim()) {
-                  setFormError("Escreva a mensagem da campanha.");
-                  return false;
-                }
-                setFormError("");
-                return true;
-              }}
-              backButtonText="Voltar"
-              nextButtonText="Continuar"
-              completeButtonText="Salvar rascunho"
-              indicator="numbers"
-              orientation="horizontal"
-              transition="slide"
-              linear
-              showFooter
-              theme={isDark ? "dark" : "light"}
-              accentColor="#C4D600"
-              frame={false}
-              radius={16}
-              width="100%"
-              className="min-h-0 flex-1"
-            >
-              <Step title="Identificação" description="Nome da campanha">
-                <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome para encontrá-la depois.</p></div>
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                </div>
-              </Step>
-              <Step title="Público" description="Quem receberá">
-                <div className="space-y-4">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Defina o público</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Selecione um ou mais segmentos existentes para receber a campanha.</p></div>
-                  <FormMultiSelect
-                    label="Público-alvo"
-                    selected={selectedAudienceSegments}
-                    options={segmentOptions}
-                    onChange={(segments) => { setSelectedAudienceSegments(segments); setFormError(""); }}
-                    placeholder="Selecione os segmentos"
-                    required
-                  />
-                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                </div>
-              </Step>
-              <Step title="Mensagem" description="Revise e salve">
-                <div className="space-y-3">
-                  <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Escreva a mensagem</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">A campanha será criada como rascunho.</p></div>
-                  <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                  {!campaignTemplate && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Variáveis de personalização</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {messageVariables.map((item) => (
-                        <button
-                          key={item.value}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => insertMessageVariable(item.value)}
-                          className="rounded-lg border border-[#002187]/20 bg-[#002187]/5 px-2.5 py-1.5 text-[10px] font-semibold text-[#002187] transition-colors hover:bg-[#C4D600]/30 dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/20 cursor-pointer hover:cursor-pointer"
-                          title={`Inserir ${item.value}`}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-slate-400">Clique em uma variável para inseri-la no ponto selecionado da mensagem.</p>
-                  </div>
-                  )}
-                  <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    <span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
-                    <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
-                  </label>
-                  <div className="space-y-2">
-                    <input
-                      ref={attachmentInputRef}
-                      type="file"
-                      accept="image/*,video/*,application/pdf"
-                      multiple
-                      className="hidden"
-                      aria-label="Adicionar imagens, vídeos ou PDFs"
-                      onChange={(event) => addAttachments(event.currentTarget.files)}
-                    />
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos anexados</p>
-                        <p className="mt-0.5 text-[10px] text-slate-400">Imagens, vídeos ou PDFs</p>
-                      </div>
-                      <button type="button" onClick={() => attachmentInputRef.current?.click()} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-200 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer hover:cursor-pointer">
-                        <Paperclip className="h-3.5 w-3.5" />Adicionar arquivo
-                      </button>
-                    </div>
-                    {selectedAttachments.length > 0 && (
-                      <ul aria-label="Arquivos selecionados" className="max-h-16 space-y-1 overflow-y-auto">
-                        {selectedAttachments.map((file, index) => {
-                          const FileIcon = file.type.startsWith("image/") ? ImageIcon : file.type.startsWith("video/") ? Film : FileText;
-                          return (
-                            <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/60">
-                              <FileIcon className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
-                              <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-700 dark:text-slate-200" title={file.name}>{file.name}</span>
-                              <span className="shrink-0 text-[10px] text-slate-400">{formatFileSize(file.size)}</span>
-                              <button type="button" aria-label={`Remover arquivo ${file.name}`} onClick={() => {
-                                const previewUrl = attachmentPreviewUrlsRef.current.get(file);
-                                if (previewUrl) {
-                                  URL.revokeObjectURL(previewUrl);
-                                  attachmentPreviewUrlsRef.current.delete(file);
-                                  setAttachmentPreviewUrls((current) => {
-                                    const next = new Map(current);
-                                    next.delete(file);
-                                    return next;
-                                  });
-                                }
-                                setSelectedAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index));
-                              }} className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-white cursor-pointer hover:cursor-pointer">
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                  <section aria-label="Prévia para o destinatário" className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Prévia para o destinatário</p>
-                    <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-900/60">
-                      {selectedAttachments.length > 0 || form.mensagem.trim() ? (
-                        <div className="flex justify-end">
-                          <div className="w-fit max-w-[90%] space-y-2 rounded-xl rounded-br-sm bg-[#C4D600]/20 p-2.5 text-sm text-[#051647] shadow-sm dark:bg-[#C4D600]/15 dark:text-slate-100">
-                            {selectedAttachments.map((file, index) => {
-                              const previewUrl = attachmentPreviewUrls.get(file);
-                              return (
-                                <div key={`${file.name}-${file.lastModified}-${index}`} className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
-                                  {file.type.startsWith("image/") && previewUrl ? (
-                                    <Image
-                                      src={previewUrl}
-                                      alt={file.name}
-                                      width={480}
-                                      height={320}
-                                      unoptimized
-                                      className="max-h-48 w-full object-contain"
-                                    />
-                                  ) : file.type.startsWith("video/") && previewUrl ? (
-                                    <video src={previewUrl} controls className="max-h-48 w-full" aria-label={file.name}>
-                                      Seu navegador não oferece suporte à reprodução de vídeo.
-                                    </video>
-                                  ) : (
-                                    <div className="flex max-w-72 items-center gap-2.5 p-3">
-                                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">
-                                        {file.type.startsWith("video/") ? <Film className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                                      </span>
-                                      <span className="min-w-0">
-                                        <span className="block truncate text-xs font-semibold" title={file.name}>{file.name}</span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Documento · {formatFileSize(file.size)}</span>
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {form.mensagem.trim() && <p className="whitespace-pre-wrap break-words">{form.mensagem.trim()}</p>}
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-400 dark:bg-slate-800/80 dark:text-slate-500">
-                          A mensagem e os arquivos aparecerão aqui.
-                        </p>
-                      )}
-                    </div>
-                  </section>
-                  {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-                </div>
-              </Step>
-            </Stepper>
-          ) : selectedCampaign && (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Envios aceitos</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos.toLocaleString("pt-BR")}</p></div>
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Respostas</p><p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{selectedCampaign.disparos > 0 ? "Veja no funil abaixo" : "—"}</p></div>
-                  <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800/60"><p className="text-[10px] text-slate-500 dark:text-slate-400">Status</p><p className={`mt-1 inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[selectedCampaign.status]}`}>{selectedCampaign.status}</p></div>
-                </div>
-                {selectedCampaign.disparos > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">Resultados da campanha</p>
-                    <CampaignMetricsPanel type="campaign" id={selectedCampaign.id} />
-                  </div>
-                )}
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                <FormMultiSelect
-                  label="Público-alvo"
-                  selected={selectedAudienceSegments}
-                  options={segmentOptions}
-                  onChange={(segments) => { setSelectedAudienceSegments(segments); setFormError(""); }}
-                  placeholder="Selecione os segmentos"
-                  required
-                />
-                <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
-                {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos da campanha</p>
-                    {selectedCampaign.anexos.map((file, index) => (
-                      <p key={`${file.name}-${index}`} className="truncate text-xs text-slate-500 dark:text-slate-400" title={file.name}>{file.name} · {formatFileSize(file.size)}</p>
-                    ))}
-                  </div>
-                )}
-                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-              </div>
-              <footer className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-                <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />{selectedCampaign.dataAtualizacao}</span>
-                <div className="flex items-center gap-2">
-                  {!isDispatchLocked(selectedCampaign.status) && (
-                    <button type="button" onClick={() => toggleCampaign(selectedCampaign.id)} className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">{selectedCampaign.status === "Ativa" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}{selectedCampaign.status === "Ativa" ? "Pausar no CRM" : "Ativar no CRM"}</button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={isDispatching || isDispatchLocked(selectedCampaign.status)}
-                    onClick={() => {
-                      setDispatchTarget({ mode: "single", ids: [selectedCampaign.id] });
-                      setDispatchResult(null);
-                      setDispatchError("");
-                      setDispatchProgress(null);
-                      setDispatchConfirmOpen(true);
-                      void estimateDispatchCost([selectedCampaign.id]);
-                    }}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#F7915E]/40 bg-[#F7915E]/10 px-3 text-xs font-semibold text-[#9a3d12] transition-colors hover:border-[#F7915E] hover:bg-[#F7915E]/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#F7915E]/30 dark:bg-[#F7915E]/15 dark:text-[#F7915E] dark:hover:bg-[#F7915E]/25 cursor-pointer hover:cursor-pointer"
-                  >
-                    <Send className="h-3.5 w-3.5" />Disparar agora
-                  </button>
-                  <button type="button" onClick={saveCampaign} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer">Salvar alterações</button>
-                </div>
-              </footer>
-            </div>
-          )}
-        </EntityDialog>
-      )}
+      <CampaignsOverview />
 
-      {/* Barra de ações em lote */}
-      {selectedCampaignIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-          <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-            {selectedCampaignIds.size} campanha{selectedCampaignIds.size === 1 ? "" : "s"} selecionada{selectedCampaignIds.size === 1 ? "" : "s"}
-          </span>
-          <button
-            type="button"
-            onClick={() => setSelectedCampaignIds(new Set())}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
-          >
-            <X className="h-3.5 w-3.5" />Limpar
-          </button>
-          <button
-            type="button"
-            disabled={isDispatching}
-            onClick={() => {
-              setDispatchTarget({ mode: "batch", ids: Array.from(selectedCampaignIds) });
-              setDispatchResult(null);
-              setDispatchError("");
-              setDispatchProgress(null);
-              setDispatchConfirmOpen(true);
-              void estimateDispatchCost(Array.from(selectedCampaignIds));
-            }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-[11px] font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
-          >
-            <Send className="h-3.5 w-3.5" />Disparar selecionadas
-          </button>
-        </div>
-      )}
-
-      {/* Modal de confirmação de disparo */}
-      {dispatchConfirmOpen && dispatchTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Confirmar disparo de campanha"
-            className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-          >
-            <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#F7915E]/15 text-[#F7915E]">
-                <AlertTriangle className="h-5 w-5" />
-              </span>
-              <div className="space-y-1">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  {dispatchTarget.mode === "single" ? "Disparar campanha" : `Disparar ${dispatchTarget.ids.length} campanhas`}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {dispatchTarget.mode === "single"
-                    ? "A campanha será enviada imediatamente para o público configurado."
-                    : "As campanhas selecionadas serão enviadas imediatamente para seus respectivos públicos."} O envio roda no servidor: você pode fechar a página e acompanhar depois.
-                </p>
-              </div>
-            </div>
-
-            {dispatchEstimate && !dispatchResult && (
-              <p className="rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
-                {dispatchEstimate.loading
-                  ? "Calculando o custo estimado do envio..."
-                  : dispatchEstimate.error
-                    ? `Custo estimado indisponível: ${dispatchEstimate.error}`
-                    : <><span className="font-semibold">Custo estimado do envio: {dispatchEstimate.cost === null ? "indisponível (categoria do modelo não encontrada)" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> · {dispatchEstimate.contacts.toLocaleString("pt-BR")} contato(s) com telefone. Contatos que receberam campanha nos últimos 7 dias são pulados, então o valor real tende a ser menor.</>}
-              </p>
-            )}
-            {dispatchError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{dispatchError}</p>}
-            {isDispatching && dispatchProgress && (
-              <p role="status" className="text-xs text-slate-500 dark:text-slate-400">
-                Enviando mensagens: {dispatchProgress.completed} de {dispatchProgress.total} contatos processados.
-              </p>
-            )}
-            {dispatchResult && (
-              <div className={`space-y-2 rounded-lg border p-3 text-xs ${dispatchResult.failed === 0 ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-200" : "border-[#F7915E]/30 bg-[#F7915E]/10 text-[#9a3d12] dark:text-[#F7915E]"}`}>
-                <p className="font-semibold">{dispatchResult.sent} mensagem{dispatchResult.sent === 1 ? "" : "s"} enviada{dispatchResult.sent === 1 ? "" : "s"}; {dispatchResult.failed} falha{dispatchResult.failed === 1 ? "" : "s"}.</p>
-                {dispatchResult.campaigns.map((campaign) => (
-                  <p key={campaign.nome}>{campaign.nome}: {campaign.status} · {campaign.sent} enviadas · {campaign.failed} falhas</p>
-                ))}
-                {dispatchResult.errors.length > 0 && (
-                  <ul className="list-inside list-disc border-t border-current/15 pt-2">
-                    {dispatchResult.errors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
-                    {dispatchResult.failed > dispatchResult.errors.length && <li>Há outras falhas; consulte os contatos sem telefone e o estado da conexão.</li>}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                disabled={isDispatching}
-                onClick={() => setDispatchConfirmOpen(false)}
-                className="inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"
-              >
-                {dispatchResult || dispatchError ? "Fechar" : "Cancelar"}
-              </button>
-              {!dispatchResult && !dispatchError && (
-                <button
-                  type="button"
-                  disabled={isDispatching}
-                  onClick={() => void dispatchCampaigns()}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer"
-                >
-                  {isDispatching ? (
-                    <>
-                      <Clock3 className="h-3.5 w-3.5 animate-spin" />Disparando...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-3.5 w-3.5" />Confirmar disparo
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <div role="tabpanel">
+        {current === "campanhas" ? <CampaignsView /> : <BulkDispatchHistory />}
+      </div>
     </div>
   );
 }

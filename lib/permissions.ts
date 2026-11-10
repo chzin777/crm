@@ -45,6 +45,13 @@ export function resolveChatCapabilities(role: string | null | undefined, permiss
   return Object.fromEntries(CHAT_CAPABILITIES.map((capability) => [capability.key, admin || stored[capability.key] === true])) as ChatCapabilities;
 }
 
+/** /campanhas reúne campanhas e envios em massa: quem tem qualquer um dos dois módulos abre a tela. */
+export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAccess> | null | undefined): boolean {
+  if (key === null) return true;
+  if (modules?.[key] === true) return true;
+  return key === "campanhas" && modules?.disparos === true;
+}
+
 export function moduleForPath(pathname: string): ModuleKey | null {
   const match = MODULES.find((module) => (module.href === "/" ? pathname === "/" : pathname === module.href || pathname.startsWith(`${module.href}/`)));
   return match?.key ?? null;

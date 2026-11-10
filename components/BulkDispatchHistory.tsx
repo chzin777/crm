@@ -33,7 +33,8 @@ const formatDate = (value?: string) => (value ? new Date(value).toLocaleString("
 
 const actionClass = "inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
 
-export default function DisparosPage() {
+/** Lotes de envio em massa iniciados pelo pipeline; exibido na aba "Envios em massa" de /campanhas. */
+export function BulkDispatchHistory() {
   const toast = useToast();
   const [jobs, setJobs] = useState<BulkJobView[] | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -113,7 +114,7 @@ export default function DisparosPage() {
     <div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Envios em massa</h1>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Envios em massa</h2>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Lotes enviados pelo pipeline: andamento, histórico e falhas de cada contato</p>
         </div>
         {isAdmin && operators.length > 0 && (

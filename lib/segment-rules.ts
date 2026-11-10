@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { STAGE_DEFINITIONS } from "@/lib/pipeline-stages";
 
 export type RuleFieldType = "number" | "date" | "text" | "select" | "presence";
 
@@ -53,9 +54,10 @@ const presenceOperators: RuleOperator[] = [
 ];
 
 export const ruleFields: RuleField[] = [
-  { id: "purchases", label: "Quantidade de compras", type: "number" },
-  { id: "totalSpent", label: "Total gasto (R$)", type: "number" },
-  { id: "lastPurchase", label: "Data da última compra", type: "date" },
+  { id: "purchases", label: "Quantidade de pedidos (ERP)", type: "number" },
+  { id: "avgTicket", label: "Ticket médio (R$)", type: "number" },
+  { id: "totalSpent", label: "Total gasto acumulado – LTV (R$)", type: "number" },
+  { id: "lastPurchase", label: "Última compra (ERP)", type: "date" },
   {
     id: "category",
     label: "Categoria do contato",
@@ -80,6 +82,14 @@ export const ruleFields: RuleField[] = [
   { id: "city", label: "Cidade", type: "text" },
   { id: "neighborhood", label: "Bairro", type: "text" },
   { id: "state", label: "Estado (UF)", type: "text" },
+  { id: "ddd", label: "DDD do telefone", type: "text" },
+  { id: "tag", label: "Tag do cliente (atendimento)", type: "text" },
+  {
+    id: "pipelineStage",
+    label: "Etapa atual do pipeline",
+    type: "select",
+    options: STAGE_DEFINITIONS.map((stage) => ({ value: stage.id, label: stage.titulo })),
+  },
   {
     id: "gender",
     label: "Gênero",

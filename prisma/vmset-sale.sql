@@ -53,3 +53,15 @@ WHERE "type" = 'Venda' AND "category" IS DISTINCT FROM 'SERVICOS'
 GROUP BY "sourceKey", "store" || '-' || "orderNumber", "invoiceDate";
 CREATE UNIQUE INDEX IF NOT EXISTS "VmsetInvoiceOrder_key" ON "VmsetInvoiceOrder" ("sourceKey", "orderKey", day);
 CREATE INDEX IF NOT EXISTS "VmsetInvoiceOrder_day_idx" ON "VmsetInvoiceOrder" (day);
+
+-- v1.10.0: resumo de compras por cliente para os filtros de segmento (pedidos, LTV, ticket médio e última compra).
+-- Só vendas e sem itens de serviço, mesma regra do /painel. A última compra conta pela data do pedido.
+CREATE MATERIALIZED VIEW IF NOT EXISTS "VmsetCustomerStats" AS
+SELECT "sourceKey",
+  COUNT(DISTINCT "store" || '-' || "orderNumber")::int AS orders,
+  SUM("amount")::numeric(14, 2) AS total,
+  max("orderDate") AS "lastDay"
+FROM "VmsetSale"
+WHERE "type" = 'Venda' AND "category" IS DISTINCT FROM 'SERVICOS' AND "sourceKey" IS NOT NULL AND "orderNumber" IS NOT NULL
+GROUP BY "sourceKey";
+CREATE UNIQUE INDEX IF NOT EXISTS "VmsetCustomerStats_key" ON "VmsetCustomerStats" ("sourceKey");

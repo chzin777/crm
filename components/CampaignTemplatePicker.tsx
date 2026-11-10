@@ -7,11 +7,13 @@ export type CampaignTemplate = {
   language: string;
   body: string;
   hasImage: boolean;
+  /** Imagem de exemplo do cabeçalho do modelo na Meta (usada quando a campanha não anexa outra). */
+  headerImageUrl?: string | null;
   // Campo de contato usado em cada variável {{1}}, {{2}}...
   params: string[];
 };
 
-type ApiTemplate = { id: string; name: string; status: string; language: string; body: string; headerFormat: string | null };
+type ApiTemplate = { id: string; name: string; status: string; language: string; body: string; headerFormat: string | null; headerImageUrl?: string | null };
 
 const FIELDS = [
   { value: "nome", label: "Nome do cliente" },
@@ -59,6 +61,7 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
       language: template.language,
       body: template.body,
       hasImage: template.headerFormat === "IMAGE",
+      headerImageUrl: template.headerFormat === "IMAGE" ? template.headerImageUrl ?? null : null,
       params: Array.from({ length: variableCount(template.body) }, (_, index) => FIELDS[index]?.value ?? "nome"),
     });
   };
@@ -82,7 +85,17 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
       {value && (
         <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/40">
           <p className="whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300">{value.body}</p>
-          {value.hasImage && <p className="text-[10px] text-slate-500 dark:text-slate-400">Este modelo usa a imagem dele. Para trocar, anexe uma imagem (JPG ou PNG) à campanha.</p>}
+          {value.hasImage && (
+            <div className="flex items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white p-2 dark:border-slate-600 dark:bg-slate-900/40">
+              {value.headerImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- imagem hospedada pela Meta (domínio externo variável)
+                <img src={value.headerImageUrl} alt="Imagem do cabeçalho do modelo" className="h-14 w-24 shrink-0 rounded-md object-cover" />
+              ) : null}
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                Modelo com imagem no cabeçalho. Sem anexo, vai a imagem do modelo; para trocar, anexe uma imagem JPG ou PNG (arquivo ou link) à campanha.
+              </p>
+            </div>
+          )}
           {value.params.map((field, index) => (
             <label key={index} className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
               <span className="w-12 shrink-0">{`{{${index + 1}}}`}</span>
