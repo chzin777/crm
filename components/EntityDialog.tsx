@@ -31,9 +31,9 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-6 ${size === "sm" ? "max-w-md" : size === "wizard" ? "h-[560px] max-w-4xl" : size === "tabs" ? "h-[740px] max-w-2xl" : size === "xl" ? "h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl" : `h-[min(640px,90vh)] ${size === "lg" ? "max-w-5xl" : "max-w-xl"}`}`}
+        className={`flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] 2xl:p-6 ${size === "sm" ? "max-w-md" : size === "wizard" ? "h-[560px] max-w-4xl" : size === "tabs" ? "h-[740px] max-w-2xl" : size === "xl" ? "h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl" : `h-[min(640px,90vh)] ${size === "lg" ? "max-w-5xl" : "max-w-xl"}`}`}
       >
-        <header className="mb-5 shrink-0">
+        <header className="mb-4 shrink-0 2xl:mb-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id={titleId} className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
@@ -52,7 +52,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
             </button>
           </div>
         </header>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {children}
         </div>
       </section>

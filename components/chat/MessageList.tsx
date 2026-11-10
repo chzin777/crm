@@ -268,7 +268,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
       onScroll={(event) => {
         if (event.currentTarget.scrollTop < 80) void loadOlder();
       }}
-      className="absolute inset-0 z-10 overflow-y-auto p-4"
+      className="absolute inset-0 z-10 overflow-y-auto p-3 xl:p-4"
     >
       {messages.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-slate-500 dark:text-slate-400">
@@ -304,7 +304,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       </button>
                     )}
                     <div
-                      className={sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm ${
+                      className={sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl px-3 py-1.5 shadow-sm 2xl:px-4 2xl:py-2.5 ${
                         message.internal
                           ? "rounded-br-sm border border-dashed border-[#F7915E] bg-[#F7915E]/15 text-slate-900 dark:text-white"
                           : message.author === "bot"

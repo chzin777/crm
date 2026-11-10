@@ -111,20 +111,20 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
 
   return (
     <aside
-      className={`sticky top-4 relative z-30 hidden h-[calc(100vh-2rem)] shrink-0 flex-col overflow-visible rounded-2xl border border-[#e2e6ee] bg-white shadow-sm transition-[width] duration-200 ease-out lg:flex dark:border-slate-800 dark:bg-[#051647] ${isCollapsed ? "w-20" : "w-64"}`}
+      className={`sticky top-4 relative z-30 hidden h-[calc(100vh-2rem)] compact:top-2 compact:h-[calc(100vh-1rem)] shrink-0 flex-col overflow-visible rounded-2xl border border-[#e2e6ee] bg-white shadow-sm transition-[width] duration-200 ease-out lg:flex dark:border-slate-800 dark:bg-[#051647] ${isCollapsed ? "w-20" : "w-56 xl:w-64"}`}
     >
       <div className="flex h-full flex-col text-[#47536a] dark:text-slate-300">
         {/* Header da logo — igual ao ecommerce */}
-        <div className={`relative z-10 flex h-24 shrink-0 items-center justify-center border-b border-[#e2e6ee] dark:border-slate-800 ${isCollapsed ? "px-0" : "px-5"}`}>
+        <div className={`relative z-10 flex h-24 shrink-0 items-center justify-center compact:h-16 border-b border-[#e2e6ee] dark:border-slate-800 ${isCollapsed ? "px-0" : "px-5"}`}>
           {isCollapsed ? (
-            <img src="/logos/logo-no-text.png" alt="Óticas Brasil" className="h-20 w-20 rounded-full object-contain" />
+            <img src="/logos/logo-no-text.png" alt="Óticas Brasil" className="h-20 w-20 rounded-full object-contain compact:h-12 compact:w-12" />
           ) : (
             <img src="/logos/principal-logo.png" alt="Óticas Brasil" className="h-[180px] w-auto object-contain" />
           )}
         </div>
 
         {!isCollapsed && (
-          <div className="px-5 pb-2 pt-6 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#a0a8b6] dark:text-slate-500">Workspace</div>
+          <div className="px-5 pb-2 pt-6 compact:pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#a0a8b6] dark:text-slate-500">Workspace</div>
         )}
 
         <nav aria-label="Navegação principal" className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
@@ -138,7 +138,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                 href={item.href}
                 title={isCollapsed ? item.title : undefined}
                 aria-label={isCollapsed ? item.title : undefined}
-                className={`group flex w-full items-center rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
+                className={`group flex w-full items-center rounded-lg py-2.5 compact:py-1.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                   isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                 } ${
                   isActive ? ITEM_ACTIVE : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
@@ -162,7 +162,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                   aria-expanded={expanded}
                   title={isCollapsed ? group.label : undefined}
                   onClick={() => toggleGroup(group.id)}
-                  className={`group flex w-full items-center justify-start rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
+                  className={`group flex w-full items-center justify-start rounded-lg py-2.5 compact:py-1.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                     isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                   } ${
                     groupActive ? "text-[#051647] dark:text-[#C4D600]" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
@@ -227,7 +227,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                 href={item.href}
                 title={isCollapsed ? item.title : undefined}
                 aria-label={isCollapsed ? item.title : undefined}
-                className={`group mt-1 flex w-full items-center rounded-lg py-2.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
+                className={`group mt-1 flex w-full items-center rounded-lg py-2.5 compact:py-1.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
                   isCollapsed ? "justify-center px-0" : "gap-3 px-3"
                 } ${
                   isActive ? ITEM_ACTIVE : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"

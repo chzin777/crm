@@ -824,7 +824,7 @@ export default function ContatosPage() {
                       }}
                       className="group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600]"
                     >
-                      <td className="px-5 py-3.5">
+                      <td className="px-5 py-2 xl:py-3.5">
                         <div className="flex min-w-0 items-center gap-3">
                           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[10px] font-bold ${categoryStyles[contact.categoria]}`}>{contact.iniciais}</span>
                           <div className="min-w-0">
@@ -833,11 +833,11 @@ export default function ContatosPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${categoryStyles[contact.categoria]}`}>{contact.segmento}</span></td>
-                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{formatDateBR(contact.ultimoContato)}</td>
-                      <td className="px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300">{contact.dataNascimento ? formatDateBR(new Date(contact.dataNascimento).toISOString().slice(0, 10)) : "—"}</td>
-                      <td className="px-4 py-3.5 text-right text-xs font-medium text-slate-700 dark:text-slate-200">{contact.compras}</td>
-                      <td className="px-5 py-3.5 text-right text-xs font-bold text-slate-900 dark:text-white">{contact.totalGasto ? currency(contact.totalGasto) : "—"}</td>
+                      <td className="px-4 py-2 xl:py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${categoryStyles[contact.categoria]}`}>{contact.segmento}</span></td>
+                      <td className="px-4 py-2 xl:py-3.5 text-xs text-slate-600 dark:text-slate-300">{formatDateBR(contact.ultimoContato)}</td>
+                      <td className="px-4 py-2 xl:py-3.5 text-xs text-slate-600 dark:text-slate-300">{contact.dataNascimento ? formatDateBR(new Date(contact.dataNascimento).toISOString().slice(0, 10)) : "—"}</td>
+                      <td className="px-4 py-2 xl:py-3.5 text-right text-xs font-medium text-slate-700 dark:text-slate-200">{contact.compras}</td>
+                      <td className="px-5 py-2 xl:py-3.5 text-right text-xs font-bold text-slate-900 dark:text-white">{contact.totalGasto ? currency(contact.totalGasto) : "—"}</td>
                     </tr>
                   ))}
                   {!contactsLoading && contacts.length === 0 && (

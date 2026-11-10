@@ -421,9 +421,9 @@ function ChatWorkspace() {
   const contextMenuItems = contextItem ? conversationMenu(detail?.id === contextItem.id ? detail : contextItem, true) : [];
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
+    <div className="flex h-full w-full flex-col overflow-hidden px-3 py-3 md:px-4 md:py-4 xl:px-10 xl:py-8 compact:py-3">
       <div className="flex flex-1 min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-[#07194f]">
-        <div className={`flex min-h-0 flex-col border-r border-slate-200 dark:border-slate-800 ${selectedId ? "hidden md:flex" : "flex"} w-full md:w-[35%] lg:w-[35%]`}>
+        <div className={`flex min-h-0 flex-col border-r border-slate-200 dark:border-slate-800 ${selectedId ? "hidden md:flex" : "flex"} w-full md:w-72 md:shrink-0 xl:w-80 2xl:w-96`}>
           <ConversationList
             items={hiddenIds.size ? items.filter((item) => !hiddenIds.has(item.id)) : items}
             counts={counts}
@@ -473,7 +473,7 @@ function ChatWorkspace() {
         <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
           {open ? (
             <>
-              <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-[#07194f]">
+              <div className="flex min-h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-2 xl:px-4 xl:py-3 compact:py-1.5 dark:border-slate-800 dark:bg-[#07194f]">
                 <button type="button" onClick={() => select(null)} aria-label="Voltar" className="md:hidden cursor-pointer rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                   <ArrowLeft className="h-5 w-5" />
                 </button>
@@ -498,7 +498,7 @@ function ChatWorkspace() {
                     key={open.id}
                     label="Ações da conversa"
                     widthClassName="w-60"
-                    triggerClassName="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+                    triggerClassName="grid h-8 w-8 xl:h-9 xl:w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
                     trigger={<MoreVertical className="h-5 w-5" />}
                     items={menuItems}
                   />

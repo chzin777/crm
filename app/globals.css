@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+/* Notebooks (1366x768, 1536x864, 1080p com escala 125%+): pouca altura útil, layout mais denso. */
+@custom-variant compact (@media (max-height: 850px));
 
 @theme {
   --color-otb-blue-deep: #051647;

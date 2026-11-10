@@ -19,7 +19,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="h-dvh bg-[#f5f7fb] dark:bg-[#030d29]">
-      <div className="mx-auto flex h-dvh max-w-[1920px] items-start gap-0 overflow-hidden px-0 py-4 sm:px-4 lg:pl-8 lg:pr-6">
+      <div className="mx-auto flex h-dvh max-w-[1920px] items-start gap-0 overflow-hidden px-0 py-4 sm:px-4 lg:pl-6 lg:pr-4 xl:pl-8 xl:pr-6 compact:py-2">
         {/* Sidebar — componente único com toggle integrado */}
         <div className="relative hidden lg:block">
           <Sidebar collapsed={sidebarCollapsed} />
@@ -37,11 +37,11 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         {/* Main content area with tab strip */}
         <main className={`h-full min-w-0 flex-1 ${pathname === "/chat" ? "overflow-hidden" : "overflow-y-auto"}`}>
           {/* Tab strip sticky — igual ao ecommerce admin: h-[92px], rounded-t-2xl, backdrop-blur */}
-          <div className="sticky top-0 z-20 flex h-[92px] items-end gap-2 rounded-t-2xl border-b border-[#dfe3ea] bg-[#f1f3f7]/95 px-3 pt-4 backdrop-blur dark:border-slate-800 dark:bg-[#0a1a3e]/95 sm:px-6">
+          <div className="sticky top-0 z-20 flex h-[92px] items-end gap-2 rounded-t-2xl border-b border-[#dfe3ea] bg-[#f1f3f7]/95 px-3 pt-4 backdrop-blur compact:h-14 compact:pt-2 dark:border-slate-800 dark:bg-[#0a1a3e]/95 sm:px-6">
             <TabSystem />
           </div>
           {/* Page content */}
-          <div className={`mx-auto w-full max-w-[1680px] ${pathname === "/chat" ? "h-[calc(100%-92px)] overflow-hidden p-0" : "px-4 py-6 sm:px-7 sm:py-8 xl:px-10"}`}>
+          <div className={`mx-auto w-full max-w-[1680px] ${pathname === "/chat" ? "h-[calc(100%-92px)] overflow-hidden p-0 compact:h-[calc(100%-3.5rem)]" : "px-3 py-4 md:px-4 lg:px-5 lg:py-6 xl:px-10 xl:py-8 compact:py-3"}`}>
             {isLoading && moduleKey !== null ? (
               <div className="flex h-64 items-center justify-center"><LoadingSpinner label="Verificando permissões..." /></div>
             ) : allowed ? (

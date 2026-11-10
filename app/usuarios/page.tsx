@@ -226,14 +226,14 @@ export default function UsuariosPage() {
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-[#07194f] dark:text-slate-400">
                   <tr>
-                    <th className="px-6 py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("name")}>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("name")}>
                       <div className="flex items-center gap-1">Nome <SortIndicator field="name" /></div>
                     </th>
-                    <th className="px-6 py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("email")}>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("email")}>
                       <div className="flex items-center gap-1">E-mail <SortIndicator field="email" /></div>
                     </th>
-                    <th className="px-6 py-3">Cargo</th>
-                    <th className="px-6 py-3">Status</th>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3">Cargo</th>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -243,15 +243,15 @@ export default function UsuariosPage() {
                       onClick={() => openForm(user)}
                       className="group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600]"
                     >
-                      <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{user.name}</td>
-                      <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{user.email}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2 xl:px-6 xl:py-4 font-medium text-slate-900 dark:text-white">{user.name}</td>
+                      <td className="px-4 py-2 xl:px-6 xl:py-4 text-slate-500 dark:text-slate-400">{user.email}</td>
+                      <td className="px-4 py-2 xl:px-6 xl:py-4">
                         <span className="inline-flex items-center gap-1 rounded-full bg-[#051647]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">
                           <Shield className="h-3 w-3" />
                           {getRoleName(user.roleId)}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2 xl:px-6 xl:py-4">
                         {user.banned ? (
                           <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">Bloqueado</span>
                         ) : (

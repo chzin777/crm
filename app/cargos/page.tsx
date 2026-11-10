@@ -141,10 +141,10 @@ export default function CargosPage() {
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-[#07194f] dark:text-slate-400">
                   <tr>
-                    <th className="px-6 py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("name")}><div className="flex items-center gap-1">Nome <SortIndicator field="name" /></div></th>
-                    <th className="px-6 py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("description")}><div className="flex items-center gap-1">Descrição <SortIndicator field="description" /></div></th>
-                    <th className="px-6 py-3">Permissões</th>
-                    <th className="px-6 py-3">Tipo</th>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("name")}><div className="flex items-center gap-1">Nome <SortIndicator field="name" /></div></th>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3 cursor-pointer hover:text-[#002187] dark:hover:text-[#C4D600]" onClick={() => handleSort("description")}><div className="flex items-center gap-1">Descrição <SortIndicator field="description" /></div></th>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3">Permissões</th>
+                    <th className="px-4 py-2.5 xl:px-6 xl:py-3">Tipo</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -156,10 +156,10 @@ export default function CargosPage() {
                         onClick={() => openForm(role)}
                         className="group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600]"
                       >
-                        <td className="px-6 py-4 font-medium text-slate-900 dark:text-white">{role.name}</td>
-                        <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{role.description || "—"}</td>
-                        <td className="px-6 py-4"><span className="inline-flex items-center rounded-full bg-[#051647]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">{pc} de {MODULES.length} telas</span></td>
-                        <td className="px-6 py-4">{role.isSystem
+                        <td className="px-4 py-2 xl:px-6 xl:py-4 font-medium text-slate-900 dark:text-white">{role.name}</td>
+                        <td className="px-4 py-2 xl:px-6 xl:py-4 text-slate-500 dark:text-slate-400">{role.description || "—"}</td>
+                        <td className="px-4 py-2 xl:px-6 xl:py-4"><span className="inline-flex items-center rounded-full bg-[#051647]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">{pc} de {MODULES.length} telas</span></td>
+                        <td className="px-4 py-2 xl:px-6 xl:py-4">{role.isSystem
                           ? <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"><Lock className="h-3 w-3" /> Sistema</span>
                           : <span className="inline-flex items-center rounded-full bg-[#C4D600]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">Personalizado</span>}</td>
                       </tr>

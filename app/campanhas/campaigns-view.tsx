@@ -984,7 +984,7 @@ export function CampaignsView() {
                       }}
                       className={`group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600] ${isSelected ? "bg-[#C4D600]/10 dark:bg-[#C4D600]/10" : ""}`}
                     >
-                      <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
+                      <td className="px-3 py-2 xl:py-3.5" onClick={(event) => event.stopPropagation()}>
                         {selectable && (
                           <button
                             type="button"
@@ -1005,16 +1005,16 @@ export function CampaignsView() {
                           </button>
                         )}
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-2 xl:py-3.5">
                         <div className="flex min-w-0 items-center gap-3">
                           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><WhatsAppIcon className="h-4 w-4 fill-current" /></span>
                           <span className="min-w-0"><span className="block max-w-56 truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{row.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">{row.origem}</span></span>
                         </div>
                       </td>
-                      <td className="max-w-48 truncate px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.mensagem}>{row.mensagem}</td>
-                      <td className="max-w-48 truncate px-4 py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.publico}>{row.publico || "—"}</td>
-                      <td className="px-4 py-3.5"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${displayStyles[row.status]}`}>{row.status === "Enviando" && <RefreshCw className="h-3 w-3 animate-spin" />}{row.status}</span></td>
-                      <td className="px-4 py-3.5">
+                      <td className="max-w-48 truncate px-4 py-2 xl:py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.mensagem}>{row.mensagem}</td>
+                      <td className="max-w-48 truncate px-4 py-2 xl:py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.publico}>{row.publico || "—"}</td>
+                      <td className="px-4 py-2 xl:py-3.5"><span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold ${displayStyles[row.status]}`}>{row.status === "Enviando" && <RefreshCw className="h-3 w-3 animate-spin" />}{row.status}</span></td>
+                      <td className="px-4 py-2 xl:py-3.5">
                         {row.total > 0 ? (
                           <div className="space-y-1">
                             <ProgressBar percent={percent} tone={row.status === "Pausado" ? "paused" : "default"} />
@@ -1022,7 +1022,7 @@ export function CampaignsView() {
                           </div>
                         ) : <span className="text-xs text-slate-400">—</span>}
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-2 xl:py-3.5">
                         <div className="flex items-center gap-3 text-[11px] tabular-nums text-slate-600 dark:text-slate-300">
                           <span className="inline-flex items-center gap-1" title="Enviados"><Send className="h-3 w-3 text-slate-400" />{int(row.stats.sent)}</span>
                           <span className="inline-flex items-center gap-1" title="Entregues"><CheckCheck className="h-3 w-3 text-slate-400" />{int(row.stats.delivered)}</span>
@@ -1030,8 +1030,8 @@ export function CampaignsView() {
                           <span className="inline-flex items-center gap-1" title="Respostas"><MessageCircleReply className="h-3 w-3 text-slate-400" />{int(row.stats.replied)}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 text-xs text-slate-500 dark:text-slate-400">{row.kind === "campaign" && row.updatedAt > 0 ? formatDateTime(new Date(row.updatedAt).toISOString()) : row.updatedLabel}</td>
-                      <td className="px-4 py-3.5 text-right" onClick={(event) => event.stopPropagation()}>
+                      <td className="px-4 py-2 xl:py-3.5 text-xs text-slate-500 dark:text-slate-400">{row.kind === "campaign" && row.updatedAt > 0 ? formatDateTime(new Date(row.updatedAt).toISOString()) : row.updatedLabel}</td>
+                      <td className="px-4 py-2 xl:py-3.5 text-right" onClick={(event) => event.stopPropagation()}>
                         <div className="flex justify-end gap-1.5">
                           {row.kind === "campaign" && row.campaign && (
                             row.job?.status === "running" ? (
