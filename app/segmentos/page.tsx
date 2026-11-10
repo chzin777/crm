@@ -25,7 +25,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { AudienceCounter, CriterionBuilder } from "@/components/CriterionBuilder";
 import { FormSelect } from "@/components/FormSelect";
-import { SegmentSpreadsheetImport, segmentNameFromFile, type SpreadsheetImportResult } from "@/components/SegmentSpreadsheetImport";
+import { SegmentSpreadsheetImport, segmentNameFromFile, type SpreadsheetImportResult, type SpreadsheetMergeSummary } from "@/components/SegmentSpreadsheetImport";
 import { describeRule, validateRule, type SegmentRule } from "@/lib/segment-rules";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
@@ -531,19 +531,27 @@ export default function SegmentosPage() {
     return true;
   };
 
-  const handleSpreadsheetImport = (result: SpreadsheetImportResult) => {
+  /** Soma a planilha aos contatos já escolhidos (união sem repetidos); nunca substitui a lista anterior. */
+  const handleSpreadsheetImport = (result: SpreadsheetImportResult): SpreadsheetMergeSummary => {
+    const existing = new Set(selectedContactIds);
+    const added = result.contactIds.filter((id) => !existing.has(id));
+    const merged = Array.from(new Set([...selectedContactIds, ...added]));
+    const summary = { added: added.length, alreadyIn: result.contactIds.length - added.length, total: merged.length };
     setAudienceMode("contatos");
-    setSelectedContactIds((current) => [...new Set([...current, ...result.contactIds])]);
+    setSelectedContactIds((current) => Array.from(new Set([...current, ...result.contactIds])));
+    // Nome e descrição só são preenchidos pelo arquivo quando ainda estão vazios.
     setForm((current) => ({
       ...current,
       nome: current.nome.trim() ? current.nome : segmentNameFromFile(result.fileName),
       descricao: current.descricao.trim() ? current.descricao : `Importado da planilha ${result.fileName}`,
     }));
     setFormError("");
+    const format = (value: number) => value.toLocaleString("pt-BR");
     toast.success(
       "Planilha importada",
-      `${result.linked.toLocaleString("pt-BR")} contatos vinculados | ${result.notFound.toLocaleString("pt-BR")} não encontrados na base do CRM.`,
+      `${format(summary.added)} contatos novos adicionados ao segmento | ${format(summary.alreadyIn)} já estavam na lista (duplicados ignorados) | ${format(result.notFound)} não encontrados na base do CRM | Total acumulado: ${format(summary.total)} contatos.`,
     );
+    return summary;
   };
 
   const createSegment = () => {
