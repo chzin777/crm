@@ -10,7 +10,7 @@ import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { DeleteConversationDialog } from "@/components/chat/DeleteConversationDialog";
-import { FloatingMenu, type FloatingMenuItem } from "@/components/chat/FloatingMenu";
+import { ContextMenu, FloatingMenu, type FloatingMenuItem } from "@/components/chat/FloatingMenu";
 import { MessageList, type MessageListHandle } from "@/components/chat/MessageList";
 import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
 import { PriorityPill } from "@/components/chat/PriorityPill";
@@ -51,6 +51,7 @@ function ChatWorkspace() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [queueOptions, setQueueOptions] = useState<{ id: string; name: string }[]>([]);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [newSearch, setNewSearch] = useState("");
   const canWrite = capabilities["chat.assume"] === true;
@@ -286,13 +287,18 @@ function ChatWorkspace() {
     messageList.current?.refresh();
   };
 
-  const conversationAction = async (path: string, init?: RequestInit) => {
+  const conversationAction = async (path: string, init?: RequestInit, id = selectedId, successTitle?: string) => {
     setSendError("");
-    const response = await fetch(`/api/chat/conversations/${selectedId}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, ...init }).catch(() => null);
+    const response = await fetch(`/api/chat/conversations/${id}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, ...init }).catch(() => null);
     const data = (await response?.json().catch(() => null)) as { error?: string; openConversationId?: string } | null;
-    if (response?.ok) refreshOpen();
-    else {
-      setSendError(data?.error ?? "Não foi possível concluir a ação.");
+    if (response?.ok) {
+      refreshOpen();
+      if (successTitle) toast.success(successTitle);
+    } else {
+      const message = data?.error ?? "Não foi possível concluir a ação.";
+      // Ação pelo clique direito: a conversa pode não estar aberta, então o erro vai em aviso.
+      if (successTitle) toast.error("Ação não concluída", message);
+      else setSendError(message);
       if (data?.openConversationId) select(data.openConversationId);
     }
   };
@@ -332,19 +338,37 @@ function ChatWorkspace() {
   const headerInfo = open
     ? [formatPhone(open.phone), STATUS_LABELS[open.status], open.assignee?.name, open.queue?.name, waiting ? `esperando há ${waiting}` : lastContact].filter(Boolean).join(" · ")
     : "";
-  const menuItems: FloatingMenuItem[] = open
-    ? [
-        { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => void conversationAction("/assume"), hidden: !canWrite || !!open.closedAt || !!open.assignee },
-        { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
-        { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(open.contactId)}&contato=${encodeURIComponent(open.name)}`, hidden: !canWrite },
-        { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!open.closedAt },
-        { label: "Marcar como não lida", icon: <Mail className="h-4 w-4" />, onSelect: () => void conversationAction("/read", { body: JSON.stringify({ unread: true }) }), hidden: !!open.closedAt },
-        { label: "Finalizar atendimento", icon: <CheckCircle2 className="h-4 w-4" />, onSelect: () => void conversationAction("/close"), hidden: !capabilities["chat.close"] || !!open.closedAt },
-        { label: "Reabrir atendimento", icon: <RotateCcw className="h-4 w-4" />, onSelect: () => void conversationAction("/reopen"), hidden: !capabilities["chat.close"] || !canWrite || !open.closedAt },
-        { label: open.blocked ? "Desbloquear contato" : "Bloquear contato", icon: <Ban className="h-4 w-4" />, onSelect: () => void toggleBlock(open.phone, open.blocked), danger: true, hidden: !capabilities["chat.queues"] },
-        { label: "Excluir conversa", icon: <Trash2 className="h-4 w-4" />, onSelect: () => setDeleteTarget({ id: open.id, name: open.name }), danger: true, hidden: !isAdmin },
-      ]
-    : [];
+  /**
+   * Ações da conversa: as mesmas nos 3 pontinhos e no clique direito da lista.
+   * `blocked` só vem com o detalhe carregado; até lá a opção de bloqueio fica oculta.
+   */
+  const conversationMenu = (conversation: ConversationItem & { blocked?: boolean }, fromList = false): FloatingMenuItem[] => {
+    // As ações só rodam no clique do item, nunca durante a renderização.
+    // eslint-disable-next-line react-hooks/refs
+    const run = (path: string, success: string, init?: RequestInit) => void conversationAction(path, init, conversation.id, fromList ? success : undefined);
+    return [
+      { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => run("/assume", "Atendimento assumido"), hidden: !canWrite || !!conversation.closedAt || !!conversation.assignee },
+      { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
+      { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(conversation.contactId)}&contato=${encodeURIComponent(conversation.name)}`, hidden: !canWrite },
+      { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!conversation.closedAt },
+      { label: "Marcar como não lida", icon: <Mail className="h-4 w-4" />, onSelect: () => run("/read", "Marcada como não lida", { body: JSON.stringify({ unread: true }) }), hidden: !!conversation.closedAt },
+      { label: "Finalizar atendimento", icon: <CheckCircle2 className="h-4 w-4" />, onSelect: () => run("/close", "Atendimento finalizado"), hidden: !capabilities["chat.close"] || !!conversation.closedAt },
+      { label: "Reabrir atendimento", icon: <RotateCcw className="h-4 w-4" />, onSelect: () => run("/reopen", "Atendimento reaberto"), hidden: !capabilities["chat.close"] || !canWrite || !conversation.closedAt },
+      {
+        label: conversation.blocked ? "Desbloquear contato" : "Bloquear contato",
+        icon: <Ban className="h-4 w-4" />,
+        // eslint-disable-next-line react-hooks/refs
+        onSelect: () => void toggleBlock(conversation.phone, !!conversation.blocked),
+        danger: true,
+        hidden: !capabilities["chat.queues"] || conversation.blocked === undefined,
+      },
+      { label: "Excluir conversa", icon: <Trash2 className="h-4 w-4" />, onSelect: () => setDeleteTarget({ id: conversation.id, name: conversation.name }), danger: true, hidden: !isAdmin },
+    ];
+  };
+  const menuItems: FloatingMenuItem[] = open ? conversationMenu(open) : [];
+  // Clique direito na lista: abre a conversa alvo (as janelas de transferir/dados usam a conversa aberta).
+  const contextItem = contextMenu ? items.find((item) => item.id === contextMenu.id) : undefined;
+  const contextMenuItems = contextItem ? conversationMenu(detail?.id === contextItem.id ? detail : contextItem, true) : [];
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden px-4 py-6 sm:px-7 sm:py-8 xl:px-10">
@@ -367,6 +391,10 @@ function ChatWorkspace() {
             selectedId={selectedId}
             onSelect={select}
             onDelete={isAdmin ? (item) => setDeleteTarget({ id: item.id, name: item.name }) : undefined}
+            onContextMenu={(item, point) => {
+              if (selectedId !== item.id) select(item.id);
+              setContextMenu({ id: item.id, ...point });
+            }}
             onEndReached={() => {
               if (nextCursor) void loadList(nextCursor);
             }}
@@ -470,6 +498,16 @@ function ChatWorkspace() {
 
         {showNew && (
           <NewConversationDialog initialSearch={newSearch} onClose={() => setShowNew(false)} onOpened={(id) => { setShowNew(false); setTab("mine"); select(id); void loadList(); }} />
+        )}
+        {contextMenu && contextItem && (
+          <ContextMenu
+            key={`${contextMenu.id}-${contextMenu.x}-${contextMenu.y}`}
+            label={`Ações da conversa com ${contextItem.name}`}
+            widthClassName="w-60"
+            point={contextMenu}
+            items={contextMenuItems}
+            onClose={() => setContextMenu(null)}
+          />
         )}
       </div>
     </div>

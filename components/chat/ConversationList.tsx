@@ -101,6 +101,8 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDelete?: (item: ConversationItem) => void;
+  /** Clique direito no card: mesmas ações dos 3 pontinhos, no ponto do mouse. */
+  onContextMenu?: (item: ConversationItem, point: { x: number; y: number }) => void;
   onEndReached: () => void;
   actions?: React.ReactNode;
 };
@@ -138,7 +140,7 @@ function FilterSelect({ label, value, placeholder, options, onChange }: FilterSe
   );
 }
 
-export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, loading, error, selectedId, onSelect, onDelete, onEndReached, actions }: Props) {
+export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, loading, error, selectedId, onSelect, onDelete, onContextMenu, onEndReached, actions }: Props) {
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const list = event.currentTarget;
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
@@ -235,7 +237,14 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const waiting = item.status === "waiting" && !!item.waitingSince;
             const hasTags = !!item.campaign || !!item.store || waiting || item.priority !== "normal" || !!item.queue || !!item.assignee;
             return (
-              <div key={item.id} className="group relative mx-2 my-1">
+              <div
+                key={item.id}
+                className="group relative mx-2 my-1"
+                onContextMenu={onContextMenu ? (event) => {
+                  event.preventDefault();
+                  onContextMenu(item, { x: event.clientX, y: event.clientY });
+                } : undefined}
+              >
                 <button
                   type="button"
                   onClick={() => onSelect(item.id)}
