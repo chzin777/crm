@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { cached, invalidateCache } from "@/lib/cache";
 import { CONTACT_PLACE_KEY } from "@/lib/geocode";
-import { MAX_RULES, ruleSchema, validateRule, type SegmentRule } from "@/lib/segment-rules";
+import { MAX_RULES, normalizeRuleText, ruleSchema, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
 
 const criterionSchema = z.object({
   id: z.string().max(200),
@@ -92,6 +92,8 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
         case "eq": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND ${ddd} = ${digits}`;
         case "neq": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND ${ddd} <> ${digits}`;
         case "contains": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND position(${digits} in ${ddd}) > 0`;
+        case "in": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND ${ddd} = ANY(${splitRuleList(value)}::text[])`;
+        case "not_in": return Prisma.sql`length(${PHONE_DIGITS}) >= 10 AND NOT (${ddd} = ANY(${splitRuleList(value)}::text[]))`;
         case "filled": return Prisma.sql`length(${PHONE_DIGITS}) >= 10`;
         case "empty": return Prisma.sql`length(${PHONE_DIGITS}) < 10`;
         default: return Prisma.sql`FALSE`;
@@ -107,6 +109,8 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
         case "eq": return anyTag(Prisma.sql`${tag} = ${needle}`);
         case "neq": return Prisma.sql`NOT ${anyTag(Prisma.sql`${tag} = ${needle}`)}`;
         case "contains": return anyTag(Prisma.sql`position(${needle} in ${tag}) > 0`);
+        case "in": return anyTag(Prisma.sql`${tag} = ANY(${splitRuleList(value).map(normalizeRuleText)}::text[])`);
+        case "not_in": return Prisma.sql`NOT ${anyTag(Prisma.sql`${tag} = ANY(${splitRuleList(value).map(normalizeRuleText)}::text[])`)}`;
         case "filled": return anyTag(Prisma.sql`TRUE`);
         case "empty": return Prisma.sql`NOT ${anyTag(Prisma.sql`TRUE`)}`;
         default: return Prisma.sql`FALSE`;
@@ -162,6 +166,8 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
         case "eq": return Prisma.sql`${normalized} = ${needle}`;
         case "neq": return Prisma.sql`${normalized} <> ${needle}`;
         case "contains": return Prisma.sql`position(${needle} in ${normalized}) > 0`;
+        case "in": return Prisma.sql`${normalized} = ANY(${splitRuleList(value).map(normalizeRuleText)}::text[])`;
+        case "not_in": return Prisma.sql`NOT (${normalized} = ANY(${splitRuleList(value).map(normalizeRuleText)}::text[]))`;
         case "filled": return Prisma.sql`${normalized} <> ''`;
         case "empty": return Prisma.sql`${normalized} = ''`;
         default: return Prisma.sql`FALSE`;

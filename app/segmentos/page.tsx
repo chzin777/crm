@@ -23,7 +23,7 @@ import { useCrmTheme } from "@/hooks/useCrmTheme";
 import Stepper, { Step } from "@/components/Stepper";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
-import { CriterionRulesEditor, emptyRule } from "@/components/CriterionRulesEditor";
+import { AudienceCounter, CriterionBuilder } from "@/components/CriterionBuilder";
 import { FormSelect } from "@/components/FormSelect";
 import { describeRule, validateRule, type SegmentRule } from "@/lib/segment-rules";
 import type { Contact, ContactCategory } from "@/lib/contacts";
@@ -178,7 +178,7 @@ export default function SegmentosPage() {
   const [criteriaSearchTerm, setCriteriaSearchTerm] = useState("");
   const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
   const [editingCriterionId, setEditingCriterionId] = useState<string | null>(null);
-  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind, regras: [emptyRule()] as SegmentRule[] });
+  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind, regras: [] as SegmentRule[] });
   const [criteriaManagerError, setCriteriaManagerError] = useState("");
   const criteriaMenuRef = useRef<HTMLDivElement>(null);
   const criteriaTriggerRef = useRef<HTMLButtonElement>(null);
@@ -426,7 +426,7 @@ export default function SegmentosPage() {
   };
 
   const resetCriterionForm = () => {
-    setCriterionForm({ nome: "", tipo: "geral", regras: [emptyRule()] });
+    setCriterionForm({ nome: "", tipo: "geral", regras: [] });
     setEditingCriterionId(null);
     setCriteriaManagerError("");
   };
@@ -1406,28 +1406,27 @@ export default function SegmentosPage() {
             }
           }}
         >
-          <section role="dialog" aria-modal="true" aria-labelledby="criteria-manager-title" className="flex h-[min(900px,94vh)] max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] sm:p-8">
-            <header className="mb-4 shrink-0 space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 id="criteria-manager-title" className="text-lg font-bold text-slate-900 dark:text-white">Gerenciar critérios de segmentação</h2>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Critérios padrão do sistema só podem ser ativados ou inativados. Critérios criados por você também podem ser editados e removidos.</p>
-                </div>
-                <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} aria-label="Fechar gerenciamento de critérios" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer"><X className="h-5 w-5" /></button>
+          <section role="dialog" aria-modal="true" aria-labelledby="criteria-manager-title" className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f9fc] shadow-2xl dark:border-slate-700 dark:bg-[#051647]">
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5 dark:border-slate-800 dark:bg-[#07194f] sm:px-8">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#002187] dark:text-[#C4D600]">Segmentação</p>
+                <h2 id="criteria-manager-title" className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{editingCriterionId ? "Editar critério" : "Novo critério de segmentação"}</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Ligue os filtros que definem o público. O contato entra quando atende a todos eles.</p>
               </div>
+              <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} aria-label="Fechar critérios de segmentação" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer"><X className="h-5 w-5" /></button>
             </header>
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
-              <div id="criterion-form" className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-700 dark:bg-slate-800/40">
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{editingCriterionId ? "Editar critério" : "Criar critério"}</h3>
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(160px,0.65fr)]">
+            <div className="custom-scrollbar min-h-0 max-h-[80vh] flex-1 overflow-y-auto px-6 py-6 sm:px-8">
+             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div id="criterion-form" className="space-y-5">
+                <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#07194f] sm:grid-cols-[minmax(0,1fr)_220px]">
                   <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                     Nome do critério <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span>
                     <input
                       autoFocus
                       value={criterionForm.nome}
                       onChange={(event) => { setCriterionForm((current) => ({ ...current, nome: event.target.value })); setCriteriaManagerError(""); }}
-                      placeholder="Ex.: Loja: Pinheiros"
-                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-xs outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-200 dark:focus:border-[#C4D600]"
+                      placeholder="Ex.: Clientes VIP de Goiânia"
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/10 dark:border-slate-700 dark:bg-[#051647] dark:text-slate-100 dark:focus:border-[#C4D600]"
                     />
                   </label>
                   <div className="block">
@@ -1442,19 +1441,12 @@ export default function SegmentosPage() {
                     />
                   </div>
                 </div>
-                <CriterionRulesEditor
+                <CriterionBuilder
                   rules={criterionForm.regras}
                   onChange={(regras) => { setCriterionForm((current) => ({ ...current, regras })); setCriteriaManagerError(""); }}
                 />
-                {criteriaManagerError && <p role="alert" className="text-sm font-medium text-[#9a3d12] dark:text-[#F7915E]">{criteriaManagerError}</p>}
-                <div className="flex justify-end gap-2">
-                  {editingCriterionId && <button type="button" onClick={resetCriterionForm} className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-200 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer hover:cursor-pointer">Cancelar edição</button>}
-                  <button type="button" onClick={submitCriterion} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer hover:cursor-pointer">
-                    {editingCriterionId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    {editingCriterionId ? "Salvar critério" : "Adicionar critério"}
-                  </button>
-                </div>
               </div>
+              <aside aria-label="Critérios salvos" className="space-y-3 xl:sticky xl:top-0 xl:self-start">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
@@ -1467,10 +1459,10 @@ export default function SegmentosPage() {
               </div>
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Critérios disponíveis</h3>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Critérios salvos</h3>
                   <span className="text-xs text-slate-400">{criteriaOptions.length} critérios</span>
                 </div>
-                <p className="mb-3 text-xs text-slate-400">Critérios inativos deixam de aparecer para novas seleções, mas continuam valendo nos segmentos que já os utilizam. O status dos critérios de loja acompanha o cadastro: lojas inativas ficam com o critério inativo e lojas removidas deixam de aparecer. Remover um critério próprio também não apaga ele dos segmentos existentes.</p>
+                <p className="mb-3 text-[11px] leading-relaxed text-slate-400">Padrões do sistema só podem ser ligados ou desligados. Inativos somem das novas seleções, mas continuam valendo nos segmentos que já os usam.</p>
                 <div className="space-y-5">
                   {criterionKinds.map((kind) => {
                     const groupedCriteria = managerCriteria.filter((criterion) => criterion.tipo === kind);
@@ -1511,7 +1503,7 @@ export default function SegmentosPage() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo, regras: criterion.regras?.length ? criterion.regras : [emptyRule()] });
+                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo, regras: criterion.regras ?? [] });
                                           setEditingCriterionId(criterion.id);
                                           setCriteriaManagerError("");
                                           document.getElementById("criterion-form")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -1554,9 +1546,20 @@ export default function SegmentosPage() {
                   {managerCriteria.length === 0 && <p className="py-6 text-center text-sm text-slate-500">Nenhum critério encontrado.</p>}
                 </div>
               </div>
+              </aside>
+             </div>
             </div>
-            <footer className="mt-5 flex shrink-0 justify-end border-t border-slate-100 pt-4 dark:border-slate-800">
-              <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Concluir</button>
+            <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-6 py-4 shadow-[0_-8px_24px_-16px_rgba(5,22,71,0.25)] dark:border-slate-800 dark:bg-[#07194f] sm:flex-row sm:items-center sm:justify-between sm:px-8">
+              <AudienceCounter rules={criterionForm.regras} />
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                {criteriaManagerError && <p role="alert" className="mr-2 max-w-xs text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{criteriaManagerError}</p>}
+                <button type="button" disabled={criterionForm.regras.length === 0} onClick={() => { setCriterionForm((current) => ({ ...current, regras: [] })); setCriteriaManagerError(""); }} className="h-10 rounded-lg px-3 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">Limpar filtros</button>
+                <button type="button" onClick={() => { if (editingCriterionId) { resetCriterionForm(); } else { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); } }} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer">{editingCriterionId ? "Cancelar edição" : "Cancelar"}</button>
+                <button type="button" onClick={submitCriterion} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#051647] px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                  {editingCriterionId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  {editingCriterionId ? "Salvar critério" : "Criar critério"}
+                </button>
+              </div>
             </footer>
           </section>
         </div>

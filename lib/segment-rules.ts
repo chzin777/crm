@@ -30,6 +30,9 @@ const textOperators: RuleOperator[] = [
   { id: "eq", label: "é igual a", input: "one" },
   { id: "neq", label: "é diferente de", input: "one" },
   { id: "contains", label: "contém", input: "one" },
+  // Lista separada por vírgula (chips no construtor de critérios).
+  { id: "in", label: "é um destes", input: "one" },
+  { id: "not_in", label: "não é nenhum destes", input: "one" },
   { id: "filled", label: "está preenchido", input: "none" },
   { id: "empty", label: "está vazio", input: "none" },
 ];
@@ -132,7 +135,15 @@ export const ruleSchema = z.object({
 
 export type SegmentRule = z.infer<typeof ruleSchema>;
 
-export const MAX_RULES = 10;
+export const MAX_RULES = 20;
+
+/** Itens de uma regra em lista ("é um destes"): separados por vírgula, sem vazios nem repetidos. */
+export const splitRuleList = (value: string | undefined) =>
+  [...new Set((value ?? "").split(",").map((item) => item.trim()).filter(Boolean))];
+
+/** Mesma normalização do SQL: maiúsculas, sem acento e sem espaços nas pontas. */
+export const normalizeRuleText = (value: string) =>
+  value.trim().toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 const isIsoDate = (value: string | undefined) => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 const isNumeric = (value: string | undefined) => !!value && value.trim() !== "" && Number.isFinite(Number(value.replace(",", ".")));
@@ -155,8 +166,13 @@ export function validateRule(rule: SegmentRule): string | null {
     } else if (field.type === "select") {
       if (!field.options?.some((option) => option.value === value)) return `Selecione um valor para "${field.label}".`;
     } else if (!value?.trim()) {
-      return `Informe o valor para "${field.label}".`;
+      return operator.id === "in" || operator.id === "not_in"
+        ? `Adicione ao menos um item em "${field.label}".`
+        : `Informe o valor para "${field.label}".`;
     }
+  }
+  if (rule.campo === "ddd" && (operator.id === "in" || operator.id === "not_in") && splitRuleList(rule.valor).some((item) => !/^\d{2}$/.test(item))) {
+    return "Cada DDD deve ter 2 dígitos.";
   }
   return null;
 }
