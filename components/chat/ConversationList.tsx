@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, Check, CheckCheck, ChevronDown, Clock, Megaphone, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Store, Trash2, User, X } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, ChevronDown, Clock, Megaphone, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
@@ -54,29 +54,40 @@ const BADGE_TONES: Record<BadgeTone, string> = {
   ecommerce: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300",
 };
 
-const PRIORITY_TONES: Record<ChatPriority, BadgeTone> = { low: "neutral", normal: "neutral", high: "warning", urgent: "danger" };
 const MAX_BADGES = 2;
 const ECOMMERCE_TAG = /e-?commerce|site|pedido|loja online/i;
 
-type Badge = { key: string; title: string; text: string; tone: BadgeTone; icon?: ReactNode };
+/** `flexible`: nome livre (campanha, etiqueta) que pode encurtar; os demais nunca encolhem. */
+type Badge = { key: string; title: string; text: string; tone: BadgeTone; icon?: ReactNode; flexible?: boolean };
 
-/** Só o que decide o atendimento: espera, prioridade e origem. Fila, loja e atendente viram texto auxiliar. */
+/**
+ * Só espera e origem viram selo; a prioridade é um ponto ao lado do nome.
+ * Fila, loja e atendente ficam no cabeçalho da conversa e no "+N" (dica ao passar o mouse).
+ */
 function businessBadges(item: ConversationItem, waiting: boolean): Badge[] {
   const badges: Badge[] = [];
   if (waiting && item.waitingSince) {
     const { text, minutes } = waitingLabel(item.waitingSince);
     badges.push({ key: "wait", title: `Esperando há ${text}`, text, tone: minutes >= 10 ? "danger" : minutes >= 3 ? "warning" : "neutral", icon: <Clock className="h-3 w-3 shrink-0" /> });
   }
-  if (item.priority !== "normal") badges.push({ key: "priority", title: `Prioridade ${PRIORITY_LABELS[item.priority].toLowerCase()}`, text: PRIORITY_LABELS[item.priority], tone: PRIORITY_TONES[item.priority] });
-  if (item.campaign) badges.push({ key: "campaign", title: `Respondeu à campanha: ${item.campaign.name}`, text: item.campaign.name, tone: "campaign", icon: <Megaphone className="h-3 w-3 shrink-0" /> });
+  if (item.campaign) badges.push({ key: "campaign", title: `Respondeu à campanha: ${item.campaign.name}`, text: item.campaign.name, tone: "campaign", icon: <Megaphone className="h-3 w-3 shrink-0" />, flexible: true });
   for (const tag of item.tags) {
     const ecommerce = ECOMMERCE_TAG.test(tag);
-    badges.push({ key: `tag-${tag}`, title: tag, text: tag, tone: ecommerce ? "ecommerce" : "neutral", icon: ecommerce ? <ShoppingBag className="h-3 w-3 shrink-0" /> : undefined });
+    badges.push({ key: `tag-${tag}`, title: tag, text: tag, tone: ecommerce ? "ecommerce" : "neutral", icon: ecommerce ? <ShoppingBag className="h-3 w-3 shrink-0" /> : undefined, flexible: true });
   }
   return badges;
 }
 
-const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
+/** Contexto de apoio (fila, loja, atendente), mostrado só na dica do "+N". */
+function supportLines(item: ConversationItem) {
+  return [
+    item.queue && `Fila: ${item.queue.name}`,
+    item.store && storeLabel(item.store),
+    item.assignee && `Atendente: ${item.assignee.name}`,
+  ].filter((line): line is string => !!line);
+}
+
+const PRIORITY_DOTS: Partial<Record<ChatPriority, string>> = { low: "bg-slate-300 dark:bg-slate-600", high: "bg-amber-500", urgent: "bg-rose-500" };
 
 function ListSkeleton() {
   return (
@@ -250,11 +261,8 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const waiting = item.status === "waiting" && !!item.waitingSince;
             const badges = businessBadges(item, waiting);
             const shown = badges.slice(0, MAX_BADGES);
-            const hidden = badges.slice(MAX_BADGES);
-            const meta: { key: string; title: string; icon: ReactNode; text: string }[] = [];
-            if (item.queue) meta.push({ key: "queue", title: `Fila: ${item.queue.name}`, icon: <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.queue.color }} />, text: item.queue.name });
-            if (item.store) meta.push({ key: "store", title: storeLabel(item.store), icon: <Store className="h-3 w-3 shrink-0" />, text: storeLabel(item.store) });
-            if (item.assignee) meta.push({ key: "assignee", title: `Atendente: ${item.assignee.name}`, icon: <User className="h-3 w-3 shrink-0" />, text: firstName(item.assignee.name) });
+            const extra = [...badges.slice(MAX_BADGES).map((badge) => badge.title), ...supportLines(item)];
+            const priorityDot = PRIORITY_DOTS[item.priority];
             return (
               <div
                 key={item.id}
@@ -284,7 +292,14 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        {priorityDot && (
+                          <span title={`Prioridade ${PRIORITY_LABELS[item.priority].toLowerCase()}`} className={`h-2 w-2 shrink-0 rounded-full ${priorityDot}`}>
+                            <span className="sr-only">Prioridade {PRIORITY_LABELS[item.priority].toLowerCase()}</span>
+                          </span>
+                        )}
+                        <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
+                      </span>
                       <span className={`shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500 ${onDelete ? "group-hover:invisible" : ""}`}>{relativeTime(item.lastMessageAt)}</span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
@@ -300,30 +315,22 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#C4D600] px-1 text-[10px] font-bold text-[#051647]">{item.unreadCount}</span>
                       )}
                     </div>
-                    {/* Linha 3 sempre presente (altura fixa): selos de negócio à esquerda, contexto em texto à direita. */}
-                    <div className="mt-1.5 flex h-5 min-w-0 items-center gap-2 overflow-hidden">
-                      <div className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
-                        {shown.map((badge) => (
-                          <span key={badge.key} title={badge.title} className={`inline-flex h-5 min-w-0 max-w-[130px] items-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold ${BADGE_TONES[badge.tone]}`}>
-                            {badge.icon}
-                            <span className="truncate">{badge.text}</span>
-                          </span>
-                        ))}
-                        {hidden.length > 0 && (
-                          <span title={hidden.map((badge) => badge.title).join("\n")} className="inline-flex h-5 shrink-0 items-center rounded-md border border-slate-200 bg-white px-1.5 text-[10px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-transparent dark:text-slate-400">
-                            +{hidden.length}
-                          </span>
-                        )}
-                      </div>
-                      {meta.length > 0 && (
-                        <div className="ml-auto flex min-w-0 shrink items-center gap-2 overflow-hidden text-[11px] text-slate-400 dark:text-slate-500">
-                          {meta.map((entry) => (
-                            <span key={entry.key} title={entry.title} className="flex min-w-0 items-center gap-1">
-                              {entry.icon}
-                              <span className="truncate">{entry.text}</span>
-                            </span>
-                          ))}
-                        </div>
+                    {/* Linha 3 (altura fixa): até 2 selos legíveis; o resto vai para o "+N" com dica. */}
+                    <div className="mt-1.5 flex h-6 min-w-0 items-center gap-1.5 overflow-hidden">
+                      {shown.map((badge) => (
+                        <span
+                          key={badge.key}
+                          title={badge.title}
+                          className={`inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-xs font-medium ${badge.flexible ? "min-w-[88px] max-w-[170px] shrink" : "shrink-0"} ${BADGE_TONES[badge.tone]}`}
+                        >
+                          {badge.icon}
+                          <span className="truncate">{badge.text}</span>
+                        </span>
+                      ))}
+                      {extra.length > 0 && (
+                        <span title={extra.join("\n")} className="inline-flex h-6 shrink-0 items-center rounded-md px-1.5 text-[11px] font-medium text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
+                          +{extra.length}
+                        </span>
                       )}
                     </div>
                   </div>
