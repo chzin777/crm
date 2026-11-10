@@ -43,48 +43,34 @@ function DeliveryIcon({ delivery }: { delivery: ChatDelivery }) {
   return <AlertCircle className={`${className} text-red-500`} aria-label="Falha no envio" />;
 }
 
-/** Selos com cor por significado: risco (espera/prioridade), origem campanha, origem e-commerce. */
-type BadgeTone = "danger" | "warning" | "neutral" | "campaign" | "ecommerce";
+/** Tag de origem com cor própria: campanha violeta, e-commerce verde, demais etiquetas neutras. */
+type OriginTone = "campaign" | "ecommerce" | "neutral";
 
-const BADGE_TONES: Record<BadgeTone, string> = {
-  danger: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300",
-  warning: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300",
+const ORIGIN_TONES: Record<OriginTone, string> = {
   neutral: "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
   campaign: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-950/40 dark:text-violet-300",
   ecommerce: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300",
 };
 
-const MAX_BADGES = 2;
 const ECOMMERCE_TAG = /e-?commerce|site|pedido|loja online/i;
 
-/** `flexible`: nome livre (campanha, etiqueta) que pode encurtar; os demais nunca encolhem. */
-type Badge = { key: string; title: string; text: string; tone: BadgeTone; icon?: ReactNode; flexible?: boolean };
+type Origin = { title: string; text: string; tone: OriginTone; icon?: ReactNode };
 
-/**
- * Só espera e origem viram selo; a prioridade é um ponto ao lado do nome.
- * Fila, loja e atendente ficam no cabeçalho da conversa e no "+N" (dica ao passar o mouse).
- */
-function businessBadges(item: ConversationItem, waiting: boolean): Badge[] {
-  const badges: Badge[] = [];
-  if (waiting && item.waitingSince) {
-    const { text, minutes } = waitingLabel(item.waitingSince);
-    badges.push({ key: "wait", title: `Esperando há ${text}`, text, tone: minutes >= 10 ? "danger" : minutes >= 3 ? "warning" : "neutral", icon: <Clock className="h-3 w-3 shrink-0" /> });
-  }
-  if (item.campaign) badges.push({ key: "campaign", title: `Respondeu à campanha: ${item.campaign.name}`, text: item.campaign.name, tone: "campaign", icon: <Megaphone className="h-3 w-3 shrink-0" />, flexible: true });
-  for (const tag of item.tags) {
-    const ecommerce = ECOMMERCE_TAG.test(tag);
-    badges.push({ key: `tag-${tag}`, title: tag, text: tag, tone: ecommerce ? "ecommerce" : "neutral", icon: ecommerce ? <ShoppingBag className="h-3 w-3 shrink-0" /> : undefined, flexible: true });
-  }
-  return badges;
+/** Uma única tag de origem no card: a campanha tem preferência; senão a primeira etiqueta. */
+function originOf(item: ConversationItem): Origin | null {
+  if (item.campaign) return { title: `Respondeu à campanha: ${item.campaign.name}`, text: item.campaign.name, tone: "campaign", icon: <Megaphone className="h-3 w-3 shrink-0" /> };
+  const tag = item.tags.find((value) => ECOMMERCE_TAG.test(value)) ?? item.tags[0];
+  if (!tag) return null;
+  const ecommerce = ECOMMERCE_TAG.test(tag);
+  return { title: tag, text: tag, tone: ecommerce ? "ecommerce" : "neutral", icon: ecommerce ? <ShoppingBag className="h-3 w-3 shrink-0" /> : undefined };
 }
 
-/** Contexto de apoio (fila, loja, atendente), mostrado só na dica do "+N". */
-function supportLines(item: ConversationItem) {
-  return [
-    item.queue && `Fila: ${item.queue.name}`,
-    item.store && storeLabel(item.store),
-    item.assignee && `Atendente: ${item.assignee.name}`,
-  ].filter((line): line is string => !!line);
+/** Tempo no canto do card: na fila mostra há quanto espera (cor sobe com a demora), senão a última mensagem. */
+function cornerTime(item: ConversationItem, waiting: boolean) {
+  if (!waiting || !item.waitingSince) return { text: relativeTime(item.lastMessageAt), title: undefined, tone: "text-slate-400 dark:text-slate-500" };
+  const { text, minutes } = waitingLabel(item.waitingSince);
+  const tone = minutes >= 10 ? "text-rose-600 dark:text-rose-300" : minutes >= 3 ? "text-amber-600 dark:text-amber-300" : "text-slate-400 dark:text-slate-500";
+  return { text, title: `Esperando há ${text}`, tone };
 }
 
 const PRIORITY_DOTS: Partial<Record<ChatPriority, string>> = { low: "bg-slate-300 dark:bg-slate-600", high: "bg-amber-500", urgent: "bg-rose-500" };
@@ -259,10 +245,10 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const selected = selectedId === item.id;
             const delivery = item.lastMessage && item.lastMessage.author !== "customer" ? item.lastMessage.delivery : null;
             const waiting = item.status === "waiting" && !!item.waitingSince;
-            const badges = businessBadges(item, waiting);
-            const shown = badges.slice(0, MAX_BADGES);
-            const extra = [...badges.slice(MAX_BADGES).map((badge) => badge.title), ...supportLines(item)];
+            const origin = originOf(item);
+            const corner = cornerTime(item, waiting);
             const priorityDot = PRIORITY_DOTS[item.priority];
+            const operational = [item.queue?.name, item.store ? storeLabel(item.store) : null].filter((value): value is string => !!value);
             return (
               <div
                 key={item.id}
@@ -276,7 +262,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                   type="button"
                   onClick={() => onSelect(item.id)}
                   aria-current={selected ? "true" : undefined}
-                  className={`flex h-[84px] w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border-l-4 px-3 py-2.5 text-left transition-all duration-150 ${
+                  className={`flex h-[84px] w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border-l-4 p-2.5 text-left transition-all duration-150 ${
                     selected
                       ? "border-[#051647] bg-blue-50/70 shadow-xs dark:border-[#C4D600] dark:bg-white/10"
                       : "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5"
@@ -300,9 +286,10 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         )}
                         <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
                       </span>
-                      <span className={`shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500 ${onDelete ? "group-hover:invisible" : ""}`}>{relativeTime(item.lastMessageAt)}</span>
+                      <span title={corner.title} className={`shrink-0 text-xs tabular-nums ${corner.tone}`}>{corner.text}</span>
                     </div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
+                    {/* Com lixeira, a linha da prévia reserva o canto dela ao passar o mouse. */}
+                    <div className={`mt-0.5 flex items-center gap-1.5 ${onDelete ? "transition-[padding] group-hover:pr-7" : ""}`}>
                       {delivery && <DeliveryIcon delivery={delivery} />}
                       <p className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-slate-400">
                         {isSticker(item) ? (
@@ -315,21 +302,21 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#C4D600] px-1 text-[10px] font-bold text-[#051647]">{item.unreadCount}</span>
                       )}
                     </div>
-                    {/* Linha 3 (altura fixa): até 2 selos legíveis; o resto vai para o "+N" com dica. */}
-                    <div className="mt-1.5 flex h-6 min-w-0 items-center gap-1.5 overflow-hidden">
-                      {shown.map((badge) => (
-                        <span
-                          key={badge.key}
-                          title={badge.title}
-                          className={`inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-xs font-medium ${badge.flexible ? "min-w-[88px] max-w-[170px] shrink" : "shrink-0"} ${BADGE_TONES[badge.tone]}`}
-                        >
-                          {badge.icon}
-                          <span className="truncate">{badge.text}</span>
+                    {/* Linha 3 (altura fixa): origem colorida à esquerda, fila • loja em texto à direita, sempre visíveis. */}
+                    <div className="mt-1.5 flex h-6 min-w-0 items-center justify-between gap-2 overflow-hidden">
+                      {origin ? (
+                        <span title={origin.title} className={`inline-flex h-6 min-w-[72px] max-w-[150px] shrink items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-medium ${ORIGIN_TONES[origin.tone]}`}>
+                          {origin.icon}
+                          <span className="truncate">{origin.text}</span>
                         </span>
-                      ))}
-                      {extra.length > 0 && (
-                        <span title={extra.join("\n")} className="inline-flex h-6 shrink-0 items-center rounded-md px-1.5 text-[11px] font-medium text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300">
-                          +{extra.length}
+                      ) : <span />}
+                      {operational.length > 0 && (
+                        <span
+                          title={[item.queue && `Fila: ${item.queue.name}`, item.store && storeLabel(item.store), item.assignee && `Atendente: ${item.assignee.name}`].filter(Boolean).join("\n")}
+                          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11px] font-normal text-slate-400 dark:text-slate-500"
+                        >
+                          {item.queue && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.queue.color }} />}
+                          <span className="truncate">{operational.join(" • ")}</span>
                         </span>
                       )}
                     </div>
@@ -341,7 +328,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                     onClick={() => onDelete(item)}
                     title="Excluir conversa"
                     aria-label={`Excluir conversa com ${item.name}`}
-                    className="absolute right-2 top-2 grid h-7 w-7 cursor-pointer place-items-center rounded-lg text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-300"
+                    className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 cursor-pointer place-items-center rounded-lg text-slate-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-300"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
