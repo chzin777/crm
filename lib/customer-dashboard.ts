@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { cached } from "@/lib/cache";
+import { cached, cachedStale } from "@/lib/cache";
 
 /** Brasil sem horário de verão: dias contados em UTC-3. */
 const BRT_OFFSET_MS = 3 * 60 * 60 * 1000;
@@ -65,6 +65,17 @@ type CustomerJson = {
   risk: RiskRow[] | null;
 };
 
+/**
+ * Consultas analíticas: o JIT do Postgres gasta segundos compilando planos que rodam em milissegundos,
+ * então fica desligado só dentro da transação desta consulta.
+ */
+function analytic<T>(query: Prisma.Sql) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL jit = off`;
+    return tx.$queryRaw<T>(query);
+  }, { maxWait: 10_000, timeout: 60_000 });
+}
+
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
 
 async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
@@ -81,7 +92,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
   })();
 
   const [periodRows, customerRows, monthlyRows, baseRows, npsRows] = await Promise.all([
-    prisma.$queryRaw<{ buyers: bigint; revenue: string | null; orders: bigint; buyersCmp: bigint; revenueCmp: string | null; ordersCmp: bigint }[]>(Prisma.sql`
+    analytic<{ buyers: bigint; revenue: string | null; orders: bigint; buyersCmp: bigint; revenueCmp: string | null; ordersCmp: bigint }[]>(Prisma.sql`
       SELECT
         COUNT(DISTINCT o."sourceKey") FILTER (WHERE o.day BETWEEN ${startDay}::date AND ${endDay}::date) AS buyers,
         SUM(o.total) FILTER (WHERE o.day BETWEEN ${startDay}::date AND ${endDay}::date)::text AS revenue,
@@ -92,7 +103,7 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
       FROM "VmsetInvoiceOrder" o
       WHERE ((o.day BETWEEN ${startDay}::date AND ${endDay}::date) OR (o.day BETWEEN ${compareStart}::date AND ${compareEnd}::date))${orderFilter}
     `),
-    prisma.$queryRaw<{ result: CustomerJson }[]>(Prisma.sql`
+    analytic<{ result: CustomerJson }[]>(Prisma.sql`
       WITH cust AS MATERIALIZED (
         SELECT o."sourceKey" AS sk, min(o.day) AS first_day, max(o.day) AS last_p,
           max(o.day) FILTER (WHERE o.day <= ${compareEnd}::date) AS last_c,
@@ -152,20 +163,27 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
         ) r)
       ) AS result
     `),
-    prisma.$queryRaw<{ m: string; buyers: bigint; base: bigint }[]>(Prisma.sql`
+    analytic<{ m: string; buyers: bigint; base: bigint }[]>(Prisma.sql`
       WITH months AS (
         SELECT generate_series(${firstMonth}::date, date_trunc('month', ${endDay}::date)::date, interval '1 month')::date AS ms
       ),
-      buyers AS (
-        SELECT date_trunc('month', o.day)::date AS ms, COUNT(DISTINCT o."sourceKey") AS buyers
+      recent AS MATERIALIZED (
+        SELECT DISTINCT o."sourceKey" AS sk, o.day
         FROM "VmsetInvoiceOrder" o
-        WHERE o.day BETWEEN ${firstMonth}::date AND ${endDay}::date${orderFilter}
+        WHERE o.day >= ${firstMonth}::date - ${inactiveDays}::int AND o.day <= ${endDay}::date${orderFilter}
+      ),
+      buyers AS (
+        SELECT date_trunc('month', day)::date AS ms, COUNT(DISTINCT sk) AS buyers
+        FROM recent WHERE day >= ${firstMonth}::date
         GROUP BY 1
+      ),
+      base AS (
+        SELECT months.ms, COUNT(DISTINCT recent.sk) AS base
+        FROM months JOIN recent ON recent.day >= months.ms - ${inactiveDays}::int AND recent.day < months.ms
+        GROUP BY months.ms
       )
-      SELECT to_char(months.ms, 'YYYY-MM') AS m, COALESCE(buyers.buyers, 0) AS buyers,
-        (SELECT COUNT(DISTINCT o."sourceKey") FROM "VmsetInvoiceOrder" o
-          WHERE o.day >= months.ms - ${inactiveDays}::int AND o.day < months.ms${orderFilter}) AS base
-      FROM months LEFT JOIN buyers USING (ms)
+      SELECT to_char(months.ms, 'YYYY-MM') AS m, COALESCE(buyers.buyers, 0) AS buyers, COALESCE(base.base, 0) AS base
+      FROM months LEFT JOIN buyers USING (ms) LEFT JOIN base USING (ms)
       ORDER BY months.ms
     `),
     prisma.$queryRaw<{ total: bigint }[]>(Prisma.sql`SELECT COUNT(*) AS total FROM "Contact" c WHERE TRUE${contactStore}`),
@@ -234,8 +252,9 @@ async function loadCustomerDashboard(filters: CustomerDashboardFilters) {
 export type CustomerDashboard = Awaited<ReturnType<typeof loadCustomerDashboard>>;
 
 export function getCustomerDashboard(filters: CustomerDashboardFilters) {
-  const key = ["painel", filters.preset, filters.start ?? "", filters.end ?? "", filters.compare, filters.store ?? "", filters.seller ?? "", filters.inactiveDays, brtToday()].join(":");
-  return cached(key, 60, () => loadCustomerDashboard(filters));
+  const key = ["painel", "v2", filters.preset, filters.start ?? "", filters.end ?? "", filters.compare, filters.store ?? "", filters.seller ?? "", filters.inactiveDays, brtToday()].join(":");
+  // Responde na hora com o último cálculo (até 30 min) e recalcula em segundo plano quando passou de 1 min.
+  return cachedStale(key, 60, 1800, () => loadCustomerDashboard(filters));
 }
 
 /** Lojas cadastradas e vendedores com vendas nos últimos 12 meses (para os filtros). */

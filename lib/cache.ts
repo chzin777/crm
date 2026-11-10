@@ -86,3 +86,41 @@ export async function invalidateCache(...prefixes: string[]): Promise<void> {
     // Entries expire on their own TTL if invalidation cannot reach Redis.
   }
 }
+
+/**
+ * Like `cached`, but serves a stale value (up to `maxSeconds` old) instantly and refreshes it in the background
+ * once it is older than `freshSeconds`. Heavy dashboards stay fast while data keeps flowing in.
+ */
+export async function cachedStale<T>(key: string, freshSeconds: number, maxSeconds: number, loader: () => Promise<T>): Promise<T> {
+  const redis = getRedis();
+  if (!redis) return loader();
+  const fullKey = PREFIX + key;
+
+  const refresh = () => {
+    const pending = inflight.get(fullKey) as Promise<T> | undefined;
+    if (pending) return pending;
+    const request = (async () => {
+      const value = await loader();
+      try {
+        await redis.set(fullKey, JSON.stringify({ at: Date.now(), value }), "EX", maxSeconds);
+      } catch {
+        // A failed write only means the next request recomputes the value.
+      }
+      return value;
+    })().finally(() => inflight.delete(fullKey));
+    inflight.set(fullKey, request);
+    return request;
+  };
+
+  try {
+    const hit = await redis.get(fullKey);
+    if (hit !== null) {
+      const entry = JSON.parse(hit) as { at: number; value: T };
+      if (Date.now() - entry.at > freshSeconds * 1000) refresh().catch(() => undefined);
+      return entry.value;
+    }
+  } catch {
+    return loader();
+  }
+  return refresh();
+}

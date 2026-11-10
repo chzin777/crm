@@ -5,7 +5,7 @@ REGRA: apenas SELECT no Oracle. Nenhuma escrita na VMSET.
 
 Roda no host de produção como serviço (crm-vmset-sync.service):
   - a cada 60 s: busca só as linhas novas pelo índice único do Oracle (ITEM_MOVI_ESTOQUE_ID), consulta leve;
-  - a cada 2 h: reconcilia os últimos 62 dias (alterações e cancelamentos) e atualiza o resumo diário;
+  - a cada 2 h: reconcilia os últimos 62 dias (alterações e cancelamentos);
   - 1x por dia (a partir das 03h) e na primeira execução: espelho completo da tabela.
 
 Uso manual: vmset-sync.py --once DIAS | --new | --full
@@ -298,27 +298,23 @@ def main():
         return
 
     # Ao iniciar: espelho completo só se o espelho ainda estiver vazio; senão, reconcilia os últimos dias.
+    # O resumo diário antigo (varre todo o histórico) só é recalculado na carga completa das 03h.
     last_full = None if latest_item_id() is None else dt.date.today()
     last_slow = 0.0
-    imported_pending = False
     while True:
         cycle = time.monotonic()
         now = dt.datetime.now()
         try:
             if last_full is None or (now.hour >= FULL_HOUR and last_full != now.date()):
                 run(None, refresh_daily=True)
-                last_full, last_slow, imported_pending = now.date(), time.monotonic(), False
+                last_full, last_slow = now.date(), time.monotonic()
             elif time.monotonic() - last_slow >= SLOW_EVERY:
-                stats = run(SLOW_DAYS)
-                if imported_pending or stats.get("imported", 0) > 0:
-                    refresh("DailySalesSummary")
-                imported_pending = False
+                run(SLOW_DAYS)
                 last_slow = time.monotonic()
             else:
                 after = latest_item_id()
                 if after:
-                    stats = run(None, after=after)
-                    imported_pending = imported_pending or stats.get("imported", 0) > 0
+                    run(None, after=after)
         except Exception as error:  # noqa: BLE001 - o serviço não pode parar por uma falha pontual
             log(f"erro: {error}")
         time.sleep(max(5.0, FAST_EVERY - (time.monotonic() - cycle)))
