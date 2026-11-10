@@ -131,16 +131,23 @@ def psql(script_head, rows, script_tail):
          'psql -X -q -t -A -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
     )
-    proc.stdin.write(script_head)
     count = 0
-    if rows is not None:
-        writer = csv.writer(proc.stdin, lineterminator="\n")
-        for record in rows:
-            writer.writerow(["" if v is None else v for v in record])
-            count += 1
-        proc.stdin.write("\\.\n")
-    proc.stdin.write(script_tail)
-    out, err = proc.communicate()
+    try:
+        proc.stdin.write(script_head)
+        if rows is not None:
+            writer = csv.writer(proc.stdin, lineterminator="\n")
+            for record in rows:
+                writer.writerow(["" if v is None else v for v in record])
+                count += 1
+            proc.stdin.write("\\.\n")
+        proc.stdin.write(script_tail)
+    except BrokenPipeError:
+        pass  # o psql parou com erro; a mensagem vem no stderr abaixo
+    try:
+        out, err = proc.communicate()
+    except BrokenPipeError:
+        out, err = proc.stdout.read(), proc.stderr.read()
+        proc.wait()
     if proc.returncode != 0:
         raise RuntimeError(f"psql falhou: {err.strip()[:500]}")
     return out.strip(), count
@@ -267,11 +274,6 @@ def run(days, refresh_daily=False):
     return stats
 
 
-def table_empty():
-    out, _ = psql('SELECT NOT EXISTS (SELECT 1 FROM "VmsetSale");\n', None, "")
-    return out.strip() == "t"
-
-
 def main():
     lib_dir = os.environ.get("ORACLE_LIB_DIR")
     oracledb.init_oracle_client(lib_dir=lib_dir) if lib_dir else oracledb.init_oracle_client()
@@ -290,10 +292,8 @@ def main():
         cycle = time.monotonic()
         now = dt.datetime.now()
         try:
-            if last_full is None and table_empty():
-                run(None, refresh_daily=True)
-                last_full, last_slow = now.date(), time.monotonic()
-            elif now.hour >= FULL_HOUR and last_full is not None and last_full != now.date():
+            # Espelho completo ao iniciar o serviço e uma vez por dia a partir das 03h.
+            if last_full is None or (now.hour >= FULL_HOUR and last_full != now.date()):
                 run(None, refresh_daily=True)
                 last_full, last_slow, imported_pending = now.date(), time.monotonic(), False
             elif time.monotonic() - last_slow >= SLOW_EVERY:
@@ -302,8 +302,6 @@ def main():
                     refresh("DailySalesSummary")
                 imported_pending = False
                 last_slow = time.monotonic()
-                if last_full is None:
-                    last_full = now.date()
             else:
                 stats = run(FAST_DAYS)
                 imported_pending = imported_pending or stats.get("imported", 0) > 0
