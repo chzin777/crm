@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { DispatchError, listDispatchJobs, resumeDispatch, startDispatch, stopDispatch, type DispatchRecipient } from "@/lib/campaign-dispatch";
+import { CONTACT_COOLDOWN_DAYS, DispatchError, listDispatchJobs, resumeDispatch, startDispatch, stopDispatch, type DispatchRecipient } from "@/lib/campaign-dispatch";
 
 export async function GET() {
   if (!(await requireApiSession())) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   try {
-    return NextResponse.json({ jobs: await listDispatchJobs() });
+    return NextResponse.json({ jobs: await listDispatchJobs(), cooldownDays: CONTACT_COOLDOWN_DAYS });
   } catch (error) {
     console.error("[campaigns/dispatch] listar:", error);
     return NextResponse.json({ error: "Não foi possível consultar os disparos." }, { status: 500 });
@@ -20,7 +20,7 @@ const isRecipient = (value: unknown): value is DispatchRecipient => {
 
 export async function POST(request: Request) {
   if (!(await requireApiSession())) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-  const body = await request.json().catch(() => null) as { action?: string; campaignId?: string; recipients?: unknown } | null;
+  const body = await request.json().catch(() => null) as { action?: string; campaignId?: string; recipients?: unknown; ignoreCooldown?: unknown } | null;
   if (!body || typeof body.campaignId !== "string" || !body.campaignId) {
     return NextResponse.json({ error: "Campanha inválida." }, { status: 400 });
   }
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
         if (!Array.isArray(body.recipients) || !body.recipients.every(isRecipient)) {
           return NextResponse.json({ error: "Lista de contatos inválida." }, { status: 400 });
         }
-        return NextResponse.json({ job: await startDispatch(body.campaignId, body.recipients) });
+        return NextResponse.json({ job: await startDispatch(body.campaignId, body.recipients, { ignoreCooldown: body.ignoreCooldown === true }) });
       }
       case "resume":
         return NextResponse.json({ job: await resumeDispatch(body.campaignId) });

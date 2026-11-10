@@ -241,6 +241,8 @@ export function CampaignsView() {
   const [dispatchTarget, setDispatchTarget] = useState<{ mode: "single" | "batch"; ids: string[] } | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [ignoreCooldown, setIgnoreCooldown] = useState(false);
+  const [cooldownDays, setCooldownDays] = useState(7);
   const [dispatchJobs, setDispatchJobs] = useState<DispatchJobView[]>([]);
   const [bulkJobs, setBulkJobs] = useState<BulkJobView[]>([]);
   const [stats, setStats] = useState<Record<string, QuickStats>>({});
@@ -253,7 +255,8 @@ export function CampaignsView() {
     try {
       const response = await fetch("/api/campaigns/dispatch", { cache: "no-store" });
       if (!response.ok) return;
-      const { jobs } = await response.json() as { jobs: DispatchJobView[] };
+      const { jobs, cooldownDays: days } = await response.json() as { jobs: DispatchJobView[]; cooldownDays?: number };
+      if (typeof days === "number") setCooldownDays(days);
       const previous = jobStatusRef.current;
       const next = new Map(jobs.map((job) => [job.campaignId, job.status]));
       jobStatusRef.current = next;
@@ -649,6 +652,7 @@ export function CampaignsView() {
   const openCreateCampaign = () => {
     resetCreateForm();
     setDispatchEstimate(null);
+    setIgnoreCooldown(false);
     setIsCreateOpen(true);
   };
 
@@ -766,7 +770,7 @@ export function CampaignsView() {
     const startResponse = await fetch("/api/campaigns/dispatch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients }),
+      body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients, ignoreCooldown }),
     });
     const startResult = await startResponse.json().catch(() => ({})) as { error?: string };
     if (!startResponse.ok) throw new Error(startResult.error || `Não foi possível iniciar o disparo de "${campaign.nome}".`);
@@ -856,6 +860,7 @@ export function CampaignsView() {
   const openDispatchConfirm = (ids: string[], mode: "single" | "batch") => {
     setDispatchTarget({ mode, ids });
     setDispatchError("");
+    setIgnoreCooldown(false);
     setDispatchConfirmOpen(true);
     void estimateByIds(ids);
   };
@@ -873,6 +878,17 @@ export function CampaignsView() {
   const ghostButton = "inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer";
   const primaryButton = "inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer";
   const iconAction = "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-[#002187] transition-colors hover:border-[#002187] hover:bg-[#002187]/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer";
+
+  // Opção por lote para enviar também a quem recebeu campanha dentro da janela de descanso (ex.: após disparos de teste).
+  const cooldownToggle = cooldownDays > 0 ? (
+    <label className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-xs transition-colors ${ignoreCooldown ? "border-[#F7915E]/50 bg-[#F7915E]/10" : "border-slate-200 dark:border-slate-700"}`}>
+      <input type="checkbox" checked={ignoreCooldown} disabled={isLaunching || isDispatching} onChange={(event) => setIgnoreCooldown(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[#002187] dark:accent-[#C4D600]" />
+      <span>
+        <span className="block font-semibold text-slate-800 dark:text-slate-100">Ignorar intervalo mínimo de envio</span>
+        <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">Enviar mesmo para quem recebeu campanha nos últimos {cooldownDays} dias (ex.: contatos dos disparos de teste).</span>
+      </span>
+    </label>
+  ) : null;
 
   const selectedJob = selectedCampaign ? jobByCampaign.get(selectedCampaign.id) : undefined;
   const selectedStats = selectedCampaign ? stats[selectedCampaign.id] ?? EMPTY_STATS : EMPTY_STATS;
@@ -1297,10 +1313,11 @@ export function CampaignsView() {
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
                       <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /><b>{int(dispatchEstimate.contacts)}</b> contato(s) com telefone</span>
                       <span>Custo estimado: <b>{dispatchEstimate.cost === null ? "indisponível" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</b></span>
-                      <span className="w-full text-[10px] text-slate-500 dark:text-slate-400">Quem recebeu campanha nos últimos 7 dias é pulado, então o valor real tende a ser menor.</span>
+                      {cooldownDays > 0 && !ignoreCooldown && <span className="w-full text-[10px] text-slate-500 dark:text-slate-400">Quem recebeu campanha nos últimos {cooldownDays} dias é pulado, então o valor real tende a ser menor.</span>}
                     </div>
                   )}
                 </div>
+                {cooldownToggle}
                 {formError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{formError}</p>}
               </div>
             </Step>
@@ -1338,7 +1355,7 @@ export function CampaignsView() {
                       <ProgressBar percent={selectedJob.total > 0 ? Math.round((selectedJob.cursor / selectedJob.total) * 100) : 0} tone={selectedJob.status === "paused" ? "paused" : "default"} />
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         {int(selectedJob.cursor)} de {int(selectedJob.total)} contatos processados · {int(selectedJob.sent)} enviadas · {int(selectedJob.failed)} falhas
-                        {selectedJob.skipped > 0 && ` · ${int(selectedJob.skipped)} pulados (receberam campanha nos últimos 7 dias)`}
+                        {selectedJob.skipped > 0 && ` · ${int(selectedJob.skipped)} pulados (receberam campanha nos últimos ${cooldownDays} dias)`}
                       </p>
                       {selectedJob.status === "paused" && selectedJob.pause && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{selectedJob.pause.message}</p>}
                       {selectedJob.errors.length > 0 && (
@@ -1502,9 +1519,10 @@ export function CampaignsView() {
                   ? "Calculando o custo estimado do envio..."
                   : dispatchEstimate.error
                     ? `Custo estimado indisponível: ${dispatchEstimate.error}`
-                    : <><span className="font-semibold">Custo estimado do envio: {dispatchEstimate.cost === null ? "indisponível (categoria do modelo não encontrada)" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> · {int(dispatchEstimate.contacts)} contato(s) com telefone. Contatos que receberam campanha nos últimos 7 dias são pulados, então o valor real tende a ser menor.</>}
+                    : <><span className="font-semibold">Custo estimado do envio: {dispatchEstimate.cost === null ? "indisponível (categoria do modelo não encontrada)" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> · {int(dispatchEstimate.contacts)} contato(s) com telefone.{cooldownDays > 0 && !ignoreCooldown && ` Contatos que receberam campanha nos últimos ${cooldownDays} dias são pulados, então o valor real tende a ser menor.`}</>}
               </p>
             )}
+            {cooldownToggle}
             {dispatchError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{dispatchError}</p>}
             <div className="flex items-center justify-end gap-2">
               <button type="button" disabled={isDispatching} onClick={() => setDispatchConfirmOpen(false)} className="inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer">

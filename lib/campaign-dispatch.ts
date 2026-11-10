@@ -31,6 +31,8 @@ export type DispatchJob = {
   failed: number;
   skipped: number;
   baseDisparos: number;
+  /** Envia mesmo para quem recebeu campanha dentro da janela de descanso. */
+  ignoreCooldown?: boolean;
   errors: string[];
   pause?: PauseReason;
   startedAt: string;
@@ -42,7 +44,10 @@ const RATE_LIMIT_WAITS_MS = [30_000, 60_000, 120_000];
 const NETWORK_RETRY_MS = [5_000, 15_000, 30_000];
 const MAX_CONSECUTIVE_API_FAILURES = 8;
 const MAX_STORED_ERRORS = 20;
-const CONTACT_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+// Descanso entre campanhas por contato. CAMPAIGN_COOLDOWN_DAYS=0 desliga a trava para todos os disparos.
+const parsedCooldownDays = Number(process.env.CAMPAIGN_COOLDOWN_DAYS);
+export const CONTACT_COOLDOWN_DAYS = Number.isFinite(parsedCooldownDays) && parsedCooldownDays >= 0 ? parsedCooldownDays : 7;
+const CONTACT_COOLDOWN_MS = CONTACT_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 
 const RATE_LIMIT_CODES = new Set([130429, 80007, 4, 17, 32, 613]);
 const FATAL_CODES: Record<number, PauseReason["kind"]> = {
@@ -145,7 +150,7 @@ function campaignNote(job: DispatchJob) {
   const done = job.cursor;
   if (job.status === "running") return `Disparo em andamento (${done} de ${job.total})`;
   if (job.status === "paused") return `Pausado: ${done} de ${job.total} processados · ${job.pause?.message ?? ""}`.trim();
-  const skipped = job.skipped > 0 ? `, ${job.skipped} pulados (campanha nos últimos 7 dias)` : "";
+  const skipped = job.skipped > 0 ? `, ${job.skipped} pulados (campanha nos últimos ${CONTACT_COOLDOWN_DAYS} dias)` : "";
   return `${new Date().toLocaleString("pt-BR")} · ${job.sent} enviados, ${job.failed} falhas${skipped}`;
 }
 
@@ -270,7 +275,8 @@ async function runJob(campaignId: string) {
     }
 
     // A fila roda um disparo por vez: aqui já contam os envios da campanha anterior.
-    const reached = await loadRecentlyReached();
+    // Com a trava ignorada no lote (ou desligada por ambiente), ninguém é pulado.
+    const reached = job.ignoreCooldown || CONTACT_COOLDOWN_MS <= 0 ? new Set<string>() : await loadRecentlyReached();
     let consecutiveApiFailures = 0;
     while (job.cursor < job.total) {
       const requested = control.get(campaignId);
@@ -384,7 +390,7 @@ function enqueue(campaignId: string) {
     .finally(() => running.delete(campaignId));
 }
 
-export async function startDispatch(campaignId: string, recipients: DispatchRecipient[]) {
+export async function startDispatch(campaignId: string, recipients: DispatchRecipient[], options: { ignoreCooldown?: boolean } = {}) {
   const existing = await readJob(campaignId);
   if (existing && (existing.status === "running" || existing.status === "paused")) {
     throw new DispatchError("Esta campanha já tem um disparo em andamento ou pausado.", 409);
@@ -415,6 +421,7 @@ export async function startDispatch(campaignId: string, recipients: DispatchReci
     failed: 0,
     skipped: 0,
     baseDisparos: campaign.disparos ?? 0,
+    ignoreCooldown: options.ignoreCooldown === true,
     errors: [],
     startedAt: new Date().toISOString(),
   };
