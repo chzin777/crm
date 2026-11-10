@@ -42,6 +42,7 @@ function detectColumns(header: string[]): Columns {
     find((key) => key === "telefonecelular" || key === "celular"),
     find((key) => (key.includes("celular") || key.includes("whatsapp")) && !key.includes("ddd")),
     find((key) => (key.includes("telefone") || key.includes("fone")) && !key.includes("ddd")),
+    find((key) => key === "tel" || key === "telcelular"),
   ].find((index) => index >= 0) ?? -1;
   const dddCandidates = keys.map((key, index) => (key.includes("ddd") ? index : -1)).filter((index) => index >= 0);
   return {
