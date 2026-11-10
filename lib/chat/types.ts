@@ -60,7 +60,19 @@ export type ChatMessageItem = {
   createdAt: string;
   attachment: { kind: string; name: string; mime: string; size: number; localUrl?: string } | null;
   pendingMedia?: string | null;
+  /** Presente quando a mensagem saiu como lista interativa; o texto fica só como alternativa. */
+  interactive?: ChatInteractiveList | null;
 };
 
 export const PRIORITY_LABELS: Record<ChatPriority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
 export const STATUS_LABELS: Record<ChatStatus, string> = { bot: "No menu", waiting: "Na fila", in_progress: "Em atendimento", closed: "Encerrada" };
+
+/** Lista interativa da Meta enviada pelo robô (menu, pesquisa NPS), guardada para o atendimento ver como o cliente recebeu. */
+export type ChatInteractiveList = {
+  type: "list";
+  header?: string;
+  body: string;
+  footer?: string;
+  button: string;
+  sections: { title?: string; rows: { id: string; title: string; description?: string }[] }[];
+};

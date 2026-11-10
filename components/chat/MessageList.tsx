@@ -4,6 +4,7 @@ import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
 import { MediaViewer } from "@/components/chat/MediaViewer";
+import { InteractiveListBubble } from "@/components/chat/InteractiveListBubble";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
 import { mergeMessages, replaceMessage } from "@/lib/chat/reconcile";
 import type { ChatDelivery, ChatMessageItem } from "@/lib/chat/types";
@@ -330,7 +331,9 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       )}
                       {message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />}
                       {missing && <MissingMedia kind={missing} onRetry={message.pendingMedia && onReply ? () => retryMedia(message.id) : undefined} />}
-                      {message.text && !(missing && LABEL_KINDS[message.text]) && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
+                      {message.interactive ? (
+                        <InteractiveListBubble list={message.interactive} messageId={message.id} />
+                      ) : message.text && !(missing && LABEL_KINDS[message.text]) && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
                       <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}

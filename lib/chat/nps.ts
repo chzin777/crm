@@ -5,6 +5,7 @@ import { sendList } from "@/lib/meta-whatsapp";
 import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
+import type { ChatInteractiveList } from "@/lib/chat/types";
 import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
 
 const SURVEY_HOURS = 24;
@@ -33,11 +34,16 @@ export function parseNpsScore(text: string, choiceId?: string | null) {
 }
 
 /** Roda depois do encerramento: falha aqui nunca desfaz o fechamento da conversa. */
-const surveyList = (phone: string, question: string) => () => sendList(phone, {
+const surveyPayload = (question: string) => ({
   body: question.slice(0, 1024),
   button: "Avaliar atendimento",
   rows: SCORE_LABELS.map((label, index) => ({ id: `nps_${index + 1}`, title: npsScoreTitle(label, index) })),
 });
+const surveyList = (phone: string, question: string) => () => sendList(phone, surveyPayload(question));
+const surveyInteractive = (question: string): ChatInteractiveList => {
+  const payload = surveyPayload(question);
+  return { type: "list", body: payload.body, button: payload.button, sections: [{ rows: payload.rows }] };
+};
 
 /** A pergunta é editável; o que marca a pesquisa no histórico é a escala no fim. */
 const scaleOf = (text: string) => [NPS_SCALE_TEXT, ...NPS_LEGACY_SCALES].find((scale) => text.endsWith(scale));
@@ -58,7 +64,7 @@ export async function sendSatisfactionSurvey(conversation: ChatConversation, att
     const settings = await readChatSettings();
     if (!settings.npsEnabled) return;
     const question = npsPrompt(settings);
-    const sent = await sendAutomaticMessage(conversation, `${question}\n${NPS_SCALE_TEXT}`, surveyList(conversation.phone, question));
+    const sent = await sendAutomaticMessage(conversation, `${question}\n${NPS_SCALE_TEXT}`, surveyList(conversation.phone, question), surveyInteractive(question));
     if (!sent || sent.delivery === "failed") return;
     await openSurvey(conversation, attendantId);
   } catch (error) {

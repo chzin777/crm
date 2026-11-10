@@ -3,6 +3,7 @@ import type { ChatMessage } from "@/generated/prisma/client";
 import { Prisma } from "@/generated/prisma/client";
 import { isWindowOpen } from "@/lib/chat/conversation";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
+import type { ChatInteractiveList } from "@/lib/chat/types";
 
 export const conversationInclude = {
   contact: { select: { name: true, email: true, segment: true, category: true, store: true } },
@@ -48,9 +49,10 @@ export function serializeConversation(row: ConversationRow) {
 
 export function serializeMessage(message: ChatMessage) {
   const attachment = message.attachment as ChatAttachment | null;
-  const metaMedia = message.metaMedia as { id?: string; kind?: string } | null;
+  const metaMedia = message.metaMedia as { id?: string; kind?: string; interactive?: ChatInteractiveList } | null;
   return {
     id: message.id,
+    interactive: metaMedia?.interactive?.type === "list" ? metaMedia.interactive : null,
     pendingMedia: !attachment && metaMedia?.id ? metaMedia.kind ?? null : null,
     author: message.author,
     authorName: message.authorName,

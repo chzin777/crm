@@ -8,6 +8,7 @@ import type { ChatActor } from "@/lib/chat/access";
 import { addAudit, addSystemMessage, isBlocked, isWindowOpen } from "@/lib/chat/conversation";
 import { convertToOggOpus } from "@/lib/chat/audio";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
+import type { ChatInteractiveList } from "@/lib/chat/types";
 import { withoutDashes } from "@/lib/chat/text";
 
 export class ChatRuleError extends Error {
@@ -186,7 +187,7 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
 }
 
 /** Mensagem automática: gravada antes de sair, para quem assumir ver o que já foi dito. */
-export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string, send?: () => Promise<{ messages?: { id: string }[] }>) {
+export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string, send?: () => Promise<{ messages?: { id: string }[] }>, interactive?: ChatInteractiveList) {
   if (await isBlocked(conversation.phone)) {
     console.log(`[bot] ${conversation.id}: mensagem automática não enviada (número bloqueado)`);
     return null;
@@ -194,7 +195,11 @@ export async function sendAutomaticMessage(conversation: Pick<ChatConversation, 
   const text = withoutDashes(rawText);
   const now = new Date();
   const message = await prisma.chatMessage.create({
-    data: { conversationId: conversation.id, author: "bot", authorName: "Atendimento automático", text, delivery: "sending", createdAt: now },
+    data: {
+      conversationId: conversation.id, author: "bot", authorName: "Atendimento automático", text, delivery: "sending", createdAt: now,
+      // Lista interativa: a estrutura fica em metaMedia (sem id, não é mídia pendente) para o atendimento mostrar como o cliente vê.
+      ...(interactive ? { metaMedia: { interactive } as unknown as Prisma.InputJsonValue } : {}),
+    },
   });
   await prisma.chatConversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now } });
   return deliver(message.id, send ?? (() => sendText(conversation.phone, text)));

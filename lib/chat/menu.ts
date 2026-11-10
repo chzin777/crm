@@ -72,8 +72,10 @@ export async function sendMenu(conversation: Pick<ChatConversation, "id" | "phon
   if (!list) return sendAutomaticMessage(conversation, text);
 
   const body = withoutDashes(fill(list.body)).slice(0, 1024) || "Como podemos ajudar?";
-  return sendAutomaticMessage(conversation, text, () =>
-    sendList(conversation.phone, { body, footer: MENU_LIST.footer, button: MENU_LIST.button, rows: list.rows }));
+  const payload = { body, footer: MENU_LIST.footer, button: MENU_LIST.button, rows: list.rows };
+  return sendAutomaticMessage(conversation, text, () => sendList(conversation.phone, payload), {
+    type: "list", body, footer: payload.footer, button: payload.button, sections: [{ rows: payload.rows }],
+  });
 }
 
 /** Toque na lista: 0 é Voltar, senão a posição da opção no nível atual. */
