@@ -25,6 +25,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { AudienceCounter, CriterionBuilder } from "@/components/CriterionBuilder";
 import { FormSelect } from "@/components/FormSelect";
+import { SegmentSpreadsheetImport, segmentNameFromFile, type SpreadsheetImportResult } from "@/components/SegmentSpreadsheetImport";
 import { describeRule, validateRule, type SegmentRule } from "@/lib/segment-rules";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
@@ -530,15 +531,29 @@ export default function SegmentosPage() {
     return true;
   };
 
+  const handleSpreadsheetImport = (result: SpreadsheetImportResult) => {
+    setAudienceMode("contatos");
+    setSelectedContactIds((current) => [...new Set([...current, ...result.contactIds])]);
+    setForm((current) => ({
+      ...current,
+      nome: current.nome.trim() ? current.nome : segmentNameFromFile(result.fileName),
+      descricao: current.descricao.trim() ? current.descricao : `Importado da planilha ${result.fileName}`,
+    }));
+    setFormError("");
+    toast.success(
+      "Planilha importada",
+      `${result.linked.toLocaleString("pt-BR")} contatos vinculados | ${result.notFound.toLocaleString("pt-BR")} não encontrados na base do CRM.`,
+    );
+  };
+
   const createSegment = () => {
-    const selectedContacts = contacts.filter((contact) => selectedContactIds.includes(contact.id));
     const criterios = form.criterios.split("\n").map((criterion) => criterion.trim()).filter(Boolean);
     const segment: Segment = {
       id: `seg-${generateId()}`,
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       status: "Rascunho",
-      membros: audienceMode === "contatos" ? selectedContacts.length : countByCriteria(criterios),
+      membros: audienceMode === "contatos" ? selectedContactIds.length : countByCriteria(criterios),
       atualizado: "Criado agora",
       criterios: audienceMode === "criterios" ? criterios : [],
       modoPublico: audienceMode,
@@ -557,7 +572,7 @@ export default function SegmentosPage() {
     setContactFilter("Todos");
     setIsContactPickerOpen(false);
     setIsCreateOpen(false);
-    toast.success("Segmento criado", `"${segment.nome}" foi adicionado.`);
+    toast.success("Segmento criado", segment.modoPublico === "contatos" ? `"${segment.nome}" foi adicionado com ${segment.membros.toLocaleString("pt-BR")} contatos vinculados.` : `"${segment.nome}" foi adicionado.`);
   };
 
   const startEditingSegment = (segment: Segment) => {
@@ -595,7 +610,7 @@ export default function SegmentosPage() {
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
       membros: audienceMode === "contatos"
-        ? contacts.filter((contact) => selectedContactIds.includes(contact.id)).length
+        ? selectedContactIds.length
         : countByCriteria(criterios),
       atualizado: "Atualizado agora",
       criterios: audienceMode === "criterios" ? criterios : [],
@@ -608,7 +623,7 @@ export default function SegmentosPage() {
     setFormError("");
     setIsCriteriaMenuOpen(false);
     setIsContactPickerOpen(false);
-    toast.success("Segmento atualizado", `"${updatedSegment.nome}" foi salvo.`);
+    toast.success("Segmento atualizado", updatedSegment.modoPublico === "contatos" ? `"${updatedSegment.nome}" foi salvo com ${updatedSegment.membros.toLocaleString("pt-BR")} contatos vinculados.` : `"${updatedSegment.nome}" foi salvo.`);
   };
 
   const deleteSegment = (segment: Segment) => {
@@ -974,6 +989,7 @@ export default function SegmentosPage() {
                               {selectedContactIds.length ? "Gerenciar contatos" : "Selecionar contatos"}
                             </button>
                           </div>
+                          <SegmentSpreadsheetImport onImported={handleSpreadsheetImport} />
                           {selectedContactRecords.length > 0 && (
                             <ul aria-label="Contatos selecionados" className="flex flex-wrap gap-1.5">
                               {selectedContactRecords.slice(0, 4).map((contact) => (
@@ -1180,6 +1196,7 @@ export default function SegmentosPage() {
                             {selectedContactIds.length ? "Gerenciar contatos" : "Selecionar contatos"}
                           </button>
                         </div>
+                        <SegmentSpreadsheetImport onImported={handleSpreadsheetImport} />
                         {selectedContactRecords.length > 0 && (
                           <ul aria-label="Contatos selecionados" className="flex flex-wrap gap-1.5">
                             {selectedContactRecords.slice(0, 4).map((contact) => (
