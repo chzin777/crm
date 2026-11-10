@@ -249,11 +249,11 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   });
   // A mensagem já está gravada: falha aqui não pode fazer a Meta reenviar o evento.
   if (autoReply) {
-    console.log(`[chat] mensagem ${message.id} de ${message.from} tratada como automática (${autoReply.kind}: ${autoReply.detail})`);
-  } else {
-    await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
-      .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
+    console.log(`[chat] mensagem ${message.id} de ${message.from} parece automática (${autoReply.kind}: ${autoReply.detail})`);
   }
+  // Toda resposta conta para a campanha; as automáticas são descartadas pela equipe em "Não é resposta da campanha".
+  await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
+    .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
 
   return { conversationId: conversation.id, messageId: saved.id, text, choiceId, created, autoReply: autoReply?.kind ?? null };
 }
