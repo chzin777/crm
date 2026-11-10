@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { CheckCheck, Eye, MessageCircleReply, Send, ShoppingBag, TrendingUp } from "lucide-react";
 import { CampaignsView } from "@/app/campanhas/campaigns-view";
 
@@ -107,7 +107,10 @@ export default function CampanhasPage() {
 
       <CampaignsOverview />
 
-      <CampaignsView />
+      {/* A lista lê a página da URL (?page=): exige Suspense no App Router. */}
+      <Suspense fallback={null}>
+        <CampaignsView />
+      </Suspense>
     </div>
   );
 }

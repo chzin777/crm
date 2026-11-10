@@ -4,7 +4,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
-import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Minus, RefreshCw, Search } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Minus, RefreshCw, Search } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* Tokens                                                              */
@@ -402,17 +402,50 @@ function pageItems(page: number, pageCount: number): (number | "gap")[] {
 
 const pagerButton = "inline-flex h-8 cursor-pointer items-center justify-center gap-1 rounded-lg border border-slate-200/80 bg-white px-2.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:border-slate-300 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:border-slate-200/80 disabled:hover:text-slate-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-300 dark:hover:border-white/20 dark:hover:text-white";
 
-export function Pagination({ page, pageSize, total, noun, onChange }: { page: number; pageSize: number; total: number; noun: string; onChange: (page: number) => void }) {
+type PaginationProps = {
+  page: number;
+  pageSize: number;
+  total: number;
+  noun: string;
+  onChange: (page: number) => void;
+  /** Com estes dois, aparece o seletor de itens por página. */
+  pageSizes?: number[];
+  onPageSizeChange?: (size: number) => void;
+  /** Botões de primeira e última página. */
+  edges?: boolean;
+  className?: string;
+};
+
+export function Pagination({ page, pageSize, total, noun, onChange, pageSizes, onPageSizeChange, edges = false, className = "mt-5 border-t border-slate-100 pt-4 dark:border-white/5" }: PaginationProps) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const from = total === 0 ? 0 : page * pageSize + 1;
   const to = Math.min(total, (page + 1) * pageSize);
   return (
-    <nav aria-label="Paginação" className="mt-5 flex flex-col items-center justify-between gap-3 border-t border-slate-100 pt-4 sm:flex-row dark:border-white/5">
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Mostrando <b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{from}–{to}</b> de <b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{total}</b> {noun}
-      </p>
+    <nav aria-label="Paginação" className={`flex flex-col items-center justify-between gap-3 sm:flex-row ${className}`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Mostrando <b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{from}–{to}</b> de <b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{total}</b> {noun}
+        </p>
+        {pageSizes && onPageSizeChange && (
+          <label className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <span>Por página</span>
+            <select
+              value={pageSize}
+              onChange={(event) => onPageSizeChange(Number(event.target.value))}
+              className="h-8 cursor-pointer rounded-lg border border-slate-200/80 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/25 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200"
+            >
+              {pageSizes.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
       {pageCount > 1 && (
         <div className="flex items-center gap-1.5">
+          {edges && (
+            <button type="button" onClick={() => onChange(0)} disabled={page === 0} aria-label="Primeira página" title="Primeira página" className={pagerButton}>
+              <ChevronsLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button type="button" onClick={() => onChange(page - 1)} disabled={page === 0} aria-label="Página anterior" className={pagerButton}>
             <ChevronLeft className="h-3.5 w-3.5" /><span className="hidden sm:inline">Anterior</span>
           </button>
@@ -427,6 +460,11 @@ export function Pagination({ page, pageSize, total, noun, onChange }: { page: nu
           <button type="button" onClick={() => onChange(page + 1)} disabled={page >= pageCount - 1} aria-label="Próxima página" className={pagerButton}>
             <span className="hidden sm:inline">Próximo</span><ChevronRight className="h-3.5 w-3.5" />
           </button>
+          {edges && (
+            <button type="button" onClick={() => onChange(pageCount - 1)} disabled={page >= pageCount - 1} aria-label="Última página" title="Última página" className={pagerButton}>
+              <ChevronsRight className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       )}
     </nav>

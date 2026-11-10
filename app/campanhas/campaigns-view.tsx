@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
+import { Pagination } from "@/components/dashboard/DashboardKit";
 import {
   AlertTriangle,
   CheckCheck,
@@ -45,6 +47,7 @@ const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || st
 /** Status exibido na listagem unificada (campanhas e lotes do pipeline). */
 type DisplayStatus = "Rascunho" | "Pronta" | "Agendado" | "Enviando" | "Pausado" | "Concluído" | "Parcial" | "Falha" | "Cancelado";
 type DisplayFilter = "Todas" | "Enviando" | "Pausado" | "Agendado" | "Concluído" | "Falha" | "Rascunho";
+const PAGE_SIZES = [10, 20, 50];
 
 interface CampaignAudienceSegment {
   id: string;
@@ -216,8 +219,42 @@ export function CampaignsView() {
   const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
   const [storesError, setStoresError] = useState("");
   const [dispatchError, setDispatchError] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeFilter, setActiveFilter] = useState<DisplayFilter>("Todas");
+  const searchParams = useSearchParams();
+  const [searchTerm, setSearchTermState] = useState("");
+  const [activeFilter, setActiveFilterState] = useState<DisplayFilter>("Todas");
+  // Página na URL (?page=2&limit=20, página começando em 1) para recarregar ou compartilhar no mesmo ponto.
+  const [page, setPageState] = useState(() => Math.max(0, (Number(searchParams.get("page")) || 1) - 1));
+  const [pageSize, setPageSizeState] = useState(() => {
+    const limit = Number(searchParams.get("limit"));
+    return PAGE_SIZES.includes(limit) ? limit : PAGE_SIZES[0];
+  });
+  const syncPageUrl = (nextPage: number, nextSize: number) => {
+    const params = new URLSearchParams(window.location.search);
+    if (nextPage > 0) params.set("page", String(nextPage + 1));
+    else params.delete("page");
+    if (nextSize !== PAGE_SIZES[0]) params.set("limit", String(nextSize));
+    else params.delete("limit");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  };
+  const setPage = (nextPage: number) => {
+    setPageState(nextPage);
+    syncPageUrl(nextPage, pageSize);
+  };
+  const setPageSize = (nextSize: number) => {
+    setPageSizeState(nextSize);
+    setPageState(0);
+    syncPageUrl(0, nextSize);
+  };
+  // Busca ou filtro novos voltam para a primeira página.
+  const setSearchTerm = (value: string) => {
+    setSearchTermState(value);
+    if (page !== 0) setPage(0);
+  };
+  const setActiveFilter = (value: DisplayFilter) => {
+    setActiveFilterState(value);
+    if (page !== 0) setPage(0);
+  };
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [bulkDetailsId, setBulkDetailsId] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -345,6 +382,7 @@ export function CampaignsView() {
 
   const [sortConfig, setSortConfig] = useState<{ field: string; order: "asc" | "desc" }>({ field: "atualizacao", order: "desc" });
   const handleSort = (field: string) => {
+    if (page !== 0) setPage(0);
     setSortConfig((prev) => {
       const nextOrder = prev.field === field && prev.order === "desc" ? "asc" : "desc";
       return { field, order: nextOrder };
@@ -469,7 +507,11 @@ export function CampaignsView() {
     const allowed = filterMatches[activeFilter];
     return matchesSearch && (!allowed || allowed.includes(row.status));
   });
-  const selectableRows = filteredRows.filter((row) => row.kind === "campaign" && row.campaign && !isDispatchLocked(row.campaign.status));
+  // Paginação na tela: a lista junta campanhas e envios do pipeline, já carregados juntos.
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = filteredRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const selectableRows = pageRows.filter((row) => row.kind === "campaign" && row.campaign && !isDispatchLocked(row.campaign.status));
 
   const resetCreateForm = () => {
     setForm({ nome: "", publico: "", mensagem: "" });
@@ -964,7 +1006,7 @@ export function CampaignsView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredRows.map((row) => {
+                {pageRows.map((row) => {
                   const selectable = row.kind === "campaign" && row.campaign !== undefined && !isDispatchLocked(row.campaign.status);
                   const isSelected = selectable && selectedCampaignIds.has(row.id);
                   const percent = row.total > 0 ? Math.min(100, Math.round((row.processed / row.total) * 100)) : 0;
@@ -1062,9 +1104,24 @@ export function CampaignsView() {
               </tbody>
             </table>
           </div>
-          <footer className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800">
-            <span>Mostrando {filteredRows.length} de {rows.length} disparos</span>
-            {hasActiveJob && <span className="inline-flex items-center gap-1"><RefreshCw className="h-3 w-3 animate-spin" />Atualizando ao vivo</span>}
+          <footer className="border-t border-slate-100 px-5 py-3 dark:border-slate-800">
+            <Pagination
+              page={currentPage}
+              pageSize={pageSize}
+              total={filteredRows.length}
+              noun={filteredRows.length === 1 ? "campanha" : "campanhas"}
+              onChange={setPage}
+              pageSizes={PAGE_SIZES}
+              onPageSizeChange={setPageSize}
+              edges
+              className=""
+            />
+            {(hasActiveJob || filteredRows.length !== rows.length) && (
+              <p className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+                {filteredRows.length !== rows.length && <span>{rows.length} no total, sem filtros</span>}
+                {hasActiveJob && <span className="inline-flex items-center gap-1"><RefreshCw className="h-3 w-3 animate-spin" />Atualizando ao vivo</span>}
+              </p>
+            )}
           </footer>
         </section>
       </div>
