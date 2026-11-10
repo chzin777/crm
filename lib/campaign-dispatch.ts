@@ -233,11 +233,15 @@ async function recordMessage(campaignId: string, recipient: DispatchRecipient, r
   }
 }
 
-// Quem recebeu campanha na janela de descanso, por contato e por telefone (o cadastro tem números repetidos).
-async function loadRecentlyReached() {
+// Quem já recebeu ESTA campanha (sempre, para retomar sem repetir) e, com a trava ativa, quem recebeu qualquer
+// campanha na janela de descanso. Por contato e por telefone (o cadastro tem números repetidos).
+async function loadRecentlyReached(campaignId: string, withCooldown: boolean) {
+  const sameCampaign = { campaignId, sentAt: { not: null } };
   const rows = await prisma.campaignMessage.findMany({
     // Envios em massa do pipeline (bulk:*) não contam no descanso entre campanhas.
-    where: { sentAt: { gte: new Date(Date.now() - CONTACT_COOLDOWN_MS) }, NOT: { campaignId: { startsWith: "bulk:" } } },
+    where: withCooldown
+      ? { OR: [sameCampaign, { sentAt: { gte: new Date(Date.now() - CONTACT_COOLDOWN_MS) }, NOT: { campaignId: { startsWith: "bulk:" } } }] }
+      : sameCampaign,
     select: { contactId: true, phone: true },
   });
   const reached = new Set<string>();
@@ -276,7 +280,8 @@ async function runJob(campaignId: string) {
 
     // A fila roda um disparo por vez: aqui já contam os envios da campanha anterior.
     // Com a trava ignorada no lote (ou desligada por ambiente), ninguém é pulado.
-    const reached = job.ignoreCooldown || CONTACT_COOLDOWN_MS <= 0 ? new Set<string>() : await loadRecentlyReached();
+    // Ao retomar, quem já recebeu este disparo nunca recebe de novo, mesmo com a trava de descanso ignorada.
+    const reached = await loadRecentlyReached(campaignId, !job.ignoreCooldown && CONTACT_COOLDOWN_MS > 0);
     let consecutiveApiFailures = 0;
     while (job.cursor < job.total) {
       const requested = control.get(campaignId);
