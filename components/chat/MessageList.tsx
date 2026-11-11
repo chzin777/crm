@@ -115,7 +115,7 @@ function Attachment({ message, onOpen }: { message: ChatMessageItem; onOpen: () 
   }
   if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 max-h-64 rounded-lg" />;
   if (attachment.kind === "audio") {
-    return <AudioPlayer src={mediaUrl(message)} outgoing={!message.internal && (message.author === "agent" || message.author === "bot")} />;
+    return <AudioPlayer src={mediaUrl(message)} />;
   }
   return (
     <a href={mediaUrl(message)} target="_blank" rel="noreferrer" className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 p-2 dark:bg-white/10">
