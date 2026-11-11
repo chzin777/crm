@@ -26,6 +26,17 @@ const INSPECTED_MEDIA_FINGERPRINTS = new Set([
   ...(process.env.META_MEDIA_CERT_FINGERPRINTS ?? "").split(",").map((value) => value.trim().toUpperCase()).filter(Boolean),
 ]);
 const MEDIA_TIMEOUT_MS = 20_000;
+
+/** A página de bloqueio do FortiGate chega como 403 em HTML; sem isso o log só mostra "403". */
+function mediaDownloadError(status: number | undefined, body: string) {
+  if (/FortiGuard|Web Filter Violation/i.test(body)) {
+    return new Error(
+      `Download de mídia bloqueado pelo filtro web do FortiGate (${status}, categoria Social Networking). ` +
+      "Libere lookaside.fbsbx.com no Web Filter do firewall.",
+    );
+  }
+  return new Error(`Falha ao baixar mídia (${status}).`);
+}
 const CHAIN_ERRORS = new Set([
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
   "UNABLE_TO_GET_ISSUER_CERT",
@@ -66,8 +77,16 @@ async function downloadPinnedMedia(url: URL, accessToken: string, maxBytes: numb
     // Sem a opção agent: com qualquer agent o Node ignora createConnection e abre outra conexão.
     const outgoing = request(url, { createConnection: () => socket, headers: { Authorization: `Bearer ${accessToken}` } }, (response) => {
       if (response.statusCode !== 200) {
-        outgoing.destroy();
-        reject(new Error(`Falha ao baixar mídia (${response.statusCode}).`));
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => {
+          if (body.length < 65_536) body += chunk;
+        });
+        response.on("error", () => reject(mediaDownloadError(response.statusCode, body)));
+        response.on("end", () => {
+          socket.destroy();
+          reject(mediaDownloadError(response.statusCode, body));
+        });
         return;
       }
       const chunks: Buffer[] = [];
@@ -230,7 +249,7 @@ export async function downloadMedia(mediaId: string, maxBytes: number) {
     const { buffer, contentType } = await downloadPinnedMedia(url, accessToken, maxBytes);
     return { buffer, mime: info.mime_type ?? contentType ?? "application/octet-stream" };
   }
-  if (!response.ok) throw new Error(`Falha ao baixar mídia (${response.status}).`);
+  if (!response.ok) throw mediaDownloadError(response.status, await response.text().catch(() => ""));
   const buffer = Buffer.from(await response.arrayBuffer());
   if (buffer.length > maxBytes) throw new Error("Mídia acima do limite.");
   return { buffer, mime: info.mime_type ?? response.headers.get("content-type") ?? "application/octet-stream" };
