@@ -179,7 +179,8 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             className="h-9 w-full rounded-lg border border-slate-200/60 bg-slate-100/60 px-3 pl-9 text-sm outline-none transition-all focus:border-[#002187] focus:ring-1 focus:ring-[#002187]/30 dark:border-slate-700/60 dark:bg-slate-800/80! dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/30"
           />
         </div>
-        <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 py-0.5 text-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* Quebra em linhas em vez de rolar: no desktop a roda do mouse não rola de lado e as abas ficavam escondidas. */}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
           {TABS.map(({ id, label }) => {
             const active = tab === id;
             const urgent = id === "unread" && counts.unread > 0;
@@ -189,19 +190,19 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                 type="button"
                 aria-pressed={active}
                 onClick={() => onTab(id)}
-                className={`flex shrink-0 cursor-pointer items-center whitespace-nowrap rounded-md px-2.5 py-1 transition-colors ${
+                className={`flex shrink-0 cursor-pointer items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-medium transition-colors ${
                   active
-                    ? "bg-slate-100 font-medium text-slate-900 shadow-xs dark:bg-white/10 dark:text-white"
-                    : "text-slate-500 hover:bg-slate-100/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+                    ? "border-[#002187]/30 bg-[#002187]/10 text-[#002187] dark:border-[#C4D600]/40 dark:bg-[#C4D600]/15 dark:text-[#C4D600]"
+                    : "border-slate-200/80 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700/80 dark:bg-transparent dark:text-slate-300 dark:hover:bg-white/5"
                 }`}
               >
                 {label}
-                <span className={`ml-1.5 text-[10px] tabular-nums ${urgent ? "font-semibold text-[#002187] dark:text-[#C4D600]" : "opacity-70"}`}>{counts[id]}</span>
+                <span className={`ml-1 font-mono text-[10px] tabular-nums ${urgent ? "font-semibold text-[#002187] dark:text-[#C4D600]" : "opacity-70"}`}>{counts[id]}</span>
               </button>
             );
           })}
         </div>
-        <div className="flex items-center gap-2">
+        <div className={`grid gap-2 ${hasFilters ? "grid-cols-[1fr_1fr_auto]" : "grid-cols-2"}`}>
           <FilterSelect
             label="Filtrar por fila"
             value={queueId}
