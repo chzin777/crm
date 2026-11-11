@@ -31,9 +31,9 @@ export type CampaignMetrics = {
   lastSaleDate: string | null;
 };
 
-type Recipient = { contactId: string; phone: string; sentDay: string };
+type Recipient = { contactId: string; phone: string; sentDay: string; sentAt: Date };
 type ContactRow = { id: string; sourceKey: string; phone: string | null; name: string };
-type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null };
+type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null; firstSeen: Date | null };
 
 /** Dia (AAAA-MM-DD) no fuso de Brasília: as vendas do ERP só têm data, sem hora. */
 const brDay = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
@@ -46,7 +46,7 @@ const addDays = (day: string, days: number) => {
 /**
  * Funil e conversão de um disparo. `campaignId` é o id da campanha ou `bulk:<lote>`.
  * Venda atribuída: pedido do ERP (tipo Venda) do próprio contato ou de outro cadastro com o mesmo
- * telefone, feito do dia do envio até `windowDays` dias depois. Só contam contatos com entrega confirmada.
+ * telefone, feito depois da mensagem e até `windowDays` dias após o dia do envio. Só contam contatos com entrega confirmada.
  */
 export async function campaignMetrics(campaignId: string, category: string | null): Promise<CampaignMetrics> {
   const [pricing, messages] = await Promise.all([
@@ -76,7 +76,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     const key = message.contactId ?? `phone:${message.phone}`;
     const sentDay = brDay(message.sentAt);
     const current = recipients.get(key);
-    if (!current || sentDay < current.sentDay) recipients.set(key, { contactId: message.contactId ?? "", phone: message.phone, sentDay });
+    if (!current || message.sentAt < current.sentAt) recipients.set(key, { contactId: message.contactId ?? "", phone: message.phone, sentDay, sentAt: message.sentAt });
   }
 
   // Cadastros ligados a cada destinatário: o próprio e os que têm o mesmo telefone (a venda pode estar no cadastro do ERP).
@@ -90,9 +90,11 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       byPhone.set(variant, list);
     }
   }
+  // Por id e por telefone em consultas separadas (UNION) para usar os índices; o OR varria o cadastro inteiro.
   const contacts = recipientList.length === 0 ? [] : await prisma.$queryRaw<ContactRow[]>`
-    SELECT "id", "sourceKey", "phone", "name" FROM "Contact"
-    WHERE "id" = ANY(${ids}::text[]) OR "phone" = ANY(${[...byPhone.keys()]}::text[])
+    SELECT "id", "sourceKey", "phone", "name" FROM "Contact" WHERE "id" = ANY(${ids}::text[])
+    UNION
+    SELECT "id", "sourceKey", "phone", "name" FROM "Contact" WHERE "phone" = ANY(${[...byPhone.keys()]}::text[])
   `;
   const byId = new Map(recipientList.map((recipient) => [recipient.contactId, recipient]));
   const contactInfo = new Map(contacts.map((contact) => [contact.id, contact]));
@@ -102,7 +104,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     const candidates = [byId.get(contact.id), ...(contact.phone ? byPhone.get(contact.phone) ?? [] : [])].filter((item): item is Recipient => Boolean(item));
     for (const candidate of candidates) {
       const current = owners.get(contact.sourceKey);
-      if (!current || candidate.sentDay < current.sentDay) owners.set(contact.sourceKey, candidate);
+      if (!current || candidate.sentAt < current.sentAt) owners.set(contact.sourceKey, candidate);
     }
   }
 
@@ -112,7 +114,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     SELECT "sourceKey", COALESCE("orderNumber", '') AS pedido, to_char("orderDate", 'YYYY-MM-DD') AS dia,
       COALESCE(max("store"), '') AS loja, COUNT(*)::int AS itens,
       left(string_agg(DISTINCT NULLIF(btrim("description"), ''), ' · '), 180) AS resumo,
-      COALESCE(SUM("amount"), 0)::float8 AS total
+      COALESCE(SUM("amount"), 0)::float8 AS total, min("syncedAt") AS "firstSeen"
     FROM "VmsetSale"
     WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "type" = 'Venda'
       AND "orderDate" >= ${firstDay}::date AND "orderDate" <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date
@@ -125,6 +127,9 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   for (const sale of sales) {
     const owner = owners.get(sale.sourceKey);
     if (!owner || sale.dia < owner.sentDay || sale.dia > addDays(owner.sentDay, windowDays)) continue;
+    // O ERP só guarda a data do pedido; o espelho sincroniza a cada minuto, então um pedido do dia do envio
+    // que já estava no espelho antes da mensagem foi feito antes dela e não é conversão.
+    if (sale.dia === owner.sentDay && sale.firstSeen && new Date(sale.firstSeen) < owner.sentAt) continue;
     const ownerKey = owner.contactId || `phone:${owner.phone}`;
     converted.add(ownerKey);
     revenue += sale.total;
