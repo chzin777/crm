@@ -137,7 +137,13 @@ interface DismissedStore {
   novos: string[];
   relacionamento: string[];
   names?: Record<string, string>;
+  /** Quando cada contato foi excluído; depois de DISMISSED_VISIBLE_MS some da lista e a exclusão fica definitiva. */
+  dismissedAt?: Record<string, string>;
 }
+
+const DISMISSED_VISIBLE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Exclusões anteriores à data registrada contam a partir do dia em que o prazo passou a existir. */
+const LEGACY_DISMISSED_AT = "2026-11-11T00:00:00.000Z";
 
 interface PipelineConfig {
   titulo: string;
@@ -299,7 +305,9 @@ export default function Home() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const selectedCardId = selectedCard?.id;
-  const dismissedForActive = dismissedStore[activePipelineId] ?? [];
+  const dismissedForActive = (dismissedStore[activePipelineId] ?? []).filter(
+    (contactId) => Date.now() - Date.parse(dismissedStore.dismissedAt?.[contactId] ?? LEGACY_DISMISSED_AT) < DISMISSED_VISIBLE_MS,
+  );
   const { data: stageStore, setData: setStageStore, saveData: saveStageStore } = useCrmData<StageConfigStore>("pipeline-stages", { stages: {} }, { autoSave: false });
   const [editingStageId, setEditingStageId] = useState<StageId | null>(null);
   const stageConfigs = useMemo(
@@ -601,6 +609,7 @@ export default function Home() {
             ...dismissedStore,
             [card.pipelineId]: [...current, card.contactId],
             names: { ...(dismissedStore.names ?? {}), [card.contactId]: card.cliente },
+            dismissedAt: { ...(dismissedStore.dismissedAt ?? {}), [card.contactId]: new Date().toISOString() },
           });
         }
       }
@@ -617,7 +626,7 @@ export default function Home() {
     try {
       await saveDismissedStore({
         ...dismissedStore,
-        [activePipelineId]: dismissedForActive.filter((id) => id !== contactId),
+        [activePipelineId]: (dismissedStore[activePipelineId] ?? []).filter((id) => id !== contactId),
       });
       toast.success("Contato restaurado", "Ele volta à pipeline na próxima sincronização.");
     } catch (error) {
@@ -1391,7 +1400,7 @@ export default function Home() {
         <EntityDialog
           titleId="dismissed-title"
           title="Contatos excluídos da pipeline"
-          description={`${pipelineMeta[activePipelineId].titulo}: não são recriados pela sincronização automática.`}
+          description={`${pipelineMeta[activePipelineId].titulo}: não são recriados pela sincronização automática. Após 7 dias a exclusão fica definitiva e o contato sai desta lista.`}
           onClose={() => setShowDismissed(false)}
         >
           <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
