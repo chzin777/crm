@@ -115,7 +115,7 @@ function Attachment({ message, onOpen }: { message: ChatMessageItem; onOpen: () 
   }
   if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 max-h-64 rounded-lg" />;
   if (attachment.kind === "audio") {
-    return <AudioPlayer src={mediaUrl(message)} id={message.id} outgoing={!message.internal && (message.author === "agent" || message.author === "bot")} />;
+    return <AudioPlayer src={mediaUrl(message)} outgoing={!message.internal && (message.author === "agent" || message.author === "bot")} />;
   }
   return (
     <a href={mediaUrl(message)} target="_blank" rel="noreferrer" className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 p-2 dark:bg-white/10">
@@ -285,6 +285,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
             const fromUs = message.author === "agent" || message.author === "bot";
             const sticker = message.attachment?.kind === "sticker" && !message.text;
             const missing = message.author === "customer" && !message.attachment ? message.pendingMedia ?? LABEL_KINDS[message.text] : undefined;
+            const voice = message.attachment?.kind === "audio";
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {newDay && (
@@ -306,7 +307,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       </button>
                     )}
                     <div
-                      className={sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl px-3 py-1.5 shadow-sm 2xl:px-4 2xl:py-2.5 ${
+                      className={sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl shadow-sm ${voice ? "p-2 pr-3" : "px-3 py-1.5 2xl:px-4 2xl:py-2.5"} ${
                         message.internal
                           ? "rounded-br-sm border border-dashed border-[#F7915E] bg-[#F7915E]/15 text-slate-900 dark:text-white"
                           : message.author === "bot"
@@ -336,7 +337,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       {message.interactive ? (
                         <InteractiveListBubble list={message.interactive} messageId={message.id} />
                       ) : message.text && !(missing && LABEL_KINDS[message.text]) && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
-                      <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs ? "justify-end" : "justify-start"}`}>
+                      <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs || voice ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
                       </div>
