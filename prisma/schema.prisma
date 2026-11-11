@@ -8,28 +8,30 @@ datasource db {
 }
 
 model User {
-  id               String     @id
-  name             String
-  email            String     @unique
-  jobTitle         String?
-  teamLevel        String     @default("Operador")
-  roleId           String?
-  roleRef          Role?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  emailVerified    Boolean    @default(false)
-  image            String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  role             String     @default("user")
-  banned           Boolean    @default(false)
-  banReason        String?
-  banExpires       DateTime?
-  sessions         Session[]
-  accounts         Account[]
-  npsResponses     NpsResponse[]
-  chatQueues       ChatQueueMember[]
-  chatAgent        ChatAgent?
-  chatAssigned     ChatConversation[] @relation("ChatAssignee")
-  npsFeedbacks     NpsFeedback[]
+  id                String             @id
+  name              String
+  email             String             @unique
+  jobTitle          String?
+  teamLevel         String             @default("Operador")
+  roleId            String?
+  roleRef           Role?              @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  emailVerified     Boolean            @default(false)
+  image             String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  role              String             @default("user")
+  banned            Boolean            @default(false)
+  banReason         String?
+  banExpires        DateTime?
+  sessions          Session[]
+  accounts          Account[]
+  npsResponses      NpsResponse[]
+  chatQueues        ChatQueueMember[]
+  chatAgent         ChatAgent?
+  chatAssigned      ChatConversation[] @relation("ChatAssignee")
+  npsFeedbacks      NpsFeedback[]
+  followUps         FollowUp[]
+  scheduledMessages ScheduledMessage[]
 
   @@map("user")
 }
@@ -47,7 +49,6 @@ model Session {
   impersonatedBy String?
 
   @@index([userId])
-
   @@map("session")
 }
 
@@ -69,7 +70,6 @@ model Account {
 
   @@unique([providerId, accountId])
   @@index([userId])
-
   @@map("account")
 }
 
@@ -82,43 +82,43 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@index([identifier])
-
   @@map("verification")
 }
 
 model Contact {
-  id                 String         @id @default(cuid())
-  sourceKey          String         @unique
-  name               String
-  cpf                String?
-  phone              String?
-  email              String?
-  birthDate          String?
-  gender             String?
-  occupation         String?
-  city               String?
-  neighborhood       String?
-  state              String?
-  store              String?
-  segment            String?
-  category           String         @default("cliente")
-  lastPurchaseDate   String?
-  prescriptionExpiry String?
-  purchases          Int            @default(0)
-  totalSpent         Decimal        @default(0) @db.Decimal(14, 2)
-  ecommerceCustomerId       String?   @unique
+  id                        String             @id @default(cuid())
+  sourceKey                 String             @unique
+  name                      String
+  cpf                       String?
+  phone                     String?
+  email                     String?
+  birthDate                 String?
+  gender                    String?
+  occupation                String?
+  city                      String?
+  neighborhood              String?
+  state                     String?
+  store                     String?
+  segment                   String?
+  category                  String             @default("cliente")
+  lastPurchaseDate          String?
+  prescriptionExpiry        String?
+  purchases                 Int                @default(0)
+  totalSpent                Decimal            @default(0) @db.Decimal(14, 2)
+  ecommerceCustomerId       String?            @unique
   ecommerceUpdatedAt        DateTime?
-  ecommercePurchases        Int       @default(0)
-  ecommerceTotalSpent       Decimal   @default(0) @db.Decimal(14, 2)
+  ecommercePurchases        Int                @default(0)
+  ecommerceTotalSpent       Decimal            @default(0) @db.Decimal(14, 2)
   ecommerceLastPurchaseDate String?
-  avatarUrl          String?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  importedSales      ImportedSale[]
-  npsResponses       NpsResponse[]
-  chatConversations  ChatConversation[]
-  notes              ContactNote[]
-  npsFeedbacks       NpsFeedback[]
+  avatarUrl                 String?
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+  importedSales             ImportedSale[]
+  npsResponses              NpsResponse[]
+  chatConversations         ChatConversation[]
+  notes                     ContactNote[]
+  npsFeedbacks              NpsFeedback[]
+  followUps                 FollowUp[]
 
   @@index([cpf])
   @@index([phone])
@@ -168,12 +168,12 @@ model PlaceGeo {
 }
 
 model ImportedSale {
-  id         BigInt   @id @default(autoincrement())
+  id         BigInt  @id @default(autoincrement())
   sourceFile String
   sourceRow  Int
   sourceKey  String
-  data       Json     @db.JsonB
-  contact    Contact  @relation(fields: [sourceKey], references: [sourceKey], onDelete: Cascade)
+  data       Json    @db.JsonB
+  contact    Contact @relation(fields: [sourceKey], references: [sourceKey], onDelete: Cascade)
 
   @@unique([sourceFile, sourceRow])
   @@index([sourceKey])
@@ -250,20 +250,20 @@ model NpsFeedback {
 }
 
 model CampaignMessage {
-  id              String                @id @default(cuid())
-  campaignId      String
-  contactId       String?
-  phone           String
-  whatsappMsgId   String?               @unique
-  status          CampaignMessageStatus @default(queued)
-  sentAt          DateTime?
-  deliveredAt     DateTime?
-  readAt          DateTime?
-  repliedAt       DateTime?
-  failedAt        DateTime?
-  failureReason   String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  id            String                @id @default(cuid())
+  campaignId    String
+  contactId     String?
+  phone         String
+  whatsappMsgId String?               @unique
+  status        CampaignMessageStatus @default(queued)
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  readAt        DateTime?
+  repliedAt     DateTime?
+  failedAt      DateTime?
+  failureReason String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 
   @@index([campaignId])
   @@index([whatsappMsgId])
@@ -303,7 +303,6 @@ model Role {
   updatedAt   DateTime @updatedAt
   users       User[]
 }
-
 
 enum ChatStatus {
   bot
@@ -371,31 +370,33 @@ model ChatAgent {
 }
 
 model ChatConversation {
-  id            String        @id @default(cuid())
-  contactId     String
-  phone         String
-  openKey       String?       @unique
-  queueId       String?
-  assigneeId    String?
-  status        ChatStatus    @default(waiting)
-  priority      ChatPriority  @default(normal)
-  subject       String        @default("")
-  unreadCount   Int           @default(0)
-  waitingSince  DateTime?
-  lastMessageAt DateTime?
-  lastInboundAt DateTime?
-  tags          String[]      @default([])
-  menuState     Json?
-  campaignId    String?
-  campaignName  String?
-  closedAt      DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  contact       Contact       @relation(fields: [contactId], references: [id], onDelete: Restrict)
-  queue         ChatQueue?    @relation(fields: [queueId], references: [id], onDelete: SetNull)
-  assignee      User?         @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  messages      ChatMessage[]
-  npsFeedbacks  NpsFeedback[]
+  id                String             @id @default(cuid())
+  contactId         String
+  phone             String
+  openKey           String?            @unique
+  queueId           String?
+  assigneeId        String?
+  status            ChatStatus         @default(waiting)
+  priority          ChatPriority       @default(normal)
+  subject           String             @default("")
+  unreadCount       Int                @default(0)
+  waitingSince      DateTime?
+  lastMessageAt     DateTime?
+  lastInboundAt     DateTime?
+  tags              String[]           @default([])
+  menuState         Json?
+  campaignId        String?
+  campaignName      String?
+  closedAt          DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  queue             ChatQueue?         @relation(fields: [queueId], references: [id], onDelete: SetNull)
+  assignee          User?              @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages          ChatMessage[]
+  npsFeedbacks      NpsFeedback[]
+  followUps         FollowUp[]
+  scheduledMessages ScheduledMessage[]
 
   @@index([queueId, status, waitingSince])
   @@index([assigneeId, closedAt])
@@ -482,6 +483,72 @@ model ChatSettings {
   id        String   @id
   menu      Json
   updatedAt DateTime @updatedAt
+}
+
+enum FollowUpStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+/// Lembrete de retorno ao cliente marcado pelo atendente na conversa.
+model FollowUp {
+  id             String           @id @default(cuid())
+  conversationId String
+  contactId      String
+  userId         String
+  dueAt          DateTime
+  note           String           @default("")
+  status         FollowUpStatus   @default(PENDING)
+  completedAt    DateTime?
+  /// Aviso de vencimento já enviado ao atendente (o relógio avisa uma vez).
+  notifiedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contact        Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, dueAt])
+  @@index([conversationId, status])
+  @@index([status, dueAt])
+}
+
+enum ScheduledMessageStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+/// Mensagem de texto do atendente para sair num horário marcado (o relógio por minuto dispara).
+model ScheduledMessage {
+  id             String                 @id @default(cuid())
+  conversationId String
+  userId         String
+  text           String
+  scheduledFor   DateTime
+  status         ScheduledMessageStatus @default(SCHEDULED)
+  failureReason  String?
+  messageId      String?
+  sentAt         DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  conversation   ChatConversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([conversationId, status])
+}
+
+/// Horário de atendimento: `scope` é "global" ou o id de uma fila (a fila tem prioridade sobre o geral).
+model OperatingHours {
+  scope            String   @id
+  enabled          Boolean  @default(false)
+  /// [{ day: 0..6 (domingo = 0), open: "08:00", close: "18:00" }]
+  schedule         Json     @default("[]")
+  autoReplyMessage String   @default("")
+  updatedAt        DateTime @updatedAt
 }
 
 /// Espelho das vendas do VMSet (Oracle), mantido por scripts/vmset-sync.py. Ver prisma/vmset-sale.sql.

@@ -10,6 +10,7 @@ import { expireSurveys, isSurveyMessage, resendSurvey } from "@/lib/chat/nps";
 import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
 import { silenceFarewell } from "@/lib/chat/settings";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -38,7 +39,7 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 }
 
 export async function runClock() {
-  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, errors: [] as string[] };
+  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, scheduledSent: 0, scheduledFailed: 0, followUpsDue: 0, errors: [] as string[] };
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -49,6 +50,16 @@ export async function runClock() {
 
   const settings = await readChatSettings();
   const now = Date.now();
+
+  await block("mensagens agendadas", async () => {
+    const result = await dispatchScheduledMessages(new Date(now));
+    summary.scheduledSent = result.sent;
+    summary.scheduledFailed = result.failed;
+  });
+
+  await block("lembretes de retorno", async () => {
+    summary.followUpsDue = await notifyDueFollowUps(new Date(now));
+  });
 
   await block("fechamento do menu", async () => {
     const rows = await prisma.chatConversation.findMany({ where: { closedAt: null, assigneeId: null, status: "bot" } });

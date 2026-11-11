@@ -15,6 +15,12 @@ export const conversationInclude = {
     take: 1,
     select: { text: true, author: true, delivery: true, attachment: true, createdAt: true },
   },
+  followUps: {
+    where: { status: "PENDING" as const },
+    orderBy: { dueAt: "asc" as const },
+    take: 1,
+    select: { dueAt: true, note: true },
+  },
 } satisfies Prisma.ChatConversationInclude;
 
 type ConversationRow = Prisma.ChatConversationGetPayload<{ include: typeof conversationInclude }>;
@@ -44,6 +50,7 @@ export function serializeConversation(row: ConversationRow) {
     assignee: row.assignee,
     windowOpen: isWindowOpen(row.lastInboundAt),
     lastMessage: last ? { text: last.text, author: last.author, delivery: last.delivery, attachmentKind: attachment?.kind ?? null } : null,
+    followUp: row.followUps[0] ? { dueAt: row.followUps[0].dueAt.toISOString(), note: row.followUps[0].note } : null,
   };
 }
 

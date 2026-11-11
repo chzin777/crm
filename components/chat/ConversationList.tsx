@@ -1,9 +1,9 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, Check, CheckCheck, ChevronDown, Clock, Megaphone, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
+import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
-import { PRIORITY_LABELS, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
+import { PRIORITY_LABELS, SLA_BREACH_MINUTES, SLA_WARN_MINUTES, type ChatCounts, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
 
 const TABS: { id: ChatTab; label: string }[] = [
   { id: "all", label: "Todas" },
@@ -12,6 +12,7 @@ const TABS: { id: ChatTab; label: string }[] = [
   { id: "campaigns", label: "Campanhas" },
   // Conversas na fila esperando atendente; a fila/setor fica no filtro de filas.
   { id: "queue", label: "Aguardando" },
+  { id: "followups", label: "Lembretes" },
   { id: "closed", label: "Encerradas" },
 ];
 
@@ -45,9 +46,11 @@ function DeliveryIcon({ delivery }: { delivery: ChatDelivery }) {
 }
 
 /** Tag de origem com cor própria: campanha violeta, e-commerce verde, demais etiquetas neutras. */
-type OriginTone = "campaign" | "ecommerce" | "neutral";
+type OriginTone = "campaign" | "ecommerce" | "neutral" | "followup" | "overdue";
 
 const ORIGIN_TONES: Record<OriginTone, string> = {
+  followup: "border-[#002187]/20 bg-[#002187]/5 text-[#002187] dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600]",
+  overdue: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300",
   neutral: "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
   campaign: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-950/40 dark:text-violet-300",
   ecommerce: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300",
@@ -66,12 +69,30 @@ function originOf(item: ConversationItem): Origin | null {
   return { title: tag, text: tag, tone: ecommerce ? "ecommerce" : "neutral", icon: ecommerce ? <ShoppingBag className="h-3 w-3 shrink-0" /> : undefined };
 }
 
-/** Tempo no canto do card: na fila mostra há quanto espera (cor sobe com a demora), senão a última mensagem. */
+/** Tempo no canto do card: na fila mostra há quanto espera (até 10 min normal, até 20 alerta, acima fora do prazo). */
 function cornerTime(item: ConversationItem, waiting: boolean) {
   if (!waiting || !item.waitingSince) return { text: relativeTime(item.lastMessageAt), title: undefined, tone: "text-slate-400 dark:text-slate-500" };
   const { text, minutes } = waitingLabel(item.waitingSince);
-  const tone = minutes >= 10 ? "text-rose-600 dark:text-rose-300" : minutes >= 3 ? "text-amber-600 dark:text-amber-300" : "text-slate-400 dark:text-slate-500";
+  if (minutes >= SLA_BREACH_MINUTES) {
+    return { text, title: `Fora do prazo: esperando há ${text}`, tone: "animate-pulse rounded-md bg-rose-100 px-1.5 font-semibold text-rose-700 dark:bg-rose-500/20 dark:text-rose-200" };
+  }
+  const tone = minutes >= SLA_WARN_MINUTES ? "font-medium text-amber-600 dark:text-amber-300" : "text-slate-400 dark:text-slate-500";
   return { text, title: `Esperando há ${text}`, tone };
+}
+
+const dueLabel = (value: string) => new Date(value).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+/** Lembrete de retorno pendente vira o selo da linha 3 (mais urgente que a origem). */
+function followUpOf(item: ConversationItem): Origin | null {
+  if (!item.followUp) return null;
+  const overdue = new Date(item.followUp.dueAt).getTime() <= Date.now();
+  const when = dueLabel(item.followUp.dueAt);
+  return {
+    title: `${overdue ? "Retorno atrasado" : "Retorno agendado"}: ${when}${item.followUp.note ? `\n${item.followUp.note}` : ""}`,
+    text: `${overdue ? "Atrasado" : "Retorno"} ${when}`,
+    tone: overdue ? "overdue" : "followup",
+    icon: <CalendarClock className="h-3 w-3 shrink-0" />,
+  };
 }
 
 const PRIORITY_DOTS: Partial<Record<ChatPriority, string>> = { low: "bg-slate-300 dark:bg-slate-600", high: "bg-amber-500", urgent: "bg-rose-500" };
@@ -97,7 +118,7 @@ function ListSkeleton() {
 
 type Props = {
   items: ConversationItem[];
-  counts: Record<ChatTab, number>;
+  counts: ChatCounts;
   tab: ChatTab;
   onTab: (tab: ChatTab) => void;
   search: string;
@@ -166,6 +187,17 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
           {counts.unread > 0 && (
             <span title="Conversas não lidas" className="rounded-full bg-[#C4D600] px-2 py-0.5 text-[11px] font-semibold text-[#051647]">{counts.unread}</span>
           )}
+          {counts.slaBreached > 0 && (
+            <button
+              type="button"
+              onClick={() => onTab("queue")}
+              title={`${counts.slaBreached} ${counts.slaBreached === 1 ? "conversa esperando" : "conversas esperando"} há mais de ${SLA_BREACH_MINUTES} min. Clique para ver a fila.`}
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/20 dark:text-rose-200 dark:hover:bg-rose-500/30"
+            >
+              <Timer className="h-3 w-3 animate-pulse" />
+              {counts.slaBreached}
+            </button>
+          )}
           <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>
         </div>
         <div className="relative">
@@ -184,6 +216,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
           {TABS.map(({ id, label }) => {
             const active = tab === id;
             const urgent = id === "unread" && counts.unread > 0;
+            const late = id === "followups" && counts.followupsOverdue > 0;
             return (
               <button
                 key={id}
@@ -197,7 +230,12 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                 }`}
               >
                 {label}
-                <span className={`ml-1 font-mono text-[10px] tabular-nums ${urgent ? "font-semibold text-[#002187] dark:text-[#C4D600]" : "opacity-70"}`}>{counts[id]}</span>
+                <span
+                  title={late ? `${counts.followupsOverdue} ${counts.followupsOverdue === 1 ? "retorno atrasado" : "retornos atrasados"}` : undefined}
+                  className={`ml-1 font-mono text-[10px] tabular-nums ${late ? "font-semibold text-rose-600 dark:text-rose-300" : urgent ? "font-semibold text-[#002187] dark:text-[#C4D600]" : "opacity-70"}`}
+                >
+                  {counts[id]}
+                </span>
               </button>
             );
           })}
@@ -252,7 +290,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const selected = selectedId === item.id;
             const delivery = item.lastMessage && item.lastMessage.author !== "customer" ? item.lastMessage.delivery : null;
             const waiting = item.status === "waiting" && !!item.waitingSince;
-            const origin = originOf(item);
+            const origin = followUpOf(item) ?? originOf(item);
             const corner = cornerTime(item, waiting);
             const priorityDot = PRIORITY_DOTS[item.priority];
             const operational = [item.queue?.name, item.store ? storeLabel(item.store) : null].filter((value): value is string => !!value);

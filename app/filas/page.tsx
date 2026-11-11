@@ -7,6 +7,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { BlockedPanel } from "@/components/chat/BlockedPanel";
 import { MenuSettingsPanel } from "@/components/chat/MenuSettingsPanel";
+import { OperatingHoursPanel } from "@/components/chat/OperatingHoursPanel";
 import { QueueBoard, type QueueAgent, type QueueRecord } from "@/components/chat/QueueBoard";
 import { QuickRepliesPanel } from "@/components/chat/QuickRepliesPanel";
 import { TeamPanel } from "@/components/chat/TeamPanel";
@@ -75,7 +76,7 @@ export default function FilasPage() {
 
   const tabs = [
     { id: "queues", label: "Filas" },
-    ...(canManage ? [{ id: "team", label: "Equipe" }, { id: "replies", label: "Respostas prontas" }, { id: "menu", label: "Menu e avisos" }, { id: "blocked", label: "Bloqueados" }] : []),
+    ...(canManage ? [{ id: "team", label: "Equipe" }, { id: "replies", label: "Respostas prontas" }, { id: "menu", label: "Menu e avisos" }, { id: "hours", label: "Horário de atendimento" }, { id: "blocked", label: "Bloqueados" }] : []),
   ];
 
   return (
@@ -106,6 +107,8 @@ export default function FilasPage() {
         <QuickRepliesPanel queues={queues} />
       ) : view === "menu" ? (
         <MenuSettingsPanel queues={queues} agents={agents.filter((agent) => agent.hasChatAccess)} />
+      ) : view === "hours" ? (
+        <OperatingHoursPanel queues={queues} />
       ) : view === "blocked" ? (
         <BlockedPanel />
       ) : view === "queues" ? (

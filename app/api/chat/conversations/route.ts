@@ -8,6 +8,7 @@ import { firstActiveQueue, isWindowOpen } from "@/lib/chat/conversation";
 import { DISPATCH_TAG } from "@/lib/chat/dispatch-history";
 import { ChatRuleError, sendAgentMessage } from "@/lib/chat/outbound";
 import { conversationInclude, serializeConversation } from "@/lib/chat/serialize";
+import { SLA_BREACH_MINUTES, type ChatCounts } from "@/lib/chat/types";
 
 const PAGE_SIZE = 40;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -20,8 +21,17 @@ function tabWhere(tab: string, actor: ChatActor): Prisma.ChatConversationWhereIn
   if (tab === "closed") return { status: "closed", NOT: { tags: { has: DISPATCH_TAG } } };
   if (tab === "unread") return { unreadCount: { gt: 0 }, ...OPEN };
   if (tab === "campaigns") return { campaignId: { not: null }, ...OPEN };
+  // Lembretes de retorno do próprio atendente, inclusive em conversa já encerrada (o retorno reabre o contato).
+  if (tab === "followups") return { followUps: { some: { userId: actor.id, status: "PENDING" } } };
   return OPEN;
 }
+
+/** Na fila há mais tempo que o limite de espera. */
+const slaBreachedWhere = (): Prisma.ChatConversationWhereInput => ({
+  status: "waiting",
+  closedAt: null,
+  waitingSince: { lte: new Date(Date.now() - SLA_BREACH_MINUTES * 60_000) },
+});
 
 function searchWhere(search: string): Prisma.ChatConversationWhereInput[] {
   return search.split(/\s+/).filter(Boolean).map((token) => {
@@ -140,7 +150,28 @@ export async function GET(request: Request) {
     ? [{ closedAt: "desc" }]
     : [{ lastMessageAt: { sort: "desc", nulls: "last" } }];
 
-  const [rows, queue, mine, all, closed, unread, campaigns] = await Promise.all([
+  // A aba de lembretes mostra o retorno mais próximo primeiro.
+  if (tab === "followups") {
+    const due = await prisma.followUp.groupBy({
+      by: ["conversationId"],
+      where: { userId: actor.id, status: "PENDING", conversation: { AND: filters } },
+      _min: { dueAt: true },
+    });
+    due.sort((a, b) => (a._min.dueAt?.getTime() ?? 0) - (b._min.dueAt?.getTime() ?? 0));
+    const page = due.slice(offset, offset + PAGE_SIZE).map((item) => item.conversationId);
+    const [rows, counts] = await Promise.all([
+      prisma.chatConversation.findMany({ where: { id: { in: page } }, include: conversationInclude }),
+      tabCounts(actor, filters),
+    ]);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return NextResponse.json({
+      items: page.flatMap((id) => (byId.has(id) ? [serializeConversation(byId.get(id)!)] : [])),
+      nextCursor: due.length > offset + PAGE_SIZE ? offset + PAGE_SIZE : null,
+      counts,
+    });
+  }
+
+  const [rows, counts] = await Promise.all([
     prisma.chatConversation.findMany({
       where: { AND: [tabWhere(tab, actor), ...filters] },
       include: conversationInclude,
@@ -148,17 +179,28 @@ export async function GET(request: Request) {
       skip: offset,
       take: PAGE_SIZE + 1,
     }),
-    prisma.chatConversation.count({ where: { AND: [tabWhere("queue", actor), ...filters] } }),
-    prisma.chatConversation.count({ where: { AND: [tabWhere("mine", actor), ...filters] } }),
-    prisma.chatConversation.count({ where: { AND: [tabWhere("all", actor), ...filters] } }),
-    prisma.chatConversation.count({ where: { AND: [tabWhere("closed", actor), ...filters] } }),
-    prisma.chatConversation.count({ where: { AND: [tabWhere("unread", actor), ...filters] } }),
-    prisma.chatConversation.count({ where: { AND: [tabWhere("campaigns", actor), ...filters] } }),
+    tabCounts(actor, filters),
   ]);
 
   return NextResponse.json({
     items: rows.slice(0, PAGE_SIZE).map(serializeConversation),
     nextCursor: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
-    counts: { queue, mine, all, closed, unread, campaigns },
+    counts,
   });
+}
+
+async function tabCounts(actor: ChatActor, filters: Prisma.ChatConversationWhereInput[]): Promise<ChatCounts> {
+  const count = (where: Prisma.ChatConversationWhereInput) => prisma.chatConversation.count({ where: { AND: [where, ...filters] } });
+  const [queue, mine, all, closed, unread, campaigns, followups, followupsOverdue, slaBreached] = await Promise.all([
+    count(tabWhere("queue", actor)),
+    count(tabWhere("mine", actor)),
+    count(tabWhere("all", actor)),
+    count(tabWhere("closed", actor)),
+    count(tabWhere("unread", actor)),
+    count(tabWhere("campaigns", actor)),
+    count(tabWhere("followups", actor)),
+    count({ followUps: { some: { userId: actor.id, status: "PENDING", dueAt: { lte: new Date() } } } }),
+    count(slaBreachedWhere()),
+  ]);
+  return { queue, mine, all, closed, unread, campaigns, followups, followupsOverdue, slaBreached };
 }

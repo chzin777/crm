@@ -1,4 +1,43 @@
-export type ChatTab = "queue" | "mine" | "all" | "closed" | "unread" | "campaigns";
+export type ChatTab = "queue" | "mine" | "all" | "closed" | "unread" | "campaigns" | "followups";
+
+/** Contadores das abas, mais os lembretes vencidos do atendente e as conversas com espera acima do limite. */
+export type ChatCounts = Record<ChatTab, number> & { followupsOverdue: number; slaBreached: number };
+
+/** Espera em "Aguardando": até 10 min normal, até 20 min alerta, acima disso fora do prazo. */
+export const SLA_WARN_MINUTES = 10;
+export const SLA_BREACH_MINUTES = 20;
+
+export type FollowUpItem = {
+  id: string;
+  dueAt: string;
+  note: string;
+  status: "PENDING" | "COMPLETED" | "CANCELLED";
+  completedAt: string | null;
+  userName: string;
+  mine: boolean;
+};
+
+export type ScheduledMessageItem = {
+  id: string;
+  text: string;
+  scheduledFor: string;
+  status: "SCHEDULED" | "SENT" | "FAILED" | "CANCELLED";
+  failureReason: string | null;
+  userName: string;
+};
+
+/** Visão do cliente no ERP para o painel lateral do chat. */
+export type CustomerHistory = {
+  cpf: string | null;
+  store: string | null;
+  purchases: number;
+  totalSpent: number;
+  lastPurchaseDate: string | null;
+  /** O espelho do ERP não traz a receita: a última compra de lentes de grau serve de referência para a renovação. */
+  prescription: { lastLensPurchase: string | null; lensType: string | null; expiry: string | null; renewalDue: boolean };
+  orders: { orderNumber: string; date: string | null; total: number; store: string; status: string; invoice: string | null; items: number; summary: string }[];
+  campaigns: { name: string; sentAt: string | null; status: string; repliedAt: string | null }[];
+};
 export type ChatStatus = "bot" | "waiting" | "in_progress" | "closed";
 export type ChatPriority = "low" | "normal" | "high" | "urgent";
 export type ChatAuthor = "customer" | "agent" | "bot" | "system";
@@ -26,6 +65,8 @@ export type ConversationItem = {
   assignee: { id: string; name: string } | null;
   windowOpen: boolean;
   lastMessage: { text: string; author: ChatAuthor; delivery: ChatDelivery | null; attachmentKind: string | null } | null;
+  /** Próximo lembrete de retorno pendente da conversa (de qualquer atendente). */
+  followUp: { dueAt: string; note: string } | null;
 };
 
 export type ConversationDetail = ConversationItem & {

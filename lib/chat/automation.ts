@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { firstDispatch, isBlocked } from "@/lib/chat/conversation";
 import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
 import { attendByMenu, readMenuState, saveMenuState } from "@/lib/chat/menu";
+import { handleOffHours } from "@/lib/chat/operations";
 import type { RecordedInbound } from "@/lib/chat/inbound";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { fillVariables } from "@/lib/chat/text";
@@ -59,6 +60,9 @@ export async function runAutomation(recorded: RecordedInbound) {
     console.log(`[bot] ${conversation.id}: sem automação (resposta automática do contato: ${recorded.autoReply})`);
     return;
   }
+
+  // Fora do horário de atendimento: aviso com o horário e a conversa espera na fila, sem menu.
+  if (await handleOffHours(conversation)) return;
 
   // Mensagens automáticas do contato não contam: a primeira mensagem de verdade ainda recebe a saudação do menu.
   const inboundCount = await prisma.chatMessage.count({

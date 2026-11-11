@@ -2,11 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
+import { CustomerPanel } from "@/components/chat/CustomerPanel";
+import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { DeleteConversationDialog, deleteConversation, type DeleteReason } from "@/components/chat/DeleteConversationDialog";
@@ -21,10 +23,11 @@ import { TransferDialog } from "@/components/chat/TransferDialog";
 import { alertsEnabled, disableAlerts, enableAlerts } from "@/lib/chat/alerts";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
-import { STATUS_LABELS, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem } from "@/lib/chat/types";
+import { STATUS_LABELS, type ChatCounts, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem, type ScheduledMessageItem } from "@/lib/chat/types";
 import { usePulse } from "@/lib/chat/use-pulse";
 
-const EMPTY_COUNTS: Record<ChatTab, number> = { queue: 0, mine: 0, all: 0, closed: 0, unread: 0, campaigns: 0 };
+const EMPTY_COUNTS: ChatCounts = { queue: 0, mine: 0, all: 0, closed: 0, unread: 0, campaigns: 0, followups: 0, followupsOverdue: 0, slaBreached: 0 };
+const PANEL_KEY = "chat:painel-cliente";
 
 function ChatWorkspace() {
   const selectedId = useSearchParams().get("c");
@@ -59,9 +62,58 @@ function ChatWorkspace() {
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [newSearch, setNewSearch] = useState("");
+  const [showPanel, setShowPanel] = useState(false);
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [followUpKey, setFollowUpKey] = useState(0);
+  const [scheduled, setScheduled] = useState<ScheduledMessageItem[]>([]);
   const canWrite = capabilities["chat.assume"] === true;
   const listRequest = useRef(0);
   const messageList = useRef<MessageListHandle>(null);
+
+  // O painel do cliente lembra se ficou aberto (preferência só deste navegador).
+  useEffect(() => {
+    try {
+      setShowPanel(window.localStorage.getItem(PANEL_KEY) === "1");
+    } catch {
+      // Sem armazenamento local: o painel começa fechado.
+    }
+  }, []);
+
+  const togglePanel = () => {
+    setShowPanel((current) => {
+      try {
+        window.localStorage.setItem(PANEL_KEY, current ? "0" : "1");
+      } catch {
+        // Preferência não salva; o painel ainda abre e fecha.
+      }
+      return !current;
+    });
+  };
+
+  const loadScheduled = useCallback(async (id: string) => {
+    const response = await fetch(`/api/chat/conversations/${id}/scheduled`, { cache: "no-store" }).catch(() => null);
+    if (response?.ok) setScheduled(((await response.json()) as { items: ScheduledMessageItem[] }).items);
+  }, []);
+
+  useEffect(() => {
+    setScheduled([]);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId) void loadScheduled(selectedId);
+  }, [selectedId, loadScheduled, tick]);
+
+  const cancelScheduled = async (scheduledId: string) => {
+    const response = await fetch(`/api/chat/scheduled/${scheduledId}`, { method: "DELETE" }).catch(() => null);
+    if (response?.ok) {
+      setScheduled((current) => current.filter((item) => item.id !== scheduledId));
+      toast.success("Envio agendado cancelado");
+    } else {
+      const data = (await response?.json().catch(() => null)) as { error?: string } | null;
+      toast.error("Não foi possível cancelar", data?.error);
+      if (selectedId) void loadScheduled(selectedId);
+    }
+  };
 
   useEffect(() => {
     setAlertsOn(alertsEnabled());
@@ -104,7 +156,7 @@ function ChatWorkspace() {
       if (cursor) params.set("cursor", String(cursor));
       const response = await fetch(`/api/chat/conversations?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = (await response.json()) as { items: ConversationItem[]; nextCursor: number | null; counts: Record<ChatTab, number> };
+      const data = (await response.json()) as { items: ConversationItem[]; nextCursor: number | null; counts: ChatCounts };
       if (requestId !== listRequest.current) return;
       setItems((current) => {
         if (!cursor) return data.items;
@@ -399,6 +451,7 @@ function ChatWorkspace() {
     return [
       { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => run("/assume", "Atendimento assumido"), hidden: !canWrite || !!conversation.closedAt || !!conversation.assignee },
       { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
+      { label: "Agendar retorno", icon: <CalendarClock className="h-4 w-4" />, onSelect: () => setShowFollowUp(true), hidden: !canWrite },
       { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(conversation.contactId)}&contato=${encodeURIComponent(conversation.name)}`, hidden: !canWrite },
       { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!conversation.closedAt },
       { label: "Marcar como não lida", icon: <Mail className="h-4 w-4" />, onSelect: () => run("/read", "Marcada como não lida", { body: JSON.stringify({ unread: true }) }), hidden: !!conversation.closedAt },
@@ -422,7 +475,7 @@ function ChatWorkspace() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden px-3 py-3 md:px-4 md:py-4 xl:px-10 xl:py-8 compact:py-3">
-      <div className="flex flex-1 min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-[#07194f]">
+      <div className="relative flex flex-1 min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-[#07194f]">
         <div className={`flex min-h-0 flex-col border-r border-slate-200 dark:border-slate-800 ${selectedId ? "hidden md:flex" : "flex"} w-full md:w-72 md:shrink-0 xl:w-80 2xl:w-96`}>
           <ConversationList
             items={hiddenIds.size ? items.filter((item) => !hiddenIds.has(item.id)) : items}
@@ -493,6 +546,27 @@ function ChatWorkspace() {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {canWrite && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFollowUp(true)}
+                      title="Agendar retorno"
+                      aria-label="Agendar retorno"
+                      className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 xl:h-9 xl:w-9 dark:text-slate-400 dark:hover:bg-white/10"
+                    >
+                      <CalendarClock className="h-5 w-5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={togglePanel}
+                    title={showPanel ? "Fechar painel do cliente" : "Painel do cliente: compras, receita, campanhas e retornos"}
+                    aria-label="Painel do cliente"
+                    aria-pressed={showPanel}
+                    className={`grid h-8 w-8 cursor-pointer place-items-center rounded-lg transition-colors xl:h-9 xl:w-9 ${showPanel ? "bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"}`}
+                  >
+                    <PanelRight className="h-5 w-5" />
+                  </button>
                   <PriorityPill key={`${open.id}-priority`} priority={open.priority} onChange={canWrite && !open.closedAt ? (value) => void updateConversation({ priority: value }) : undefined} />
                   <FloatingMenu
                     key={open.id}
@@ -504,8 +578,33 @@ function ChatWorkspace() {
                   />
                 </div>
               </div>
-              <MessageList key={open.id} conversationId={open.id} tick={tick} onReply={canWrite ? setReplyTo : undefined} listRef={messageList} />
-              <Composer key={open.id} conversation={open} agentName={agentName} canWrite={canWrite} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} onSend={handleSend} onTemplate={handleTemplate} onAttach={handleAttach} onError={setSendError} uploadProgress={uploadProgress} error={sendError} />
+              <MessageList
+                key={open.id}
+                conversationId={open.id}
+                tick={tick}
+                onReply={canWrite ? setReplyTo : undefined}
+                listRef={messageList}
+                scheduled={scheduled}
+                onCancelScheduled={canWrite ? (scheduledId) => void cancelScheduled(scheduledId) : undefined}
+              />
+              <Composer
+                key={open.id}
+                conversation={open}
+                agentName={agentName}
+                canWrite={canWrite}
+                replyTo={replyTo}
+                onCancelReply={() => setReplyTo(null)}
+                onSend={handleSend}
+                onTemplate={handleTemplate}
+                onAttach={handleAttach}
+                onError={setSendError}
+                uploadProgress={uploadProgress}
+                error={sendError}
+                onScheduled={() => {
+                  toast.success("Mensagem agendada");
+                  void loadScheduled(open.id);
+                }}
+              />
             </>
           ) : selectedId ? (
             <div className="flex flex-1 items-center justify-center"><LoadingSpinner label="Abrindo conversa..." size={32} /></div>
@@ -521,6 +620,32 @@ function ChatWorkspace() {
             </div>
           )}
         </div>
+
+        {showPanel && open && (
+          <CustomerPanel
+            key={open.id}
+            conversationId={open.id}
+            canWrite={canWrite}
+            refreshKey={followUpKey}
+            onNewFollowUp={() => setShowFollowUp(true)}
+            onChanged={() => void loadList()}
+            onClose={togglePanel}
+          />
+        )}
+
+        {showFollowUp && open && (
+          <FollowUpDialog
+            conversationId={open.id}
+            customerName={open.name}
+            onClose={() => setShowFollowUp(false)}
+            onSaved={() => {
+              setShowFollowUp(false);
+              setFollowUpKey((value) => value + 1);
+              toast.success("Retorno agendado", "Você recebe um aviso na hora marcada.");
+              void loadList();
+            }}
+          />
+        )}
 
         {showDetails && open && (
           <ContactDetailsDialog

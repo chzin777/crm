@@ -1,10 +1,11 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, FileText, Image as ImageIcon, Lock, Mic, Paperclip, Search, Send, Smile, StickyNote, Trash2, X, Zap } from "lucide-react";
+import { CalendarClock, Check, FileText, Image as ImageIcon, Lock, Mic, Paperclip, Search, Send, Smile, StickyNote, Trash2, X, Zap } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ComposerPopover } from "@/components/chat/ComposerPopover";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
+import { ScheduleMessageDialog } from "@/components/chat/ScheduleDialogs";
 import { TemplatePicker, type TemplateChoice } from "@/components/chat/TemplatePicker";
 import { fillVariables } from "@/lib/chat/text";
 import type { ChatMessageItem, ConversationDetail } from "@/lib/chat/types";
@@ -32,6 +33,8 @@ type Props = {
   onError: (message: string) => void;
   uploadProgress: number | null;
   error: string;
+  /** Com ele, aparece "Agendar envio" ao lado de Enviar; chamado depois de agendar. */
+  onScheduled?: () => void;
 };
 
 const MAX_FIELD_HEIGHT = 128;
@@ -41,8 +44,10 @@ const WAVE_BARS = Array.from({ length: 18 }, (_, index) => index);
 const toolButton = "grid h-[42px] w-9 shrink-0 cursor-pointer place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/10";
 const roundButton = "grid h-[42px] w-[42px] shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
-export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error }: Props) {
+export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error, onScheduled }: Props) {
   const [text, setText] = useState("");
+  /** Texto congelado ao abrir "Agendar envio"; null enquanto o diálogo está fechado. */
+  const [scheduling, setScheduling] = useState<string | null>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [showQuick, setShowQuick] = useState(false);
   const [quickSearch, setQuickSearch] = useState("");
@@ -253,6 +258,11 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
             placeholder={internal ? "Nota interna, o cliente não vê..." : "Digite uma mensagem..."}
             className={`max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-y-auto scroll-smooth rounded-2xl px-4 py-[11px] text-sm leading-5 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-1 focus:ring-[#002187]/30 dark:text-white dark:focus:ring-[#C4D600]/40 ${internal ? "bg-[#F7915E]/15!" : "bg-slate-100 dark:bg-slate-800/80!"}`}
           />
+          {text.trim() && !internal && onScheduled && (
+            <button type="button" title="Agendar envio" aria-label="Agendar envio" onClick={() => setScheduling(text.trim())} disabled={sending} className={`${roundButton} text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10`}>
+              <CalendarClock className="h-5 w-5" />
+            </button>
+          )}
           {text.trim() || internal ? (
             <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}>
               <Send className="h-5 w-5" />
@@ -266,6 +276,18 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
         <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label="Envio do arquivo" aria-valuenow={uploadProgress}>
           <div className="h-full bg-[#002187] transition-all dark:bg-[#C4D600]" style={{ width: `${uploadProgress}%` }} />
         </div>
+      )}
+      {scheduling !== null && onScheduled && (
+        <ScheduleMessageDialog
+          conversationId={conversation.id}
+          text={scheduling}
+          onClose={() => setScheduling(null)}
+          onSaved={() => {
+            setScheduling(null);
+            setText("");
+            onScheduled();
+          }}
+        />
       )}
       {(blocked || windowClosed) && (
         <div className="mt-2 flex items-center gap-2">

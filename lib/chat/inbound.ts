@@ -10,76 +10,9 @@ import { recordSurveyReply } from "@/lib/chat/nps";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
 
-type MetaMedia = { id?: string; mime_type?: string; caption?: string; filename?: string };
+import { isCustomerMessage, MEDIA_LABELS, readContent, type MetaInboundMessage, type MetaMedia } from "@/lib/chat/inbound-content";
 
-export type MetaInboundMessage = {
-  id?: string;
-  from?: string;
-  timestamp?: string;
-  type?: string;
-  context?: { id?: string };
-  text?: { body?: string };
-  image?: MetaMedia;
-  video?: MetaMedia;
-  audio?: MetaMedia;
-  document?: MetaMedia;
-  sticker?: MetaMedia;
-  location?: { latitude?: number; longitude?: number; name?: string; address?: string };
-  contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string }[] }[];
-  button?: { text?: string };
-  interactive?: { type?: string; button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
-};
-
-const MEDIA_LABELS: Record<AttachmentKind, string> = {
-  image: "[Imagem]",
-  video: "[Vídeo]",
-  audio: "[Áudio]",
-  document: "[Documento]",
-  sticker: "[Figurinha]",
-};
-
-function describeLocation(location: NonNullable<MetaInboundMessage["location"]>) {
-  const place = [location.name, location.address].filter(Boolean).join(" - ");
-  const coordinates = location.latitude !== undefined && location.longitude !== undefined ? `https://maps.google.com/?q=${location.latitude},${location.longitude}` : "";
-  return ["📍 Localização", place, coordinates].filter(Boolean).join("\n");
-}
-
-function describeContacts(contacts: NonNullable<MetaInboundMessage["contacts"]>) {
-  return contacts.map((item) => `👤 ${item.name?.formatted_name ?? "Contato"} ${item.phones?.[0]?.phone ?? ""}`.trim()).join("\n");
-}
-
-/**
- * Só o que o cliente realmente enviou. "system" (troca de número, chave de segurança),
- * "reaction", "ephemeral" e "request_welcome" são avisos de protocolo da Meta.
- * "unsupported" fica: é mensagem do cliente que a API não sabe ler (ex.: visualização única).
- */
-const CUSTOMER_TYPES = new Set(["text", "image", "video", "audio", "document", "sticker", "location", "contacts", "button", "interactive", "order", "unsupported"]);
-export const isCustomerMessage = (type: string | undefined) => CUSTOMER_TYPES.has(type ?? "");
-
-function readContent(message: MetaInboundMessage): { text: string; media: (MetaMedia & { kind: AttachmentKind }) | null } {
-  switch (message.type) {
-    case "text":
-      return { text: message.text?.body ?? "", media: null };
-    case "image":
-    case "video":
-    case "audio":
-    case "document":
-    case "sticker": {
-      const media = message[message.type];
-      return { text: media?.caption ?? "", media: media?.id ? { ...media, kind: message.type } : null };
-    }
-    case "location":
-      return { text: message.location ? describeLocation(message.location) : "📍 Localização", media: null };
-    case "contacts":
-      return { text: message.contacts ? describeContacts(message.contacts) : "👤 Contato", media: null };
-    case "button":
-      return { text: message.button?.text ?? "[Botão]", media: null };
-    case "interactive":
-      return { text: message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "[Resposta interativa]", media: null };
-    default:
-      return { text: `[Mensagem do tipo ${message.type ?? "desconhecido"}]`, media: null };
-  }
-}
+export { isCustomerMessage, type MetaInboundMessage };
 
 async function findOrCreateContact(waId: string, profileName: string | undefined) {
   // O cadastro tem telefones repetidos: a conversa aberta diz com qual contato o cliente já fala.

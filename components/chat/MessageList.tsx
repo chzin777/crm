@@ -7,7 +7,7 @@ import { MediaViewer } from "@/components/chat/MediaViewer";
 import { InteractiveListBubble } from "@/components/chat/InteractiveListBubble";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
 import { mergeMessages, replaceMessage } from "@/lib/chat/reconcile";
-import type { ChatDelivery, ChatMessageItem } from "@/lib/chat/types";
+import type { ChatDelivery, ChatMessageItem, ScheduledMessageItem } from "@/lib/chat/types";
 
 export type MessageListHandle = {
   add: (message: ChatMessageItem) => void;
@@ -136,9 +136,37 @@ type Props = {
   tick: number;
   onReply?: (message: ChatMessageItem) => void;
   listRef?: Ref<MessageListHandle>;
+  /** Agendadas pendentes (e falhas recentes), mostradas depois da última mensagem. */
+  scheduled?: ScheduledMessageItem[];
+  onCancelScheduled?: (id: string) => void;
 };
 
-export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
+/** Mensagem agendada: balão pontilhado no fim da conversa, até o relógio enviar. */
+function ScheduledBubble({ item, onCancel }: { item: ScheduledMessageItem; onCancel?: (id: string) => void }) {
+  const failed = item.status === "FAILED";
+  const when = new Date(item.scheduledFor).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="flex justify-end">
+      <div className={`max-w-[75%] rounded-2xl rounded-br-sm border border-dashed px-3 py-1.5 2xl:px-4 2xl:py-2.5 ${failed ? "border-red-300 bg-red-50/80 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200" : "border-[#002187]/40 bg-white/70 text-slate-700 dark:border-[#C4D600]/40 dark:bg-white/5 dark:text-slate-200"}`}>
+        <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold opacity-80">
+          <Clock className="h-3 w-3" />
+          {failed ? `Não enviada (agendada para ${when})` : `Agendada para ${when}`} · {item.userName}
+        </p>
+        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed opacity-90">{item.text}</p>
+        {failed && item.failureReason && <p className="mt-1 text-[11px] font-medium">{item.failureReason}</p>}
+        {onCancel && (
+          <div className="mt-1 flex justify-end">
+            <button type="button" onClick={() => onCancel(item.id)} className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-black/5 hover:text-red-600 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-red-300">
+              {failed ? "Dispensar" : "Cancelar envio"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function MessageList({ conversationId, tick, onReply, listRef, scheduled, onCancelScheduled }: Props) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [viewing, setViewing] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -369,6 +397,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
               </div>
             );
           })}
+          {scheduled?.map((item) => <ScheduledBubble key={item.id} item={item} onCancel={onCancelScheduled} />)}
         </div>
       )}
       {viewing && (

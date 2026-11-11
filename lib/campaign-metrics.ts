@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { phoneVariants } from "@/lib/chat/phone";
+import { addDays, brDay, isAttributedSale } from "@/lib/campaign-attribution";
 import { getMetaPricing, priceFor } from "@/lib/meta-pricing";
 
 export type ConvertedSale = {
@@ -42,13 +43,6 @@ type Recipient = { contactId: string; phone: string; sentDay: string; sentAt: Da
 type ContactRow = { id: string; sourceKey: string; phone: string | null; name: string };
 type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null; firstSeen: Date | null; nota: string };
 
-/** Dia (AAAA-MM-DD) no fuso de Brasília: as vendas do ERP só têm data, sem hora. */
-const brDay = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
-const addDays = (day: string, days: number) => {
-  const date = new Date(`${day}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-};
 
 /**
  * Funil e conversão de um disparo. `campaignId` é o id da campanha ou `bulk:<lote>`.
@@ -133,10 +127,9 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   let revenue = 0;
   for (const sale of sales) {
     const owner = owners.get(sale.sourceKey);
-    if (!owner || sale.dia < owner.sentDay || sale.dia > addDays(owner.sentDay, windowDays)) continue;
-    // O ERP só guarda a data do pedido; o espelho sincroniza a cada minuto, então um pedido do dia do envio
-    // que já estava no espelho antes da mensagem foi feito antes dela e não é conversão.
-    if (sale.dia === owner.sentDay && sale.firstSeen && new Date(sale.firstSeen) < owner.sentAt) continue;
+    if (!owner) continue;
+    const firstSeen = sale.firstSeen ? new Date(sale.firstSeen) : null;
+    if (!isAttributedSale({ saleDay: sale.dia, firstSeen, sentDay: owner.sentDay, sentAt: owner.sentAt, windowDays })) continue;
     const ownerKey = owner.contactId || `phone:${owner.phone}`;
     converted.add(ownerKey);
     revenue += sale.total;
