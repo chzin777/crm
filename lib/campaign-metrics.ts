@@ -14,6 +14,13 @@ export type ConvertedSale = {
   /** Linhas do pedido no ERP e descrição resumida dos produtos. */
   itens: number;
   resumo: string;
+  /** Número da NF no ERP; sem ela o pedido ainda aguarda faturamento. */
+  notaFiscal: string | null;
+  /** Envio da mensagem e primeira vez que o pedido apareceu no espelho do ERP (ISO). */
+  enviadoEm: string;
+  registradoEm: string | null;
+  /** Conversa do comprador no chat, se houver. */
+  conversationId: string | null;
 };
 
 export type CampaignMetrics = {
@@ -33,7 +40,7 @@ export type CampaignMetrics = {
 
 type Recipient = { contactId: string; phone: string; sentDay: string; sentAt: Date };
 type ContactRow = { id: string; sourceKey: string; phone: string | null; name: string };
-type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null; firstSeen: Date | null };
+type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null; firstSeen: Date | null; nota: string };
 
 /** Dia (AAAA-MM-DD) no fuso de Brasília: as vendas do ERP só têm data, sem hora. */
 const brDay = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
@@ -114,7 +121,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     SELECT "sourceKey", COALESCE("orderNumber", '') AS pedido, to_char("orderDate", 'YYYY-MM-DD') AS dia,
       COALESCE(max("store"), '') AS loja, COUNT(*)::int AS itens,
       left(string_agg(DISTINCT NULLIF(btrim("description"), ''), ' · '), 180) AS resumo,
-      COALESCE(SUM("amount"), 0)::float8 AS total, min("syncedAt") AS "firstSeen"
+      COALESCE(SUM("amount"), 0)::float8 AS total, min("syncedAt") AS "firstSeen", COALESCE(max("invoiceNumber"), '') AS nota
     FROM "VmsetSale"
     WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "type" = 'Venda'
       AND "orderDate" >= ${firstDay}::date AND "orderDate" <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date
@@ -134,9 +141,28 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     converted.add(ownerKey);
     revenue += sale.total;
     const info = contactInfo.get(owner.contactId);
-    convertedSales.push({ contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total, loja: sale.loja, itens: Number(sale.itens), resumo: sale.resumo ?? "" });
+    convertedSales.push({
+      contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total,
+      loja: sale.loja, itens: Number(sale.itens), resumo: sale.resumo ?? "", notaFiscal: sale.nota || null,
+      enviadoEm: owner.sentAt.toISOString(), registradoEm: sale.firstSeen ? new Date(sale.firstSeen).toISOString() : null, conversationId: null,
+    });
   }
   convertedSales.sort((a, b) => b.data.localeCompare(a.data) || b.valor - a.valor);
+
+  // Conversa do chat de cada comprador (pelo contato ou pelo telefone), para abrir direto do relatório.
+  if (convertedSales.length > 0) {
+    const buyerIds = [...new Set(convertedSales.map((sale) => sale.contactId).filter(Boolean))];
+    const buyerPhones = [...new Set(convertedSales.flatMap((sale) => phoneVariants(sale.telefone)))];
+    const conversations = await prisma.chatConversation.findMany({
+      where: { OR: [{ contactId: { in: buyerIds } }, { phone: { in: buyerPhones } }] },
+      orderBy: [{ lastMessageAt: { sort: "desc", nulls: "last" } }],
+      select: { id: true, contactId: true, phone: true },
+    });
+    for (const sale of convertedSales) {
+      const variants = new Set(phoneVariants(sale.telefone));
+      sale.conversationId = conversations.find((item) => (sale.contactId && item.contactId === sale.contactId) || variants.has(item.phone))?.id ?? null;
+    }
+  }
 
   const lastSale = await prisma.$queryRaw<{ last: string | null }[]>`
     SELECT to_char(max("orderDate"), 'YYYY-MM-DD') AS last FROM "VmsetSale"

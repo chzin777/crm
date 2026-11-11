@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CircleDollarSign, Percent, Receipt, ShoppingBag, Store, TrendingDown, TrendingUp, Wallet } from "lucide-react";
-import type { CampaignMetrics } from "@/lib/campaign-metrics";
+import Link from "next/link";
+import { CircleDollarSign, MessageCircle, Percent, Receipt, Send, ShoppingBag, Store, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { EntityDialog } from "@/components/EntityDialog";
+import { formatPhone } from "@/lib/chat/phone";
+import type { CampaignMetrics, ConvertedSale } from "@/lib/campaign-metrics";
 
 const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const pct = (value: number | null) => (value === null ? "—" : `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
@@ -10,9 +13,67 @@ const dateBr = (day: string) => (day ? day.split("-").reverse().join("/") : "—
 const rate = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : null);
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "?";
 
-function KpiCard({ icon: Icon, label, value, hint, accent = false, children }: { icon: React.ElementType; label: string; value: string; hint: string; accent?: boolean; children?: React.ReactNode }) {
+const timeBr = (iso: string | null) => {
+  if (!iso) return "—";
+  const parts = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date(iso));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("day")}/${part("month")} às ${part("hour")}:${part("minute")}`;
+};
+const elapsed = (from: string, to: string | null) => {
+  if (!to) return null;
+  const minutes = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const rest = minutes % 60;
+  return `+${days ? `${days}d ` : ""}${days || hours ? `${hours}h ` : ""}${rest}min`;
+};
+const SALES_PAGE = 20;
+
+/** Uma venda atribuída: cliente, pedido no ERP, linha do tempo envio → registro e atalho para a conversa. */
+function SaleItem({ sale }: { sale: ConvertedSale }) {
+  const gap = elapsed(sale.enviadoEm, sale.registradoEm);
   return (
-    <div className={`soft-pop-in rounded-xl border p-3 ${accent ? "border-[#002187]/15 bg-[#002187]/[0.04] dark:border-[#C4D600]/25 dark:bg-[#C4D600]/[0.06]" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/40"}`}>
+    <li className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-emerald-50 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300">{initials(sale.nome)}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{sale.nome}</p>
+          <p className="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-white">{brl(sale.valor)}</p>
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="tabular-nums">{formatPhone(sale.telefone)}</span>
+          <span aria-hidden>·</span>
+          <span>Pedido <strong className="font-semibold text-slate-700 dark:text-slate-200">#{sale.pedido || "—"}</strong></span>
+          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${sale.notaFiscal ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300"}`}>
+            {sale.notaFiscal ? `Faturado · NF ${sale.notaFiscal}` : "Aguardando faturamento"}
+          </span>
+          {sale.loja && <><span aria-hidden>·</span><span className="inline-flex items-center gap-0.5"><Store className="h-3 w-3" />Loja {sale.loja}</span></>}
+          <span aria-hidden>·</span>
+          <span>{sale.itens} {sale.itens === 1 ? "item" : "itens"}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" />Disparo {timeBr(sale.enviadoEm)}</span>
+          <span aria-hidden>→</span>
+          <span className="inline-flex items-center gap-1"><ShoppingBag className="h-3 w-3" />{sale.registradoEm ? `ERP ${timeBr(sale.registradoEm)}` : `Pedido ${dateBr(sale.data)}`}</span>
+          {gap && <span className="rounded-full bg-[#002187]/[0.06] px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-[#002187] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">{gap}</span>}
+        </div>
+        {sale.resumo && <p className="mt-1 line-clamp-1 text-[11px] text-slate-400" title={sale.resumo}>{sale.resumo}</p>}
+      </div>
+      {sale.conversationId ? (
+        <Link href={`/chat?c=${sale.conversationId}`} className="inline-flex shrink-0 cursor-pointer items-center gap-1 self-center rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-[#002187] transition-colors hover:bg-[#002187]/[0.06] dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10">
+          <MessageCircle className="h-3.5 w-3.5" />Abrir conversa
+        </Link>
+      ) : (
+        <span className="shrink-0 self-center text-[10px] text-slate-400">Sem conversa</span>
+      )}
+    </li>
+  );
+}
+
+function KpiCard({ icon: Icon, label, value, hint, accent = false, onClick, children }: { icon: React.ElementType; label: string; value: string; hint: string; accent?: boolean; onClick?: () => void; children?: React.ReactNode }) {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag type={onClick ? "button" : undefined} onClick={onClick} title={onClick ? "Ver conversões" : undefined} className={`soft-pop-in rounded-xl border p-3 text-left ${onClick ? "cursor-pointer transition-shadow hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#002187]" : ""} ${accent ? "border-[#002187]/15 bg-[#002187]/[0.04] dark:border-[#C4D600]/25 dark:bg-[#C4D600]/[0.06]" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/40"}`}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{label}</p>
         <span className={`grid h-7 w-7 place-items-center rounded-lg ${accent ? "bg-[#002187] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300"}`}><Icon className="h-3.5 w-3.5" /></span>
@@ -22,7 +83,7 @@ function KpiCard({ icon: Icon, label, value, hint, accent = false, children }: {
         {children}
       </div>
       <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">{hint}</p>
-    </div>
+    </Tag>
   );
 }
 
@@ -53,6 +114,8 @@ function passTone(value: number | null) {
 export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; id: string }) {
   const [metrics, setMetrics] = useState<CampaignMetrics | null>(null);
   const [error, setError] = useState("");
+  const [showSales, setShowSales] = useState(false);
+  const [visibleSales, setVisibleSales] = useState(SALES_PAGE);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,12 +144,25 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
   const max = Math.max(1, funnel.dispatched);
   const categoryLabel = metrics.category === "MARKETING" ? "marketing" : metrics.category === "UTILITY" ? "utilidade" : metrics.category ? metrics.category.toLowerCase() : null;
   const roiPositive = metrics.roi !== null && metrics.roi >= 0;
+  const openSales = () => { setVisibleSales(SALES_PAGE); setShowSales(true); };
+  const emptySales = (
+    <div className="flex flex-col items-center px-6 py-8 text-center">
+      <span className="relative mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-[#002187]/[0.06] text-[#002187] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
+        <ShoppingBag className="h-6 w-6" />
+        <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-white bg-[#C4D600] dark:border-[#051647]" />
+      </span>
+      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Nenhuma compra registrada ainda</p>
+      <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+        Nenhuma venda do ERP feita por quem recebeu este envio, depois da mensagem e até {metrics.windowDays} dia(s) após, foi identificada.
+      </p>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <KpiCard icon={CircleDollarSign} label="Receita gerada" value={brl(metrics.revenue)} hint={`${metrics.orders} pedido(s) no ERP`} accent />
-        <KpiCard icon={Percent} label="Taxa de conversão" value={pct(metrics.conversionRate)} hint={`${funnel.converted} de ${funnel.delivered} entregues compraram`} />
+        <KpiCard icon={CircleDollarSign} label="Receita gerada" value={brl(metrics.revenue)} hint={`${metrics.orders} pedido(s) no ERP · ver detalhes`} accent onClick={openSales} />
+        <KpiCard icon={Percent} label="Taxa de conversão" value={pct(metrics.conversionRate)} hint={`${funnel.converted} de ${funnel.delivered} entregues compraram`} onClick={openSales} />
         <KpiCard icon={Receipt} label="Ticket médio" value={metrics.averageTicket === null ? "—" : brl(metrics.averageTicket)} hint="por cliente que comprou" />
         <KpiCard icon={roiPositive ? TrendingUp : TrendingDown} label="ROI da campanha" value={metrics.roi === null ? "—" : `${metrics.roi.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x`} hint={metrics.roi === null ? "sem custo da Meta" : "retorno sobre o custo da Meta"}>
           {metrics.roi !== null && (
@@ -149,44 +225,47 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
       <section className="rounded-xl border border-slate-200 dark:border-slate-700" aria-label="Pedidos convertidos">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
           <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Pedidos convertidos (ERP)</h3>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{metrics.sales.length} pedido{metrics.sales.length === 1 ? "" : "s"}</span>
+          <span className="flex items-center gap-2">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{metrics.sales.length} pedido{metrics.sales.length === 1 ? "" : "s"}</span>
+            {metrics.sales.length > 0 && (
+              <button type="button" onClick={openSales} className="cursor-pointer text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">Ver conversões</button>
+            )}
+          </span>
         </div>
-        {metrics.sales.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-8 text-center">
-            <span className="relative mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-[#002187]/[0.06] text-[#002187] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
-              <ShoppingBag className="h-6 w-6" />
-              <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-white bg-[#C4D600] dark:border-[#051647]" />
-            </span>
-            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Nenhuma compra registrada ainda</p>
-            <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
-              Vendas do ERP feitas por quem recebeu este envio, até {metrics.windowDays} dia(s) depois, aparecem aqui automaticamente.
-            </p>
-          </div>
-        ) : (
+        {metrics.sales.length === 0 ? emptySales : (
           <ul className="custom-scrollbar max-h-72 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
-            {metrics.sales.map((sale) => (
-              <li key={`${sale.contactId}-${sale.pedido}-${sale.data}`} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-emerald-50 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300">{initials(sale.nome)}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{sale.nome}</p>
-                    <p className="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-white">{brl(sale.valor)}</p>
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>{dateBr(sale.data)}</span>
-                    <span aria-hidden>·</span>
-                    <span>Pedido <strong className="font-semibold text-slate-700 dark:text-slate-200">{sale.pedido || "—"}</strong></span>
-                    {sale.loja && <><span aria-hidden>·</span><span className="inline-flex items-center gap-0.5"><Store className="h-3 w-3" />Loja {sale.loja}</span></>}
-                    <span aria-hidden>·</span>
-                    <span>{sale.itens} {sale.itens === 1 ? "item" : "itens"}</span>
-                  </div>
-                  {sale.resumo && <p className="mt-1 line-clamp-1 text-[11px] text-slate-400" title={sale.resumo}>{sale.resumo}</p>}
-                </div>
-              </li>
-            ))}
+            {metrics.sales.slice(0, 5).map((sale) => <SaleItem key={`${sale.contactId}-${sale.pedido}-${sale.data}`} sale={sale} />)}
           </ul>
         )}
+        {metrics.sales.length > 5 && (
+          <button type="button" onClick={openSales} className="w-full cursor-pointer border-t border-slate-100 px-4 py-2 text-xs font-semibold text-[#002187] hover:bg-slate-50 dark:border-slate-800 dark:text-[#C4D600] dark:hover:bg-slate-800/40">
+            Ver todas as {metrics.sales.length} conversões
+          </button>
+        )}
       </section>
+
+      {showSales && (
+        <EntityDialog
+          titleId="campaign-conversions-title"
+          title="Conversões da campanha"
+          description={`${metrics.sales.length} pedido(s) · ${brl(metrics.revenue)} · venda depois do disparo e até ${metrics.windowDays} dia(s) após o envio`}
+          onClose={() => setShowSales(false)}
+          size="lg"
+        >
+          {metrics.sales.length === 0 ? emptySales : (
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
+              <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+                {metrics.sales.slice(0, visibleSales).map((sale) => <SaleItem key={`${sale.contactId}-${sale.pedido}-${sale.data}`} sale={sale} />)}
+              </ul>
+              {visibleSales < metrics.sales.length && (
+                <button type="button" onClick={() => setVisibleSales((count) => count + SALES_PAGE)} className="mt-3 w-full cursor-pointer rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800/40">
+                  Carregar mais ({metrics.sales.length - visibleSales} restantes)
+                </button>
+              )}
+            </div>
+          )}
+        </EntityDialog>
+      )}
     </div>
   );
 }
