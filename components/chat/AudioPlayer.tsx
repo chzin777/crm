@@ -1,8 +1,9 @@
 "use client";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Loader2, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from "lucide-react";
 
 const JUMP = 15;
+const SPEEDS = [1, 1.5, 2];
 
 const clock = (value: number) => {
   if (!Number.isFinite(value)) return "0:00";
@@ -21,7 +22,8 @@ function JumpIcon({ forward }: { forward?: boolean }) {
   );
 }
 
-export function AudioPlayer({ src }: { src: string }) {
+/** `meta` (hora e status de entrega) fecha a linha dentro da própria cápsula. */
+export function AudioPlayer({ src, meta }: { src: string; meta?: ReactNode }) {
   const audio = useRef<HTMLAudioElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -31,6 +33,7 @@ export function AudioPlayer({ src }: { src: string }) {
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const progress = duration > 0 ? Math.min(current / duration, 1) : 0;
 
   const toggle = () => {
@@ -42,6 +45,7 @@ export function AudioPlayer({ src }: { src: string }) {
     }
     setFailed(false);
     if (element.readyState < 3) setLoading(true);
+    element.playbackRate = speed;
     element.play().catch(() => setLoading(false));
   };
 
@@ -63,13 +67,19 @@ export function AudioPlayer({ src }: { src: string }) {
     setCurrent(element.currentTime);
   };
 
-  const updateDuration = (element: HTMLAudioElement) => {
+  const cycleSpeed = () => {
+    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+    setSpeed(next);
+    if (audio.current) audio.current.playbackRate = next;
+  };
+
+  const updateDuration =(element: HTMLAudioElement) => {
     // Áudio gravado em webm/ogg pode vir sem duração no cabeçalho até ser lido.
     if (Number.isFinite(element.duration)) setDuration(element.duration);
   };
 
   return (
-    <div className="flex w-fit max-w-[360px] items-center gap-2.5 rounded-full border border-slate-200/70 bg-white/90 px-4 py-2 text-slate-900 shadow-sm dark:border-slate-700/60 dark:bg-slate-900 dark:text-white">
+    <div className="flex w-fit max-w-[min(420px,100%)] items-center gap-2 rounded-full border border-slate-200/80 bg-white px-3.5 py-1.5 text-slate-900 shadow-sm dark:border-slate-700/60 dark:bg-slate-800 dark:text-white">
       <audio
         ref={audio}
         src={src}
@@ -147,9 +157,18 @@ export function AudioPlayer({ src }: { src: string }) {
       <span className="shrink-0 select-none pl-1 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
         {failed ? "--:--" : `${clock(current)} / ${clock(duration)}`}
       </span>
+      <button
+        type="button"
+        onClick={cycleSpeed}
+        title="Velocidade"
+        className="shrink-0 cursor-pointer select-none rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+      >
+        {String(speed).replace(".", ",")}x
+      </button>
       <button type="button" onClick={() => setMuted((value) => !value)} aria-label={muted ? "Ativar som" : "Silenciar"} title={muted ? "Ativar som" : "Silenciar"} className={SIDE_BUTTON}>
         {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
       </button>
+      {meta && <span className="ml-1 flex shrink-0 select-none items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">{meta}</span>}
     </div>
   );
 }

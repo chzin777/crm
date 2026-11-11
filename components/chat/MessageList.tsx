@@ -18,11 +18,13 @@ export type MessageListHandle = {
   releaseRefresh: () => void;
 };
 
-function Delivery({ delivery, reason, onLime }: { delivery: ChatDelivery | null; reason: string | null; onLime: boolean }) {
+function Delivery({ delivery, reason, onLime, onLight }: { delivery: ChatDelivery | null; reason: string | null; onLime: boolean; onLight?: boolean }) {
   if (delivery === "sending") return <Clock className="h-3.5 w-3.5" aria-label="Enviando" />;
   if (delivery === "sent") return <Check className="h-3.5 w-3.5" aria-label="Enviada" />;
   if (delivery === "delivered") return <CheckCheck className="h-3.5 w-3.5" aria-label="Entregue" />;
   // No tema escuro o balão do atendente é lima: o check da mesma cor sumiria sobre ele.
+  // Na cápsula de áudio o fundo é claro: o lima sumiria sobre o branco.
+  if (delivery === "read" && onLight) return <CheckCheck className="h-3.5 w-3.5 text-[#002187] dark:text-[#C4D600]" aria-label="Lida" />;
   if (delivery === "read") return <CheckCheck className={`h-3.5 w-3.5 text-[#C4D600] ${onLime ? "dark:text-[#002187]" : ""}`} aria-label="Lida" />;
   if (delivery === "failed") return <span title={reason ?? "Falha no envio"}><AlertCircle className="h-3.5 w-3.5 text-red-400" aria-label="Falhou" /></span>;
   return null;
@@ -286,6 +288,8 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
             const sticker = message.attachment?.kind === "sticker" && !message.text;
             const missing = message.author === "customer" && !message.attachment ? message.pendingMedia ?? LABEL_KINDS[message.text] : undefined;
             const voice = message.attachment?.kind === "audio";
+            // Áudio sem legenda, citação ou nota interna vira a própria cápsula, sem o balão em volta.
+            const pill = voice && !message.text && !message.replyTo && !message.internal;
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {newDay && (
@@ -307,7 +311,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       </button>
                     )}
                     <div
-                      className={sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl shadow-sm ${voice ? "p-2 pr-3" : "px-3 py-1.5 2xl:px-4 2xl:py-2.5"} ${
+                      className={pill ? `flex max-w-full flex-col ${fromUs ? "items-end" : "items-start"}` : sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl px-3 py-1.5 shadow-sm 2xl:px-4 2xl:py-2.5 ${
                         message.internal
                           ? "rounded-br-sm border border-dashed border-[#F7915E] bg-[#F7915E]/15 text-slate-900 dark:text-white"
                           : message.author === "bot"
@@ -318,7 +322,7 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                       }`}
                     >
                       {(message.internal || message.author === "bot" || (fromUs && message.authorName)) && (
-                        <p className="mb-1 text-[10px] font-semibold opacity-80">
+                        <p className={`mb-1 text-[10px] font-semibold opacity-80 ${pill ? "px-3 text-slate-500 dark:text-slate-400" : ""}`}>
                           {message.internal ? `Nota interna · ${message.authorName ?? ""}` : message.authorName ?? "Atendimento automático"}
                         </p>
                       )}
@@ -332,16 +336,28 @@ export function MessageList({ conversationId, tick, onReply, listRef }: Props) {
                           <span className="line-clamp-2 opacity-80">{message.replyTo.text}</span>
                         </button>
                       )}
-                      {message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />}
+                      {pill ? (
+                        <AudioPlayer
+                          src={mediaUrl(message)}
+                          meta={
+                            <>
+                              <span>{clockTime(message.createdAt)}</span>
+                              {fromUs && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={false} onLight />}
+                            </>
+                          }
+                        />
+                      ) : (
+                        message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />
+                      )}
                       {missing && <MissingMedia kind={missing} onRetry={message.pendingMedia && onReply ? () => retryMedia(message.id) : undefined} />}
                       {message.interactive ? (
                         <InteractiveListBubble list={message.interactive} messageId={message.id} />
                       ) : message.text && !(missing && LABEL_KINDS[message.text]) && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
-                      <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs || voice ? "justify-end" : "justify-start"}`}>
+                      {!pill && <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs || voice ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
-                      </div>
-                      {message.delivery === "failed" && <p className="mt-1 text-[10px] font-medium text-red-300">{message.failureReason ?? "Falha no envio"}</p>}
+                      </div>}
+                      {message.delivery === "failed" && <p className={`mt-1 text-[10px] font-medium ${pill ? "px-3 text-red-500" : "text-red-300"}`}>{message.failureReason ?? "Falha no envio"}</p>}
                     </div>
                     {!fromUs && onReply && (
                       <button type="button" title="Responder" aria-label="Responder" onClick={() => onReply(message)} className="cursor-pointer rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-slate-600 group-hover:opacity-100 dark:hover:text-slate-200">
