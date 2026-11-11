@@ -1,21 +1,10 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, Mic, Pause, Play, Volume2, VolumeX } from "lucide-react";
 
-const BARS = 36;
 const SPEEDS = [1, 1.5, 2];
 const HEARD_KEY = "chat:audios-ouvidos";
 const HEARD_LIMIT = 500;
-
-/** Onda decorativa derivada da URL: decodificar o áudio travaria a rolagem em conversas longas. */
-function bars(url: string) {
-  let hash = 0;
-  for (const char of url) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return Array.from({ length: BARS }, (_, index) => {
-    hash = (hash * 1103515245 + 12345 + index) | 0;
-    return 25 + (Math.abs(hash) % 75);
-  });
-}
 
 const clock = (value: number) => {
   if (!Number.isFinite(value)) return "0:00";
@@ -50,20 +39,41 @@ type Props = {
   outgoing?: boolean;
 };
 
+const THEMES = {
+  outgoing: {
+    card: "bg-black/15 dark:bg-[#051647]/10",
+    button: "bg-white text-[#051647] dark:bg-[#051647] dark:text-[#C4D600]",
+    track: "bg-white/25 dark:bg-[#051647]/20",
+    fill: "bg-white dark:bg-[#051647]",
+    meta: "text-white/75 dark:text-[#051647]/75",
+    pill: "bg-white/15 text-current hover:bg-white/25 dark:bg-[#051647]/15 dark:hover:bg-[#051647]/25",
+    dot: "bg-[#C4D600] dark:bg-[#051647]",
+  },
+  incoming: {
+    card: "border border-slate-200/70 bg-slate-100/80 dark:border-slate-700/60 dark:bg-slate-900/40",
+    button: "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]",
+    track: "bg-slate-300/70 dark:bg-slate-600/60",
+    fill: "bg-[#002187] dark:bg-[#C4D600]",
+    meta: "text-slate-500 dark:text-slate-400",
+    pill: "bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600",
+    dot: "bg-[#002187] dark:bg-[#C4D600]",
+  },
+};
+
 export function AudioPlayer({ src, id, outgoing = false }: Props) {
   const audio = useRef<HTMLAudioElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(false);
   const [unheard, setUnheard] = useState(false);
-  const waveform = useMemo(() => bars(src), [src]);
-  const progress = duration > 0 ? current / duration : 0;
-  const started = playing || current > 0;
+  const progress = duration > 0 ? Math.min(current / duration, 1) : 0;
+  const theme = outgoing ? THEMES.outgoing : THEMES.incoming;
 
   useEffect(() => {
     if (outgoing || !id) return;
@@ -108,14 +118,8 @@ export function AudioPlayer({ src, id, outgoing = false }: Props) {
     if (Number.isFinite(element.duration)) setDuration(element.duration);
   };
 
-  const button = outgoing
-    ? "bg-white/20 text-current hover:bg-white/30 dark:bg-[#051647]/15 dark:hover:bg-[#051647]/25"
-    : "bg-[#051647] text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#C4D600]/90";
-  const played = outgoing ? "bg-current" : "bg-[#002187] dark:bg-[#C4D600]";
-  const pill = outgoing ? "bg-white/15 hover:bg-white/25 dark:bg-[#051647]/10 dark:hover:bg-[#051647]/20" : "bg-slate-200/70 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20";
-
   return (
-    <div className="mb-1 flex min-w-[220px] max-w-[320px] items-center gap-2.5 px-1.5 py-1">
+    <div className={`mb-1 w-full min-w-[260px] max-w-[340px] rounded-xl p-2.5 ${theme.card}`}>
       <audio
         ref={audio}
         src={src}
@@ -146,53 +150,80 @@ export function AudioPlayer({ src, id, outgoing = false }: Props) {
         onDurationChange={(event) => updateDuration(event.currentTarget)}
         onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
       />
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={playing ? "Pausar" : "Tocar"}
-        title={failed ? "Não foi possível carregar o áudio. Clique para tentar de novo." : playing ? "Pausar" : "Tocar"}
-        className={`relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-transform active:scale-95 ${button}`}
-      >
-        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="ml-0.5 h-4 w-4 fill-current" />}
-        {unheard && <span aria-label="Áudio não ouvido" className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[#002187] ring-2 ring-white dark:bg-[#C4D600] dark:ring-slate-800" />}
-      </button>
-      <div
-        ref={track}
-        role="slider"
-        tabIndex={0}
-        aria-label="Posição do áudio"
-        aria-valuemin={0}
-        aria-valuemax={Math.round(duration)}
-        aria-valuenow={Math.round(current)}
-        className="flex h-7 min-w-0 flex-1 cursor-pointer touch-none items-center gap-px"
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          seekTo(event.clientX);
-        }}
-        onPointerMove={(event) => {
-          if (event.buttons === 1) seekTo(event.clientX);
-        }}
-        onKeyDown={(event) => {
-          if (!audio.current) return;
-          if (event.key === "ArrowRight") audio.current.currentTime += 5;
-          if (event.key === "ArrowLeft") audio.current.currentTime -= 5;
-        }}
-      >
-        {waveform.map((height, index) => (
-          <span
-            key={index}
-            className={`flex-1 rounded-full transition-[opacity,background-color] duration-150 ${index / BARS < progress ? `${played} opacity-100` : "bg-current opacity-25"}`}
-            style={{ height: `${height}%` }}
-          />
-        ))}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? "Pausar" : "Tocar"}
+          title={failed ? "Não foi possível carregar o áudio. Clique para tentar de novo." : playing ? "Pausar" : "Tocar"}
+          className={`flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full shadow-sm transition-all hover:scale-105 active:scale-95 ${theme.button}`}
+        >
+          {loading ? <Loader2 className="size-5 animate-spin" /> : playing ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
+        </button>
+        <div
+          ref={track}
+          role="slider"
+          tabIndex={0}
+          aria-label="Posição do áudio"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration)}
+          aria-valuenow={Math.round(current)}
+          className="group relative flex h-5 flex-1 cursor-pointer touch-none items-center"
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setDragging(true);
+            seekTo(event.clientX);
+          }}
+          onPointerMove={(event) => {
+            if (dragging) seekTo(event.clientX);
+          }}
+          onPointerUp={() => setDragging(false)}
+          onPointerCancel={() => setDragging(false)}
+          onKeyDown={(event) => {
+            if (!audio.current) return;
+            if (event.key === "ArrowRight") audio.current.currentTime += 5;
+            if (event.key === "ArrowLeft") audio.current.currentTime -= 5;
+          }}
+        >
+          <div className={`relative h-2 w-full rounded-full ${theme.track}`}>
+            <div
+              className={`relative h-full rounded-full ${theme.fill} ${dragging ? "" : "transition-[width] duration-200 ease-linear"}`}
+              style={{ width: `${progress * 100}%` }}
+            >
+              <span
+                className={`absolute right-0 top-1/2 size-3.5 -translate-y-1/2 translate-x-1/2 rounded-full shadow-sm transition-opacity ${theme.fill} ${dragging ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              />
+            </div>
+          </div>
+        </div>
       </div>
-      <span className="shrink-0 font-mono text-[11px] tabular-nums opacity-70">{failed ? "--:--" : clock(started ? current : duration)}</span>
-      <button type="button" onClick={cycleSpeed} title="Velocidade" className={`shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold opacity-80 transition-colors ${pill}`}>
-        {String(speed).replace(".", ",")}x
-      </button>
-      <button type="button" onClick={() => setMuted((value) => !value)} aria-label={muted ? "Ativar som" : "Silenciar"} title={muted ? "Ativar som" : "Silenciar"} className="shrink-0 cursor-pointer opacity-60 hover:opacity-100">
-        {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-      </button>
+      <div className={`mt-2 flex items-center justify-between pl-13 pr-1 text-xs ${theme.meta}`}>
+        <span className="font-mono tabular-nums">{failed ? "Áudio indisponível" : `${clock(current)} / ${clock(duration)}`}</span>
+        <span className="flex items-center gap-2">
+          {unheard ? (
+            <span aria-label="Áudio não ouvido" title="Áudio não ouvido" className={`size-1.5 rounded-full ${theme.dot}`} />
+          ) : (
+            <Mic className="size-3.5 opacity-60" aria-hidden />
+          )}
+          <button
+            type="button"
+            onClick={() => setMuted((value) => !value)}
+            aria-label={muted ? "Ativar som" : "Silenciar"}
+            title={muted ? "Ativar som" : "Silenciar"}
+            className="cursor-pointer opacity-70 transition-opacity hover:opacity-100"
+          >
+            {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={cycleSpeed}
+            title="Velocidade"
+            className={`cursor-pointer select-none rounded-md px-2 py-0.5 text-[11px] font-semibold transition-colors ${theme.pill}`}
+          >
+            {String(speed).replace(".", ",")}x
+          </button>
+        </span>
+      </div>
     </div>
   );
 }
