@@ -10,7 +10,8 @@ const TABS: { id: ChatTab; label: string }[] = [
   { id: "unread", label: "Não lidas" },
   { id: "mine", label: "Minhas" },
   { id: "campaigns", label: "Campanhas" },
-  { id: "queue", label: "Fila" },
+  // Conversas na fila esperando atendente; a fila/setor fica no filtro de filas.
+  { id: "queue", label: "Aguardando" },
   { id: "closed", label: "Encerradas" },
 ];
 
@@ -134,7 +135,7 @@ function FilterSelect({ label, value, placeholder, options, onChange }: FilterSe
       align="left"
       compact
       widthClassName="w-52 min-w-[140px]"
-      triggerClassName={`flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-xl border bg-white px-3 text-xs font-medium text-slate-700 outline-none transition-all hover:bg-slate-50 focus:border-[#002187] dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700/50 dark:focus:border-[#C4D600] ${value ? "border-[#C4D600]" : "border-slate-200/80 dark:border-slate-700/80"}`}
+      triggerClassName={`flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg border bg-white px-3 text-xs font-medium text-slate-700 outline-none transition-all hover:bg-slate-50 focus:border-[#002187] dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700/50 dark:focus:border-[#C4D600] ${value ? "border-[#C4D600]" : "border-slate-200/80 dark:border-slate-700/80"}`}
       trigger={(
         <>
           <span className="min-w-0 flex-1 truncate text-left">{text}</span>
@@ -159,7 +160,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
 
   return (
     <>
-      <div className="shrink-0 space-y-3 border-b border-slate-200 p-4 dark:border-slate-800">
+      <div className="shrink-0 space-y-2 border-b border-slate-200 px-4 pb-2 pt-3 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Conversas</h2>
           {counts.unread > 0 && (
@@ -175,25 +176,30 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             onChange={(event) => onSearch(event.target.value)}
             placeholder="Buscar conversa..."
             aria-label="Buscar conversa"
-            className="h-9 w-full rounded-xl border border-transparent bg-slate-100/80 px-3 pl-9 text-xs outline-none transition-all focus:border-[#002187] dark:bg-slate-800/80! dark:text-white dark:focus:border-[#C4D600]"
+            className="h-9 w-full rounded-lg border border-slate-200/60 bg-slate-100/60 px-3 pl-9 text-sm outline-none transition-all focus:border-[#002187] focus:ring-1 focus:ring-[#002187]/30 dark:border-slate-700/60 dark:bg-slate-800/80! dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/30"
           />
         </div>
-        <div className="flex flex-wrap gap-1">
-          {TABS.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={tab === id}
-              onClick={() => onTab(id)}
-              className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
-                tab === id
-                  ? "bg-[#C4D600] text-[#051647]"
-                  : "bg-transparent text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5"
-              }`}
-            >
-              {label} <span className="opacity-70">{counts[id]}</span>
-            </button>
-          ))}
+        <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 py-0.5 text-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {TABS.map(({ id, label }) => {
+            const active = tab === id;
+            const urgent = id === "unread" && counts.unread > 0;
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onTab(id)}
+                className={`flex shrink-0 cursor-pointer items-center whitespace-nowrap rounded-md px-2.5 py-1 transition-colors ${
+                  active
+                    ? "bg-slate-100 font-medium text-slate-900 shadow-xs dark:bg-white/10 dark:text-white"
+                    : "text-slate-500 hover:bg-slate-100/60 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+                }`}
+              >
+                {label}
+                <span className={`ml-1.5 text-[10px] tabular-nums ${urgent ? "font-semibold text-[#002187] dark:text-[#C4D600]" : "opacity-70"}`}>{counts[id]}</span>
+              </button>
+            );
+          })}
         </div>
         <div className="flex items-center gap-2">
           <FilterSelect
@@ -216,7 +222,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
               title="Limpar filtros"
               aria-label="Limpar filtros"
               onClick={() => { onQueue(""); onPriority(""); }}
-              className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
             >
               <X className="h-4 w-4" />
             </button>
