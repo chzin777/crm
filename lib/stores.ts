@@ -14,5 +14,16 @@ export function storeErpCode(name: string | null | undefined): string | null {
   return match ? match[1] || "0" : null;
 }
 
+/**
+ * Nome da unidade de uma venda do ERP a partir do código da loja ("13", "013"): o nome cadastrado cujo "LJ <n>" bate;
+ * sem cadastro, "LJ <código>"; sem código, "Loja não informada".
+ */
+export function storeNameForErpCode(stores: { number: number; name?: string | null }[], code: string | null | undefined) {
+  const normalized = (code ?? "").trim().replace(/^0+(?=\d)/, "");
+  if (!normalized) return "Loja não informada";
+  const store = stores.find((item) => storeErpCode(item.name) === normalized);
+  return store ? storeDisplayName(store) : `LJ ${normalized}`;
+}
+
 /** Ordem natural pelo nome ("LJ 2" antes de "LJ 10"). */
 export const compareStoreNames = (a: string, b: string) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });

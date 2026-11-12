@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, CircleDollarSign, Percent, Receipt, Send, ShoppingBag, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { ArrowUpRight, CircleDollarSign, Percent, Receipt, Send, ShoppingBag, Store, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { formatPhone } from "@/lib/chat/phone";
 import type { CampaignMetrics, ConvertedSale } from "@/lib/campaign-metrics";
@@ -33,7 +33,7 @@ function SaleItem({ sale }: { sale: ConvertedSale }) {
   const gap = elapsed(sale.enviadoEm, sale.registradoEm);
   const details = [
     sale.notaFiscal ? `Faturado · NF ${sale.notaFiscal}` : "Aguardando faturamento",
-    sale.loja ? `Loja ${sale.loja}` : "",
+    sale.lojaNome,
     `${sale.itens} ${sale.itens === 1 ? "item" : "itens"}`,
     sale.resumo ?? "",
   ].filter(Boolean).join(" · ");
@@ -51,6 +51,10 @@ function SaleItem({ sale }: { sale: ConvertedSale }) {
       </div>
       <div className="flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
+          <span className="inline-flex min-w-0 items-center gap-1 font-medium text-slate-600 dark:text-slate-300" title={sale.lojaNome}>
+            <Store className="size-3 shrink-0" /><span className="max-w-[180px] truncate">{sale.lojaNome}</span>
+          </span>
+          <span aria-hidden className="text-slate-300 dark:text-slate-600">·</span>
           <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" />Disparo: {timeBr(sale.enviadoEm)}</span>
           <span aria-hidden className="text-slate-300 dark:text-slate-600">→</span>
           <span className="inline-flex items-center gap-1"><ShoppingBag className="h-3 w-3" />Venda ERP: {sale.registradoEm ? timeBr(sale.registradoEm) : dateBr(sale.data)}</span>

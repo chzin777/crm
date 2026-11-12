@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { phoneVariants } from "@/lib/chat/phone";
 import { addDays, brDay, buildOrders, campaignFinancials, isAttributedSale, lastTouch, type SaleItemRow, type Touch } from "@/lib/campaign-attribution";
 import { getMetaPricing, priceFor } from "@/lib/meta-pricing";
+import { storeNameForErpCode } from "@/lib/stores";
 
 export type ConvertedSale = {
   contactId: string;
@@ -11,7 +12,9 @@ export type ConvertedSale = {
   pedido: string;
   data: string;
   valor: number;
+  /** Código da loja no ERP ("13") e nome cadastrado da unidade ("LJ 13 ..."). */
   loja: string;
+  lojaNome: string;
   /** Linhas do pedido no ERP e descrição resumida dos produtos. */
   itens: number;
   resumo: string;
@@ -62,12 +65,13 @@ type SaleItemSqlRow = Omit<SaleItemRow, "amount" | "syncedAt"> & { amount: numbe
  * telefone, feito depois da mensagem e até `windowDays` dias após o dia do envio. Só contam contatos com entrega confirmada.
  */
 export async function campaignMetrics(campaignId: string, category: string | null): Promise<CampaignMetrics> {
-  const [pricing, messages] = await Promise.all([
+  const [pricing, messages, stores] = await Promise.all([
     getMetaPricing(),
     prisma.campaignMessage.findMany({
       where: { campaignId },
       select: { contactId: true, phone: true, status: true, sentAt: true, deliveredAt: true, readAt: true, repliedAt: true },
     }),
+    prisma.store.findMany({ select: { number: true, name: true } }),
   ]);
   const unitPrice = priceFor(pricing, category);
   const windowDays = pricing.conversionWindowDays;
@@ -176,7 +180,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     const info = contactInfo.get(owner.contactId);
     convertedSales.push({
       contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total,
-      loja: sale.loja, itens: sale.itens, resumo: sale.resumo, notaFiscal: sale.notaFiscal,
+      loja: sale.loja, lojaNome: storeNameForErpCode(stores, sale.loja), itens: sale.itens, resumo: sale.resumo, notaFiscal: sale.notaFiscal,
       enviadoEm: owner.sentAt.toISOString(), registradoEm: sale.firstSeen ? sale.firstSeen.toISOString() : null, conversationId: null,
       buyerKey: ownerKey, orderKey: `${sale.sourceKey}|${sale.loja}|${sale.pedido}|${sale.dia}`,
     });

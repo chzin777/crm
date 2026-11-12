@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareStoreNames, storeDisplayName, storeErpCode } from "@/lib/stores";
+import { compareStoreNames, storeDisplayName, storeErpCode, storeNameForErpCode } from "@/lib/stores";
 
 describe("lojas", () => {
   it("mostra o nome cadastrado, sem o sequencial interno", () => {
@@ -12,6 +12,15 @@ describe("lojas", () => {
     expect(storeErpCode("OPTICA BRASIL LTDA LJ 05 (BAIXADA)")).toBe("5");
     expect(storeErpCode("LJ 39-ZVC FLAMBOYANT")).toBe("39");
     expect(storeErpCode("ADM UNILENTES IND COM DE LENTES LTDA")).toBeNull();
+  });
+
+  it("nome da loja de um pedido do ERP pelo código, com fallback", () => {
+    const stores = [{ number: 6, name: "LJ 13 UNILENTES" }, { number: 2, name: "OPTICA BRASIL LTDA LJ 05 (BAIXADA)" }];
+    expect(storeNameForErpCode(stores, "13")).toBe("LJ 13 UNILENTES");
+    expect(storeNameForErpCode(stores, "005")).toBe("OPTICA BRASIL LTDA LJ 05 (BAIXADA)");
+    expect(storeNameForErpCode(stores, "6")).toBe("LJ 6"); // o sequencial interno não é código de loja
+    expect(storeNameForErpCode(stores, "")).toBe("Loja não informada");
+    expect(storeNameForErpCode(stores, null)).toBe("Loja não informada");
   });
 
   it("ordena pelo número dentro do nome", () => {
