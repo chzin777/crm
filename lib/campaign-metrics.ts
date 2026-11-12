@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { phoneVariants } from "@/lib/chat/phone";
-import { addDays, brDay, isAttributedSale } from "@/lib/campaign-attribution";
+import { addDays, brDay, buildOrders, campaignFinancials, isAttributedSale, type SaleItemRow } from "@/lib/campaign-attribution";
 import { getMetaPricing, priceFor } from "@/lib/meta-pricing";
 
 export type ConvertedSale = {
@@ -30,10 +30,16 @@ export type CampaignMetrics = {
   windowDays: number;
   cost: { estimated: number; real: number };
   funnel: { attempted: number; dispatched: number; delivered: number; read: number; replied: number; converted: number };
+  /** Clientes que compraram ÷ destinatários únicos com entrega confirmada (%). */
   conversionRate: number | null;
+  /** Destinatários únicos com entrega confirmada (base da conversão). */
+  recipients: number;
   revenue: number;
   orders: number;
+  /** Vendido ÷ clientes que compraram. */
   averageTicket: number | null;
+  /** Vendido ÷ pedidos. */
+  ticketPerOrder: number | null;
   /** Retorno financeiro em %: ((vendido − gasto) / gasto) × 100. Null quando não houve gasto. */
   roi: number | null;
   /** ROAS: vendido / gasto (quantas vezes o gasto voltou em vendas). Null quando não houve gasto. */
@@ -44,7 +50,7 @@ export type CampaignMetrics = {
 
 type Recipient = { contactId: string; phone: string; sentDay: string; sentAt: Date };
 type ContactRow = { id: string; sourceKey: string; phone: string | null; name: string };
-type SaleRow = { sourceKey: string; pedido: string; dia: string; loja: string; total: number; itens: number; resumo: string | null; firstSeen: Date | null; nota: string };
+type SaleItemSqlRow = Omit<SaleItemRow, "amount" | "syncedAt"> & { amount: number | string | null; syncedAt: Date | string | null };
 
 
 /**
@@ -114,16 +120,17 @@ export async function campaignMetrics(campaignId: string, category: string | nul
 
   const firstDay = recipientList.reduce<string | null>((min, recipient) => (!min || recipient.sentDay < min ? recipient.sentDay : min), null);
   // Vendas do espelho do VMSet (uma linha por item, sem duplicidade), atualizado a cada minuto.
-  const sales = owners.size === 0 || !firstDay ? [] : await prisma.$queryRaw<SaleRow[]>`
-    SELECT "sourceKey", COALESCE("orderNumber", '') AS pedido, to_char("orderDate", 'YYYY-MM-DD') AS dia,
-      COALESCE(max("store"), '') AS loja, COUNT(*)::int AS itens,
-      left(string_agg(DISTINCT NULLIF(btrim("description"), ''), ' · '), 180) AS resumo,
-      COALESCE(SUM("amount"), 0)::float8 AS total, min("syncedAt") AS "firstSeen", COALESCE(max("invoiceNumber"), '') AS nota
+  // Itens de venda e de devolução (a devolução repete o pedido e o produto): pedidos e devoluções são resolvidos em buildOrders.
+  // Devoluções podem vir depois da janela, por isso não têm limite de data final.
+  const rows = owners.size === 0 || !firstDay ? [] : await prisma.$queryRaw<SaleItemSqlRow[]>`
+    SELECT "sourceKey", "type", COALESCE("orderNumber", '') AS "orderNumber", to_char("orderDate", 'YYYY-MM-DD') AS day,
+      COALESCE("store", '') AS store, COALESCE("productCode", '') AS "productCode", "amount"::float8 AS amount,
+      COALESCE("invoiceNumber", '') AS "invoiceNumber", COALESCE("description", '') AS description, "syncedAt"
     FROM "VmsetSale"
-    WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "type" = 'Venda'
-      AND "orderDate" >= ${firstDay}::date AND "orderDate" <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date
-    GROUP BY "sourceKey", "store", "orderNumber", "orderDate"
+    WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "orderDate" >= ${firstDay}::date
+      AND ("type" = 'Devolucao Cliente' OR ("type" = 'Venda' AND "orderDate" <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date))
   `;
+  const sales = buildOrders(rows.map((row) => ({ ...row, amount: row.amount === null ? null : Number(row.amount), syncedAt: row.syncedAt ? new Date(row.syncedAt) : null })));
 
   const converted = new Set<string>();
   const convertedSales: ConvertedSale[] = [];
@@ -131,18 +138,18 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   for (const sale of sales) {
     const owner = owners.get(sale.sourceKey);
     if (!owner) continue;
-    const firstSeen = sale.firstSeen ? new Date(sale.firstSeen) : null;
-    if (!isAttributedSale({ saleDay: sale.dia, firstSeen, sentDay: owner.sentDay, sentAt: owner.sentAt, windowDays })) continue;
+    if (!isAttributedSale({ saleDay: sale.dia, firstSeen: sale.firstSeen, sentDay: owner.sentDay, sentAt: owner.sentAt, windowDays })) continue;
     const ownerKey = owner.contactId || `phone:${owner.phone}`;
     converted.add(ownerKey);
     revenue += sale.total;
     const info = contactInfo.get(owner.contactId);
     convertedSales.push({
       contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total,
-      loja: sale.loja, itens: Number(sale.itens), resumo: sale.resumo ?? "", notaFiscal: sale.nota || null,
-      enviadoEm: owner.sentAt.toISOString(), registradoEm: sale.firstSeen ? new Date(sale.firstSeen).toISOString() : null, conversationId: null,
+      loja: sale.loja, itens: sale.itens, resumo: sale.resumo, notaFiscal: sale.notaFiscal,
+      enviadoEm: owner.sentAt.toISOString(), registradoEm: sale.firstSeen ? sale.firstSeen.toISOString() : null, conversationId: null,
     });
   }
+  revenue = Math.round(revenue * 100) / 100;
   convertedSales.sort((a, b) => b.data.localeCompare(a.data) || b.valor - a.valor);
 
   // Conversa do chat de cada comprador (pelo contato ou pelo telefone), para abrir direto do relatório.
@@ -164,19 +171,23 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     SELECT to_char(max("orderDate"), 'YYYY-MM-DD') AS last FROM "VmsetSale"
   `;
 
-  const realCost = delivered * unitPrice;
+  // A Meta cobra por mensagem de modelo entregue; o estimado considera todas as mensagens do disparo.
+  const realCost = Math.round(delivered * unitPrice * 100) / 100;
+  const financials = campaignFinancials({ revenue, cost: realCost, buyers: converted.size, recipients: recipients.size, orders: convertedSales.length });
   return {
     category,
     unitPrice,
     windowDays,
-    cost: { estimated: messages.length * unitPrice, real: realCost },
+    cost: { estimated: Math.round(messages.length * unitPrice * 100) / 100, real: realCost },
     funnel: { attempted: messages.length, dispatched, delivered, read, replied, converted: converted.size },
-    conversionRate: delivered > 0 ? (converted.size / delivered) * 100 : null,
+    conversionRate: financials.conversionRate,
+    recipients: recipients.size,
     revenue,
     orders: convertedSales.length,
-    averageTicket: converted.size > 0 ? revenue / converted.size : null,
-    roi: realCost > 0 ? ((revenue - realCost) / realCost) * 100 : null,
-    roas: realCost > 0 ? revenue / realCost : null,
+    averageTicket: financials.averageTicket,
+    ticketPerOrder: financials.ticketPerOrder,
+    roi: financials.roi,
+    roas: financials.roas,
     sales: convertedSales,
     lastSaleDate: lastSale[0]?.last ?? null,
   };

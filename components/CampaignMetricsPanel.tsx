@@ -181,8 +181,8 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
       </section>
 
       <div className="grid grid-cols-2 gap-2">
-        <KpiCard icon={Percent} label="Conversão de leads" value={pct(metrics.conversionRate)} hint={`${funnel.converted} de ${funnel.delivered} entregues compraram`} onClick={openSales} />
-        <KpiCard icon={Receipt} label="Ticket médio" value={metrics.averageTicket === null ? "—" : brl(metrics.averageTicket)} hint="por cliente que comprou" />
+        <KpiCard icon={Percent} label="Conversão de leads" value={pct(metrics.conversionRate)} hint={`${funnel.converted} de ${metrics.recipients.toLocaleString("pt-BR")} clientes com entrega compraram`} onClick={openSales} />
+        <KpiCard icon={Receipt} label="Ticket médio" value={metrics.averageTicket === null ? "—" : brl(metrics.averageTicket)} hint={`por cliente que comprou${metrics.ticketPerOrder === null ? "" : ` · ${brl(metrics.ticketPerOrder)} por pedido`}`} />
       </div>
 
       <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">

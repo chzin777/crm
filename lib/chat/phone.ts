@@ -4,7 +4,8 @@ export function phoneVariants(waId: string): string[] {
   const local = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
   const locals = new Set([local]);
   if (local.length === 11 && local[2] === "9") locals.add(local.slice(0, 2) + local.slice(3));
-  if (local.length === 10) locals.add(`${local.slice(0, 2)}9${local.slice(2)}`);
+  // Só celular antigo (começa com 6 a 9) ganha o 9º dígito; fixo (2 a 5) viraria um celular de outra pessoa.
+  if (local.length === 10 && /[6-9]/.test(local[2])) locals.add(`${local.slice(0, 2)}9${local.slice(2)}`);
   // Inclui a forma formatada "(62) 99999-9999", usada nos cadastros manuais.
   return [...new Set([digits, waId, ...[...locals].flatMap((item) => [item, `55${item}`, formatPhone(item)])])];
 }
