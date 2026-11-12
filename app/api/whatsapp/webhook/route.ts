@@ -5,6 +5,7 @@ import { runAutomation } from "@/lib/chat/automation";
 import { notifyChatChange } from "@/lib/chat/events";
 import { isCustomerMessage, recordEcho, recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 import { phoneVariants } from "@/lib/chat/phone";
+import { markBulkItemFailed } from "@/lib/bulk-dispatch";
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
 export async function GET(request: Request) {
@@ -72,15 +73,15 @@ async function updateChatDelivery(event: StatusEvent) {
 async function updateMessageStatus(event: StatusEvent) {
   await updateChatDelivery(event).catch((failure) => console.error("[whatsapp/webhook] atualizar entrega do chat:", failure));
   if (!event.id || !event.status) return;
-  const message = await prisma.campaignMessage.findUnique({ where: { whatsappMsgId: event.id }, select: { id: true, status: true } });
+  const message = await prisma.campaignMessage.findUnique({ where: { whatsappMsgId: event.id }, select: { id: true, status: true, campaignId: true, contactId: true, phone: true } });
   if (!message) return;
   const at = event.timestamp ? new Date(Number(event.timestamp) * 1000) : new Date();
   if (event.status === "failed") {
     const error = event.errors?.[0];
-    await prisma.campaignMessage.update({
-      where: { id: message.id },
-      data: { status: "failed", failedAt: at, failureReason: (error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta").slice(0, 500) },
-    });
+    const reason = `${error?.code ? `${error.code}: ` : ""}${error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta"}`.slice(0, 500);
+    await prisma.campaignMessage.update({ where: { id: message.id }, data: { status: "failed", failedAt: at, failureReason: reason } });
+    // Lotes e envios individuais: a falha que chega depois também aparece em /campanhas.
+    await markBulkItemFailed(message.campaignId, { contactId: message.contactId, phone: message.phone }, reason).catch((failure) => console.error("[whatsapp/webhook] atualizar lote:", failure));
     return;
   }
   if (event.status !== "sent" && event.status !== "delivered" && event.status !== "read") return;

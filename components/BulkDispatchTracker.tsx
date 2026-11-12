@@ -231,7 +231,8 @@ export function BulkDispatchTracker() {
       const response = await fetch("/api/whatsapp/bulk-send?recent=1", { cache: "no-store" });
       if (!response.ok) return;
       const body = await response.json() as { data?: BulkJobView[] };
-      list = body.data ?? [];
+      // Envios individuais já avisam na hora: ficam só na listagem de /campanhas.
+      list = (body.data ?? []).filter((job) => !job.single);
     } catch {
       // Falha de rede: tenta de novo no próximo ciclo se houver lote ativo.
       list = [];

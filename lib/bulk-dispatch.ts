@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { readFile } from "@/lib/minio";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
+import { phoneVariants } from "@/lib/chat/phone";
 
 export type BulkParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
 export type BulkTemplateParam = { source: BulkParamSource; value: string };
@@ -26,6 +27,8 @@ export type BulkJob = {
   template: { name: string; language: string; params: BulkTemplateParam[]; category?: string } | null;
   attachments: BulkAttachment[];
   retryOf?: string;
+  /** Envio individual (card do pipeline, notificação de modelo): registrado como lote de 1. */
+  single?: boolean;
   createdAt: string;
   finishedAt?: string;
 };
@@ -47,6 +50,7 @@ export type BulkJobView = {
   failed: number;
   pending: number;
   retryOf?: string;
+  single?: boolean;
   createdAt: string;
   finishedAt?: string;
   items?: BulkItem[];
@@ -97,6 +101,7 @@ export function toView(job: BulkJob, withItems = false): BulkJobView {
     failed: job.failed,
     pending,
     retryOf: job.retryOf,
+    single: job.single,
     createdAt: job.createdAt,
     finishedAt: job.finishedAt,
     ...(withItems ? { items: job.items } : {}),
@@ -189,7 +194,7 @@ async function recordMessage(job: BulkJob, item: BulkItem, result: { messageId: 
     await prisma.campaignMessage.create({
       data: {
         campaignId: bulkCampaignId(job.id),
-        contactId: item.contactId,
+        contactId: item.contactId || null,
         phone: item.telefone,
         ...("failure" in result
           ? { status: "failed" as const, failedAt: new Date(), failureReason: result.failure.slice(0, 500) }
@@ -441,4 +446,86 @@ export async function retryFailures(job: BulkJob, userId: string) {
     attachments: job.attachments,
     retryOf: job.id,
   });
+}
+
+export type SingleSendInput = {
+  userId: string;
+  userName: string;
+  /** De onde saiu: "Pipeline", "Modelos"... vira o nome do envio em /campanhas. */
+  origin: string;
+  phone: string;
+  contactId?: string | null;
+  nome?: string;
+  /** Texto como o cliente recebeu (modelo já preenchido). */
+  text: string;
+  template: { name: string; language: string; params: string[]; category?: string } | null;
+  messageId: string | null;
+  failure?: string;
+};
+
+/**
+ * Envio individual (card do pipeline, notificação de um modelo): grava como um envio de 1 destinatário.
+ * Assim ele aparece em /campanhas e nas métricas, o webhook da Meta atualiza entregue/lida/falha pelo id,
+ * e a mensagem fica no /chat do contato. Antes, esse caminho não deixava rastro nenhum.
+ */
+export async function recordSingleSend(input: SingleSendInput) {
+  const telefone = input.phone.replace(/\D/g, "");
+  let contactId = input.contactId ?? null;
+  let nome = input.nome?.trim() ?? "";
+  if (!contactId) {
+    const contact = await prisma.contact.findFirst({ where: { phone: { in: phoneVariants(telefone) } }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } });
+    contactId = contact?.id ?? null;
+    nome ||= contact?.name ?? "";
+  }
+  const now = new Date().toISOString();
+  const failed = !!input.failure;
+  const job: BulkJob = {
+    id: randomUUID(),
+    userId: input.userId,
+    userName: input.userName,
+    stageName: `Envio individual · ${input.origin}`,
+    single: true,
+    status: "completed",
+    total: 1,
+    sent: failed ? 0 : 1,
+    failed: failed ? 1 : 0,
+    items: [{ contactId: contactId ?? "", nome: nome || telefone, telefone, status: failed ? "FAILED" : "SENT", ...(failed ? { error: input.failure } : {}) }],
+    text: input.template ? "" : input.text,
+    template: input.template ? { name: input.template.name, language: input.template.language, params: input.template.params.map((value) => ({ source: "manual" as const, value })), category: input.template.category } : null,
+    attachments: [],
+    createdAt: now,
+    finishedAt: now,
+  };
+  await writeJob(job);
+  await recordMessage(job, job.items[0], failed ? { failure: input.failure! } : { messageId: input.messageId });
+  if (!failed && contactId) {
+    await recordDispatchInChat({
+      contactId,
+      phone: chatPhone(telefone),
+      text: input.text,
+      externalId: input.messageId,
+      authorName: `${job.stageName} · ${input.userName}`,
+      campaignId: bulkCampaignId(job.id),
+      campaignName: job.stageName,
+    });
+  }
+  return job;
+}
+
+/**
+ * Falha informada depois pela Meta (webhook): o envio foi aceito, mas não chegou.
+ * Corrige o lote para que /campanhas mostre a falha com o motivo, em vez de "enviado".
+ */
+export async function markBulkItemFailed(campaignId: string, recipient: { contactId: string | null; phone: string }, reason: string) {
+  if (!campaignId.startsWith("bulk:")) return;
+  const job = await readJob(campaignId.slice("bulk:".length));
+  if (!job) return;
+  const digits = recipient.phone.replace(/\D/g, "");
+  const item = job.items.find((entry) => entry.status === "SENT" && ((recipient.contactId && entry.contactId === recipient.contactId) || entry.telefone.replace(/\D/g, "") === digits));
+  if (!item) return;
+  item.status = "FAILED";
+  item.error = reason;
+  job.sent = Math.max(0, job.sent - 1);
+  job.failed += 1;
+  await writeJob(job);
 }

@@ -311,11 +311,12 @@ export default function ModelosPage() {
       form.set("templateName", sendTarget.name);
       form.set("templateLanguage", sendTarget.language);
       form.set("templateParams", JSON.stringify(params.slice(0, sendVariables)));
+      form.set("origin", "Modelos");
       if (needsImage && sendImage) form.set("headerImage", sendImage);
       const response = await fetch("/api/whatsapp/send", { method: "POST", body: form });
       const result = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "Não foi possível enviar o modelo.");
-      toast.success("Notificação enviada", `Modelo "${sendTarget.name}" aceito pelo WhatsApp.`);
+      toast.success("Notificação aceita pela Meta", `A entrega é confirmada em Campanhas › "Envio individual · Modelos".`);
       setSendTarget(null);
     } catch (err) {
       setSendError(err instanceof Error ? err.message : "Tente novamente.");

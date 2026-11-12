@@ -1027,6 +1027,9 @@ export default function Home() {
             const body = new FormData();
             body.set("phone", messageCard.telefone);
             body.set("text", text);
+            body.set("origin", "Pipeline");
+            body.set("recipientName", messageCard.cliente);
+            if (messageCard.contactId) body.set("contactId", messageCard.contactId);
             if (template) {
               body.set("templateName", template.name);
               body.set("templateLanguage", template.language);
@@ -1039,7 +1042,7 @@ export default function Home() {
               const data = await response.json().catch(() => null);
               throw new Error(data?.error ?? "Não foi possível enviar a mensagem.");
             }
-            toast.success("Mensagem enviada", `Enviada para ${messageCard.cliente}.`);
+            toast.success("Mensagem aceita pela Meta", `Para ${messageCard.cliente}. A entrega é confirmada em Campanhas › "Envio individual · Pipeline".`);
           }}
         />
       )}
