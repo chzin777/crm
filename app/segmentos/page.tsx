@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   Megaphone,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   ChevronsUpDown,
   Plus,
@@ -109,6 +111,8 @@ const presetCriteria: SegmentCriterion[] = [
 ];
 
 const criterionKinds: CriterionKind[] = ["geral", "loja"];
+/** Itens por página em cada grupo da lista de critérios salvos do modal de critérios. */
+const MANAGER_PAGE_SIZE = 8;
 const criterionKindLabels: Record<CriterionKind, string> = {
   geral: "Geral",
   loja: "Loja",
@@ -552,6 +556,8 @@ export default function SegmentosPage() {
     </div>
   );
   const [managerSearch, setManagerSearch] = useState("");
+  // Página atual de cada grupo da lista de critérios salvos (Geral / Loja) no modal de critérios.
+  const [kindPages, setKindPages] = useState<Partial<Record<CriterionKind, number>>>({});
   const [collapsedKinds, setCollapsedKinds] = useState<CriterionKind[]>(criterionKinds);
   const highlightMatch = (text: string, term: string) => {
     const query = term.trim();
@@ -1715,8 +1721,8 @@ export default function SegmentosPage() {
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   value={managerSearch}
-                  onChange={(event) => setManagerSearch(event.target.value)}
-                  placeholder="Pesquisar critérios..."
+                  onChange={(event) => { setManagerSearch(event.target.value); setKindPages({}); }}
+                  placeholder="Buscar critério ou loja (ex.: LJ 12)..."
                   aria-label="Pesquisar critérios"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-xs font-medium text-slate-700 shadow-xs outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-slate-700 dark:bg-[#07194f] dark:text-slate-200 dark:focus:border-[#C4D600]"
                 />
@@ -1733,6 +1739,11 @@ export default function SegmentosPage() {
                     if (!groupedCriteria.length) return null;
                     const isSearching = normalizedManagerSearch.length > 0;
                     const isExpanded = isSearching || !collapsedKinds.includes(kind);
+                    // Paginado: a lista de lojas tem dezenas de itens e o modal tem altura fixa.
+                    const pageCount = Math.ceil(groupedCriteria.length / MANAGER_PAGE_SIZE);
+                    const page = Math.min(kindPages[kind] ?? 0, pageCount - 1);
+                    const pageStart = page * MANAGER_PAGE_SIZE;
+                    const pageCriteria = groupedCriteria.slice(pageStart, pageStart + MANAGER_PAGE_SIZE);
                     return (
                       <section key={kind} aria-label={criterionKindLabels[kind]}>
                         <button
@@ -1748,7 +1759,7 @@ export default function SegmentosPage() {
                           <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExpanded ? "" : "-rotate-90"}`} />
                         </button>
                         {isExpanded && <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100 dark:divide-slate-800 dark:border-slate-800">
-                          {groupedCriteria.map((criterion) => {
+                          {pageCriteria.map((criterion) => {
                             const system = isSystemCriterion(criterion);
                             return (
                               <li key={criterion.id} className={`flex items-center justify-between gap-3 px-4 py-3 ${isSearching ? "bg-[#C4D600]/10 dark:bg-[#C4D600]/5" : ""}`}>
@@ -1804,6 +1815,19 @@ export default function SegmentosPage() {
                             );
                           })}
                         </ul>}
+                        {isExpanded && pageCount > 1 && (
+                          <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                            <span className="tabular-nums">Mostrando {pageStart + 1}–{Math.min(pageStart + MANAGER_PAGE_SIZE, groupedCriteria.length)} de {groupedCriteria.length}</span>
+                            <span className="flex items-center gap-1">
+                              <button type="button" disabled={page === 0} onClick={() => setKindPages((current) => ({ ...current, [kind]: page - 1 }))} aria-label={`Página anterior de ${criterionKindLabels[kind]}`} className="inline-flex h-7 items-center gap-0.5 rounded-md px-2 font-semibold transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-800 cursor-pointer">
+                                <ChevronLeft className="h-3.5 w-3.5" />Anterior
+                              </button>
+                              <button type="button" disabled={page >= pageCount - 1} onClick={() => setKindPages((current) => ({ ...current, [kind]: page + 1 }))} aria-label={`Próxima página de ${criterionKindLabels[kind]}`} className="inline-flex h-7 items-center gap-0.5 rounded-md px-2 font-semibold transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-800 cursor-pointer">
+                                Próxima<ChevronRight className="h-3.5 w-3.5" />
+                              </button>
+                            </span>
+                          </div>
+                        )}
                       </section>
                     );
                   })}
