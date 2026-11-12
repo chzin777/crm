@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, CalendarClock, Check, Glasses, Megaphone, Plus, ShoppingBag, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, Glasses, Megaphone, Plus, ShoppingBag, Sparkles, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { AiProductSuggestions } from "@/components/chat/AiPanels";
 import { useToast } from "@/components/ToastProvider";
 import type { CustomerHistory, FollowUpItem } from "@/lib/chat/types";
 
@@ -34,10 +35,12 @@ type Props = {
   onNewFollowUp: () => void;
   onChanged: () => void;
   onClose: () => void;
+  /** Leva a oferta sugerida pela IA para o campo de mensagem. */
+  onUsePitch?: (text: string) => void;
 };
 
 /** Painel direito do /chat: lembretes de retorno e visão do cliente no ERP. */
-export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollowUp, onChanged, onClose }: Props) {
+export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollowUp, onChanged, onClose, onUsePitch }: Props) {
   const toast = useToast();
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [historyError, setHistoryError] = useState(false);
@@ -144,6 +147,10 @@ export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollo
           <div className="flex justify-center py-8"><LoadingSpinner label="Buscando no ERP..." size={24} /></div>
         ) : (
           <>
+            <Section icon={<Sparkles className="h-4 w-4" />} title="Oportunidades de venda (IA)">
+              <AiProductSuggestions conversationId={conversationId} onUsePitch={canWrite ? onUsePitch : undefined} />
+            </Section>
+
             <Section icon={<Glasses className="h-4 w-4" />} title="Receita">
               {history.prescription.renewalDue && (
                 <p className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">

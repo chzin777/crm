@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarClock, Check, FileText, Image as ImageIcon, Lock, Mic, Paperclip, Search, Send, Smile, StickyNote, Trash2, X, Zap } from "lucide-react";
+import { CalendarClock, Check, FileText, Image as ImageIcon, Loader2, Lock, Mic, Paperclip, Search, Send, Smile, Sparkles, StickyNote, Trash2, X, Zap } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ComposerPopover } from "@/components/chat/ComposerPopover";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
@@ -35,6 +35,8 @@ type Props = {
   error: string;
   /** Com ele, aparece "Agendar envio" ao lado de Enviar; chamado depois de agendar. */
   onScheduled?: () => void;
+  /** Texto vindo de fora (ex.: oferta sugerida pela IA no painel do cliente); nonce muda a cada pedido. */
+  draft?: { text: string; nonce: number } | null;
 };
 
 const MAX_FIELD_HEIGHT = 128;
@@ -44,8 +46,9 @@ const WAVE_BARS = Array.from({ length: 18 }, (_, index) => index);
 const toolButton = "grid h-[42px] w-9 shrink-0 cursor-pointer place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/10";
 const roundButton = "grid h-[42px] w-[42px] shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
-export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error, onScheduled }: Props) {
+export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error, onScheduled, draft }: Props) {
   const [text, setText] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
   /** Texto congelado ao abrir "Agendar envio"; null enquanto o diálogo está fechado. */
   const [scheduling, setScheduling] = useState<string | null>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
@@ -97,6 +100,34 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   useEffect(() => {
     if (replyTo) field.current?.focus();
   }, [replyTo]);
+
+  // Só aplica pedidos feitos depois de montar: trocar de conversa não pode herdar a oferta da anterior.
+  const appliedDraft = useRef(draft?.nonce);
+  useEffect(() => {
+    if (!draft?.text || draft.nonce === appliedDraft.current) return;
+    appliedDraft.current = draft.nonce;
+    setText(draft.text);
+    requestAnimationFrame(() => field.current?.focus());
+  }, [draft]);
+
+  /** A IA só preenche o campo: quem atende revisa e decide enviar. */
+  const suggestReply = async () => {
+    if (suggesting) return;
+    setSuggesting(true);
+    try {
+      const response = await fetch(`/api/chat/conversations/${conversation.id}/ai`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reply" }) });
+      const data = (await response.json().catch(() => ({}))) as { reply?: string; error?: string };
+      if (!response.ok || !data.reply) onError(data.error ?? "Não foi possível sugerir uma resposta.");
+      else {
+        setText(data.reply);
+        requestAnimationFrame(() => field.current?.focus());
+      }
+    } catch {
+      onError("Não foi possível falar com a IA. Verifique a conexão.");
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -241,6 +272,11 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
                   ]}
                 />
               </>
+            )}
+            {!internal && (
+              <button type="button" title="Sugerir resposta com IA" aria-label="Sugerir resposta com IA" disabled={suggesting} onClick={() => void suggestReply()} className={`${toolButton} text-[#002187] dark:text-[#C4D600]`}>
+                {suggesting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+              </button>
             )}
             <button type="button" title="Nota interna" aria-label="Nota interna" aria-pressed={internal} onClick={() => setInternal((value) => !value)} className={internal ? `${toolButton} bg-[#F7915E]/20 text-[#b4531f] hover:bg-[#F7915E]/30 dark:text-[#F7915E] dark:hover:bg-[#F7915E]/30` : toolButton}><StickyNote className="h-5 w-5" /></button>
           </div>

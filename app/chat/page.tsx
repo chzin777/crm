@@ -2,12 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, Sparkles, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
 import { CustomerPanel } from "@/components/chat/CustomerPanel";
+import { AiSummaryDialog } from "@/components/chat/AiPanels";
 import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
@@ -65,6 +66,8 @@ function ChatWorkspace() {
   const [showPanel, setShowPanel] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpKey, setFollowUpKey] = useState(0);
+  const [summaryTarget, setSummaryTarget] = useState<{ id: string; name: string } | null>(null);
+  const [composerDraft, setComposerDraft] = useState<{ text: string; nonce: number } | null>(null);
   const [scheduled, setScheduled] = useState<ScheduledMessageItem[]>([]);
   const canWrite = capabilities["chat.assume"] === true;
   const listRequest = useRef(0);
@@ -451,6 +454,7 @@ function ChatWorkspace() {
     return [
       { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => run("/assume", "Atendimento assumido"), hidden: !canWrite || !!conversation.closedAt || !!conversation.assignee },
       { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
+      { label: "Resumir atendimento (IA)", icon: <Sparkles className="h-4 w-4" />, onSelect: () => setSummaryTarget({ id: conversation.id, name: conversation.name }) },
       { label: "Agendar retorno", icon: <CalendarClock className="h-4 w-4" />, onSelect: () => setShowFollowUp(true), hidden: !canWrite },
       { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(conversation.contactId)}&contato=${encodeURIComponent(conversation.name)}`, hidden: !canWrite },
       { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!conversation.closedAt },
@@ -600,6 +604,7 @@ function ChatWorkspace() {
                 onError={setSendError}
                 uploadProgress={uploadProgress}
                 error={sendError}
+                draft={composerDraft}
                 onScheduled={() => {
                   toast.success("Mensagem agendada");
                   void loadScheduled(open.id);
@@ -630,7 +635,12 @@ function ChatWorkspace() {
             onNewFollowUp={() => setShowFollowUp(true)}
             onChanged={() => void loadList()}
             onClose={togglePanel}
+            onUsePitch={(text) => setComposerDraft({ text, nonce: Date.now() })}
           />
+        )}
+
+        {summaryTarget && (
+          <AiSummaryDialog conversationId={summaryTarget.id} customerName={summaryTarget.name} onClose={() => setSummaryTarget(null)} />
         )}
 
         {showFollowUp && open && (
