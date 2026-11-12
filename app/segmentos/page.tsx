@@ -6,7 +6,6 @@ import {
   Bell,
   Check,
   CheckCircle2,
-  FileText,
   Megaphone,
   ChevronDown,
   ChevronUp,
@@ -1818,9 +1817,6 @@ export default function SegmentosPage() {
             <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-6 py-4 shadow-[0_-8px_24px_-16px_rgba(5,22,71,0.25)] dark:border-slate-800 dark:bg-[#07194f] sm:flex-row sm:items-center sm:justify-between sm:px-8">
               <AudienceCounter preview={audiencePreview} />
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                <Link href="/modelos" target="_blank" rel="noopener" title="Abre em nova aba: o critério em edição continua aqui" className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-[#002187] transition-colors hover:bg-[#002187]/5 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
-                  <FileText className="h-4 w-4" />Criar modelo de mensagem
-                </Link>
                 {criteriaManagerError && <p role="alert" className="mr-2 max-w-xs text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{criteriaManagerError}</p>}
                 <button type="button" disabled={criterionForm.regras.length === 0} onClick={() => { setCriterionForm((current) => ({ ...current, regras: [] })); setCriteriaManagerError(""); }} className="h-10 rounded-lg px-3 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">Limpar filtros</button>
                 <button type="button" onClick={() => { if (editingCriterionId) { resetCriterionForm(); } else { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); } }} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer">{editingCriterionId ? "Cancelar edição" : "Cancelar"}</button>
