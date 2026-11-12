@@ -1,0 +1,25 @@
+import { NextResponse } from "next/server";
+import { requireModule } from "@/lib/api-auth";
+import { prisma } from "@/lib/prisma";
+import { readAiSettings, saveAiSettings } from "@/lib/ai/store";
+import { aiConfigured } from "@/lib/ai/openai";
+
+/** Parâmetros da IA (Configurações): o que responde, onde atende, quando transfere e custos. */
+export async function GET() {
+  const guard = await requireModule("configuracoes");
+  if (guard.response) return guard.response;
+  const [settings, queues] = await Promise.all([
+    readAiSettings(),
+    prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
+  ]);
+  return NextResponse.json({ settings, queues, configured: aiConfigured() });
+}
+
+export async function PUT(request: Request) {
+  const guard = await requireModule("configuracoes");
+  if (guard.response) return guard.response;
+  const body = (await request.json().catch(() => null)) as { settings?: unknown } | null;
+  if (!body?.settings) return NextResponse.json({ error: "Envie as configurações da IA." }, { status: 400 });
+  const settings = await saveAiSettings(body.settings);
+  return NextResponse.json({ settings });
+}

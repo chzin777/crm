@@ -7,6 +7,7 @@ import { handleOffHours } from "@/lib/chat/operations";
 import type { RecordedInbound } from "@/lib/chat/inbound";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { fillVariables } from "@/lib/chat/text";
+import { aiTakeOver } from "@/lib/ai/agent";
 
 const AUTOMATIC_GAP_MS = 3 * 60 * 1000;
 
@@ -60,6 +61,13 @@ export async function runAutomation(recorded: RecordedInbound) {
     console.log(`[bot] ${conversation.id}: sem automação (resposta automática do contato: ${recorded.autoReply})`);
     return;
   }
+
+  // IA autônoma (Configurações › Inteligência Artificial): quando assume, menu e aviso de fora do horário não rodam.
+  const byAi = await aiTakeOver(conversation, recorded.messageId).catch((error) => {
+    console.error("[ai] decisão de assumir:", error);
+    return false;
+  });
+  if (byAi) return;
 
   // Fora do horário de atendimento: aviso com o horário e a conversa espera na fila, sem menu.
   if (await handleOffHours(conversation)) return;

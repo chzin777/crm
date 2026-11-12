@@ -581,3 +581,19 @@ model VmsetSale {
   @@index([orderDate])
   @@index([sourceKey])
 }
+
+/// Consumo da IA (OpenAI): uma linha por chamada, base do painel de gastos em Configurações.
+model AiUsage {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  feature        String
+  model          String
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  costUsd        Decimal  @default(0) @db.Decimal(12, 6)
+  conversationId String?
+  userId         String?
+  ok             Boolean  @default(true)
+
+  @@index([createdAt])
+}

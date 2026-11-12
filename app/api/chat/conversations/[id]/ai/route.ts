@@ -22,9 +22,9 @@ export async function POST(request: Request, context: Context) {
   if (!conversation) return conversationNotFound();
 
   try {
-    if (action === "reply") return NextResponse.json(await suggestReply(conversation, guard.actor.name));
-    if (action === "summary") return NextResponse.json(await summarizeConversation(conversation));
-    return NextResponse.json(await suggestProducts(conversation));
+    if (action === "reply") return NextResponse.json(await suggestReply(conversation, guard.actor.name, guard.actor.id));
+    if (action === "summary") return NextResponse.json(await summarizeConversation(conversation, guard.actor.id));
+    return NextResponse.json(await suggestProducts(conversation, guard.actor.id));
   } catch (error) {
     if (error instanceof AiError) return chatError(error.message, error.status);
     console.error("[ai]", action, error);

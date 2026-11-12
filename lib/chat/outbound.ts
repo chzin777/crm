@@ -187,7 +187,7 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
 }
 
 /** Mensagem automática: gravada antes de sair, para quem assumir ver o que já foi dito. */
-export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string, send?: () => Promise<{ messages?: { id: string }[] }>, interactive?: ChatInteractiveList) {
+export async function sendAutomaticMessage(conversation: Pick<ChatConversation, "id" | "phone">, rawText: string, send?: () => Promise<{ messages?: { id: string }[] }>, interactive?: ChatInteractiveList, authorName = "Atendimento automático") {
   if (await isBlocked(conversation.phone)) {
     console.log(`[bot] ${conversation.id}: mensagem automática não enviada (número bloqueado)`);
     return null;
@@ -196,7 +196,7 @@ export async function sendAutomaticMessage(conversation: Pick<ChatConversation, 
   const now = new Date();
   const message = await prisma.chatMessage.create({
     data: {
-      conversationId: conversation.id, author: "bot", authorName: "Atendimento automático", text, delivery: "sending", createdAt: now,
+      conversationId: conversation.id, author: "bot", authorName, text, delivery: "sending", createdAt: now,
       // Lista interativa: a estrutura fica em metaMedia (sem id, não é mídia pendente) para o atendimento mostrar como o cliente vê.
       ...(interactive ? { metaMedia: { interactive } as unknown as Prisma.InputJsonValue } : {}),
     },
