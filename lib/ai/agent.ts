@@ -143,10 +143,11 @@ async function respond(conversationId: string, messageId: string) {
 
   // Mensagens do cliente desde a última resposta (bot ou atendente).
   const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
-  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true } });
+  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true, attachment: true, metaMedia: true } });
   const pendingText = pending.map((item) => item.text).join("\n");
 
   if (asksForHuman(settings, pendingText)) return handoff(conversation, settings, "Cliente pediu para falar com uma pessoa");
+  if (settings.handoffOnMedia && pending.some((item) => item.attachment || item.metaMedia)) return handoff(conversation, settings, "Cliente enviou foto, documento ou áudio (ex.: receita)");
   const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR } });
   if (aiReplies >= settings.maxAiReplies) return handoff(conversation, settings, `Limite de ${settings.maxAiReplies} respostas da IA atingido`);
 

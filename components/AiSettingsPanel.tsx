@@ -377,6 +377,7 @@ export function AiSettingsPanel() {
             <Toggle label="Reclamação ou cliente irritado" checked={settings.handoffOnComplaint} onChange={(value) => set("handoffOnComplaint", value)} />
             <Toggle label="Intenção de compra ou orçamento" description="Fechar compra, orçamento com receita ou negociar condições." checked={settings.handoffOnPurchaseIntent} onChange={(value) => set("handoffOnPurchaseIntent", value)} />
             <Toggle label="A IA não tiver certeza da resposta" description="Assunto fora do que está cadastrado." checked={settings.handoffWhenUnsure} onChange={(value) => set("handoffWhenUnsure", value)} />
+            <Toggle label="O cliente enviar foto, documento ou áudio" description="Ex.: foto da receita médica. A IA não lê arquivos: transfere na hora." checked={settings.handoffOnMedia} onChange={(value) => set("handoffOnMedia", value)} />
             <label className={labelCls}>Máximo de respostas da IA por conversa
               <input type="number" min={1} max={50} value={settings.maxAiReplies} onChange={(event) => set("maxAiReplies", Number(event.target.value))} className={`${input} w-28`} />
             </label>

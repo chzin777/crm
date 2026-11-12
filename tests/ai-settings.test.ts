@@ -79,3 +79,10 @@ describe("página /ia: novos parâmetros e permissão", () => {
     expect(canAccessModule("ia", { chat: true })).toBe(false);
   });
 });
+
+describe("transbordo por arquivo (receita)", () => {
+  it("vem ligado por padrão e respeita o valor salvo", () => {
+    expect(sanitizeAiSettings({}).handoffOnMedia).toBe(true);
+    expect(sanitizeAiSettings({ handoffOnMedia: false }).handoffOnMedia).toBe(false);
+  });
+});

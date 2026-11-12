@@ -44,6 +44,8 @@ export type AiSettings = {
   handoffOnComplaint: boolean;
   handoffOnPurchaseIntent: boolean;
   handoffWhenUnsure: boolean;
+  /** Cliente mandou foto, documento ou áudio (ex.: receita): a IA não lê arquivos, transfere. */
+  handoffOnMedia: boolean;
   maxAiReplies: number;
   /** Fila de destino na transferência; vazio mantém a fila atual (ou a IA escolhe, se permitido). */
   handoffQueueId: string;
@@ -92,6 +94,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   handoffOnComplaint: true,
   handoffOnPurchaseIntent: true,
   handoffWhenUnsure: true,
+  handoffOnMedia: true,
   maxAiReplies: 8,
   handoffQueueId: "",
   aiChoosesQueue: true,
@@ -152,6 +155,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     handoffOnComplaint: bool(raw.handoffOnComplaint, d.handoffOnComplaint),
     handoffOnPurchaseIntent: bool(raw.handoffOnPurchaseIntent, d.handoffOnPurchaseIntent),
     handoffWhenUnsure: bool(raw.handoffWhenUnsure, d.handoffWhenUnsure),
+    handoffOnMedia: bool(raw.handoffOnMedia, d.handoffOnMedia),
     maxAiReplies: Math.round(num(raw.maxAiReplies, d.maxAiReplies, 1, 50)),
     handoffQueueId: str(raw.handoffQueueId, d.handoffQueueId, 60),
     aiChoosesQueue: bool(raw.aiChoosesQueue, d.aiChoosesQueue),
