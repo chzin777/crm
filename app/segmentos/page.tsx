@@ -54,6 +54,8 @@ interface SegmentCriterion {
   regras?: SegmentRule[];
   /** Como as regras se combinam: todas (E, padrão) ou qualquer uma (OU). */
   combinar?: RuleMatch;
+  /** Nome legível (razão social da loja), só para exibição. */
+  descricao?: string;
   inativo?: boolean;
 }
 
@@ -126,7 +128,7 @@ export default function SegmentosPage() {
   const CONTACTS_PAGE_SIZE = 50;
   const contactSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [contactSearchQuery, setContactSearchQuery] = useState("");
-  const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
+  const [stores, setStores] = useState<{ number: number; name?: string; active: boolean }[]>([]);
   const [audienceCounts, setAudienceCounts] = useState<Record<string, number>>({});
   const [refinedCounts, setRefinedCounts] = useState<Record<string, number>>({});
   const requestedAudienceKeysRef = useRef(new Set<string>());
@@ -164,11 +166,14 @@ export default function SegmentosPage() {
         return 0;
     }
   });
-  const storeCriteria = [...stores]
+  // "Loja <número>" é o nome-chave que os segmentos salvos referenciam; a razão social vai como descrição.
+  const storeCriteria: SegmentCriterion[] = stores
+    .filter((store) => Number.isFinite(store.number))
     .sort((a, b) => a.number - b.number)
     .map((store) => ({
       id: `store-${store.number}`,
       nome: `Loja ${store.number}`,
+      descricao: store.name?.trim() || undefined,
       tipo: "loja" as const,
       inativo: !store.active,
     }));
@@ -1753,6 +1758,7 @@ export default function SegmentosPage() {
                                     <span className={`truncate text-sm ${criterion.inativo ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200"}`}>{highlightMatch(criterion.nome, managerSearch)}</span>
                                     {system && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">Padrão</span>}
                                   </span>
+                                  {isStoreCriterion(criterion) && criterion.descricao && <span className="truncate text-xs text-slate-400" title={criterion.descricao}>{criterion.descricao}</span>}
                                   {!system && (criterion.regras?.length
                                     ? <span className="text-xs text-slate-400">{criterion.regras.map(describeRule).join(criterion.combinar === "any" ? " OU " : " • ")}</span>
                                     : <span className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">Sem regras: nenhum contato atende. Edite para definir.</span>)}

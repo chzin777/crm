@@ -104,7 +104,7 @@ const PIPELINE_CARDS = Prisma.sql`SELECT card->>'contactId' AS contact_id, card-
   CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(w.value) = 'array' THEN w.value ELSE '[]'::jsonb END) card
   WHERE w.key = 'pipeline' AND card->>'contactId' IS NOT NULL`;
 
-type StoreRecord = { id: string; name: string; neighborhoods: string[]; city: string | null; radiusKm: number; lat: number | null; lng: number | null };
+type StoreRecord = { id: string; number: number; name: string; neighborhoods: string[]; city: string | null; radiusKm: number; lat: number | null; lng: number | null };
 
 const NORMALIZED_NEIGHBORHOOD = Prisma.sql`translate(upper(btrim(c.neighborhood)), 'ÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC')`;
 const NORMALIZED_CITY = Prisma.sql`translate(upper(btrim(c.city)), 'ÁÀÃÂÄÉÈÊËÍÌÎÏÓÒÕÔÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC')`;
@@ -260,7 +260,8 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
     const store = stores.get(criterion.id.replace(/^store-/, ""));
     if (!store) return Prisma.sql`FALSE`;
     // Direct link: the store of the contact's latest sale. The store neighborhood and the service radius add nearby customers.
-    const bySale = Prisma.sql`btrim(c.store) = ${store.name}`;
+    // Contact.store guarda o número da loja da última venda (ex.: "13").
+    const bySale = Prisma.sql`btrim(c.store) = ${String(store.number)}`;
     const alternatives = [bySale];
     if (store.neighborhoods.length > 0) {
       const sameNeighborhood = Prisma.sql`${NORMALIZED_NEIGHBORHOOD} = ANY(${store.neighborhoods}::text[])`;
@@ -292,7 +293,7 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
 export async function GET() {
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
-  const stores = await prisma.store.findMany({ orderBy: { name: "asc" }, select: { active: true } });
+  const stores = await prisma.store.findMany({ orderBy: { number: "asc" }, select: { number: true, name: true, active: true } });
   return Response.json({ data: stores });
 }
 
@@ -369,7 +370,8 @@ export async function POST(request: Request) {
     prisma.store.findMany(),
     loadCampaignSets([...Object.values(parsed.data.groups), ...Object.values(parsed.data.contactCriteria ?? {})].flat()),
   ]);
-  const stores = new Map(storeRows.map((store) => [store.name, store]));
+  // Critério de loja tem id "store-<número>".
+  const stores = new Map(storeRows.map((store) => [String(store.number), store]));
   const sampleSize = parsed.data.includeRecipients ? 0 : parsed.data.sample ?? 0;
   const counts: Record<string, number> = {};
   const samples: Record<string, AudienceSampleRow[]> = {};
