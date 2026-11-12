@@ -123,7 +123,7 @@ export function NpsWhatsappPanel() {
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {report.latest.map((item) => (
                         <tr key={item.id} className="text-slate-700 dark:text-slate-200">
-                          <td className="whitespace-nowrap px-4 py-2">{new Date(item.answeredAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</td>
+                          <td className="whitespace-nowrap px-4 py-2">{new Date(item.answeredAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" })}</td>
                           <td className="px-4 py-2 font-medium">{item.contact.name}</td>
                           <td className="px-4 py-2">{item.attendant?.name ?? "Sem atendente"}</td>
                           <td className="px-4 py-2"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold ${scoreClass(item.score)}`}><Star className="h-3 w-3 fill-current" />{item.score}</span></td>

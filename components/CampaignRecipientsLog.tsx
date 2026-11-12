@@ -38,7 +38,7 @@ const formatPhone = (phone: string) => {
   if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   return phone;
 };
-const formatDate = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+const formatDate = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
 
 /** Lista paginada dos destinatários de um disparo com o status individual; atualiza sozinha enquanto o envio roda. */
 export function CampaignRecipientsLog({ campaignId, live }: { campaignId: string; live: boolean }) {

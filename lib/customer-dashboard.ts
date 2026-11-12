@@ -264,7 +264,7 @@ export function getCustomerDashboardOptions() {
       prisma.store.findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { number: true, name: true } }),
       prisma.$queryRaw<{ seller: string }[]>`
         SELECT seller FROM "VmsetInvoiceOrder"
-        WHERE day >= CURRENT_DATE - 365 AND seller IS NOT NULL
+        WHERE day >= (now() AT TIME ZONE 'America/Sao_Paulo')::date - 365 AND seller IS NOT NULL
         GROUP BY seller ORDER BY seller LIMIT 500
       `,
     ]);

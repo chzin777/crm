@@ -31,7 +31,7 @@ type Template = {
 
 const EDIT_LIMIT_NOTICE = `Limite da Meta para modelos aprovados: ${TEMPLATE_EDIT_LIMITS.perDay} edição a cada 24 horas e ${TEMPLATE_EDIT_LIMITS.perMonth} em 30 dias. Rejeitados e pausados não têm limite. A contagem considera as edições feitas pelo CRM.`;
 
-const formatDateTime = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+const formatDateTime = (value: string) => new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
 
 const editUsageLabel = ({ limited, used, limit }: TemplateEditUsage) => (limited ? `${used} de ${limit} edições em 30 dias` : "Edição sem limite");
 

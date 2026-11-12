@@ -89,7 +89,7 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
                 </p>
                 <p className="line-clamp-2 text-[11px] text-slate-600 dark:text-slate-300">{activity.descricao}</p>
                 <time dateTime={activity.createdAt} className="block pt-0.5 text-[10px] text-slate-400">
-                  {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(activity.createdAt))}
+                  {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(activity.createdAt))}
                 </time>
               </div>
             </article>

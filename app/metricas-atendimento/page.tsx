@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Clock, Headphones, Hourglas
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import type { PeriodPreset, ServiceMetrics } from "@/lib/service-metrics";
+import { brDay } from "@/lib/br-time";
 
 type Options = { queues: { id: string; name: string }[]; operators: { id: string; name: string }[] };
 type Filters = { preset: PeriodPreset; start: string; end: string; queueId: string; assigneeId: string };
@@ -20,7 +21,7 @@ const PRESET_OPTIONS: { value: PeriodPreset; label: string; title: string }[] = 
   { value: "custom", label: "Personalizado", title: "Escolher datas" },
 ];
 
-const todayBrt = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const todayBrt = () => brDay();
 
 /** Segundos em texto curto: 45s, 12 min, 1h 05min. */
 function formatDuration(seconds: number | null | undefined) {

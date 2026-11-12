@@ -49,7 +49,7 @@ export function MediaPreview({ file, caption, time }: { file: File; caption: str
 }
 
 export function ChatPreview({ text, files }: { text: string; files: File[] }) {
- const time = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+ const time = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
  const trimmed = text.trim();
  return (
  <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto rounded-lg bg-[#efeae2] p-3 dark:bg-[#0b141a]" aria-label="Prévia da mensagem">

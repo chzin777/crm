@@ -21,8 +21,8 @@ async function loadDashboard() {
     prisma.$queryRaw<DailySale[]>`
       SELECT to_char(day, 'YYYY-MM-DD') AS day, revenue, sales
       FROM "DailySalesSummary"
-      WHERE day >= CURRENT_DATE - INTERVAL '364 days'
-        AND day <= CURRENT_DATE
+      WHERE day >= (now() AT TIME ZONE 'America/Sao_Paulo')::date - 364
+        AND day <= (now() AT TIME ZONE 'America/Sao_Paulo')::date
       ORDER BY day
     `,
     prisma.npsResponse.findMany({ select: { surveyKey: true, rating: true } }),

@@ -7,6 +7,7 @@ import { CONTACT_PLACE_KEY } from "@/lib/geocode";
 import { campaignAudienceSets } from "@/lib/campaign-metrics";
 import { matchesBirthday, type BirthdayOperator, type BirthParts } from "@/lib/birthday";
 import { storeErpCode } from "@/lib/stores";
+import { brDay, purchaseWindow } from "@/lib/br-time";
 import { MAX_RULES, normalizeRuleText, ruleSchema, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
 
 const criterionSchema = z.object({
@@ -27,19 +28,10 @@ const BR_TODAY = Prisma.sql`(now() AT TIME ZONE 'America/Sao_Paulo')::date`;
 
 /** Pedido de venda no ERP na janela pedida, com filtros opcionais aplicados ao próprio pedido. */
 function purchaseCondition(rule: SegmentRule): Prisma.Sql {
-  const value = rule.valor ?? "";
-  let window: Prisma.Sql;
-  switch (rule.operador) {
-    case "today": window = Prisma.sql`v."orderDate" = ${BR_TODAY}`; break;
-    case "yesterday": window = Prisma.sql`v."orderDate" = ${BR_TODAY} - 1`; break;
-    case "within_days": window = Prisma.sql`v."orderDate" BETWEEN ${BR_TODAY} - ${Math.max(0, Math.floor(Number(value)) - 1)}::int AND ${BR_TODAY}`; break;
-    case "between": {
-      const [start, end] = [value, rule.valor2 ?? ""].sort();
-      window = Prisma.sql`v."orderDate" BETWEEN ${start}::date AND ${end}::date`;
-      break;
-    }
-    default: return Prisma.sql`FALSE`;
-  }
+  // Dias de Brasília calculados em TS (lib/br-time, com testes de virada de dia em servidor UTC).
+  const range = purchaseWindow(rule.operador, rule.valor, rule.valor2);
+  if (!range) return Prisma.sql`FALSE`;
+  const window = Prisma.sql`v."orderDate" BETWEEN ${range.start}::date AND ${range.end}::date`;
   const where = [window, Prisma.sql`v."type" = 'Venda'`, Prisma.sql`v."sourceKey" IS NOT NULL`];
   const store = rule.filtros?.loja?.trim();
   if (store) where.push(Prisma.sql`${normalizeText(Prisma.sql`COALESCE(v."store", '')`)} = ${normalizeRuleText(store)}`);
@@ -63,8 +55,7 @@ function purchaseCondition(rule: SegmentRule): Prisma.Sql {
 
 /** Hoje no fuso de Brasília, em partes (ano, mês, dia). */
 function brTodayParts(): BirthParts {
-  const [year, month, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(new Date()).split("-").map(Number);
+  const [year, month, day] = brDay().split("-").map(Number);
   return { year, month, day };
 }
 
@@ -224,8 +215,9 @@ function ruleCondition(rule: SegmentRule, context: RuleContext): Prisma.Sql {
     case "lastPurchase": {
       const hasPurchase = Prisma.sql`${LAST_PURCHASE_DATE} IS NOT NULL`;
       switch (rule.operador) {
-        case "within_days": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} <= CURRENT_DATE AND ${LAST_PURCHASE_DATE} >= CURRENT_DATE - ${Math.floor(Number(value))}::int`;
-        case "older_days": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} < CURRENT_DATE - ${Math.floor(Number(value))}::int`;
+        // Postgres em UTC: CURRENT_DATE vira o dia seguinte às 21h de Brasília, por isso o dia de Brasília explícito.
+        case "within_days": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} <= ${BR_TODAY} AND ${LAST_PURCHASE_DATE} >= ${BR_TODAY} - ${Math.floor(Number(value))}::int`;
+        case "older_days": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} < ${BR_TODAY} - ${Math.floor(Number(value))}::int`;
         case "before": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} < ${value}::date`;
         case "after": return Prisma.sql`${hasPurchase} AND ${LAST_PURCHASE_DATE} > ${value}::date`;
         case "between": {
@@ -301,13 +293,13 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
   }
 
   const withinDays = (days: number) =>
-    Prisma.sql`${LAST_PURCHASE_DATE} <= CURRENT_DATE AND ${LAST_PURCHASE_DATE} >= CURRENT_DATE - ${days}::int`;
+    Prisma.sql`${LAST_PURCHASE_DATE} <= ${BR_TODAY} AND ${LAST_PURCHASE_DATE} >= ${BR_TODAY} - ${days}::int`;
   switch (criterion.id) {
     case "criteria-30d": return withinDays(30);
     case "criteria-90d": return withinDays(90);
     case "criteria-180d": return withinDays(180);
     case "criteria-inactive-180d":
-      return Prisma.sql`${LAST_PURCHASE_DATE} < CURRENT_DATE - 180`;
+      return Prisma.sql`${LAST_PURCHASE_DATE} < ${BR_TODAY} - 180`;
     case "criteria-no-nps":
       return Prisma.sql`NOT EXISTS (SELECT 1 FROM "NpsResponse" n WHERE n."contactId" = c.id)`;
     case "criteria-low-nps":

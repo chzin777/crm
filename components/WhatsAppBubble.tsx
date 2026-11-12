@@ -16,7 +16,7 @@ type Props = {
 };
 
 export function WhatsAppBubble({ image, mediaLabel, headerText, headerValues = [], body, footer, values = [], buttons = [] }: Props) {
-  const time = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const time = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
   return (
     <div className="rounded-lg bg-[#efeae2] p-3 dark:bg-[#0b141a]" aria-label="Prévia da mensagem">
       <div className="w-fit max-w-[92%]">

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
 import { getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { phoneVariants } from "@/lib/chat/phone";
+import { formatBr } from "@/lib/br-time";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 
 export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string };
@@ -151,7 +152,7 @@ function campaignNote(job: DispatchJob) {
   if (job.status === "running") return `Disparo em andamento (${done} de ${job.total})`;
   if (job.status === "paused") return `Pausado: ${done} de ${job.total} processados · ${job.pause?.message ?? ""}`.trim();
   const skipped = job.skipped > 0 ? `, ${job.skipped} pulados (campanha nos últimos ${CONTACT_COOLDOWN_DAYS} dias)` : "";
-  return `${new Date().toLocaleString("pt-BR")} · ${job.sent} enviados, ${job.failed} falhas${skipped}`;
+  return `${formatBr(new Date(), { dateStyle: "short", timeStyle: "medium" })} · ${job.sent} enviados, ${job.failed} falhas${skipped}`;
 }
 
 async function syncCampaign(job: DispatchJob) {

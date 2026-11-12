@@ -1664,7 +1664,7 @@ export default function Home() {
                           <div key={obs.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-800/50">
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{obs.autor}</span>
-                              <span className="text-[9px] text-slate-400">{new Date(obs.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                              <span className="text-[9px] text-slate-400">{new Date(obs.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })}</span>
                             </div>
                             <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">{obs.texto}</p>
                           </div>

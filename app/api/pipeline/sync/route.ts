@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
+import { brDaysAgo } from "@/lib/br-time";
 import {
   STAGE_PROGRESS,
   orderedStages,
@@ -149,7 +150,8 @@ const LAST_PURCHASE_DATE = Prisma.sql`(CASE
 END)`;
 
 function buildCriteriaConditions(criteria: StageCriteria, now: Date): Prisma.Sql[] {
-  const daysAgo = (days: number) => new Date(now.getTime() - days * 86400000).toISOString().slice(0, 10);
+  // Dia de Brasília: toISOString() dá o dia UTC, um dia adiantado a partir das 21h.
+  const daysAgo = (days: number) => brDaysAgo(days, now);
   const conditions: Prisma.Sql[] = [];
   if (criteria.minCompras !== null) conditions.push(Prisma.sql`c.purchases >= ${criteria.minCompras}`);
   if (criteria.maxCompras !== null) conditions.push(Prisma.sql`c.purchases <= ${criteria.maxCompras}`);

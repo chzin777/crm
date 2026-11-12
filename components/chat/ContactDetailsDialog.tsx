@@ -20,7 +20,7 @@ const CATEGORY_LABELS: Record<string, string> = { cliente: "Cliente", lead: "Lea
 type Tab = "cadastro" | "atendimento" | "anotacoes";
 
 const dateTime = (value: string | null) =>
-  value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : null;
+  value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }) : null;
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const toast = useToast();
@@ -276,7 +276,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
           <div className="grid gap-3 sm:grid-cols-2">
             <Metric icon={ListOrdered} label="Fila atual" value={conversation.queue?.name ?? "Sem fila"} detail={attendance} />
             <Metric icon={MessagesSquare} label="Mensagens" value={profile ? profile.messageCount.toLocaleString("pt-BR") : "..."} detail={profile ? `${profile.conversationCount} ${profile.conversationCount === 1 ? "atendimento" : "atendimentos"}` : "Carregando..."} />
-            <Metric icon={CalendarClock} label="Primeira mensagem do dia" value={firstToday ? clockTime(firstToday) : "Sem mensagens hoje"} detail={firstToday ? new Date(firstToday).toLocaleDateString("pt-BR") : "Nada trocado hoje"} />
+            <Metric icon={CalendarClock} label="Primeira mensagem do dia" value={firstToday ? clockTime(firstToday) : "Sem mensagens hoje"} detail={firstToday ? new Date(firstToday).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "Nada trocado hoje"} />
             <Metric icon={Hourglass} label="Tempo de espera" value={waiting || "Sem espera"} detail={waiting ? "Aguardando atendente" : "Não está na fila de espera"} />
           </div>
 
@@ -310,7 +310,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
                 {conversation.campaigns.map((campaign) => (
                   <div key={campaign.id} className="flex items-center justify-between gap-3">
                     <CampaignBadge name={campaign.name} className="min-w-0" />
-                    <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{new Date(campaign.repliedAt).toLocaleDateString("pt-BR")}</span>
+                    <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{new Date(campaign.repliedAt).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</span>
                   </div>
                 ))}
               </div>
@@ -322,7 +322,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
               <div className="space-y-2">
                 {conversation.previous.map((item) => (
                   <button key={item.id} type="button" onClick={() => onOpenConversation(item.id)} className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-xs hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-white/5">
-                    <span className="text-slate-700 dark:text-slate-200">{new Date(item.createdAt).toLocaleDateString("pt-BR")}{item.queue ? ` · ${item.queue.name}` : ""}</span>
+                    <span className="text-slate-700 dark:text-slate-200">{new Date(item.createdAt).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}{item.queue ? ` · ${item.queue.name}` : ""}</span>
                     <span className="text-slate-500 dark:text-slate-400">{STATUS_LABELS[item.status]}</span>
                   </button>
                 ))}

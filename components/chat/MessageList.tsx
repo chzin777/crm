@@ -144,7 +144,7 @@ type Props = {
 /** Mensagem agendada: balão pontilhado no fim da conversa, até o relógio enviar. */
 function ScheduledBubble({ item, onCancel }: { item: ScheduledMessageItem; onCancel?: (id: string) => void }) {
   const failed = item.status === "FAILED";
-  const when = new Date(item.scheduledFor).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const when = new Date(item.scheduledFor).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
   return (
     <div className="flex justify-end">
       <div className={`max-w-[75%] rounded-2xl rounded-br-sm border border-dashed px-3 py-1.5 2xl:px-4 2xl:py-2.5 ${failed ? "border-red-300 bg-red-50/80 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200" : "border-[#002187]/40 bg-white/70 text-slate-700 dark:border-[#C4D600]/40 dark:bg-white/5 dark:text-slate-200"}`}>

@@ -10,6 +10,7 @@ import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, Pagination, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import type { CompareMode, CustomerDashboard, CustomerPeriodPreset, HealthSegment } from "@/lib/customer-dashboard";
+import { brDay } from "@/lib/br-time";
 
 type Options = { stores: { id: string; name: string }[]; sellers: string[] };
 type Filters = { preset: CustomerPeriodPreset; start: string; end: string; compare: CompareMode; store: string; seller: string; inactiveDays: number };
@@ -37,7 +38,7 @@ const SEGMENTS: Record<HealthSegment, { label: string; text: string; icon: React
   dormente: { label: "Dormentes", text: "Compra única antiga ou mais de 2 anos sem comprar.", icon: Moon, tone: "slate", bar: "bg-slate-300 dark:bg-slate-600" },
 };
 
-const todayBrt = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const todayBrt = () => brDay();
 const formatDay = (day: string) => day.split("-").reverse().join("/");
 const formatInt = (value: number) => Math.round(value).toLocaleString("pt-BR");
 const formatMoney = (value: number | null, digits = 0) => value === null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: digits, maximumFractionDigits: digits });

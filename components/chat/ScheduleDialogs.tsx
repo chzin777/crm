@@ -2,24 +2,18 @@
 import { useState } from "react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { fieldClass } from "@/components/chat/MenuFormParts";
+import { brClock, brDay, brNextBusinessDay, brWallTime } from "@/lib/br-time";
 
 const LABEL = "mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300";
 const PRESET = "cursor-pointer rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5";
 const PRIMARY = "h-10 cursor-pointer rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647]";
 const CANCEL = "h-10 cursor-pointer rounded-lg px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800";
 
+// Data e hora dos campos são sempre de Brasília, mesmo com o navegador em outro fuso.
 const pad = (value: number) => String(value).padStart(2, "0");
-const dateValue = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-const timeValue = (date: Date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-
-/** Dia útil seguinte (pula sábado e domingo) às `hour`. */
-function nextBusinessDay(daysAhead: number, hour: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + daysAhead);
-  while (date.getDay() === 0 || date.getDay() === 6) date.setDate(date.getDate() + 1);
-  date.setHours(hour, 0, 0, 0);
-  return date;
-}
+const dateValue = (date: Date) => brDay(date);
+const timeValue = (date: Date) => { const clock = brClock(date); return `${pad(clock.hour)}:${pad(clock.minute)}`; };
+const nextBusinessDay = (daysAhead: number, hour: number) => brNextBusinessDay(daysAhead, hour);
 
 type Preset = { label: string; at: () => Date };
 
@@ -47,10 +41,8 @@ function WhenFields({ date, time, onChange, presets }: { date: string; time: str
   );
 }
 
-const toIso = (date: string, time: string) => {
-  const value = new Date(`${date}T${time}`);
-  return Number.isNaN(value.getTime()) ? null : value.toISOString();
-};
+/** "2026-11-13" + "09:00" de Brasília → ISO UTC (12:00Z); antes usava o fuso do navegador. */
+const toIso = (date: string, time: string) => brWallTime(date, time)?.toISOString() ?? null;
 
 async function post(url: string, body: unknown) {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);

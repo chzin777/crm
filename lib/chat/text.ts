@@ -1,3 +1,5 @@
+import { brClock } from "@/lib/br-time";
+
 /** Troca travessões por hífen na saída para o cliente. */
 export function withoutDashes(text: string) {
   return text.replace(/\s*[—–]\s*/g, " - ").replace(/ {2,}/g, " ");
@@ -20,8 +22,9 @@ export const TEXT_VARIABLES = [
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? "";
 
+/** Saudação pela hora de Brasília: no servidor (UTC) getHours() dava "boa noite" às 15h. */
 export function greetingFor(now: Date) {
-  const hour = now.getHours();
+  const { hour } = brClock(now);
   if (hour < 12) return "bom dia";
   if (hour < 18) return "boa tarde";
   return "boa noite";

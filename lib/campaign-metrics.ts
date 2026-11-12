@@ -135,7 +135,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       COALESCE("invoiceNumber", '') AS "invoiceNumber", COALESCE("description", '') AS description, "syncedAt"
     FROM "VmsetSale"
     WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "orderDate" >= ${firstDay}::date
-      AND ("type" = 'Devolucao Cliente' OR ("type" = 'Venda' AND "orderDate" <= ${addDays(new Date().toISOString().slice(0, 10), 1)}::date))
+      AND ("type" = 'Devolucao Cliente' OR ("type" = 'Venda' AND "orderDate" <= ${addDays(brDay(), 1)}::date))
   `;
   const sales = buildOrders(rows.map((row) => ({ ...row, amount: row.amount === null ? null : Number(row.amount), syncedAt: row.syncedAt ? new Date(row.syncedAt) : null })));
 

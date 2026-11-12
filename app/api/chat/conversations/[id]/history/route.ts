@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { conversationNotFound, findScopedConversation, requireChatActor } from "@/lib/chat/access";
 import { campaignNames } from "@/lib/chat/campaign-origin";
 import { phoneVariants } from "@/lib/chat/phone";
+import { brDay } from "@/lib/br-time";
 import type { CustomerHistory } from "@/lib/chat/types";
 
 type Context = { params: Promise<{ id: string }> };
@@ -74,7 +75,7 @@ export async function GET(_request: Request, context: Context) {
 
   const lastLens = lens[0]?.dia ?? null;
   const expiry = parseDay(contact.prescriptionExpiry);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = brDay();
   const renewalDue = expiry
     ? expiry <= today
     : !!lastLens && Date.now() - new Date(`${lastLens}T12:00:00Z`).getTime() > RENEWAL_DAYS * 24 * 60 * 60 * 1000;

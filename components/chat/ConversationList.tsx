@@ -80,7 +80,7 @@ function cornerTime(item: ConversationItem, waiting: boolean) {
   return { text, title: `Esperando há ${text}`, tone };
 }
 
-const dueLabel = (value: string) => new Date(value).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const dueLabel = (value: string) => new Date(value).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
 
 /** Lembrete de retorno pendente vira o selo da linha 3 (mais urgente que a origem). */
 function followUpOf(item: ConversationItem): Origin | null {

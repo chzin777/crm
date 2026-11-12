@@ -181,7 +181,7 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
               <>
                 <div className="rounded-lg bg-[#efeae2] p-3 dark:bg-[#0b141a]" aria-label="Prévia do modelo">
                   <div className="ml-auto w-fit max-w-[85%] space-y-1">
-                    <Bubble time={new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}>
+                    <Bubble time={new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })}>
                       {needsImage && selected.headerImageUrl && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={selected.headerImageUrl} alt="Imagem do cabeçalho" className="max-h-44 w-full rounded-md object-cover" />

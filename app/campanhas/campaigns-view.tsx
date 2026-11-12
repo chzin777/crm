@@ -139,7 +139,7 @@ const formatFileSize = (size: number) => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 const int = (value: number) => value.toLocaleString("pt-BR");
-const formatDateTime = (value?: string) => (value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
+const formatDateTime = (value?: string) => (value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }) : "—");
 
 const displayStyles: Record<DisplayStatus, string> = {
   Rascunho: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",

@@ -1,13 +1,9 @@
 /** Regra pura de atribuição de venda a um disparo, separada de campaign-metrics para poder ser testada. */
 
-/** Dia (AAAA-MM-DD) no fuso de Brasília: as vendas do ERP só têm data, sem hora. */
-export const brDay = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(date);
+import { addDays, brDay } from "@/lib/br-time";
 
-export const addDays = (day: string, days: number) => {
-  const date = new Date(`${day}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-};
+/** Dia no fuso de Brasília: as vendas do ERP só têm data, sem hora. */
+export { addDays, brDay };
 
 export type AttributionInput = {
   /** Dia do pedido no ERP (AAAA-MM-DD). */

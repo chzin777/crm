@@ -155,7 +155,7 @@ export default function NpsPage() {
     survey: surveys.find((survey) => survey.key === response.surveyKey)?.title ?? response.surveyKey,
     rating: response.rating,
     comment: response.comment ?? "",
-    date: new Date(response.createdAt).toLocaleString("pt-BR"),
+    date: new Date(response.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
   }));
   const weeklyTrend = currentDate ? Array.from({ length: 6 }, (_, index) => {
     const start = new Date(currentDate);

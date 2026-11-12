@@ -1,3 +1,5 @@
+import { addDays, brDay, brStartOfDay, formatBr } from "@/lib/br-time";
+
 export function relativeTime(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -6,13 +8,12 @@ export function relativeTime(value: string | null) {
   if (minutes < 60) return `${minutes}min`;
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
   if (minutes < 10080) return `${Math.floor(minutes / 1440)}d`;
-  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  return formatBr(date, { day: "2-digit", month: "short" });
 }
 
 /** O dia do atendimento é o de Brasília, não o do fuso do servidor. */
 export function startOfBrazilDay() {
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-  return new Date(`${day}T00:00:00-03:00`);
+  return brStartOfDay();
 }
 
 /** O ERP grava CPF sem zeros à esquerda; valor fora do padrão aparece como veio. */
@@ -21,15 +22,15 @@ export function formatCpf(value: string) {
   return digits.length === 11 ? digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4") : value;
 }
 
-export const clockTime =(value: string) => new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+export const clockTime = (value: string) => formatBr(value, { hour: "2-digit", minute: "2-digit" });
 
-export function dayLabel(value: string) {
-  const date = new Date(value);
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 86400000);
-  if (date.toDateString() === today.toDateString()) return "Hoje";
-  if (date.toDateString() === yesterday.toDateString()) return "Ontem";
-  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+/** "Hoje", "Ontem" ou a data, pelos dias de Brasília. */
+export function dayLabel(value: string, now: Date = new Date()) {
+  const day = brDay(new Date(value));
+  const today = brDay(now);
+  if (day === today) return "Hoje";
+  if (day === addDays(today, -1)) return "Ontem";
+  return formatBr(value, { day: "2-digit", month: "long", year: "numeric" });
 }
 
 export function waitingLabel(since: string | null) {
