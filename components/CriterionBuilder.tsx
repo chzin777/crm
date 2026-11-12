@@ -378,6 +378,8 @@ function SelectEditor({ card, rule, update }: EditorProps) {
   );
 }
 
+const filterLabelClass = "mb-1.5 block truncate whitespace-nowrap text-xs font-medium leading-none text-slate-500 dark:text-slate-400";
+
 function PurchaseEditor({ rule, update }: EditorProps) {
   const mode = (["today", "yesterday", "within_days", "between"].includes(rule.operador) ? rule.operador : "yesterday") as "today" | "yesterday" | "within_days" | "between";
   const filters = rule.filtros ?? {};
@@ -409,19 +411,23 @@ function PurchaseEditor({ rule, update }: EditorProps) {
           <input type="date" aria-label="Data final" value={rule.valor2 ?? ""} onChange={(event) => update({ valor2: event.target.value })} className={`${fieldClass} w-auto`} />
         </div>
       )}
-      <div className="grid gap-2 sm:grid-cols-3">
-        <label className="block space-y-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-          Loja (opcional)
-          <input value={filters.loja ?? ""} onChange={(event) => setFilter({ loja: event.target.value })} placeholder="Ex.: 12" className={fieldClass} />
-        </label>
-        <div className="space-y-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-          <span>Pedido a partir de (opcional)</span>
-          <MoneyInput label="Valor mínimo do pedido" value={filters.valorMin} onChange={(value) => setFilter({ valorMin: value })} />
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Filtros adicionais (opcionais)</p>
+        {/* items-end: mesmo que um rótulo quebre linha em tela estreita, as caixas ficam niveladas pela base. */}
+        <div className="grid items-end gap-2 sm:grid-cols-3">
+          <label className="flex min-w-0 flex-col justify-end">
+            <span className={filterLabelClass}>Loja</span>
+            <input value={filters.loja ?? ""} onChange={(event) => setFilter({ loja: event.target.value })} placeholder="Ex.: 12" className={fieldClass} />
+          </label>
+          <div className="flex min-w-0 flex-col justify-end">
+            <span className={filterLabelClass} aria-hidden="true">Valor mínimo</span>
+            <MoneyInput label="Valor mínimo do pedido" value={filters.valorMin} onChange={(value) => setFilter({ valorMin: value })} />
+          </div>
+          <label className="flex min-w-0 flex-col justify-end">
+            <span className={filterLabelClass}>Produto / Categoria</span>
+            <input value={filters.produto ?? ""} onChange={(event) => setFilter({ produto: event.target.value })} placeholder="Ex.: lente, armação" className={fieldClass} />
+          </label>
         </div>
-        <label className="block space-y-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-          Produto ou categoria (opcional)
-          <input value={filters.produto ?? ""} onChange={(event) => setFilter({ produto: event.target.value })} placeholder="Ex.: lente, armação" className={fieldClass} />
-        </label>
       </div>
     </div>
   );
