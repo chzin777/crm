@@ -698,6 +698,28 @@ export function CampaignsView() {
     setIsCreateOpen(true);
   };
 
+  /** Abre a criação com o segmento já escolhido como público (atalho vindo de /segmentos). */
+  const openCreateFromSegment = (segment: CampaignAudienceSegment | undefined) => {
+    openCreateCampaign();
+    if (!segment) return;
+    setSelectedAudienceSegments([segment.nome]);
+    setForm((current) => ({ ...current, nome: `Campanha · ${segment.nome}` }));
+  };
+
+  // Vindo de /campanhas/nova?segmentoId=…: abre a criação uma vez e depois limpa a URL.
+  const newFromSegmentHandled = useRef(false);
+  useEffect(() => {
+    if (newFromSegmentHandled.current || segmentsLoading || searchParams.get("nova") !== "1") return;
+    newFromSegmentHandled.current = true;
+    openCreateFromSegment(segments.find((item) => item.id === searchParams.get("segmentoId")));
+    const params = new URLSearchParams(window.location.search);
+    params.delete("nova");
+    params.delete("segmentoId");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- roda uma vez, quando os segmentos terminam de carregar
+  }, [segmentsLoading, segments, searchParams]);
+
   /** Calcula os destinatários de cada campanha a partir dos segmentos (usado no disparo e na estimativa de custo). */
   const buildCampaignRecipients = async (readyCampaigns: Campaign[]) => {
     const groups: Record<string, AudienceCriterion[]> = {};

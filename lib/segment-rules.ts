@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { STAGE_DEFINITIONS } from "@/lib/pipeline-stages";
 
-export type RuleFieldType = "number" | "date" | "text" | "select" | "presence";
+export type RuleFieldType = "number" | "date" | "text" | "select" | "presence" | "purchase" | "campaign";
 
 export interface RuleOperator {
   id: string;
@@ -56,7 +56,23 @@ const presenceOperators: RuleOperator[] = [
   { id: "empty", label: "está vazio", input: "none" },
 ];
 
+// Pedido no ERP numa janela de datas (dia de Brasília), com filtros opcionais do próprio pedido.
+const purchaseOperators: RuleOperator[] = [
+  { id: "today", label: "hoje", input: "none" },
+  { id: "yesterday", label: "ontem", input: "none" },
+  { id: "within_days", label: "nos últimos (dias)", input: "one" },
+  { id: "between", label: "entre as datas", input: "two" },
+];
+
+// valor = id do disparo (CampaignMessage.campaignId); valor2 = nome exibido.
+const campaignOperators: RuleOperator[] = [
+  { id: "converted", label: "converteram após receber", input: "one" },
+  { id: "not_converted", label: "receberam e não compraram", input: "one" },
+];
+
 export const ruleFields: RuleField[] = [
+  { id: "erpPurchase", label: "Comprou no ERP", type: "purchase" },
+  { id: "campaignConversion", label: "Campanha", type: "campaign" },
   { id: "purchases", label: "Quantidade de pedidos (ERP)", type: "number" },
   { id: "avgTicket", label: "Ticket médio (R$)", type: "number" },
   { id: "totalSpent", label: "Total gasto acumulado – LTV (R$)", type: "number" },
@@ -114,6 +130,8 @@ export const operatorsByType: Record<RuleFieldType, RuleOperator[]> = {
   text: textOperators,
   select: selectOperators,
   presence: presenceOperators,
+  purchase: purchaseOperators,
+  campaign: campaignOperators,
 };
 
 export const getRuleField = (id: string) => ruleFields.find((field) => field.id === id);
@@ -131,9 +149,18 @@ export const ruleSchema = z.object({
   operador: z.string().max(40),
   valor: z.string().max(200).optional(),
   valor2: z.string().max(200).optional(),
+  /** Só para "Comprou no ERP": restringe o pedido por loja, valor mínimo e produto/categoria. */
+  filtros: z.object({
+    loja: z.string().max(100).optional(),
+    valorMin: z.string().max(20).optional(),
+    produto: z.string().max(100).optional(),
+  }).optional(),
 });
 
 export type SegmentRule = z.infer<typeof ruleSchema>;
+
+/** Como as regras de um critério se combinam: todas (E) ou qualquer uma (OU). */
+export type RuleMatch = "all" | "any";
 
 export const MAX_RULES = 20;
 
@@ -154,14 +181,17 @@ export function validateRule(rule: SegmentRule): string | null {
   if (!field) return "Selecione o campo da regra.";
   const operator = getOperator(rule.campo, rule.operador);
   if (!operator) return `Selecione a condição para "${field.label}".`;
+  if (field.type === "purchase" && rule.filtros?.valorMin && !isNumeric(rule.filtros.valorMin)) return "Informe um valor mínimo de pedido válido.";
+  if (field.type === "campaign") return rule.valor?.trim() ? null : "Selecione a campanha.";
+  if (field.type === "purchase" && operator.id === "within_days" && !(Number(rule.valor) >= 1)) return "Informe ao menos 1 dia em \"Comprou no ERP\".";
   if (operator.input === "none") return null;
 
   const values = operator.input === "two" ? [rule.valor, rule.valor2] : [rule.valor];
   for (const value of values) {
-    if (field.type === "number" || (field.type === "date" && operator.id.endsWith("_days"))) {
+    if (field.type === "number" || ((field.type === "date" || field.type === "purchase") && operator.id.endsWith("_days"))) {
       if (!isNumeric(value)) return `Informe um número válido para "${field.label}".`;
       if (field.type === "date" && Number(value) < 0) return `Informe um número de dias válido para "${field.label}".`;
-    } else if (field.type === "date") {
+    } else if (field.type === "date" || field.type === "purchase") {
       if (!isIsoDate(value)) return `Escolha a data para "${field.label}".`;
     } else if (field.type === "select") {
       if (!field.options?.some((option) => option.value === value)) return `Selecione um valor para "${field.label}".`;
@@ -181,6 +211,21 @@ export function describeRule(rule: SegmentRule): string {
   const field = getRuleField(rule.campo);
   const operator = getOperator(rule.campo, rule.operador);
   if (!field || !operator) return "Regra inválida";
+  if (field.type === "campaign") {
+    const name = `"${rule.valor2 || rule.valor || ""}"`;
+    return operator.id === "converted" ? `Converteram após receber a campanha ${name}` : `Receberam a campanha ${name} e não compraram`;
+  }
+  if (field.type === "purchase") {
+    const br = (value?: string) => (value ?? "").split("-").reverse().join("/");
+    const when = operator.id === "today" ? "hoje" : operator.id === "yesterday" ? "ontem"
+      : operator.id === "within_days" ? `nos últimos ${rule.valor} dia(s)` : `entre ${br(rule.valor)} e ${br(rule.valor2)}`;
+    const extras = [
+      rule.filtros?.loja ? `loja ${rule.filtros.loja}` : "",
+      rule.filtros?.valorMin ? `pedido a partir de R$ ${Number(rule.filtros.valorMin).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "",
+      rule.filtros?.produto ? `produto/categoria contém "${rule.filtros.produto}"` : "",
+    ].filter(Boolean);
+    return `Comprou ${when}${extras.length ? ` (${extras.join(", ")})` : ""}`;
+  }
   const format = (value?: string) => {
     if (field.type === "select") return field.options?.find((option) => option.value === value)?.label ?? value ?? "";
     if (field.type === "date" && !operator.id.endsWith("_days") && value) return value.split("-").reverse().join("/");

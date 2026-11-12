@@ -10,7 +10,10 @@ import {
   Layers,
   MapPin,
   MapPinned,
+  Megaphone,
   MessageSquareHeart,
+  ShoppingCart,
+  TrendingUp,
   Phone,
   PhoneCall,
   Receipt,
@@ -24,20 +27,32 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { getRuleField, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
+import { getRuleField, splitRuleList, validateRule, type RuleMatch, type SegmentRule } from "@/lib/segment-rules";
+import { formatPhone } from "@/lib/chat/phone";
 
 type FieldId =
+  | "erpPurchase" | "campaignConversion"
   | "lastPurchase" | "avgTicket" | "totalSpent" | "purchases"
   | "ddd" | "state" | "city" | "neighborhood" | "tag" | "phone" | "email" | "gender" | "occupation"
   | "pipelineStage" | "category" | "npsAnswered" | "npsRating" | "segment";
 
-type EditorKind = "days" | "money" | "count" | "number" | "chips" | "text" | "presence" | "select";
+type EditorKind = "days" | "money" | "count" | "number" | "chips" | "text" | "presence" | "select" | "purchase" | "campaign";
 
 type CardDef = { id: FieldId; title: string; description: string; icon: LucideIcon; editor: EditorKind; chipHint?: string };
 
 type GroupDef = { id: string; label: string; description: string; icon: LucideIcon; cards: CardDef[] };
 
 export const CRITERION_GROUPS: GroupDef[] = [
+  {
+    id: "vendas",
+    label: "Vendas e campanhas",
+    description: "Compras recentes no ERP e conversão de disparos.",
+    icon: TrendingUp,
+    cards: [
+      { id: "erpPurchase", title: "Compra recente no ERP", description: "Comprou hoje, ontem, nos últimos dias ou num período.", icon: ShoppingCart, editor: "purchase" },
+      { id: "campaignConversion", title: "Conversão em campanha", description: "Comprou (ou não) depois de receber um disparo.", icon: Megaphone, editor: "campaign" },
+    ],
+  },
   {
     id: "compras",
     label: "Histórico de compras",
@@ -94,6 +109,8 @@ function defaultRule(card: CardDef): SegmentRule {
     case "text": return { campo: card.id, operador: "contains", valor: "" };
     case "presence": return { campo: card.id, operador: "filled" };
     case "select": return { campo: card.id, operador: "eq", valor: getRuleField(card.id)?.options?.[0]?.value ?? "" };
+    case "purchase": return { campo: card.id, operador: "yesterday" };
+    case "campaign": return { campo: card.id, operador: "converted", valor: "" };
   }
 }
 
@@ -361,8 +378,110 @@ function SelectEditor({ card, rule, update }: EditorProps) {
   );
 }
 
+function PurchaseEditor({ rule, update }: EditorProps) {
+  const mode = (["today", "yesterday", "within_days", "between"].includes(rule.operador) ? rule.operador : "yesterday") as "today" | "yesterday" | "within_days" | "between";
+  const filters = rule.filtros ?? {};
+  const setFilter = (patch: Partial<NonNullable<SegmentRule["filtros"]>>) => {
+    const next = { ...filters, ...patch };
+    const clean = Object.fromEntries(Object.entries(next).filter(([, value]) => value)) as NonNullable<SegmentRule["filtros"]>;
+    update({ filtros: Object.keys(clean).length ? clean : undefined });
+  };
+  return (
+    <div className="space-y-3">
+      <Pills
+        label="Quando comprou"
+        value={mode}
+        onChange={(next) => update({ operador: next, valor: next === "within_days" ? "7" : "", valor2: "" })}
+        options={[
+          { value: "today", label: "Hoje" },
+          { value: "yesterday", label: "Ontem" },
+          { value: "within_days", label: "Nos últimos" },
+          { value: "between", label: "Entre datas" },
+        ]}
+      />
+      {mode === "within_days" && (
+        <div className="w-36"><NumberInput label="Quantidade de dias" value={rule.valor} onChange={(value) => update({ valor: value })} suffix="dias" placeholder="7" /></div>
+      )}
+      {mode === "between" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="date" aria-label="Data inicial" value={rule.valor ?? ""} onChange={(event) => update({ valor: event.target.value })} className={`${fieldClass} w-auto`} />
+          <span className="text-xs text-slate-400">até</span>
+          <input type="date" aria-label="Data final" value={rule.valor2 ?? ""} onChange={(event) => update({ valor2: event.target.value })} className={`${fieldClass} w-auto`} />
+        </div>
+      )}
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label className="block space-y-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+          Loja (opcional)
+          <input value={filters.loja ?? ""} onChange={(event) => setFilter({ loja: event.target.value })} placeholder="Ex.: 12" className={fieldClass} />
+        </label>
+        <div className="space-y-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+          <span>Pedido a partir de (opcional)</span>
+          <MoneyInput label="Valor mínimo do pedido" value={filters.valorMin} onChange={(value) => setFilter({ valorMin: value })} />
+        </div>
+        <label className="block space-y-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+          Produto ou categoria (opcional)
+          <input value={filters.produto ?? ""} onChange={(event) => setFilter({ produto: event.target.value })} placeholder="Ex.: lente, armação" className={fieldClass} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+type CampaignOption = { id: string; nome: string; enviadaEm: string; enviados: number };
+let campaignOptionsRequest: Promise<CampaignOption[]> | null = null;
+const loadCampaignOptions = () => {
+  campaignOptionsRequest ??= fetch("/api/segments/campaigns", { cache: "no-store" })
+    .then(async (response) => {
+      const body = (await response.json().catch(() => null)) as { data?: CampaignOption[]; error?: string } | null;
+      if (!response.ok) throw new Error(body?.error ?? "Não foi possível carregar as campanhas.");
+      return body?.data ?? [];
+    })
+    .catch((error: unknown) => { campaignOptionsRequest = null; throw error; });
+  return campaignOptionsRequest;
+};
+const sentLabel = (iso: string) => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+
+function CampaignEditor({ rule, update }: EditorProps) {
+  const [options, setOptions] = useState<CampaignOption[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    loadCampaignOptions().then((data) => { if (active) setOptions(data); }).catch((err: unknown) => { if (active) setError(err instanceof Error ? err.message : "Não foi possível carregar as campanhas."); });
+    return () => { active = false; };
+  }, []);
+  return (
+    <div className="space-y-3">
+      <Pills
+        label="Resultado"
+        value={rule.operador === "not_converted" ? "not_converted" : "converted"}
+        onChange={(next) => update({ operador: next })}
+        options={[{ value: "converted", label: "Converteram após receber" }, { value: "not_converted", label: "Receberam e não compraram" }]}
+      />
+      <select
+        aria-label="Campanha"
+        value={rule.valor ?? ""}
+        disabled={!options}
+        onChange={(event) => {
+          const option = options?.find((item) => item.id === event.target.value);
+          update({ valor: event.target.value, valor2: option ? `${option.nome} (${sentLabel(option.enviadaEm)})` : "" });
+        }}
+        className={`${fieldClass} cursor-pointer`}
+      >
+        <option value="">{options ? (options.length ? "Selecione a campanha" : "Nenhum disparo enviado ainda") : "Carregando campanhas..."}</option>
+        {options?.map((option) => (
+          <option key={option.id} value={option.id}>{option.nome} · {sentLabel(option.enviadaEm)} · {option.enviados.toLocaleString("pt-BR")} enviados</option>
+        ))}
+      </select>
+      {error && <p className="text-[11px] font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
+      <p className="text-[11px] text-slate-400">Mesma regra das métricas da campanha: compra no ERP depois do envio e dentro da janela de conversão. Só contam mensagens entregues.</p>
+    </div>
+  );
+}
+
 function Editor(props: EditorProps) {
   switch (props.card.editor) {
+    case "purchase": return <PurchaseEditor {...props} />;
+    case "campaign": return <CampaignEditor {...props} />;
     case "days": return <DaysEditor {...props} />;
     case "money": return <RangeEditor {...props} money />;
     case "count": return <CountEditor {...props} />;
@@ -414,7 +533,7 @@ function CriterionCard({ card, rule, onToggle, update }: { card: CardDef; rule: 
  * Construtor de critérios: um card por campo, agrupado por tema. Ligar o card cria a regra; desligar remove.
  * Regras antigas de campos sem card continuam preservadas e são listadas no fim.
  */
-export function CriterionBuilder({ rules, onChange }: { rules: SegmentRule[]; onChange: (rules: SegmentRule[]) => void }) {
+export function CriterionBuilder({ rules, onChange, match = "all", onMatchChange }: { rules: SegmentRule[]; onChange: (rules: SegmentRule[]) => void; match?: RuleMatch; onMatchChange?: (match: RuleMatch) => void }) {
   const [groupId, setGroupId] = useState(CRITERION_GROUPS[0].id);
   const group = CRITERION_GROUPS.find((item) => item.id === groupId) ?? CRITERION_GROUPS[0];
   const ruleFor = (id: FieldId) => rules.find((rule) => rule.campo === id);
@@ -427,7 +546,18 @@ export function CriterionBuilder({ rules, onChange }: { rules: SegmentRule[]; on
 
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="Grupos de critérios" className="grid gap-2 sm:grid-cols-3">
+      {onMatchChange && rules.length >= 2 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-[#07194f]/60">
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Combinar os {rules.length} filtros:</span>
+          <Pills
+            label="Como combinar os filtros"
+            value={match}
+            onChange={onMatchChange}
+            options={[{ value: "all", label: "Todos (E)" }, { value: "any", label: "Qualquer um (OU)" }]}
+          />
+        </div>
+      )}
+      <div role="tablist" aria-label="Grupos de critérios" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {CRITERION_GROUPS.map((item) => {
           const Icon = item.icon;
           const count = item.cards.filter((card) => ruleFor(card.id)).length;
@@ -469,15 +599,20 @@ export function CriterionBuilder({ rules, onChange }: { rules: SegmentRule[]; on
   );
 }
 
-/** Contagem ao vivo do público: só regras completas entram; responde ~0,5 s após a última alteração. */
-export function useAudiencePreview(rules: SegmentRule[]) {
-  const [state, setState] = useState<{ loading: boolean; count: number | null; error: string }>({ loading: false, count: null, error: "" });
+export type AudienceSample = { id: string; nome: string; telefone: string; ultimaCompra: string | null; valorUltimaCompra: number | null };
+export type AudiencePreview = { loading: boolean; count: number | null; error: string; sample: AudienceSample[]; incomplete: number };
+
+const PREVIEW_SAMPLE = 8;
+
+/** Contagem ao vivo do público (com amostra dos primeiros contatos): só regras completas entram; responde ~0,5 s após a última alteração. */
+export function useAudiencePreview(rules: SegmentRule[], match: RuleMatch = "all"): AudiencePreview {
+  const [state, setState] = useState<{ loading: boolean; count: number | null; error: string; sample: AudienceSample[] }>({ loading: false, count: null, error: "", sample: [] });
   const valid = rules.filter((rule) => !validateRule(rule));
-  const signature = JSON.stringify(valid);
+  const signature = JSON.stringify({ valid, match });
   useEffect(() => {
-    const current = JSON.parse(signature) as SegmentRule[];
-    if (current.length === 0) {
-      setState({ loading: false, count: null, error: "" });
+    const current = JSON.parse(signature) as { valid: SegmentRule[]; match: RuleMatch };
+    if (current.valid.length === 0) {
+      setState({ loading: false, count: null, error: "", sample: [] });
       return;
     }
     const controller = new AbortController();
@@ -486,16 +621,16 @@ export function useAudiencePreview(rules: SegmentRule[]) {
       fetch("/api/segments/audience", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ groups: { preview: [{ id: "preview", nome: "Prévia", tipo: "geral", regras: current }] } }),
+        body: JSON.stringify({ groups: { preview: [{ id: "preview", nome: "Prévia", tipo: "geral", regras: current.valid, combinar: current.match }] }, sample: PREVIEW_SAMPLE }),
         signal: controller.signal,
       })
         .then(async (response) => {
-          const body = (await response.json().catch(() => null)) as { counts?: Record<string, number>; error?: string } | null;
+          const body = (await response.json().catch(() => null)) as { counts?: Record<string, number>; samples?: Record<string, AudienceSample[]>; error?: string } | null;
           if (!response.ok) throw new Error(body?.error ?? "Não foi possível calcular o público.");
-          setState({ loading: false, count: body?.counts?.preview ?? 0, error: "" });
+          setState({ loading: false, count: body?.counts?.preview ?? 0, error: "", sample: body?.samples?.preview ?? [] });
         })
         .catch((error: unknown) => {
-          if (!controller.signal.aborted) setState({ loading: false, count: null, error: error instanceof Error ? error.message : "Não foi possível calcular o público." });
+          if (!controller.signal.aborted) setState({ loading: false, count: null, error: error instanceof Error ? error.message : "Não foi possível calcular o público.", sample: [] });
         });
     }, 500);
     return () => {
@@ -506,8 +641,45 @@ export function useAudiencePreview(rules: SegmentRule[]) {
   return { ...state, incomplete: rules.length - valid.length };
 }
 
-export function AudienceCounter({ rules }: { rules: SegmentRule[] }): ReactNode {
-  const preview = useAudiencePreview(rules);
+const dayBr = (day: string) => day.split("-").reverse().join("/");
+const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+/** Primeiros contatos do público, para conferir na hora se o filtro pegou as pessoas certas. */
+export function AudiencePreviewList({ preview }: { preview: AudiencePreview }): ReactNode {
+  if (preview.count === null && !preview.loading) return null;
+  return (
+    <section aria-label="Prévia do público" className="rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-[#07194f]">
+      <header className="flex items-baseline justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Prévia do público</h3>
+        <span className={`text-xs text-slate-500 dark:text-slate-400 ${preview.loading ? "opacity-50" : ""}`}>
+          <b className="tabular-nums text-slate-900 dark:text-white">{preview.count === null ? "…" : preview.count.toLocaleString("pt-BR")}</b> clientes encontrados
+        </span>
+      </header>
+      {preview.sample.length === 0 ? (
+        <p className="px-4 py-6 text-center text-xs text-slate-400">{preview.loading ? "Buscando contatos..." : "Nenhum contato atende aos filtros."}</p>
+      ) : (
+        <ul className={`divide-y divide-slate-100 transition-opacity dark:divide-slate-800 ${preview.loading ? "opacity-50" : ""}`}>
+          {preview.sample.map((contact) => (
+            <li key={contact.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+              <p className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{contact.nome}</span>
+                <span className="shrink-0 text-xs tabular-nums text-slate-400">{contact.telefone ? formatPhone(contact.telefone) : "sem telefone"}</span>
+              </p>
+              <p className="shrink-0 text-right text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                {contact.ultimaCompra ? <>Última compra {dayBr(contact.ultimaCompra)}{contact.valorUltimaCompra ? <> · <span className="font-semibold text-emerald-600 dark:text-emerald-400">{brl(contact.valorUltimaCompra)}</span></> : null}</> : "Sem compra no ERP"}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {preview.count !== null && preview.count > preview.sample.length && preview.sample.length > 0 && (
+        <p className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400 dark:border-slate-800">Amostra de {preview.sample.length} de {preview.count.toLocaleString("pt-BR")} contatos.</p>
+      )}
+    </section>
+  );
+}
+
+export function AudienceCounter({ preview }: { preview: AudiencePreview }): ReactNode {
   return (
     <div role="status" aria-live="polite" className="flex min-w-0 items-center gap-3">
       <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${preview.count !== null ? "bg-[#C4D600] text-[#051647]" : "bg-slate-100 text-slate-400 dark:bg-slate-800"}`}>

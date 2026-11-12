@@ -33,9 +33,13 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
   const [templates, setTemplates] = useState<ApiTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Recarrega a lista depois de criar um modelo em /modelos (aberto em outra aba).
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setError("");
     fetch("/api/whatsapp/templates", { cache: "no-store" })
       .then(async (response) => {
         const result = (await response.json().catch(() => ({}))) as { data?: ApiTemplate[]; error?: string };
@@ -51,7 +55,7 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const handleSelect = (key: string) => {
     const template = templates.find((item) => `${item.name}|${item.language}` === key);
@@ -81,6 +85,11 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
           ))}
         </select>
       </label>
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        <a href="/modelos" target="_blank" rel="noopener" className="font-semibold text-[#002187] hover:underline dark:text-[#C4D600] cursor-pointer">Criar novo modelo</a>
+        <button type="button" onClick={() => setReloadKey((key) => key + 1)} disabled={loading} className="text-slate-500 hover:text-slate-800 hover:underline disabled:opacity-50 dark:text-slate-400 dark:hover:text-white cursor-pointer">Atualizar lista</button>
+        <span className="text-slate-400">O modelo abre em outra aba; a campanha continua aqui.</span>
+      </p>
       {error && <p className="text-[10px] text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
       {value && (
         <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/40">

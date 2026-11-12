@@ -6,6 +6,8 @@ import {
   Bell,
   Check,
   CheckCircle2,
+  FileText,
+  Megaphone,
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
@@ -23,10 +25,11 @@ import { useCrmTheme } from "@/hooks/useCrmTheme";
 import Stepper, { Step } from "@/components/Stepper";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
-import { AudienceCounter, CriterionBuilder } from "@/components/CriterionBuilder";
+import Link from "next/link";
+import { AudienceCounter, AudiencePreviewList, CriterionBuilder, useAudiencePreview } from "@/components/CriterionBuilder";
 import { FormSelect } from "@/components/FormSelect";
 import { SegmentSpreadsheetImport, segmentNameFromFile, type SpreadsheetImportResult, type SpreadsheetMergeSummary } from "@/components/SegmentSpreadsheetImport";
-import { describeRule, validateRule, type SegmentRule } from "@/lib/segment-rules";
+import { describeRule, validateRule, type RuleMatch, type SegmentRule } from "@/lib/segment-rules";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
 
@@ -49,6 +52,8 @@ interface SegmentCriterion {
   nome: string;
   tipo: CriterionKind;
   regras?: SegmentRule[];
+  /** Como as regras se combinam: todas (E, padrão) ou qualquer uma (OU). */
+  combinar?: RuleMatch;
   inativo?: boolean;
 }
 
@@ -193,7 +198,8 @@ export default function SegmentosPage() {
   const [criteriaSearchTerm, setCriteriaSearchTerm] = useState("");
   const [isCriteriaManagerOpen, setIsCriteriaManagerOpen] = useState(false);
   const [editingCriterionId, setEditingCriterionId] = useState<string | null>(null);
-  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind, regras: [] as SegmentRule[] });
+  const [criterionForm, setCriterionForm] = useState({ nome: "", tipo: "geral" as CriterionKind, regras: [] as SegmentRule[], combinar: "all" as RuleMatch });
+  const audiencePreview = useAudiencePreview(criterionForm.regras, criterionForm.combinar);
   const [criteriaManagerError, setCriteriaManagerError] = useState("");
   const criteriaMenuRef = useRef<HTMLDivElement>(null);
   const criteriaTriggerRef = useRef<HTMLButtonElement>(null);
@@ -576,7 +582,7 @@ export default function SegmentosPage() {
   };
 
   const resetCriterionForm = () => {
-    setCriterionForm({ nome: "", tipo: "geral", regras: [] });
+    setCriterionForm({ nome: "", tipo: "geral", regras: [], combinar: "all" });
     setEditingCriterionId(null);
     setCriteriaManagerError("");
   };
@@ -607,7 +613,10 @@ export default function SegmentosPage() {
       operador: rule.operador,
       ...(rule.valor !== undefined && rule.valor !== "" ? { valor: rule.valor.trim() } : {}),
       ...(rule.valor2 ? { valor2: rule.valor2.trim() } : {}),
+      ...(rule.filtros ? { filtros: rule.filtros } : {}),
     }));
+    // OU só faz sentido com 2+ regras; com uma só, grava o padrão (E).
+    const combinar: RuleMatch | undefined = regras.length > 1 && criterionForm.combinar === "any" ? "any" : undefined;
 
     if (editingCriterionId) {
       const existingCriterion = criteriaOptions.find((criterion) => criterion.id === editingCriterionId);
@@ -616,7 +625,7 @@ export default function SegmentosPage() {
         return;
       }
       const updatedCriteria = savedCriteriaOptions.map((criterion) => criterion.id === editingCriterionId
-        ? { ...criterion, nome, tipo: criterionForm.tipo, regras }
+        ? { ...criterion, nome, tipo: criterionForm.tipo, regras, combinar }
         : criterion);
       if (!saveCriteriaOptions(updatedCriteria)) return;
       toast.success("Critério atualizado", `"${nome}" foi salvo.`);
@@ -640,6 +649,7 @@ export default function SegmentosPage() {
         nome,
         tipo: criterionForm.tipo,
         regras,
+        ...(combinar ? { combinar } : {}),
       };
       if (!saveCriteriaOptions([...savedCriteriaOptions, newCriterion])) return;
       toast.success("Critério adicionado", `"${nome}" foi criado.`);
@@ -925,7 +935,18 @@ export default function SegmentosPage() {
                       <td className="px-4 py-2 xl:py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[segment.status]}`}>{segment.status}</span></td>
                       <td className="px-5 py-2 xl:py-3.5 text-xs text-slate-500 dark:text-slate-400">{segment.atualizado}</td>
                       <td className="px-4 py-2 xl:py-3.5 text-right text-xs font-semibold text-slate-700 dark:text-slate-200">{segmentCampaignCount(segment)}</td>
-                      <td className="px-4 py-2 xl:py-3.5 text-right">
+                      <td className="px-4 py-2 xl:py-3.5 text-right whitespace-nowrap">
+                        <Link
+                          href={`/campanhas/nova?segmentoId=${encodeURIComponent(segment.id)}`}
+                          aria-label={`Criar campanha com o segmento ${segment.nome}`}
+                          title="Criar campanha com este segmento"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#002187] transition-colors hover:bg-[#002187]/5 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer"
+                        >
+                          <Megaphone className="h-3.5 w-3.5" />
+                          <span className="sr-only sm:not-sr-only">Criar campanha</span>
+                        </Link>
                         <button
                           type="button"
                           aria-label={`Excluir segmento ${segment.nome}`}
@@ -1384,6 +1405,11 @@ export default function SegmentosPage() {
                     <Trash2 className="h-3.5 w-3.5" />Excluir segmento
                   </button>
                   <button type="button" onClick={closeSegmentModals} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer hover:cursor-pointer">Cancelar</button>
+                  {selectedSegment && (
+                    <Link href={`/campanhas/nova?segmentoId=${encodeURIComponent(selectedSegment.id)}`} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#002187]/30 px-3 text-xs font-semibold text-[#002187] transition-colors hover:bg-[#002187]/5 dark:border-[#C4D600]/40 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
+                      <Megaphone className="h-3.5 w-3.5" />Criar campanha
+                    </Link>
+                  )}
                   <button type="button" onClick={saveSegmentChanges} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white transition-colors hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-95 cursor-pointer hover:cursor-pointer">
                     <Check className="h-3.5 w-3.5" />Salvar alterações
                   </button>
@@ -1674,7 +1700,10 @@ export default function SegmentosPage() {
                 <CriterionBuilder
                   rules={criterionForm.regras}
                   onChange={(regras) => { setCriterionForm((current) => ({ ...current, regras })); setCriteriaManagerError(""); }}
+                  match={criterionForm.combinar}
+                  onMatchChange={(combinar) => setCriterionForm((current) => ({ ...current, combinar }))}
                 />
+                <AudiencePreviewList preview={audiencePreview} />
               </div>
               <aside aria-label="Critérios salvos" className="space-y-3 xl:sticky xl:top-0 xl:self-start">
               <div className="relative">
@@ -1724,7 +1753,7 @@ export default function SegmentosPage() {
                                     {system && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">Padrão</span>}
                                   </span>
                                   {!system && (criterion.regras?.length
-                                    ? <span className="text-xs text-slate-400">{criterion.regras.map(describeRule).join(" • ")}</span>
+                                    ? <span className="text-xs text-slate-400">{criterion.regras.map(describeRule).join(criterion.combinar === "any" ? " OU " : " • ")}</span>
                                     : <span className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">Sem regras: nenhum contato atende. Edite para definir.</span>)}
                                 </span>
                                 <span className="flex shrink-0 items-center gap-2">
@@ -1733,7 +1762,7 @@ export default function SegmentosPage() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo, regras: criterion.regras ?? [] });
+                                          setCriterionForm({ nome: criterion.nome, tipo: criterion.tipo, regras: criterion.regras ?? [], combinar: criterion.combinar ?? "all" });
                                           setEditingCriterionId(criterion.id);
                                           setCriteriaManagerError("");
                                           document.getElementById("criterion-form")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -1780,8 +1809,11 @@ export default function SegmentosPage() {
              </div>
             </div>
             <footer className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-6 py-4 shadow-[0_-8px_24px_-16px_rgba(5,22,71,0.25)] dark:border-slate-800 dark:bg-[#07194f] sm:flex-row sm:items-center sm:justify-between sm:px-8">
-              <AudienceCounter rules={criterionForm.regras} />
+              <AudienceCounter preview={audiencePreview} />
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Link href="/modelos" target="_blank" rel="noopener" title="Abre em nova aba: o critério em edição continua aqui" className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-[#002187] transition-colors hover:bg-[#002187]/5 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
+                  <FileText className="h-4 w-4" />Criar modelo de mensagem
+                </Link>
                 {criteriaManagerError && <p role="alert" className="mr-2 max-w-xs text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{criteriaManagerError}</p>}
                 <button type="button" disabled={criterionForm.regras.length === 0} onClick={() => { setCriterionForm((current) => ({ ...current, regras: [] })); setCriteriaManagerError(""); }} className="h-10 rounded-lg px-3 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">Limpar filtros</button>
                 <button type="button" onClick={() => { if (editingCriterionId) { resetCriterionForm(); } else { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); } }} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 cursor-pointer">{editingCriterionId ? "Cancelar edição" : "Cancelar"}</button>

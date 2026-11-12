@@ -2,8 +2,9 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
-import { cached, invalidateCache } from "@/lib/cache";
+import { cached } from "@/lib/cache";
 import { CONTACT_PLACE_KEY } from "@/lib/geocode";
+import { campaignAudienceSets } from "@/lib/campaign-metrics";
 import { MAX_RULES, normalizeRuleText, ruleSchema, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
 
 const criterionSchema = z.object({
@@ -11,7 +12,73 @@ const criterionSchema = z.object({
   nome: z.string().max(300),
   tipo: z.enum(["geral", "loja"]),
   regras: z.array(ruleSchema).max(MAX_RULES).optional(),
+  /** "any" = basta uma regra (OU); padrão "all" = todas (E). */
+  combinar: z.enum(["all", "any"]).optional(),
 });
+
+/** Destinatários e convertidos de cada campanha citada nas regras, resolvidos antes de montar o SQL. */
+type CampaignSets = Map<string, { delivered: string[]; converted: string[] }>;
+
+const BR_TODAY = Prisma.sql`(now() AT TIME ZONE 'America/Sao_Paulo')::date`;
+
+/** Pedido de venda no ERP na janela pedida, com filtros opcionais aplicados ao próprio pedido. */
+function purchaseCondition(rule: SegmentRule): Prisma.Sql {
+  const value = rule.valor ?? "";
+  let window: Prisma.Sql;
+  switch (rule.operador) {
+    case "today": window = Prisma.sql`v."orderDate" = ${BR_TODAY}`; break;
+    case "yesterday": window = Prisma.sql`v."orderDate" = ${BR_TODAY} - 1`; break;
+    case "within_days": window = Prisma.sql`v."orderDate" BETWEEN ${BR_TODAY} - ${Math.max(0, Math.floor(Number(value)) - 1)}::int AND ${BR_TODAY}`; break;
+    case "between": {
+      const [start, end] = [value, rule.valor2 ?? ""].sort();
+      window = Prisma.sql`v."orderDate" BETWEEN ${start}::date AND ${end}::date`;
+      break;
+    }
+    default: return Prisma.sql`FALSE`;
+  }
+  const where = [window, Prisma.sql`v."type" = 'Venda'`, Prisma.sql`v."sourceKey" IS NOT NULL`];
+  const store = rule.filtros?.loja?.trim();
+  if (store) where.push(Prisma.sql`${normalizeText(Prisma.sql`COALESCE(v."store", '')`)} = ${normalizeRuleText(store)}`);
+  const having: Prisma.Sql[] = [];
+  const minValue = Number((rule.filtros?.valorMin ?? "").replace(",", "."));
+  if (rule.filtros?.valorMin && Number.isFinite(minValue) && minValue > 0) having.push(Prisma.sql`COALESCE(SUM(v."amount"), 0) >= ${minValue}`);
+  const product = rule.filtros?.produto?.trim();
+  if (product) {
+    const needle = normalizeRuleText(product);
+    const columns = [Prisma.sql`v."description"`, Prisma.sql`v."category"`, Prisma.sql`v."subcategory"`, Prisma.sql`v."brand"`]
+      .map((column) => Prisma.sql`position(${needle} in ${normalizeText(Prisma.sql`COALESCE(${column}, '')`)}) > 0`);
+    having.push(Prisma.sql`bool_or(${Prisma.join(columns, " OR ")})`);
+  }
+  return Prisma.sql`c."sourceKey" IN (
+    SELECT v."sourceKey" FROM "VmsetSale" v
+    WHERE ${Prisma.join(where, " AND ")}
+    GROUP BY v."sourceKey", v."orderNumber", v."orderDate"
+    ${having.length ? Prisma.sql`HAVING ${Prisma.join(having, " AND ")}` : Prisma.empty}
+  )`;
+}
+
+function campaignCondition(rule: SegmentRule, campaigns: CampaignSets): Prisma.Sql {
+  const sets = campaigns.get(rule.valor ?? "");
+  if (!sets) return Prisma.sql`FALSE`;
+  if (rule.operador === "converted") return Prisma.sql`c.id = ANY(${sets.converted}::text[])`;
+  if (rule.operador === "not_converted") {
+    const converted = new Set(sets.converted);
+    return Prisma.sql`c.id = ANY(${sets.delivered.filter((id) => !converted.has(id))}::text[])`;
+  }
+  return Prisma.sql`FALSE`;
+}
+
+/** Busca (com cache curto) os contatos de cada campanha usada em regras de conversão. */
+async function loadCampaignSets(criteria: z.infer<typeof criterionSchema>[]): Promise<CampaignSets> {
+  const ids = new Set(criteria.flatMap((criterion) => (criterion.regras ?? [])
+    .filter((rule) => rule.campo === "campaignConversion" && rule.valor)
+    .map((rule) => rule.valor as string)));
+  const sets: CampaignSets = new Map();
+  await Promise.all([...ids].map(async (id) => {
+    sets.set(id, await cached(`audience:campaign:${id}`, 120, () => campaignAudienceSets(id)));
+  }));
+  return sets;
+}
 
 const bodySchema = z.object({
   groups: z.record(z.string().max(100), z.array(criterionSchema).max(30)).refine((groups) => Object.keys(groups).length <= 200),
@@ -21,6 +88,8 @@ const bodySchema = z.object({
   contactCriteria: z.record(z.string().max(100), z.array(criterionSchema).max(30))
     .refine((groups) => Object.keys(groups).length <= 200).optional(),
   includeRecipients: z.boolean().optional(),
+  /** Quantos contatos de amostra devolver por grupo (prévia ao vivo do construtor). */
+  sample: z.number().int().min(0).max(50).optional(),
 });
 
 // Compras do ERP por cliente (espelho do VMSet, só vendas e sem serviços): ver prisma/vmset-sale.sql.
@@ -79,12 +148,14 @@ const numberComparison = (column: Prisma.Sql, rule: SegmentRule): Prisma.Sql => 
   }
 };
 
-function ruleCondition(rule: SegmentRule): Prisma.Sql {
+function ruleCondition(rule: SegmentRule, campaigns: CampaignSets): Prisma.Sql {
   if (validateRule(rule)) return Prisma.sql`FALSE`;
   const value = rule.valor ?? "";
   const column = (name: string) => Prisma.raw(`c."${name}"`);
 
   switch (rule.campo) {
+    case "erpPurchase": return purchaseCondition(rule);
+    case "campaignConversion": return campaignCondition(rule, campaigns);
     case "purchases": return numberComparison(ERP_ORDERS, rule);
     case "totalSpent": return numberComparison(ERP_TOTAL, rule);
     case "avgTicket": return Prisma.sql`s.orders > 0 AND ${numberComparison(ERP_TICKET, rule)}`;
@@ -180,9 +251,10 @@ function ruleCondition(rule: SegmentRule): Prisma.Sql {
   }
 }
 
-function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: Map<string, StoreRecord>): Prisma.Sql {
+function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: Map<string, StoreRecord>, campaigns: CampaignSets): Prisma.Sql {
   if (criterion.regras && criterion.regras.length > 0) {
-    return Prisma.sql`(${Prisma.join(criterion.regras.map(ruleCondition), " AND ")})`;
+    const conditions = criterion.regras.map((rule) => Prisma.sql`(${ruleCondition(rule, campaigns)})`);
+    return Prisma.sql`(${Prisma.join(conditions, criterion.combinar === "any" ? " OR " : " AND ")})`;
   }
   if (criterion.tipo === "loja") {
     const store = stores.get(criterion.id.replace(/^store-/, ""));
@@ -224,9 +296,32 @@ export async function GET() {
   return Response.json({ data: stores });
 }
 
-async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean, restrictToIds?: string[]): Promise<{ count: number; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
-  if (criteria.length === 0 || (restrictToIds && restrictToIds.length === 0)) return { count: 0, recipients: includeRecipients ? [] : undefined };
-  const conditions = criteria.map((criterion) => criterionCondition(criterion, stores));
+type AudienceSampleRow = { id: string; nome: string; telefone: string; ultimaCompra: string | null; valorUltimaCompra: number | null };
+
+/** Primeiros contatos do público (compra mais recente primeiro) para conferência na prévia. */
+async function sampleContacts(conditions: Prisma.Sql[], limit: number): Promise<AudienceSampleRow[]> {
+  const rows = await prisma.$queryRaw<{ id: string; name: string; phone: string | null; last_day: string | null; last_total: number | null }[]>(Prisma.sql`
+    SELECT t.id, t.name, t.phone, to_char(t."lastDay", 'YYYY-MM-DD') AS last_day, lo.total AS last_total
+    FROM (
+      SELECT c.id, c.name, c.phone, c."sourceKey", s."lastDay"
+      ${FROM_CONTACTS}
+      WHERE ${Prisma.join(conditions, " AND ")}
+      -- Sem ORDER BY aqui: ordenar o público inteiro custa segundos em janelas longas; a amostra é ordenada abaixo.
+      LIMIT ${limit}
+    ) t
+    -- Valor do último dia de compra só para as linhas da amostra (não para o público inteiro).
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(v."amount"), 0)::float8 AS total FROM "VmsetSale" v
+      WHERE v."sourceKey" = t."sourceKey" AND v."type" = 'Venda' AND v."orderDate" = t."lastDay"
+    ) lo ON t."lastDay" IS NOT NULL
+    ORDER BY t."lastDay" DESC NULLS LAST, t.name
+  `);
+  return rows.map((row) => ({ id: row.id, nome: row.name, telefone: row.phone ?? "", ultimaCompra: row.last_day, valorUltimaCompra: row.last_total === null ? null : Number(row.last_total) }));
+}
+
+async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean, restrictToIds?: string[], campaigns: CampaignSets = new Map(), sample = 0): Promise<{ count: number; sample?: AudienceSampleRow[]; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
+  if (criteria.length === 0 || (restrictToIds && restrictToIds.length === 0)) return { count: 0, recipients: includeRecipients ? [] : undefined, sample: sample > 0 ? [] : undefined };
+  const conditions = criteria.map((criterion) => criterionCondition(criterion, stores, campaigns));
   // Interseção: os critérios filtram apenas dentro da lista importada.
   if (restrictToIds) conditions.unshift(Prisma.sql`c.id = ANY(${restrictToIds}::text[])`);
   if (includeRecipients) {
@@ -255,10 +350,13 @@ async function computeGroupCount(key: string, criteria: z.infer<typeof criterion
       })),
     };
   }
-  const rows = await prisma.$queryRaw<Array<{ n: bigint }>>(
-    Prisma.sql`SELECT count(*) AS n ${FROM_CONTACTS} WHERE ${Prisma.join(conditions, " AND ")}`
-  );
-  return { count: Number(rows[0]?.n ?? 0) };
+  const [rows, preview] = await Promise.all([
+    prisma.$queryRaw<Array<{ n: bigint }>>(
+      Prisma.sql`SELECT count(*) AS n ${FROM_CONTACTS} WHERE ${Prisma.join(conditions, " AND ")}`
+    ),
+    sample > 0 ? sampleContacts(conditions, sample) : Promise.resolve(undefined),
+  ]);
+  return { count: Number(rows[0]?.n ?? 0), sample: preview };
 }
 
 export async function POST(request: Request) {
@@ -267,8 +365,14 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Critérios inválidos." }, { status: 400 });
 
-  const stores = new Map((await prisma.store.findMany()).map((store) => [store.name, store]));
+  const [storeRows, campaigns] = await Promise.all([
+    prisma.store.findMany(),
+    loadCampaignSets([...Object.values(parsed.data.groups), ...Object.values(parsed.data.contactCriteria ?? {})].flat()),
+  ]);
+  const stores = new Map(storeRows.map((store) => [store.name, store]));
+  const sampleSize = parsed.data.includeRecipients ? 0 : parsed.data.sample ?? 0;
   const counts: Record<string, number> = {};
+  const samples: Record<string, AudienceSampleRow[]> = {};
   const recipients: Record<string, { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[]> = {};
 
   // Cache individual store counts so repeated page loads hit Redis instead of recomputing haversine.
@@ -281,15 +385,16 @@ export async function POST(request: Request) {
       const hit = await cached(cacheKey, 300, () => computeGroupCount(key, criteria, stores, false));
       counts[key] = hit.count;
     } else {
-      const result = await computeGroupCount(key, criteria, stores, !!parsed.data.includeRecipients);
+      const result = await computeGroupCount(key, criteria, stores, !!parsed.data.includeRecipients, undefined, campaigns, sampleSize);
       counts[key] = result.count;
+      if (result.sample) samples[key] = result.sample;
       if (parsed.data.includeRecipients && result.recipients) recipients[key] = result.recipients;
     }
   }
   for (const [key, contactIds] of Object.entries(parsed.data.contactGroups ?? {})) {
     const refine = parsed.data.contactCriteria?.[key] ?? [];
     if (refine.length > 0) {
-      const result = await computeGroupCount(key, refine, stores, !!parsed.data.includeRecipients, contactIds);
+      const result = await computeGroupCount(key, refine, stores, !!parsed.data.includeRecipients, contactIds, campaigns);
       counts[key] = result.count;
       if (parsed.data.includeRecipients && result.recipients) recipients[key] = result.recipients;
       continue;
@@ -313,5 +418,6 @@ export async function POST(request: Request) {
       segmento: contact.segment ?? "",
     }));
   }
-  return Response.json(parsed.data.includeRecipients ? { counts, recipients } : { counts });
+  if (parsed.data.includeRecipients) return Response.json({ counts, recipients });
+  return Response.json(sampleSize > 0 ? { counts, samples } : { counts });
 }

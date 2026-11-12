@@ -181,3 +181,27 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     lastSaleDate: lastSale[0]?.last ?? null,
   };
 }
+
+/**
+ * Contatos de um disparo para segmentação: quem recebeu (entrega confirmada) e quem converteu,
+ * pela mesma regra de atribuição das métricas da campanha.
+ */
+export async function campaignAudienceSets(campaignId: string): Promise<{ delivered: string[]; converted: string[] }> {
+  const [metrics, messages] = await Promise.all([
+    campaignMetrics(campaignId, null),
+    prisma.campaignMessage.findMany({
+      where: {
+        campaignId,
+        contactId: { not: null },
+        sentAt: { not: null },
+        status: { not: "failed" },
+        OR: [{ deliveredAt: { not: null } }, { readAt: { not: null } }, { repliedAt: { not: null } }],
+      },
+      select: { contactId: true },
+    }),
+  ]);
+  return {
+    delivered: [...new Set(messages.map((message) => message.contactId).filter((id): id is string => Boolean(id)))],
+    converted: [...new Set(metrics.sales.map((sale) => sale.contactId).filter(Boolean))],
+  };
+}
