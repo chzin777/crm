@@ -8,6 +8,7 @@ import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
+import { compareStoreNames, storeDisplayName } from "@/lib/stores";
 
 interface StoreRecord {
   id: string;
@@ -87,7 +88,7 @@ export default function LojasPage() {
     }
     setCountsLoading(true);
     try {
-      const groups = Object.fromEntries(list.map((store) => [String(store.number), [{ id: `store-${store.number}`, nome: `Loja ${store.number}`, tipo: "loja" }]]));
+      const groups = Object.fromEntries(list.map((store) => [String(store.number), [{ id: `store-${store.number}`, nome: storeDisplayName(store), tipo: "loja" }]]));
       const response = await fetch("/api/segments/audience", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,7 +218,7 @@ export default function LojasPage() {
       const result = await response.json().catch(() => ({})) as { data?: StoreRecord; error?: string };
       if (!response.ok || !result.data) throw new Error(result.error || "Não foi possível salvar a loja.");
       const saved = result.data;
-      const next = [...stores.filter((store) => store.id !== saved.id), saved].sort((a, b) => a.number - b.number);
+      const next = [...stores.filter((store) => store.id !== saved.id), saved].sort((a, b) => compareStoreNames(storeDisplayName(a), storeDisplayName(b)));
       setStores(next);
       if (saved.radiusKm > 0) {
         setProgress("Localizando bairros...");
@@ -251,7 +252,7 @@ export default function LojasPage() {
   };
 
   const removeStore = async (store: StoreRecord) => {
-    if (!window.confirm(`Remover a loja ${store.number} - ${store.name}?`)) return;
+    if (!window.confirm(`Remover a loja ${storeDisplayName(store)}?`)) return;
     const response = await fetch(`/api/stores?id=${encodeURIComponent(store.id)}`, { method: "DELETE" });
     if (response.ok) {
       closeForm();
@@ -424,7 +425,7 @@ export default function LojasPage() {
                     <tr
                       key={store.id}
                       tabIndex={0}
-                      aria-label={`Abrir detalhes da loja ${store.number}`}
+                      aria-label={`Abrir detalhes da loja ${storeDisplayName(store)}`}
                       onClick={() => openForm(store)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
@@ -439,7 +440,7 @@ export default function LojasPage() {
                           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><StoreIcon className="h-4 w-4" /></span>
                           <span className="min-w-0">
                             <span className="block truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">
-                              Loja {store.number}{store.name !== `Loja ${store.number}` ? ` · ${store.name}` : ""}
+                              {storeDisplayName(store)}
                             </span>
                             <span className="mt-0.5 block text-[10px] text-slate-400">{store.kind || "Loja"}{store.startDate ? ` · Desde ${store.startDate}` : ""}</span>
                           </span>
@@ -483,7 +484,7 @@ export default function LojasPage() {
       </div>
 
       {editing && (
-        <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar loja ${editing.number}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm}>
+        <EntityDialog titleId="store-dialog-title" title={editing === "new" ? "Cadastrar loja" : `Editar ${storeDisplayName(editing)}`} description="Clientes que compraram nesta loja entram automaticamente; o bairro da loja também traz clientes da mesma região." onClose={closeForm}>
           {editing === "new" ? (
             <Stepper
               initialStep={1}
@@ -543,7 +544,7 @@ export default function LojasPage() {
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ao salvar com raio, os bairros dos contatos são localizados no mapa.</p>
                   </div>
                   <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white px-4 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800/50">
-                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Loja</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">Loja {form.number} · {form.name || "Sem nome"}{form.active ? "" : " (inativa)"}</dd></div>
+                    <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Loja</dt><dd className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{form.name.trim() || `Loja ${form.number}`}{form.active ? "" : " (inativa)"}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Endereço</dt><dd className="mt-1 text-xs text-slate-700 dark:text-slate-200">{[[form.address, form.addressNumber].filter(Boolean).join(", "), form.complement, form.neighborhoods[0], [form.city, form.state].filter(Boolean).join("/"), form.postalCode].filter(Boolean).join(" · ") || "Não informado"}</dd></div>
                     <div className="py-3"><dt className="text-[10px] font-bold uppercase text-slate-400">Raio de atendimento</dt><dd className="mt-1 text-xs font-semibold text-slate-700 dark:text-slate-200">{Number(form.radiusKm) > 0 ? `${Number(form.radiusKm)} km` : "Somente o bairro da loja"}</dd></div>
                   </dl>

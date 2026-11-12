@@ -29,6 +29,7 @@ import { AudienceCounter, AudiencePreviewList, CriterionBuilder, useAudiencePrev
 import { FormSelect } from "@/components/FormSelect";
 import { SegmentSpreadsheetImport, segmentNameFromFile, type SpreadsheetImportResult, type SpreadsheetMergeSummary } from "@/components/SegmentSpreadsheetImport";
 import { describeRule, validateRule, type RuleMatch, type SegmentRule } from "@/lib/segment-rules";
+import { compareStoreNames, storeDisplayName } from "@/lib/stores";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
 
@@ -53,8 +54,6 @@ interface SegmentCriterion {
   regras?: SegmentRule[];
   /** Como as regras se combinam: todas (E, padrão) ou qualquer uma (OU). */
   combinar?: RuleMatch;
-  /** Nome legível (razão social da loja), só para exibição. */
-  descricao?: string;
   inativo?: boolean;
 }
 
@@ -78,8 +77,10 @@ function resolveCriterionNames(names: string[], options: SegmentCriterion[]): Se
     const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
     const option = options.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
     if (option) return option;
+    // Nome antigo "Loja <n>": a loja segue a mesma (id store-<n>), mesmo que hoje apareça pelo nome cadastrado.
     const deletedStore = /^Loja (\d+)$/i.exec(legacyName);
-    return deletedStore ? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const } : undefined;
+    if (!deletedStore) return undefined;
+    return options.find((candidate) => candidate.id === `store-${deletedStore[1]}`) ?? { id: `store-${deletedStore[1]}`, nome: legacyName, tipo: "loja" as const };
   });
   return resolved.some((option) => !option) ? null : resolved as SegmentCriterion[];
 }
@@ -165,17 +166,16 @@ export default function SegmentosPage() {
         return 0;
     }
   });
-  // "Loja <número>" é o nome-chave que os segmentos salvos referenciam; a razão social vai como descrição.
+  // Nome cadastrado da loja (já traz o código "LJ 12"); nomes antigos "Loja <n>" seguem resolvidos pelo id store-<n>.
   const storeCriteria: SegmentCriterion[] = stores
     .filter((store) => Number.isFinite(store.number))
-    .sort((a, b) => a.number - b.number)
     .map((store) => ({
       id: `store-${store.number}`,
-      nome: `Loja ${store.number}`,
-      descricao: store.name?.trim() || undefined,
+      nome: storeDisplayName(store),
       tipo: "loja" as const,
       inativo: !store.active,
-    }));
+    }))
+    .sort((a, b) => compareStoreNames(a.nome, b.nome));
   const isSystemCriterion = (criterion: SegmentCriterion) =>
     presetCriteria.some((preset) => preset.id === criterion.id) || criterion.id.startsWith("store-");
   const isStoreCriterion = (criterion: SegmentCriterion) => criterion.id.startsWith("store-");
@@ -1757,7 +1757,6 @@ export default function SegmentosPage() {
                                     <span className={`truncate text-sm ${criterion.inativo ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-200"}`}>{highlightMatch(criterion.nome, managerSearch)}</span>
                                     {system && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">Padrão</span>}
                                   </span>
-                                  {isStoreCriterion(criterion) && criterion.descricao && <span className="truncate text-xs text-slate-400" title={criterion.descricao}>{criterion.descricao}</span>}
                                   {!system && (criterion.regras?.length
                                     ? <span className="text-xs text-slate-400">{criterion.regras.map(describeRule).join(criterion.combinar === "any" ? " OU " : " • ")}</span>
                                     : <span className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">Sem regras: nenhum contato atende. Edite para definir.</span>)}

@@ -31,6 +31,7 @@ import {
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/CampaignTemplatePicker";
+import { compareStoreNames, storeDisplayName } from "@/lib/stores";
 import Stepper, { Step } from "@/components/Stepper";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
@@ -216,7 +217,7 @@ export function CampaignsView() {
   const { data: savedAudienceCriteria, isLoading: criteriaLoading } = useCrmData<AudienceCriterion[]>("criteria", []);
   const segmentOptions = segments.map((segment) => segment.nome);
   const segmentOptionSet = new Set(segmentOptions);
-  const [stores, setStores] = useState<{ number: number; active: boolean }[]>([]);
+  const [stores, setStores] = useState<{ number: number; name?: string; active: boolean }[]>([]);
   const [storesError, setStoresError] = useState("");
   const [dispatchError, setDispatchError] = useState("");
   const searchParams = useSearchParams();
@@ -393,7 +394,7 @@ export function CampaignsView() {
     let active = true;
     fetch("/api/segments/audience")
       .then(async (response) => {
-        const result = await response.json() as { data?: { number: number; active: boolean }[]; error?: string };
+        const result = await response.json() as { data?: { number: number; name?: string; active: boolean }[]; error?: string };
         if (!response.ok) throw new Error(result.error || "Não foi possível carregar as lojas.");
         if (active) setStores(result.data ?? []);
       })
@@ -415,12 +416,13 @@ export function CampaignsView() {
       ...preset,
       inativo: savedAudienceCriteria.find((saved) => saved.id === preset.id)?.inativo === true,
     })),
-    ...[...stores].sort((a, b) => a.number - b.number).map((store) => ({
+    // Nome cadastrado da loja (já traz o código "LJ 12"), sem o sequencial interno.
+    ...stores.map((store) => ({
       id: `store-${store.number}`,
-      nome: `Loja ${store.number}`,
+      nome: storeDisplayName(store),
       tipo: "loja" as const,
       inativo: !store.active,
-    })),
+    })).sort((a, b) => compareStoreNames(a.nome, b.nome)),
     ...savedAudienceCriteria.filter((criterion) =>
       !presetAudienceCriteria.some((preset) => preset.id === criterion.id) && !criterion.id.startsWith("store-")),
   ];

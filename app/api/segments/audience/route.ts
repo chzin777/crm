@@ -6,6 +6,7 @@ import { cached } from "@/lib/cache";
 import { CONTACT_PLACE_KEY } from "@/lib/geocode";
 import { campaignAudienceSets } from "@/lib/campaign-metrics";
 import { matchesBirthday, type BirthdayOperator, type BirthParts } from "@/lib/birthday";
+import { storeErpCode } from "@/lib/stores";
 import { MAX_RULES, normalizeRuleText, ruleSchema, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
 
 const criterionSchema = z.object({
@@ -286,14 +287,16 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
     const store = stores.get(criterion.id.replace(/^store-/, ""));
     if (!store) return Prisma.sql`FALSE`;
     // Direct link: the store of the contact's latest sale. The store neighborhood and the service radius add nearby customers.
-    // Contact.store guarda o número da loja da última venda (ex.: "13").
-    const bySale = Prisma.sql`btrim(c.store) = ${String(store.number)}`;
-    const alternatives = [bySale];
+    // Contact.store guarda o código ERP da loja da última venda ("13"), que vem no nome da loja ("LJ 13 ..."),
+    // e não o sequencial interno Store.number.
+    const erpCode = storeErpCode(store.name);
+    const alternatives: Prisma.Sql[] = erpCode ? [Prisma.sql`btrim(c.store) = ${erpCode}`] : [];
     if (store.neighborhoods.length > 0) {
       const sameNeighborhood = Prisma.sql`${NORMALIZED_NEIGHBORHOOD} = ANY(${store.neighborhoods}::text[])`;
       alternatives.push(store.city ? Prisma.sql`${sameNeighborhood} AND ${NORMALIZED_CITY} = ${store.city}` : sameNeighborhood);
     }
     if (store.radiusKm > 0 && store.lat !== null && store.lng !== null) alternatives.push(withinRadius(store));
+    if (alternatives.length === 0) return Prisma.sql`FALSE`;
     return Prisma.sql`(${Prisma.join(alternatives.map((item) => Prisma.sql`(${item})`), " OR ")})`;
   }
 
