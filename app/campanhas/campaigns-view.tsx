@@ -1413,7 +1413,7 @@ export function CampaignsView() {
           titleId="campaign-dialog-title"
           title={selectedCampaign.nome}
           description={selectedLocked ? "Acompanhe o envio, o funil de conversão e o status de cada contato." : "Edite e dispare quando estiver pronta."}
-          size="xl"
+          size="2xl"
           onClose={() => { setSelectedCampaign(null); clearSelectedAttachments(); setUploadedAttachments([]); setFormError(""); }}
         >
           <div className="flex h-full min-h-0 flex-col">

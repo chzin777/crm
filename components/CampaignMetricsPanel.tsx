@@ -52,7 +52,7 @@ function SaleItem({ sale }: { sale: ConvertedSale }) {
       <div className="flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
           <span className="inline-flex min-w-0 items-center gap-1 font-medium text-slate-600 dark:text-slate-300" title={sale.lojaNome}>
-            <Store className="size-3 shrink-0" /><span className="max-w-[180px] truncate">{sale.lojaNome}</span>
+            <Store className="size-3 shrink-0" /><span className="max-w-[180px] truncate sm:max-w-[320px]">{sale.lojaNome}</span>
           </span>
           <span aria-hidden className="text-slate-300 dark:text-slate-600">·</span>
           <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" />Disparo: {timeBr(sale.enviadoEm)}</span>
@@ -262,7 +262,7 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
           title="Conversões da campanha"
           description={`${metrics.sales.length} pedido(s) · ${brl(metrics.revenue)} · venda depois do disparo e até ${metrics.windowDays} dia(s) após o envio`}
           onClose={() => setShowSales(false)}
-          size="lg"
+          size="2xl"
         >
           {metrics.sales.length === 0 ? emptySales : (
             <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
