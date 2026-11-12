@@ -34,7 +34,10 @@ export type CampaignMetrics = {
   revenue: number;
   orders: number;
   averageTicket: number | null;
+  /** Retorno financeiro em %: ((vendido − gasto) / gasto) × 100. Null quando não houve gasto. */
   roi: number | null;
+  /** ROAS: vendido / gasto (quantas vezes o gasto voltou em vendas). Null quando não houve gasto. */
+  roas: number | null;
   sales: ConvertedSale[];
   lastSaleDate: string | null;
 };
@@ -172,7 +175,8 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     revenue,
     orders: convertedSales.length,
     averageTicket: converted.size > 0 ? revenue / converted.size : null,
-    roi: realCost > 0 ? (revenue - realCost) / realCost : null,
+    roi: realCost > 0 ? ((revenue - realCost) / realCost) * 100 : null,
+    roas: realCost > 0 ? revenue / realCost : null,
     sales: convertedSales,
     lastSaleDate: lastSale[0]?.last ?? null,
   };

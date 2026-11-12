@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { CircleDollarSign, MessageCircle, Percent, Receipt, Send, ShoppingBag, Store, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { ArrowUpRight, CircleDollarSign, Percent, Receipt, Send, ShoppingBag, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { formatPhone } from "@/lib/chat/phone";
 import type { CampaignMetrics, ConvertedSale } from "@/lib/campaign-metrics";
@@ -11,13 +11,12 @@ const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency"
 const pct = (value: number | null) => (value === null ? "—" : `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
 const dateBr = (day: string) => (day ? day.split("-").reverse().join("/") : "—");
 const rate = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : null);
-const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase() || "?";
 
 const timeBr = (iso: string | null) => {
   if (!iso) return "—";
   const parts = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date(iso));
   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("day")}/${part("month")} às ${part("hour")}:${part("minute")}`;
+  return `${part("day")}/${part("month")} ${part("hour")}:${part("minute")}`;
 };
 const elapsed = (from: string, to: string | null) => {
   if (!to) return null;
@@ -25,47 +24,46 @@ const elapsed = (from: string, to: string | null) => {
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
   const rest = minutes % 60;
-  return `+${days ? `${days}d ` : ""}${days || hours ? `${hours}h ` : ""}${rest}min`;
+  return `+${days ? `${days}d ` : ""}${days || hours ? `${hours}h ` : ""}${rest}m`;
 };
 const SALES_PAGE = 20;
 
 /** Uma venda atribuída: cliente, pedido no ERP, linha do tempo envio → registro e atalho para a conversa. */
 function SaleItem({ sale }: { sale: ConvertedSale }) {
   const gap = elapsed(sale.enviadoEm, sale.registradoEm);
+  const details = [
+    sale.notaFiscal ? `Faturado · NF ${sale.notaFiscal}` : "Aguardando faturamento",
+    sale.loja ? `Loja ${sale.loja}` : "",
+    `${sale.itens} ${sale.itens === 1 ? "item" : "itens"}`,
+    sale.resumo ?? "",
+  ].filter(Boolean).join(" · ");
   return (
-    <li className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-emerald-50 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300">{initials(sale.nome)}</span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{sale.nome}</p>
-          <p className="shrink-0 text-sm font-bold tabular-nums text-slate-900 dark:text-white">{brl(sale.valor)}</p>
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-          <span className="tabular-nums">{formatPhone(sale.telefone)}</span>
-          <span aria-hidden>·</span>
-          <span>Pedido <strong className="font-semibold text-slate-700 dark:text-slate-200">#{sale.pedido || "—"}</strong></span>
-          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${sale.notaFiscal ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300"}`}>
-            {sale.notaFiscal ? `Faturado · NF ${sale.notaFiscal}` : "Aguardando faturamento"}
-          </span>
-          {sale.loja && <><span aria-hidden>·</span><span className="inline-flex items-center gap-0.5"><Store className="h-3 w-3" />Loja {sale.loja}</span></>}
-          <span aria-hidden>·</span>
-          <span>{sale.itens} {sale.itens === 1 ? "item" : "itens"}</span>
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-          <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" />Disparo {timeBr(sale.enviadoEm)}</span>
-          <span aria-hidden>→</span>
-          <span className="inline-flex items-center gap-1"><ShoppingBag className="h-3 w-3" />{sale.registradoEm ? `ERP ${timeBr(sale.registradoEm)}` : `Pedido ${dateBr(sale.data)}`}</span>
-          {gap && <span className="rounded-full bg-[#002187]/[0.06] px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-[#002187] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">{gap}</span>}
-        </div>
-        {sale.resumo && <p className="mt-1 line-clamp-1 text-[11px] text-slate-400" title={sale.resumo}>{sale.resumo}</p>}
+    <li className="grid gap-1.5 px-4 py-3 transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30" title={details}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{sale.nome}</span>
+          <span className="shrink-0 text-xs tabular-nums text-slate-400 dark:text-slate-500">{formatPhone(sale.telefone)}</span>
+        </p>
+        <p className="flex shrink-0 items-center gap-2">
+          <span className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{brl(sale.valor)}</span>
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-400">#{sale.pedido || "—"}</span>
+        </p>
       </div>
-      {sale.conversationId ? (
-        <Link href={`/chat?c=${sale.conversationId}`} className="inline-flex shrink-0 cursor-pointer items-center gap-1 self-center rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-[#002187] transition-colors hover:bg-[#002187]/[0.06] dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10">
-          <MessageCircle className="h-3.5 w-3.5" />Abrir conversa
-        </Link>
-      ) : (
-        <span className="shrink-0 self-center text-[10px] text-slate-400">Sem conversa</span>
-      )}
+      <div className="flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+        <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
+          <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" />Disparo: {timeBr(sale.enviadoEm)}</span>
+          <span aria-hidden className="text-slate-300 dark:text-slate-600">→</span>
+          <span className="inline-flex items-center gap-1"><ShoppingBag className="h-3 w-3" />Venda ERP: {sale.registradoEm ? timeBr(sale.registradoEm) : dateBr(sale.data)}</span>
+          {gap && <span className="text-slate-400 dark:text-slate-500">({gap})</span>}
+        </p>
+        {sale.conversationId ? (
+          <Link href={`/chat?c=${sale.conversationId}`} className="inline-flex shrink-0 cursor-pointer items-center gap-1 font-medium text-[#002187] hover:underline dark:text-[#C4D600]">
+            Ver chat<ArrowUpRight className="h-3 w-3" />
+          </Link>
+        ) : (
+          <span className="shrink-0 text-slate-400">Sem conversa</span>
+        )}
+      </div>
     </li>
   );
 }
@@ -91,8 +89,13 @@ function KpiCard({ icon: Icon, label, value, hint, accent = false, onClick, chil
 function PanelSkeleton() {
   return (
     <div className="animate-pulse space-y-4" aria-busy="true" aria-label="Calculando resultados">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div key={index} className="h-[92px] rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40" />
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {Array.from({ length: 2 }, (_, index) => (
           <div key={index} className="h-[92px] rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40" />
         ))}
       </div>
@@ -160,28 +163,31 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <KpiCard icon={CircleDollarSign} label="Receita gerada" value={brl(metrics.revenue)} hint={`${metrics.orders} pedido(s) no ERP · ver detalhes`} accent onClick={openSales} />
-        <KpiCard icon={Percent} label="Taxa de conversão" value={pct(metrics.conversionRate)} hint={`${funnel.converted} de ${funnel.delivered} entregues compraram`} onClick={openSales} />
-        <KpiCard icon={Receipt} label="Ticket médio" value={metrics.averageTicket === null ? "—" : brl(metrics.averageTicket)} hint="por cliente que comprou" />
-        <KpiCard icon={roiPositive ? TrendingUp : TrendingDown} label="ROI da campanha" value={metrics.roi === null ? "—" : `${metrics.roi.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x`} hint={metrics.roi === null ? "sem custo da Meta" : "retorno sobre o custo da Meta"}>
+      <section aria-label="Resultado financeiro" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <KpiCard icon={Wallet} label="Gasto (R$)" value={brl(metrics.cost.real)} hint={`custo Meta das mensagens entregues · ${brl(metrics.cost.estimated)} estimado`} />
+        <KpiCard icon={CircleDollarSign} label="Vendido (R$)" value={brl(metrics.revenue)} hint={`${metrics.orders} pedido(s) no ERP · ver detalhes`} accent onClick={openSales} />
+        <KpiCard
+          icon={roiPositive ? TrendingUp : TrendingDown}
+          label="Retorno financeiro (%)"
+          value={metrics.roi === null ? "—" : `${metrics.roi >= 0 ? "+" : ""}${pct(metrics.roi)}`}
+          hint={metrics.roas === null ? "sem gasto na Meta: retorno não se aplica" : `(vendido − gasto) ÷ gasto · ROAS ${metrics.roas.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}x`}
+        >
           {metrics.roi !== null && (
             <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${roiPositive ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300" : "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]"}`}>
-              {roiPositive ? "Positivo" : "Negativo"}
+              {roiPositive ? "Lucro" : "Prejuízo"}
             </span>
           )}
         </KpiCard>
+      </section>
+
+      <div className="grid grid-cols-2 gap-2">
+        <KpiCard icon={Percent} label="Conversão de leads" value={pct(metrics.conversionRate)} hint={`${funnel.converted} de ${funnel.delivered} entregues compraram`} onClick={openSales} />
+        <KpiCard icon={Receipt} label="Ticket médio" value={metrics.averageTicket === null ? "—" : brl(metrics.averageTicket)} hint="por cliente que comprou" />
       </div>
 
-      <div className="flex flex-col gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between dark:bg-slate-800/40 dark:text-slate-300">
-        <span className="flex items-center gap-2">
-          <Wallet className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-          <span>Custo Meta: <strong className="tabular-nums text-slate-900 dark:text-white">{brl(metrics.cost.real)}</strong> real · {brl(metrics.cost.estimated)} estimado</span>
-        </span>
-        <span className="text-[11px] text-slate-400">
-          {categoryLabel ? `Modelo de ${categoryLabel}: ${brl(metrics.unitPrice)}/msg` : "Mensagem livre: sem cobrança"} · vendas até {metrics.windowDays} dia(s) após o envio · ERP até {dateBr(metrics.lastSaleDate ?? "")}
-        </span>
-      </div>
+      <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
+        {categoryLabel ? `Modelo de ${categoryLabel}: ${brl(metrics.unitPrice)}/msg` : "Mensagem livre: sem cobrança"} · vendas até {metrics.windowDays} dia(s) após o envio · ERP até {dateBr(metrics.lastSaleDate ?? "")}
+      </p>
 
       <section className="rounded-xl border border-slate-200 p-4 dark:border-slate-700" aria-label="Funil de conversão">
         <div className="mb-3 flex items-baseline justify-between gap-2">
