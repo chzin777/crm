@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { brDay } from "@/lib/br-time";
 import { retryInboundMedia } from "@/lib/chat/inbound";
 import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
@@ -189,7 +190,7 @@ export async function runClock() {
   });
 
   await block("faxina", async () => {
-    if (!(await firstDispatch(`cleanup:${new Date(now).toISOString().slice(0, 10)}`))) return;
+    if (!(await firstDispatch(`cleanup:${brDay(new Date(now))}`))) return;
     const removed = await prisma.chatDispatch.deleteMany({ where: { createdAt: { lt: new Date(now - DISPATCH_RETENTION_DAYS * 24 * 60 * MINUTE) } } });
     summary.cleaned = removed.count;
   });

@@ -7,6 +7,7 @@ import { NpsWhatsappPanel } from "@/components/NpsWhatsappPanel";
 import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, RefreshCw, Star, TrendingUp, Users, X } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
+import { addDays, brDay, brStartOfDay, formatBr } from "@/lib/br-time";
 
 type SurveyKey = "atendimento" | "produto";
 
@@ -158,17 +159,16 @@ export default function NpsPage() {
     date: new Date(response.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
   }));
   const weeklyTrend = currentDate ? Array.from({ length: 6 }, (_, index) => {
-    const start = new Date(currentDate);
-    start.setDate(start.getDate() - (5 - index) * 7);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
+    // Semanas em dias de Brasília: setHours/setDate usariam o fuso do navegador.
+    const startDay = addDays(brDay(currentDate), -(5 - index) * 7);
+    const start = brStartOfDay(startDay);
+    const end = brStartOfDay(addDays(startDay, 7));
     const withinWeek = responses.filter((response) => {
       const date = new Date(response.createdAt);
       return date >= start && date < end;
     });
     return {
-      week: start.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }),
+      week: formatBr(start, { day: "2-digit", month: "short" }),
       atendimento: getMetrics(withinWeek.filter((item) => item.surveyKey === "atendimento").map((item) => item.rating)).nps,
       produto: getMetrics(withinWeek.filter((item) => item.surveyKey === "produto").map((item) => item.rating)).nps,
       respostas: withinWeek.length,

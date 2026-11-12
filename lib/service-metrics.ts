@@ -1,11 +1,11 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { brDay, brStartOfDay } from "@/lib/br-time";
 import { cached } from "@/lib/cache";
 import { DISPATCH_TAG } from "@/lib/chat/dispatch-history";
 
 /** Brasil sem horário de verão: dias contados em UTC-3. */
-const BRT_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Limites de SLA do tempo de resposta (segundos): acima de WARN fica amarelo, acima de BREACH vermelho. */
@@ -23,8 +23,9 @@ export type ServiceMetricsFilters = {
 };
 
 const ymd = (date: Date) => date.toISOString().slice(0, 10);
-const brtToday = () => ymd(new Date(Date.now() - BRT_OFFSET_MS));
-const brtMidnight = (day: string) => new Date(Date.parse(`${day}T00:00:00.000Z`) + BRT_OFFSET_MS);
+// Dia e meia-noite de Brasília pelo fuso oficial (Intl), sem depender do TZ do servidor nem de offset fixo.
+const brtToday = () => brDay();
+const brtMidnight = (day: string) => brStartOfDay(day);
 const addDays = (day: string, days: number) => ymd(new Date(Date.parse(`${day}T00:00:00.000Z`) + days * DAY_MS));
 const isDay = (value: string | undefined): value is string => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 
@@ -185,10 +186,10 @@ async function loadServiceMetrics(filters: ServiceMetricsFilters) {
       WHERE ${npsWhere(from, to)} AND n."attendantId" IS NOT NULL GROUP BY n."attendantId"`,
     prisma.$queryRaw<{ day: string; started: bigint; closed: bigint }[]>`
       WITH events AS (
-        SELECT to_char(c."createdAt" - interval '3 hours', 'YYYY-MM-DD') AS day, 1 AS started, 0 AS closed
+        SELECT to_char(c."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS day, 1 AS started, 0 AS closed
         FROM "ChatConversation" c WHERE c."createdAt" >= ${from} AND c."createdAt" < ${to} AND ${conv("c")}
         UNION ALL
-        SELECT to_char(c."closedAt" - interval '3 hours', 'YYYY-MM-DD'), 0, 1
+        SELECT to_char(c."closedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD'), 0, 1
         FROM "ChatConversation" c WHERE c."closedAt" >= ${from} AND c."closedAt" < ${to} AND ${conv("c")}
       )
       SELECT day, SUM(started) AS started, SUM(closed) AS closed FROM events GROUP BY day`,

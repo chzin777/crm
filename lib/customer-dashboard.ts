@@ -1,10 +1,10 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { brDay, brStartOfDay } from "@/lib/br-time";
 import { cached, cachedStale } from "@/lib/cache";
 
 /** Brasil sem horário de verão: dias contados em UTC-3. */
-const BRT_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type CustomerPeriodPreset = "30d" | "month" | "quarter" | "custom";
@@ -24,7 +24,8 @@ export type CustomerDashboardFilters = {
 export type HealthSegment = "promotor" | "ativo" | "risco" | "critico" | "dormente";
 
 const ymd = (date: Date) => date.toISOString().slice(0, 10);
-const brtToday = () => ymd(new Date(Date.now() - BRT_OFFSET_MS));
+// Dia e meia-noite de Brasília pelo fuso oficial (Intl), sem depender do TZ do servidor nem de offset fixo.
+const brtToday = () => brDay();
 const addDays = (day: string, days: number) => ymd(new Date(Date.parse(`${day}T00:00:00.000Z`) + days * DAY_MS));
 const addYears = (day: string, years: number) => {
   const date = new Date(`${day}T00:00:00.000Z`);
@@ -32,7 +33,7 @@ const addYears = (day: string, years: number) => {
   return ymd(date);
 };
 const isDay = (value: string | undefined): value is string => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
-const brtMidnight = (day: string) => new Date(Date.parse(`${day}T00:00:00.000Z`) + BRT_OFFSET_MS);
+const brtMidnight = (day: string) => brStartOfDay(day);
 
 /** Período base (dias BRT inclusivos) e o período de comparação. */
 export function resolveCustomerPeriod(filters: CustomerDashboardFilters) {
