@@ -28,6 +28,7 @@ import {
   TrendingUp,
   Target,
   Building2,
+  BookOpen,
   BarChart3,
 } from "lucide-react";
 
@@ -238,6 +239,21 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
               </Link>
             );
           })()}
+
+          {/* Manual do sistema: liberado para todos */}
+          <Link
+            href="/manual"
+            title={isCollapsed ? "Manual do sistema" : undefined}
+            aria-label={isCollapsed ? "Manual do sistema" : undefined}
+            className={`group mt-1 flex w-full items-center rounded-lg py-2.5 compact:py-1.5 text-[13px] font-medium transition-colors cursor-pointer hover:cursor-pointer ${
+              isCollapsed ? "justify-center px-0" : "gap-3 px-3"
+            } ${
+              pathname === "/manual" ? ITEM_ACTIVE : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+            }`}
+          >
+            <BookOpen className={`h-5 w-5 shrink-0 transition-colors ${pathname === "/manual" ? ICON_ACTIVE : ICON_IDLE}`} />
+            <span className={`truncate transition-opacity duration-200 ${isCollapsed ? "w-0 opacity-0" : "opacity-100"}`}>Manual do sistema</span>
+          </Link>
         </nav>
 
         {/* Footer: perfil + ver site */}

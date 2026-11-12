@@ -17,6 +17,7 @@ import {
   KeyRound,
   Settings,
   BarChart3,
+  BookOpen,
   X,
 } from "lucide-react";
 
@@ -43,6 +44,7 @@ const TABS: TabDef[] = [
   { id: "filas", label: "Filas", href: "/filas", icon: ListOrdered },
   { id: "metricas", label: "Métricas", href: "/metricas-atendimento", icon: BarChart3 },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
+  { id: "manual", label: "Manual", href: "/manual", icon: BookOpen },
 ];
 
 const STORAGE_KEY = "crm_tabs";
