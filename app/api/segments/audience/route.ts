@@ -5,6 +5,7 @@ import { requireApiSession } from "@/lib/api-auth";
 import { cached } from "@/lib/cache";
 import { CONTACT_PLACE_KEY } from "@/lib/geocode";
 import { campaignAudienceSets } from "@/lib/campaign-metrics";
+import { matchesBirthday, type BirthdayOperator, type BirthParts } from "@/lib/birthday";
 import { MAX_RULES, normalizeRuleText, ruleSchema, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
 
 const criterionSchema = z.object({
@@ -18,6 +19,8 @@ const criterionSchema = z.object({
 
 /** Destinatários e convertidos de cada campanha citada nas regras, resolvidos antes de montar o SQL. */
 type CampaignSets = Map<string, { delivered: string[]; converted: string[] }>;
+/** Dados resolvidos antes de montar o SQL das regras que dependem de cálculo fora do banco. */
+type RuleContext = { campaigns: CampaignSets; birthDates: string[] };
 
 const BR_TODAY = Prisma.sql`(now() AT TIME ZONE 'America/Sao_Paulo')::date`;
 
@@ -55,6 +58,28 @@ function purchaseCondition(rule: SegmentRule): Prisma.Sql {
     GROUP BY v."sourceKey", v."orderNumber", v."orderDate"
     ${having.length ? Prisma.sql`HAVING ${Prisma.join(having, " AND ")}` : Prisma.empty}
   )`;
+}
+
+/** Hoje no fuso de Brasília, em partes (ano, mês, dia). */
+function brTodayParts(): BirthParts {
+  const [year, month, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(new Date()).split("-").map(Number);
+  return { year, month, day };
+}
+
+/**
+ * Textos distintos de Contact.birthDate (~28 mil para 320 mil contatos), com cache curto.
+ * Interpretar a data dentro do SQL custava de 1 a 15 s por consulta; aqui a regra (lib/birthday.ts, com testes)
+ * roda sobre os textos distintos e o banco só compara igualdade.
+ */
+const loadBirthDates = () => cached("audience:birthdates", 300, async () =>
+  (await prisma.$queryRaw<{ b: string }[]>`SELECT DISTINCT "birthDate" AS b FROM "Contact" WHERE "birthDate" <> ''`).map((row) => row.b));
+
+/** Aniversário/idade: contatos cuja data de nascimento atende à regra hoje; sem data (ou inválida) nunca entram. */
+function birthdayCondition(rule: SegmentRule, birthDates: string[]): Prisma.Sql {
+  const today = brTodayParts();
+  const matching = birthDates.filter((value) => matchesBirthday(value, rule.operador as BirthdayOperator, today, rule.valor, rule.valor2));
+  return matching.length === 0 ? Prisma.sql`FALSE` : Prisma.sql`c."birthDate" = ANY(${matching}::text[])`;
 }
 
 function campaignCondition(rule: SegmentRule, campaigns: CampaignSets): Prisma.Sql {
@@ -148,14 +173,15 @@ const numberComparison = (column: Prisma.Sql, rule: SegmentRule): Prisma.Sql => 
   }
 };
 
-function ruleCondition(rule: SegmentRule, campaigns: CampaignSets): Prisma.Sql {
+function ruleCondition(rule: SegmentRule, context: RuleContext): Prisma.Sql {
   if (validateRule(rule)) return Prisma.sql`FALSE`;
   const value = rule.valor ?? "";
   const column = (name: string) => Prisma.raw(`c."${name}"`);
 
   switch (rule.campo) {
+    case "birthday": return birthdayCondition(rule, context.birthDates);
     case "erpPurchase": return purchaseCondition(rule);
-    case "campaignConversion": return campaignCondition(rule, campaigns);
+    case "campaignConversion": return campaignCondition(rule, context.campaigns);
     case "purchases": return numberComparison(ERP_ORDERS, rule);
     case "totalSpent": return numberComparison(ERP_TOTAL, rule);
     case "avgTicket": return Prisma.sql`s.orders > 0 AND ${numberComparison(ERP_TICKET, rule)}`;
@@ -251,9 +277,9 @@ function ruleCondition(rule: SegmentRule, campaigns: CampaignSets): Prisma.Sql {
   }
 }
 
-function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: Map<string, StoreRecord>, campaigns: CampaignSets): Prisma.Sql {
+function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: Map<string, StoreRecord>, context: RuleContext): Prisma.Sql {
   if (criterion.regras && criterion.regras.length > 0) {
-    const conditions = criterion.regras.map((rule) => Prisma.sql`(${ruleCondition(rule, campaigns)})`);
+    const conditions = criterion.regras.map((rule) => Prisma.sql`(${ruleCondition(rule, context)})`);
     return Prisma.sql`(${Prisma.join(conditions, criterion.combinar === "any" ? " OR " : " AND ")})`;
   }
   if (criterion.tipo === "loja") {
@@ -320,9 +346,9 @@ async function sampleContacts(conditions: Prisma.Sql[], limit: number): Promise<
   return rows.map((row) => ({ id: row.id, nome: row.name, telefone: row.phone ?? "", ultimaCompra: row.last_day, valorUltimaCompra: row.last_total === null ? null : Number(row.last_total) }));
 }
 
-async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean, restrictToIds?: string[], campaigns: CampaignSets = new Map(), sample = 0): Promise<{ count: number; sample?: AudienceSampleRow[]; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
+async function computeGroupCount(key: string, criteria: z.infer<typeof criterionSchema>[], stores: Map<string, StoreRecord>, includeRecipients: boolean, restrictToIds?: string[], context: RuleContext = { campaigns: new Map(), birthDates: [] }, sample = 0): Promise<{ count: number; sample?: AudienceSampleRow[]; recipients?: { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string }[] }> {
   if (criteria.length === 0 || (restrictToIds && restrictToIds.length === 0)) return { count: 0, recipients: includeRecipients ? [] : undefined, sample: sample > 0 ? [] : undefined };
-  const conditions = criteria.map((criterion) => criterionCondition(criterion, stores, campaigns));
+  const conditions = criteria.map((criterion) => criterionCondition(criterion, stores, context));
   // Interseção: os critérios filtram apenas dentro da lista importada.
   if (restrictToIds) conditions.unshift(Prisma.sql`c.id = ANY(${restrictToIds}::text[])`);
   if (includeRecipients) {
@@ -366,10 +392,14 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Critérios inválidos." }, { status: 400 });
 
-  const [storeRows, campaigns] = await Promise.all([
+  const allCriteria = [...Object.values(parsed.data.groups), ...Object.values(parsed.data.contactCriteria ?? {})].flat();
+  const usesBirthday = allCriteria.some((criterion) => criterion.regras?.some((rule) => rule.campo === "birthday"));
+  const [storeRows, campaigns, birthDates] = await Promise.all([
     prisma.store.findMany(),
-    loadCampaignSets([...Object.values(parsed.data.groups), ...Object.values(parsed.data.contactCriteria ?? {})].flat()),
+    loadCampaignSets(allCriteria),
+    usesBirthday ? loadBirthDates() : Promise.resolve([] as string[]),
   ]);
+  const context: RuleContext = { campaigns, birthDates };
   // Critério de loja tem id "store-<número>".
   const stores = new Map(storeRows.map((store) => [String(store.number), store]));
   const sampleSize = parsed.data.includeRecipients ? 0 : parsed.data.sample ?? 0;
@@ -387,7 +417,7 @@ export async function POST(request: Request) {
       const hit = await cached(cacheKey, 300, () => computeGroupCount(key, criteria, stores, false));
       counts[key] = hit.count;
     } else {
-      const result = await computeGroupCount(key, criteria, stores, !!parsed.data.includeRecipients, undefined, campaigns, sampleSize);
+      const result = await computeGroupCount(key, criteria, stores, !!parsed.data.includeRecipients, undefined, context, sampleSize);
       counts[key] = result.count;
       if (result.sample) samples[key] = result.sample;
       if (parsed.data.includeRecipients && result.recipients) recipients[key] = result.recipients;
@@ -396,7 +426,7 @@ export async function POST(request: Request) {
   for (const [key, contactIds] of Object.entries(parsed.data.contactGroups ?? {})) {
     const refine = parsed.data.contactCriteria?.[key] ?? [];
     if (refine.length > 0) {
-      const result = await computeGroupCount(key, refine, stores, !!parsed.data.includeRecipients, contactIds, campaigns);
+      const result = await computeGroupCount(key, refine, stores, !!parsed.data.includeRecipients, contactIds, context);
       counts[key] = result.count;
       if (parsed.data.includeRecipients && result.recipients) recipients[key] = result.recipients;
       continue;

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   AtSign,
   BadgeCheck,
+  Cake,
   CalendarClock,
   Briefcase,
   Kanban,
@@ -29,14 +30,15 @@ import {
 } from "lucide-react";
 import { getRuleField, splitRuleList, validateRule, type RuleMatch, type SegmentRule } from "@/lib/segment-rules";
 import { formatPhone } from "@/lib/chat/phone";
+import { MONTH_NAMES } from "@/lib/birthday";
 
 type FieldId =
-  | "erpPurchase" | "campaignConversion"
+  | "birthday" | "erpPurchase" | "campaignConversion"
   | "lastPurchase" | "avgTicket" | "totalSpent" | "purchases"
   | "ddd" | "state" | "city" | "neighborhood" | "tag" | "phone" | "email" | "gender" | "occupation"
   | "pipelineStage" | "category" | "npsAnswered" | "npsRating" | "segment";
 
-type EditorKind = "days" | "money" | "count" | "number" | "chips" | "text" | "presence" | "select" | "purchase" | "campaign";
+type EditorKind = "days" | "money" | "count" | "number" | "chips" | "text" | "presence" | "select" | "purchase" | "campaign" | "birthday";
 
 type CardDef = { id: FieldId; title: string; description: string; icon: LucideIcon; editor: EditorKind; chipHint?: string };
 
@@ -71,6 +73,7 @@ export const CRITERION_GROUPS: GroupDef[] = [
     description: "Telefone, região e marcações do atendimento.",
     icon: MapPin,
     cards: [
+      { id: "birthday", title: "Idade e aniversário", description: "Aniversariantes do dia, semana ou mês, ou faixa de idade.", icon: Cake, editor: "birthday" },
       { id: "ddd", title: "DDDs", description: "Região pelo DDD do telefone.", icon: PhoneCall, editor: "chips", chipHint: "Digite o DDD e tecle Enter (ex.: 62)" },
       { id: "state", title: "Estados (UF)", description: "Estado do cadastro do cliente.", icon: MapPinned, editor: "chips", chipHint: "Digite a UF e tecle Enter (ex.: GO)" },
       { id: "city", title: "Cidades", description: "Cidade do cadastro do cliente.", icon: MapPin, editor: "chips", chipHint: "Digite a cidade e tecle Enter" },
@@ -111,6 +114,7 @@ function defaultRule(card: CardDef): SegmentRule {
     case "select": return { campo: card.id, operador: "eq", valor: getRuleField(card.id)?.options?.[0]?.value ?? "" };
     case "purchase": return { campo: card.id, operador: "yesterday" };
     case "campaign": return { campo: card.id, operador: "converted", valor: "" };
+    case "birthday": return { campo: card.id, operador: "this_month" };
   }
 }
 
@@ -484,8 +488,57 @@ function CampaignEditor({ rule, update }: EditorProps) {
   );
 }
 
+function BirthdayEditor({ rule, update }: EditorProps) {
+  const isAge = rule.operador === "age";
+  const when = (["today", "this_week", "this_month", "month"].includes(rule.operador) ? rule.operador : "this_month") as "today" | "this_week" | "this_month" | "month";
+  return (
+    <div className="space-y-3">
+      <Pills
+        label="Tipo de critério"
+        value={isAge ? "age" : "birthday"}
+        onChange={(next) => update(next === "age" ? { operador: "age", valor: "40", valor2: "" } : { operador: "this_month", valor: "", valor2: "" })}
+        options={[{ value: "birthday", label: "Aniversariantes" }, { value: "age", label: "Faixa etária" }]}
+      />
+      {!isAge && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Pills
+            label="Quando faz aniversário"
+            value={when}
+            onChange={(next) => update({ operador: next, valor: next === "month" ? String(new Date().getMonth() + 1) : "", valor2: "" })}
+            options={[
+              { value: "today", label: "Hoje" },
+              { value: "this_week", label: "Esta semana" },
+              { value: "this_month", label: "Este mês" },
+              { value: "month", label: "Mês específico" },
+            ]}
+          />
+          {when === "month" && (
+            <select aria-label="Mês do aniversário" value={rule.valor ?? ""} onChange={(event) => update({ valor: event.target.value })} className={`${fieldClass} w-40 cursor-pointer`}>
+              {MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1)}>{name}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+      {isAge && (
+        <div className="grid grid-cols-2 items-end gap-3">
+          <div className="flex min-w-0 flex-col justify-end">
+            <span className={filterLabelClass} aria-hidden="true">Idade mínima</span>
+            <NumberInput label="Idade mínima" value={rule.valor} onChange={(value) => update({ valor: value.slice(0, 3) })} suffix="anos" placeholder="Ex.: 40" />
+          </div>
+          <div className="flex min-w-0 flex-col justify-end">
+            <span className={filterLabelClass} aria-hidden="true">Idade máxima</span>
+            <NumberInput label="Idade máxima" value={rule.valor2} onChange={(value) => update({ valor2: value.slice(0, 3) })} suffix="anos" placeholder="Sem limite" />
+          </div>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-400">Usa a data de nascimento do cadastro; contatos sem data ficam de fora.</p>
+    </div>
+  );
+}
+
 function Editor(props: EditorProps) {
   switch (props.card.editor) {
+    case "birthday": return <BirthdayEditor {...props} />;
     case "purchase": return <PurchaseEditor {...props} />;
     case "campaign": return <CampaignEditor {...props} />;
     case "days": return <DaysEditor {...props} />;

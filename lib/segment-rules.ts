@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { STAGE_DEFINITIONS } from "@/lib/pipeline-stages";
 
-export type RuleFieldType = "number" | "date" | "text" | "select" | "presence" | "purchase" | "campaign";
+import { describeBirthday, validateBirthday } from "@/lib/birthday";
+
+export type RuleFieldType = "number" | "date" | "text" | "select" | "presence" | "purchase" | "campaign" | "birthday";
 
 export interface RuleOperator {
   id: string;
@@ -70,7 +72,17 @@ const campaignOperators: RuleOperator[] = [
   { id: "not_converted", label: "receberam e não compraram", input: "one" },
 ];
 
+// Aniversário (dia/mês, ignorando o ano) ou idade; "month" usa valor = 1..12, "age" usa valor = mínima e valor2 = máxima.
+const birthdayOperators: RuleOperator[] = [
+  { id: "today", label: "aniversário hoje", input: "none" },
+  { id: "this_week", label: "aniversário nesta semana", input: "none" },
+  { id: "this_month", label: "aniversário neste mês", input: "none" },
+  { id: "month", label: "aniversário no mês", input: "one" },
+  { id: "age", label: "idade entre", input: "two" },
+];
+
 export const ruleFields: RuleField[] = [
+  { id: "birthday", label: "Idade e aniversário", type: "birthday" },
   { id: "erpPurchase", label: "Comprou no ERP", type: "purchase" },
   { id: "campaignConversion", label: "Campanha", type: "campaign" },
   { id: "purchases", label: "Quantidade de pedidos (ERP)", type: "number" },
@@ -132,6 +144,7 @@ export const operatorsByType: Record<RuleFieldType, RuleOperator[]> = {
   presence: presenceOperators,
   purchase: purchaseOperators,
   campaign: campaignOperators,
+  birthday: birthdayOperators,
 };
 
 export const getRuleField = (id: string) => ruleFields.find((field) => field.id === id);
@@ -183,6 +196,7 @@ export function validateRule(rule: SegmentRule): string | null {
   if (!operator) return `Selecione a condição para "${field.label}".`;
   if (field.type === "purchase" && rule.filtros?.valorMin && !isNumeric(rule.filtros.valorMin)) return "Informe um valor mínimo de pedido válido.";
   if (field.type === "campaign") return rule.valor?.trim() ? null : "Selecione a campanha.";
+  if (field.type === "birthday") return validateBirthday(operator.id, rule.valor, rule.valor2);
   if (field.type === "purchase" && operator.id === "within_days" && !(Number(rule.valor) >= 1)) return "Informe ao menos 1 dia em \"Comprou no ERP\".";
   if (operator.input === "none") return null;
 
@@ -211,6 +225,7 @@ export function describeRule(rule: SegmentRule): string {
   const field = getRuleField(rule.campo);
   const operator = getOperator(rule.campo, rule.operador);
   if (!field || !operator) return "Regra inválida";
+  if (field.type === "birthday") return describeBirthday(operator.id, rule.valor, rule.valor2);
   if (field.type === "campaign") {
     const name = `"${rule.valor2 || rule.valor || ""}"`;
     return operator.id === "converted" ? `Converteram após receber a campanha ${name}` : `Receberam a campanha ${name} e não compraram`;
