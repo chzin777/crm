@@ -2,7 +2,10 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { addDays, brDay, brStartOfDay } from "@/lib/br-time";
-import { AI_SETTINGS_KEY, sanitizeAiSettings, usageCostUsd, type AiSettings } from "@/lib/ai/settings";
+import { AI_SETTINGS_KEY, creditSummary, sanitizeAiSettings, usageCostUsd, type AiSettings } from "@/lib/ai/settings";
+
+/** Mesmo nome de AI_AUTHOR (lib/ai/agent), repetido aqui para não importar o agente no painel. */
+const AI_AUTHOR_NAME = "Assistente IA";
 
 const STATUS_KEY = "ai-status";
 const CACHE_MS = 30_000;
@@ -67,6 +70,7 @@ export const AI_FEATURE_LABELS: Record<string, string> = {
   products: "Sugestões de venda",
   agent: "Atendimento autônomo",
   playground: "Teste na página da IA",
+  check: "Verificação de conexão",
 };
 
 type Totals = { calls: number; inputTokens: number; outputTokens: number; costUsd: number };
@@ -92,6 +96,11 @@ export async function aiUsageReport() {
     settings.creditLoadedAt ? prisma.aiUsage.aggregate({ where: { createdAt: { gte: brStartOfDay(settings.creditLoadedAt) } }, _sum: { costUsd: true } }) : null,
     readAiStatus(),
   ]);
+  // Atuação no mês: conversas atendidas pela IA e mensagens que ela mandou ao cliente.
+  const [agentConversations, aiMessages] = await Promise.all([
+    prisma.aiUsage.findMany({ where: { feature: "agent", ok: true, createdAt: { gte: fromMonth }, conversationId: { not: null } }, distinct: ["conversationId"], select: { conversationId: true } }).then((rows) => rows.length),
+    prisma.chatMessage.count({ where: { author: "bot", authorName: AI_AUTHOR_NAME, createdAt: { gte: fromMonth } } }),
+  ]);
 
   const totals = (agg: { _count: number; _sum: { inputTokens: number | null; outputTokens: number | null; costUsd: Prisma.Decimal | null } }): Totals => ({
     calls: agg._count,
@@ -99,20 +108,31 @@ export async function aiUsageReport() {
     outputTokens: agg._sum.outputTokens ?? 0,
     costUsd: Number(agg._sum.costUsd ?? 0),
   });
-  const toBrl = (usd: number) => Math.round(usd * settings.usdToBrl * 100) / 100;
+  // 4 casas: uma chamada custa frações de centavo e não pode aparecer como zero.
+  const toBrl = (usd: number) => (Number.isFinite(usd) ? Math.round(usd * settings.usdToBrl * 10_000) / 10_000 : 0);
   const withBrl = (value: Totals) => ({ ...value, costBrl: toBrl(value.costUsd) });
 
-  const spentSinceCredit = Number(sinceCredit?._sum.costUsd ?? 0);
+  const all = totals(allTotals);
+  const month = totals(monthTotals);
+  // Sem data da recarga, desconta todo o gasto registrado (nunca mostra saldo maior que o real).
+  const spentSinceCredit = sinceCredit ? Number(sinceCredit._sum.costUsd ?? 0) : all.costUsd;
   const creditRemainingUsd = settings.creditLoadedUsd > 0 ? Math.max(0, settings.creditLoadedUsd - spentSinceCredit) : null;
+  const agentMonthUsd = byFeature.find((row) => row.bucket === "agent")?.cost ?? 0;
 
   return {
     configured: !!process.env.OPENAI_API_KEY?.trim(),
     model: settings.model,
     usdToBrl: settings.usdToBrl,
     today: withBrl(totals(todayTotals)),
-    month: withBrl(totals(monthTotals)),
-    allTime: withBrl(totals(allTotals)),
+    month: withBrl(month),
+    allTime: withBrl(all),
     monthlyBudgetBrl: settings.monthlyBudgetBrl,
+    balance: creditSummary({ creditLoadedUsd: settings.creditLoadedUsd, spentSinceCreditUsd: spentSinceCredit, monthlyBudgetBrl: settings.monthlyBudgetBrl, monthSpentUsd: month.costUsd, usdToBrl: settings.usdToBrl }),
+    activity: {
+      conversations: agentConversations,
+      messages: aiMessages,
+      avgCostPerConversationBrl: agentConversations > 0 ? toBrl(agentMonthUsd / agentConversations) : 0,
+    },
     credit: {
       loadedUsd: settings.creditLoadedUsd,
       loadedAt: settings.creditLoadedAt || null,

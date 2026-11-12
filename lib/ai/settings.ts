@@ -174,7 +174,10 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
 
 /** Custo em US$ de uma chamada pelos preços por milhão de tokens. */
 export const usageCostUsd = (settings: Pick<AiSettings, "priceInputPerMillionUsd" | "priceOutputPerMillionUsd">, inputTokens: number, outputTokens: number) =>
-  (inputTokens * settings.priceInputPerMillionUsd + outputTokens * settings.priceOutputPerMillionUsd) / 1_000_000;
+  {
+    const cost = ((Number(inputTokens) || 0) * (Number(settings.priceInputPerMillionUsd) || 0) + (Number(outputTokens) || 0) * (Number(settings.priceOutputPerMillionUsd) || 0)) / 1_000_000;
+    return Number.isFinite(cost) && cost > 0 ? cost : 0;
+  };
 
 /** Se as faixas próprias da IA cobrem este instante (horário de Brasília). */
 export function inAiSchedule(schedule: AiScheduleSlot[], date: Date) {
@@ -213,4 +216,53 @@ export function asksForHuman(settings: Pick<AiSettings, "handoffKeywords">, text
     const term = normalize(keyword).trim();
     return term.length > 0 && new RegExp(`(^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(message);
   });
+}
+
+/**
+ * Preços de tabela (US$ por 1 milhão de tokens) dos modelos mais usados. Ao trocar o modelo na tela,
+ * os preços são preenchidos por aqui; o administrador pode ajustar se a OpenAI mudar a tabela.
+ */
+export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
+  "gpt-5.4-mini": { input: 0.25, output: 2 },
+  "gpt-5-mini": { input: 0.25, output: 2 },
+  "gpt-5-nano": { input: 0.05, output: 0.4 },
+  "gpt-5": { input: 1.25, output: 10 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
+  "gpt-4.1": { input: 2, output: 8 },
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "gpt-4o": { input: 2.5, output: 10 },
+};
+
+export const modelPrice = (model: string) => MODEL_PRICES[model.trim().toLowerCase()] ?? null;
+
+const money = (value: number) => (Number.isFinite(value) ? Math.round(value * 100) / 100 : 0);
+
+export type CreditSummary = {
+  /** credit: crédito carregado na OpenAI; budget: orçamento mensal; none: nada informado. */
+  mode: "credit" | "budget" | "none";
+  totalBrl: number;
+  spentBrl: number;
+  remainingBrl: number;
+  /** 0 a 100. */
+  percentLeft: number;
+  /** Abaixo de 20% do total. */
+  low: boolean;
+};
+
+/**
+ * Saldo exibido no painel: crédito carregado menos o gasto desde a recarga (sem data, todo o gasto registrado);
+ * sem crédito informado, usa o orçamento mensal menos o gasto do mês. Nunca devolve NaN nem negativo.
+ */
+export function creditSummary(input: { creditLoadedUsd: number; spentSinceCreditUsd: number; monthlyBudgetBrl: number; monthSpentUsd: number; usdToBrl: number }): CreditSummary {
+  const rate = Number.isFinite(input.usdToBrl) && input.usdToBrl > 0 ? input.usdToBrl : DEFAULT_AI_SETTINGS.usdToBrl;
+  const safe = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0);
+  const build = (mode: CreditSummary["mode"], totalBrl: number, spentBrl: number): CreditSummary => {
+    const remainingBrl = money(Math.max(0, totalBrl - spentBrl));
+    const percentLeft = totalBrl > 0 ? Math.round((remainingBrl / totalBrl) * 1000) / 10 : 0;
+    return { mode, totalBrl: money(totalBrl), spentBrl: money(spentBrl), remainingBrl, percentLeft, low: totalBrl > 0 && percentLeft < 20 };
+  };
+  if (safe(input.creditLoadedUsd) > 0) return build("credit", safe(input.creditLoadedUsd) * rate, safe(input.spentSinceCreditUsd) * rate);
+  if (safe(input.monthlyBudgetBrl) > 0) return build("budget", safe(input.monthlyBudgetBrl), safe(input.monthSpentUsd) * rate);
+  return { ...build("none", 0, safe(input.monthSpentUsd) * rate), remainingBrl: 0 };
 }

@@ -86,3 +86,32 @@ describe("transbordo por arquivo (receita)", () => {
     expect(sanitizeAiSettings({ handoffOnMedia: false }).handoffOnMedia).toBe(false);
   });
 });
+
+describe("custo por tokens e saldo de créditos", () => {
+  it("custo por modelo: tokens de entrada e saída pela tabela de preços", async () => {
+    const { modelPrice, usageCostUsd } = await import("@/lib/ai/settings");
+    const mini = modelPrice("gpt-4o-mini")!;
+    // 1M de entrada a US$ 0,15 + 500 mil de saída a US$ 0,60 = US$ 0,45.
+    expect(usageCostUsd({ priceInputPerMillionUsd: mini.input, priceOutputPerMillionUsd: mini.output }, 1_000_000, 500_000)).toBeCloseTo(0.45, 6);
+    const big = modelPrice("GPT-4o")!;
+    expect(usageCostUsd({ priceInputPerMillionUsd: big.input, priceOutputPerMillionUsd: big.output }, 2_000, 1_000)).toBeCloseTo(0.015, 6);
+    expect(modelPrice("modelo-desconhecido")).toBeNull();
+    // Entradas quebradas nunca viram NaN.
+    expect(usageCostUsd({ priceInputPerMillionUsd: Number.NaN, priceOutputPerMillionUsd: 2 }, Number.NaN, 1_000_000)).toBe(2);
+  });
+
+  it("crédito carregado menos o gasto, com alerta abaixo de 20%", async () => {
+    const { creditSummary } = await import("@/lib/ai/settings");
+    expect(creditSummary({ creditLoadedUsd: 10, spentSinceCreditUsd: 0, monthlyBudgetBrl: 0, monthSpentUsd: 0, usdToBrl: 5 })).toEqual({ mode: "credit", totalBrl: 50, spentBrl: 0, remainingBrl: 50, percentLeft: 100, low: false });
+    expect(creditSummary({ creditLoadedUsd: 10, spentSinceCreditUsd: 8.5, monthlyBudgetBrl: 0, monthSpentUsd: 8.5, usdToBrl: 5 })).toMatchObject({ remainingBrl: 7.5, percentLeft: 15, low: true });
+    // Gasto acima do carregado: saldo zero, nunca negativo.
+    expect(creditSummary({ creditLoadedUsd: 1, spentSinceCreditUsd: 3, monthlyBudgetBrl: 0, monthSpentUsd: 3, usdToBrl: 5 })).toMatchObject({ remainingBrl: 0, percentLeft: 0, low: true });
+  });
+
+  it("sem crédito usa o orçamento do mês; sem nada informado não mostra NaN", async () => {
+    const { creditSummary } = await import("@/lib/ai/settings");
+    expect(creditSummary({ creditLoadedUsd: 0, spentSinceCreditUsd: 0, monthlyBudgetBrl: 100, monthSpentUsd: 4, usdToBrl: 5 })).toMatchObject({ mode: "budget", totalBrl: 100, spentBrl: 20, remainingBrl: 80, percentLeft: 80, low: false });
+    const none = creditSummary({ creditLoadedUsd: 0, spentSinceCreditUsd: Number.NaN, monthlyBudgetBrl: 0, monthSpentUsd: Number.NaN, usdToBrl: Number.NaN });
+    expect(none).toEqual({ mode: "none", totalBrl: 0, spentBrl: 0, remainingBrl: 0, percentLeft: 0, low: false });
+  });
+});

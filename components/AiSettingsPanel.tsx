@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, CheckCircle2, Coins, FlaskConical, PlugZap, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UserRoundCheck, Wallet, XCircle } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
-import { AI_TONES, DEFAULT_AI_SETTINGS, type AiSettings } from "@/lib/ai/settings";
+import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import type { AiUsageReport } from "@/lib/ai/store";
 
 type Queue = { id: string; name: string };
@@ -23,9 +23,15 @@ const TABS: { id: Tab; label: string; icon: typeof Bot }[] = [
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
 const area = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
 const labelCls = "block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300";
-const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// Valores pequenos (frações de centavo por chamada) aparecem com 4 casas em vez de R$ 0,00.
+const brl = (value: number | null | undefined) => {
+  const amount = Number.isFinite(value) ? Number(value) : 0;
+  return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: amount > 0 && amount < 1 ? 4 : 2 });
+};
+type CheckState = { state: "idle" | "checking" | "ok" | "error"; message?: string; at?: string };
 const usd = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 });
-const int = (value: number) => value.toLocaleString("pt-BR");
+const int = (value: number | null | undefined) => (Number.isFinite(value) ? Number(value) : 0).toLocaleString("pt-BR");
+const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" }) : "");
 
 function Toggle({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
@@ -137,6 +143,7 @@ export function AiSettingsPanel() {
   const [usage, setUsage] = useState<AiUsageReport | null>(null);
   const [usageError, setUsageError] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
+  const [check, setCheck] = useState<CheckState>({ state: "idle" });
 
   useEffect(() => {
     let active = true;
@@ -202,6 +209,25 @@ export function AiSettingsPanel() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const verifyConnection = async () => {
+    setCheck({ state: "checking" });
+    try {
+      const response = await fetch("/api/ai/check", { method: "POST" });
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok && !data.error) throw new Error("Não foi possível verificar.");
+      setCheck(data.ok ? { state: "ok", at: new Date().toISOString() } : { state: "error", message: data.error ?? "Falha na verificação.", at: new Date().toISOString() });
+    } catch (cause) {
+      setCheck({ state: "error", message: cause instanceof Error ? cause.message : "Não foi possível verificar." });
+    } finally {
+      setUsage(null);
+    }
+  };
+  // Modelo da tabela conhecida: já preenche os preços para o custo sair certo.
+  const changeModel = (model: string) => {
+    const price = modelPrice(model);
+    setSettings((current) => (current ? { ...current, model, ...(price ? { priceInputPerMillionUsd: price.input, priceOutputPerMillionUsd: price.output } : {}) } : current));
   };
 
   const toggleQueue = (id: string) => set("queueIds", settings.queueIds.includes(id) ? settings.queueIds.filter((item) => item !== id) : [...settings.queueIds, id]);
@@ -418,19 +444,40 @@ export function AiSettingsPanel() {
                 </p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Créditos</p>
-                {!usage ? <p className="mt-1 text-xs text-slate-400">{usageError || "Verificando..."}</p> : usage.status.creditExhausted
-                  ? <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[#c2410c] dark:text-[#F7915E]"><AlertTriangle className="h-4 w-4" />Sem créditos</p>
-                  : <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" />{usage.credit.remainingBrl === null ? "Sem alerta" : brl(usage.credit.remainingBrl)}</p>}
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Créditos na OpenAI</p>
+                {!usage ? <p className="mt-1 text-xs text-slate-400">{usageError || "Carregando..."}</p> : usage.status.creditExhausted ? (
+                  <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[#c2410c] dark:text-[#F7915E]"><AlertTriangle className="h-4 w-4" />Sem créditos</p>
+                ) : usage.status.lastOkAt && (!usage.status.lastErrorAt || usage.status.lastOkAt > usage.status.lastErrorAt) ? (
+                  <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" />Funcionando</p>
+                ) : usage.status.lastErrorAt ? (
+                  <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-red-600"><XCircle className="h-4 w-4" />Com erro</p>
+                ) : (
+                  <p className="mt-1 text-sm font-bold text-slate-500">Não verificado</p>
+                )}
+                {usage && (usage.status.lastOkAt || usage.status.lastErrorAt) && (
+                  <p className="mt-0.5 text-[10px] text-slate-400">Último uso: {when(usage.status.lastOkAt && (!usage.status.lastErrorAt || usage.status.lastOkAt > usage.status.lastErrorAt) ? usage.status.lastOkAt : usage.status.lastErrorAt)}</p>
+                )}
               </div>
             </div>
+            {usage?.status.lastError && usage.status.lastErrorAt && (!usage.status.lastOkAt || usage.status.lastErrorAt > usage.status.lastOkAt) && (
+              <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{usage.status.lastError}</p>
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" disabled={!configured || check.state === "checking"} onClick={() => void verifyConnection()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
+                <RefreshCw className={`h-3.5 w-3.5 ${check.state === "checking" ? "animate-spin" : ""}`} />{check.state === "checking" ? "Verificando..." : "Verificar conexão e créditos"}
+              </button>
+              {check.state === "ok" && <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" />Chave, modelo e créditos OK</span>}
+              {check.state === "error" && <span role="alert" className="flex items-center gap-1 text-xs font-semibold text-red-600"><XCircle className="h-4 w-4" />{check.message}</span>}
+            </div>
+            <p className="text-[10px] text-slate-400">A OpenAI não informa o saldo em dinheiro pela chave do projeto. A verificação faz um pedido mínimo (frações de centavo) e diz se a chave, o modelo e os créditos estão funcionando. O valor em R$ do saldo é calculado em Consumo e créditos.</p>
           </Block>
 
           <Block title="Modelo e criatividade">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className={labelCls}>Modelo
-                <input value={settings.model} onChange={(event) => set("model", event.target.value)} className={input} />
-                <span className="block text-[10px] font-normal text-slate-400">Nome exato do modelo na OpenAI (ex.: gpt-5.4-mini).</span>
+                <input value={settings.model} list="ai-models" onChange={(event) => changeModel(event.target.value)} className={input} />
+                <datalist id="ai-models">{["gpt-5.4-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"].map((model) => <option key={model} value={model} />)}</datalist>
+                <span className="block text-[10px] font-normal text-slate-400">Nome exato do modelo na OpenAI. Modelos da lista já preenchem os preços abaixo.</span>
               </label>
               <div className="space-y-1.5">
                 <Toggle label="Usar a criatividade padrão do modelo" description="Recomendado. Alguns modelos só aceitam o padrão." checked={settings.temperature === null} onChange={(value) => set("temperature", value ? null : 0.4)} />
@@ -474,8 +521,37 @@ export function AiSettingsPanel() {
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />A OpenAI recusou o último pedido por falta de créditos. A IA fica parada até a recarga.
                 </p>
               )}
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Stat label="Crédito disponível" value={usage.credit.remainingBrl === null ? "—" : brl(usage.credit.remainingBrl)} detail={usage.credit.remainingUsd === null ? "Informe o crédito carregado abaixo" : `${usd(usage.credit.remainingUsd)} de ${usd(usage.credit.loadedUsd)} carregados`} tone={usage.credit.remainingUsd !== null && usage.credit.remainingUsd < usage.credit.loadedUsd * 0.1 ? "warn" : "default"} />
+              <div className={`space-y-2 rounded-xl border p-4 ${usage.balance.low ? "border-[#F7915E]/60 bg-[#F7915E]/10" : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/40"}`}>
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{usage.balance.mode === "budget" ? "Disponível no orçamento do mês" : "Crédito disponível"}</p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-[#051647] dark:text-white">{usage.balance.mode === "none" ? "Não informado" : brl(usage.balance.remainingBrl)}</p>
+                  </div>
+                  <p className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                    {usage.balance.mode === "credit" && <>Gasto {brl(usage.balance.spentBrl)} de {brl(usage.balance.totalBrl)} carregados{usage.credit.loadedAt ? ` em ${usage.credit.loadedAt.split("-").reverse().join("/")}` : ""}{usage.credit.remainingUsd !== null ? ` · ${usd(usage.credit.remainingUsd)}` : ""}</>}
+                    {usage.balance.mode === "budget" && <>Gasto {brl(usage.balance.spentBrl)} de {brl(usage.balance.totalBrl)} no mês</>}
+                    {usage.balance.mode === "none" && <>Informe abaixo o crédito carregado na OpenAI (ou um orçamento mensal) para acompanhar o saldo.</>}
+                  </p>
+                </div>
+                {usage.balance.mode !== "none" && (
+                  <>
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10" role="progressbar" aria-label="Crédito restante" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usage.balance.percentLeft}>
+                      <div className={`h-full rounded-full transition-all ${usage.balance.low ? "bg-[#F7915E]" : "bg-[#C4D600]"}`} style={{ width: `${Math.min(100, Math.max(0, usage.balance.percentLeft))}%` }} />
+                    </div>
+                    <p className={`text-[11px] font-semibold ${usage.balance.low ? "text-[#9a4a1c] dark:text-[#F7915E]" : "text-slate-500 dark:text-slate-400"}`}>
+                      {usage.balance.percentLeft.toLocaleString("pt-BR")}% restante{usage.balance.low ? " · abaixo de 20%: recarregue para a IA não parar" : ""}
+                    </p>
+                  </>
+                )}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Stat label="Conversas atendidas pela IA (mês)" value={int(usage.activity.conversations)} detail="No atendimento autônomo" />
+                <Stat label="Mensagens enviadas pela IA (mês)" value={int(usage.activity.messages)} detail="Respostas ao cliente" />
+                <Stat label="Custo médio por conversa" value={brl(usage.activity.avgCostPerConversationBrl)} detail="Atendimento autônomo no mês" />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
                 <Stat label="Gasto hoje" value={brl(usage.today.costBrl)} detail={`${int(usage.today.inputTokens + usage.today.outputTokens)} tokens · ${int(usage.today.calls)} usos`} />
                 <Stat label="Gasto no mês" value={brl(usage.month.costBrl)} detail={`${int(usage.month.inputTokens + usage.month.outputTokens)} tokens${usage.monthlyBudgetBrl > 0 ? ` · ${Math.round((usage.month.costBrl / usage.monthlyBudgetBrl) * 100)}% do orçamento` : ""}`} tone={usage.monthlyBudgetBrl > 0 && usage.month.costBrl >= usage.monthlyBudgetBrl ? "warn" : "default"} />
                 <Stat label="Total desde o início" value={brl(usage.allTime.costBrl)} detail={`${int(usage.allTime.inputTokens)} de entrada · ${int(usage.allTime.outputTokens)} de saída`} />
