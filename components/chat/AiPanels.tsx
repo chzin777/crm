@@ -90,11 +90,37 @@ export function AiSummaryDialog({ conversationId, customerName, onClose }: { con
   );
 }
 
-/** Oportunidades de venda sugeridas pela IA no painel do cliente; a oferta vai para o campo de mensagem, nunca direto ao cliente. */
-export function AiProductSuggestions({ conversationId, onUsePitch }: { conversationId: string; onUsePitch?: (text: string) => void }) {
+/** Botão "Sugestões de venda" do cabeçalho da conversa: abre as oportunidades já analisando o cliente. */
+export function AiSalesDialog({ conversationId, customerName, onUsePitch, onClose }: { conversationId: string; customerName: string; onUsePitch?: (text: string) => void; onClose: () => void }) {
+  return (
+    <EntityDialog titleId="ai-sales-title" title="Sugestões de venda (IA)" description={`Oportunidades para ${customerName} pelo histórico de compras, receita e conversa.`} onClose={onClose}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1">
+        <AiProductSuggestions
+          conversationId={conversationId}
+          autoLoad
+          onUsePitch={onUsePitch ? (text) => { onUsePitch(text); onClose(); } : undefined}
+        />
+      </div>
+    </EntityDialog>
+  );
+}
+
+/** Oportunidades de venda sugeridas pela IA; a oferta vai para o campo de mensagem, nunca direto ao cliente. */
+export function AiProductSuggestions({ conversationId, onUsePitch, autoLoad = false }: { conversationId: string; onUsePitch?: (text: string) => void; autoLoad?: boolean }) {
   const [items, setItems] = useState<ProductSuggestion[] | null>(null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(autoLoad);
+
+  // Aberto pelo botão da conversa: já chega analisando, sem um clique a mais.
+  useEffect(() => {
+    if (!autoLoad) return;
+    let active = true;
+    askAi<{ suggestions: ProductSuggestion[] }>(conversationId, "products")
+      .then((data) => { if (active) setItems(data.suggestions); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Não foi possível sugerir produtos."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [autoLoad, conversationId]);
 
   const load = async () => {
     setLoading(true);

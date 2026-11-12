@@ -2,13 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, Sparkles, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
 import { CustomerPanel } from "@/components/chat/CustomerPanel";
-import { AiSummaryDialog } from "@/components/chat/AiPanels";
+import { AiSalesDialog, AiSummaryDialog } from "@/components/chat/AiPanels";
 import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
@@ -66,6 +66,7 @@ function ChatWorkspace() {
   const [showPanel, setShowPanel] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpKey, setFollowUpKey] = useState(0);
+  const [showSales, setShowSales] = useState(false);
   const [summaryTarget, setSummaryTarget] = useState<{ id: string; name: string } | null>(null);
   const [composerDraft, setComposerDraft] = useState<{ text: string; nonce: number } | null>(null);
   const [scheduled, setScheduled] = useState<ScheduledMessageItem[]>([]);
@@ -563,6 +564,16 @@ function ChatWorkspace() {
                   )}
                   <button
                     type="button"
+                    onClick={() => setShowSales(true)}
+                    title="Sugestões de venda com IA para este cliente"
+                    aria-label="Sugestões de venda"
+                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-2.5 text-xs font-semibold text-[#051647] transition hover:bg-[#b3c400] xl:h-9"
+                  >
+                    <ShoppingBag className="h-4 w-4" />
+                    <span className="hidden sm:inline">Sugestões de venda</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={togglePanel}
                     title={showPanel ? "Fechar painel do cliente" : "Painel do cliente: compras, receita, campanhas e retornos"}
                     aria-label="Painel do cliente"
@@ -635,7 +646,15 @@ function ChatWorkspace() {
             onNewFollowUp={() => setShowFollowUp(true)}
             onChanged={() => void loadList()}
             onClose={togglePanel}
-            onUsePitch={(text) => setComposerDraft({ text, nonce: Date.now() })}
+          />
+        )}
+
+        {showSales && open && (
+          <AiSalesDialog
+            conversationId={open.id}
+            customerName={open.name}
+            onUsePitch={canWrite && !open.closedAt ? (text) => setComposerDraft({ text, nonce: Date.now() }) : undefined}
+            onClose={() => setShowSales(false)}
           />
         )}
 
