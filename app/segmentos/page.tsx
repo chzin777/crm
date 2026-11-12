@@ -1656,7 +1656,7 @@ export default function SegmentosPage() {
             }
           }}
         >
-          <section role="dialog" aria-modal="true" aria-labelledby="criteria-manager-title" className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f9fc] shadow-2xl dark:border-slate-700 dark:bg-[#051647]">
+          <section role="dialog" aria-modal="true" aria-labelledby="criteria-manager-title" className="flex h-[min(860px,92vh)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-[#f7f9fc] shadow-2xl dark:border-slate-700 dark:bg-[#051647]">
             <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5 dark:border-slate-800 dark:bg-[#07194f] sm:px-8">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#002187] dark:text-[#C4D600]">Segmentação</p>
@@ -1671,7 +1671,8 @@ export default function SegmentosPage() {
               </div>
               <button type="button" onClick={() => { setIsCriteriaManagerOpen(false); setManagerSearch(""); resetCriterionForm(); }} aria-label="Fechar critérios de segmentação" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer"><X className="h-5 w-5" /></button>
             </header>
-            <div className="custom-scrollbar min-h-0 max-h-[80vh] flex-1 overflow-y-auto px-6 py-6 sm:px-8">
+            {/* Altura fixa: só o corpo rola, então trocar de filtro não mexe no tamanho do modal nem nos botões do rodapé. */}
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] px-6 py-6 sm:px-8">
              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
               <div id="criterion-form" className="space-y-5">
                 <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#07194f] sm:grid-cols-[minmax(0,1fr)_220px]">
