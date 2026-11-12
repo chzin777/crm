@@ -11,7 +11,7 @@ import { formatBr } from "@/lib/br-time";
 import { aiConfigured, aiJson, AiError } from "@/lib/ai/openai";
 import { BRAND_RULES, catalog, conversationContext } from "@/lib/ai/assist";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
-import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
+import { AI_TONES, aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import type { ChatConversation } from "@/generated/prisma/client";
 
 /** Nome gravado nas mensagens da IA (o atendimento vê quem respondeu). */
@@ -94,6 +94,7 @@ function rules(settings: AiSettings, queueNames: string[]) {
   return [
     BRAND_RULES,
     `Você é ${settings.agentName}, assistente virtual que atende clientes pelo WhatsApp. Se for a primeira resposta da conversa, apresente-se brevemente como assistente virtual.`,
+    `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
     "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",
     settings.useCustomerOrders ? "Você pode informar ao cliente dados dos pedidos dele que aparecem no histórico do ERP (data, loja, situação)." : "Não comente pedidos ou compras anteriores do cliente.",
     settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
@@ -159,7 +160,7 @@ async function respond(conversationId: string, messageId: string) {
   try {
     decision = await aiJson<AgentDecision>(
       [
-        { role: "system", content: `${rules(settings, queues.map((queue) => queue.name))}\n\nAgora: ${formatBr(new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).\n\nInformações que você pode usar:\n${info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}` },
+        { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info) },
         { role: "user", content: context.text },
       ],
       { feature: "agent", conversationId, maxTokens: 700 },
@@ -185,4 +186,35 @@ async function respond(conversationId: string, messageId: string) {
     // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
     await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${reason}`, "");
   }
+}
+
+const systemPrompt = (settings: AiSettings, queueNames: string[], info: string) =>
+  `${rules(settings, queueNames)}\n\nAgora: ${formatBr(new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).\n\nInformações que você pode usar:\n${info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`;
+
+export type PlaygroundMessage = { from: "customer" | "ai"; text: string };
+export type PlaygroundResult = { action: "reply" | "handoff" | "resolved"; reply: string; reason: string; queue: string; byKeyword: boolean };
+
+/**
+ * Teste da página /ia: simula a conversa com os parâmetros da tela (mesmo ainda não salvos),
+ * com as mesmas regras e informações do atendimento real. Não envia nada ao cliente.
+ */
+export async function simulateAgent(settings: AiSettings, messages: PlaygroundMessage[], userId: string): Promise<PlaygroundResult> {
+  const lastAi = messages.map((message) => message.from).lastIndexOf("ai");
+  const pendingText = messages.slice(lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).join("\n");
+  if (asksForHuman(settings, pendingText)) return { action: "handoff", reply: settings.handoffMessage, reason: "Cliente pediu para falar com uma pessoa (palavra de transferência)", queue: "", byKeyword: true };
+
+  const [info, queues] = await Promise.all([
+    knowledge(settings),
+    settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
+  ]);
+  const transcript = messages.map((message) => `${message.from === "customer" ? "Cliente" : settings.agentName}: ${message.text}`).join("\n");
+  const decision = await aiJson<AgentDecision>(
+    [
+      { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info) },
+      { role: "user", content: `Conversa de teste (cliente fictício, sem histórico no ERP):\n${transcript}` },
+    ],
+    { feature: "playground", userId, maxTokens: 700, settings },
+  );
+  const action = decision.action === "handoff" || decision.action === "resolved" ? decision.action : "reply";
+  return { action, reply: decision.reply?.trim() ?? "", reason: decision.reason?.trim() ?? "", queue: decision.queue?.trim() ?? "", byKeyword: false };
 }

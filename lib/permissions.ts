@@ -15,6 +15,7 @@ export const MODULES = [
   { key: "filas", label: "Filas de Atendimento", href: "/filas", group: "Vendas" },
   { key: "metricas", label: "Métricas de Atendimento", href: "/metricas-atendimento", group: "Vendas" },
   { key: "configuracoes", label: "Configurações", href: "/configuracoes", group: "Geral" },
+  { key: "ia", label: "Inteligência Artificial", href: "/ia", group: "Geral" },
 ] as const;
 
 export type ModuleKey = (typeof MODULES)[number]["key"];
@@ -49,6 +50,8 @@ export function resolveChatCapabilities(role: string | null | undefined, permiss
 export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAccess> | null | undefined): boolean {
   if (key === null) return true;
   if (modules?.[key] === true) return true;
+  // A IA saiu de Configurações para /ia: quem já administrava Configurações continua com acesso.
+  if (key === "ia") return modules?.configuracoes === true;
   return key === "campanhas" && modules?.disparos === true;
 }
 

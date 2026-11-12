@@ -19,6 +19,7 @@ import {
   Award,
   UserCog,
   Settings,
+  Sparkles,
   ChevronDown,
   Megaphone,
   LogOut,
@@ -93,6 +94,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Usuários", href: "/usuarios", icon: UserCog },
     { title: "Cargos", href: "/cargos", icon: ShieldCheck },
     { title: "Permissões", href: "/permissoes", icon: KeyRound },
+    { title: "Inteligência Artificial", href: "/ia", icon: Sparkles },
     { title: "Configurações", href: "/configuracoes", icon: Settings },
   ];
 
@@ -218,13 +220,14 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
             );
           })}
 
-          {/* Configurações */}
-          {canAccess("/configuracoes") && (() => {
-            const item = byHref("/configuracoes");
+          {/* Inteligência Artificial e Configurações: itens soltos, fora dos grupos */}
+          {["/ia", "/configuracoes"].filter((href) => canAccess(href)).map((href) => {
+            const item = byHref(href);
             const Icon = item.icon;
             const isActive = pathname === item.href;
             return (
               <Link
+                key={item.href}
                 href={item.href}
                 title={isCollapsed ? item.title : undefined}
                 aria-label={isCollapsed ? item.title : undefined}
@@ -238,7 +241,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                 <span className={`truncate transition-opacity duration-200 ${isCollapsed ? "w-0 opacity-0" : "opacity-100"}`}>{item.title}</span>
               </Link>
             );
-          })()}
+          })}
 
           {/* Manual do sistema: liberado para todos */}
           <Link

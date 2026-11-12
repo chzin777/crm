@@ -22,6 +22,7 @@ const TABS: TabItem[] = [
   { href: "/nps", label: "NPS" },
   { href: "/usuarios", label: "Usuários" },
   { href: "/cargos", label: "Cargos" },
+  { href: "/ia", label: "IA" },
   { href: "/configuracoes", label: "Configurações" },
 ];
 

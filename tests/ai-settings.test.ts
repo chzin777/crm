@@ -60,3 +60,22 @@ describe("parâmetros salvos", () => {
     expect(usageCostUsd({ priceInputPerMillionUsd: 0.25, priceOutputPerMillionUsd: 2 }, 4000, 500)).toBeCloseTo(0.002, 6);
   });
 });
+
+describe("página /ia: novos parâmetros e permissão", () => {
+  it("tom e temperatura: padrão, valores válidos e inválidos", async () => {
+    const { sanitizeAiSettings, DEFAULT_AI_SETTINGS } = await import("@/lib/ai/settings");
+    expect(sanitizeAiSettings({})).toMatchObject({ tone: DEFAULT_AI_SETTINGS.tone, temperature: null });
+    expect(sanitizeAiSettings({ tone: "profissional", temperature: 0.3 })).toMatchObject({ tone: "profissional", temperature: 0.3 });
+    expect(sanitizeAiSettings({ tone: "grosseiro", temperature: 5 })).toMatchObject({ tone: DEFAULT_AI_SETTINGS.tone, temperature: 1 });
+    // Configuração salva antes da página nova continua valendo, com os campos novos no padrão.
+    expect(sanitizeAiSettings({ agentName: "Lia", autonomousEnabled: true })).toMatchObject({ agentName: "Lia", autonomousEnabled: true, tone: "acolhedor", temperature: null });
+  });
+
+  it("quem tinha Configurações acessa /ia; quem não tinha, não", async () => {
+    const { canAccessModule, moduleForPath } = await import("@/lib/permissions");
+    expect(moduleForPath("/ia")).toBe("ia");
+    expect(canAccessModule("ia", { configuracoes: true })).toBe(true);
+    expect(canAccessModule("ia", { ia: true })).toBe(true);
+    expect(canAccessModule("ia", { chat: true })).toBe(false);
+  });
+});

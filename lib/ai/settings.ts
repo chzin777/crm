@@ -1,18 +1,28 @@
 import { brClock } from "@/lib/br-time";
 
 /**
- * Parâmetros da IA definidos pelo administrador em Configurações.
+ * Parâmetros da IA definidos pelo administrador na página Inteligência Artificial (/ia).
  * Puro (sem banco) para ser usado na tela, nas rotas e nos testes.
  */
 
 export type AiKnowledgeTopic = { id: string; title: string; enabled: boolean; content: string };
 export type AiScheduleSlot = { day: number; start: string; end: string };
 
+export type AiTone = "acolhedor" | "profissional" | "descontraido" | "objetivo";
+export const AI_TONES: { id: AiTone; label: string; hint: string; instruction: string }[] = [
+  { id: "acolhedor", label: "Acolhedor", hint: "Próximo e gentil, sem exageros.", instruction: "Tom acolhedor e gentil, próximo do cliente, sem exageros nem intimidade forçada." },
+  { id: "profissional", label: "Profissional", hint: "Cordial e formal, trata por senhor(a).", instruction: "Tom profissional e cordial; trate o cliente por senhor ou senhora e evite gírias e emojis." },
+  { id: "descontraido", label: "Descontraído", hint: "Leve, com emojis moderados.", instruction: "Tom leve e descontraído, com no máximo um emoji por mensagem, sem perder a clareza." },
+  { id: "objetivo", label: "Objetivo", hint: "Curto e direto ao ponto.", instruction: "Tom objetivo: respostas curtas e diretas, no máximo duas frases quando possível." },
+];
+
 export type AiSettings = {
   /** Liga o atendimento autônomo (o copiloto do atendente funciona sempre que houver chave). */
   autonomousEnabled: boolean;
   /** Nome com que a IA se apresenta ao cliente. */
   agentName: string;
+  /** Tom de voz das respostas ao cliente. */
+  tone: AiTone;
   /** Atende na entrada, no lugar do menu automático. */
   attendAtEntry: boolean;
   /** Filas em que a IA atende quem está aguardando, enquanto ninguém assume. */
@@ -43,6 +53,8 @@ export type AiSettings = {
 
   // Custos e créditos.
   model: string;
+  /** Criatividade (0 a 1); null usa o padrão do modelo (alguns modelos só aceitam o padrão). */
+  temperature: number | null;
   priceInputPerMillionUsd: number;
   priceOutputPerMillionUsd: number;
   usdToBrl: number;
@@ -65,6 +77,7 @@ export const DEFAULT_AI_TOPICS: AiKnowledgeTopic[] = [
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   autonomousEnabled: false,
   agentName: "Assistente Óticas Brasil",
+  tone: "acolhedor",
   attendAtEntry: false,
   queueIds: [],
   scheduleMode: "off_hours",
@@ -85,6 +98,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   handoffMessage: "Vou te passar para um dos nossos atendentes, só um instante! 😊",
   closeWhenResolved: true,
   model: "gpt-5.4-mini",
+  temperature: null,
   priceInputPerMillionUsd: 0.25,
   priceOutputPerMillionUsd: 2,
   usdToBrl: 5.5,
@@ -123,6 +137,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
   return {
     autonomousEnabled: bool(raw.autonomousEnabled, d.autonomousEnabled),
     agentName: str(raw.agentName, d.agentName, 60).trim() || d.agentName,
+    tone: AI_TONES.some((tone) => tone.id === raw.tone) ? (raw.tone as AiTone) : d.tone,
     attendAtEntry: bool(raw.attendAtEntry, d.attendAtEntry),
     queueIds: Array.isArray(raw.queueIds) ? raw.queueIds.filter((id): id is string => typeof id === "string").slice(0, 50) : d.queueIds,
     scheduleMode: raw.scheduleMode === "always" || raw.scheduleMode === "custom" || raw.scheduleMode === "off_hours" ? raw.scheduleMode : d.scheduleMode,
@@ -143,6 +158,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     handoffMessage: str(raw.handoffMessage, d.handoffMessage, 1000),
     closeWhenResolved: bool(raw.closeWhenResolved, d.closeWhenResolved),
     model: str(raw.model, d.model, 60).trim() || d.model,
+    temperature: raw.temperature === null || raw.temperature === undefined || raw.temperature === "" ? null : num(raw.temperature, 0.7, 0, 1),
     priceInputPerMillionUsd: num(raw.priceInputPerMillionUsd, d.priceInputPerMillionUsd, 0, 1000),
     priceOutputPerMillionUsd: num(raw.priceOutputPerMillionUsd, d.priceOutputPerMillionUsd, 0, 1000),
     usdToBrl: num(raw.usdToBrl, d.usdToBrl, 0.01, 100),

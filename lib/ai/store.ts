@@ -66,6 +66,7 @@ export const AI_FEATURE_LABELS: Record<string, string> = {
   summary: "Resumo do atendimento",
   products: "Sugestões de venda",
   agent: "Atendimento autônomo",
+  playground: "Teste na página da IA",
 };
 
 type Totals = { calls: number; inputTokens: number; outputTokens: number; costUsd: number };

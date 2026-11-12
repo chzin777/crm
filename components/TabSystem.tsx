@@ -16,6 +16,7 @@ import {
   Shield,
   KeyRound,
   Settings,
+  Sparkles,
   BarChart3,
   BookOpen,
   X,
@@ -43,6 +44,7 @@ const TABS: TabDef[] = [
   { id: "chat", label: "Atendimento", href: "/chat", icon: MessageSquare },
   { id: "filas", label: "Filas", href: "/filas", icon: ListOrdered },
   { id: "metricas", label: "Métricas", href: "/metricas-atendimento", icon: BarChart3 },
+  { id: "ia", label: "Inteligência Artificial", href: "/ia", icon: Sparkles },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
   { id: "manual", label: "Manual", href: "/manual", icon: BookOpen },
 ];

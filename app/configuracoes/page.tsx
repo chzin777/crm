@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { WhatsAppSettings } from "@/components/WhatsAppSettings";
-import { AiSettingsPanel } from "@/components/AiSettingsPanel";
-import { Bell, CheckCircle2, Clock3, DollarSign, Save, Sparkles, TrendingUp, Users } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, DollarSign, Save, TrendingUp, Users } from "lucide-react";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
 
@@ -232,10 +231,6 @@ export default function ConfiguracoesPage() {
               <SettingsTextField label="Janela de conversão (dias após o envio)" value={settings.janelaConversaoDias ?? "7"} type="number" onChange={(value) => updateSetting("janelaConversaoDias", value)} />
             </div>
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Mensagens livres, dentro da janela de 24h de atendimento, não são cobradas pela Meta.</p>
-          </SettingsCard>
-
-          <SettingsCard title="Inteligência Artificial" description="O que a IA responde sozinha, em quais filas e horários atende, quando passa para uma pessoa e quanto está custando. Tem botão próprio de salvar." icon={Sparkles}>
-            <AiSettingsPanel />
           </SettingsCard>
 
           <WhatsAppSettings />
