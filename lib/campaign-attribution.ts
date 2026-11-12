@@ -31,6 +31,40 @@ export function isAttributedSale({ saleDay, firstSeen, sentDay, sentAt, windowDa
   return true;
 }
 
+/** Um envio entregue a um cliente: de qual disparo e quando. */
+export type Touch = { campaignId: string; sentAt: Date };
+
+/**
+ * Última campanha antes da compra (last-touch): entre os envios entregues ao cliente que aceitariam o pedido
+ * pela regra de atribuição, fica o mais recente. Assim cada pedido conta para no máximo um disparo e a soma
+ * dos disparos bate com o total geral. Empate no mesmo instante: menor id, para ser determinístico.
+ */
+export function lastTouch(sale: { saleDay: string; firstSeen: Date | null }, touches: Touch[], windowDays: number): string | null {
+  let winner: Touch | null = null;
+  for (const touch of touches) {
+    if (!isAttributedSale({ ...sale, sentDay: brDay(touch.sentAt), sentAt: touch.sentAt, windowDays })) continue;
+    if (!winner || touch.sentAt > winner.sentAt || (touch.sentAt.getTime() === winner.sentAt.getTime() && touch.campaignId < winner.campaignId)) winner = touch;
+  }
+  return winner?.campaignId ?? null;
+}
+
+/** Venda atribuída, identificada para o total geral: quem comprou e qual pedido. */
+export type AttributedSaleRef = { buyerKey: string; orderKey: string; valor: number };
+
+/** Total geral dos disparos: soma de vendas e pedidos, com clientes únicos entre todos os disparos. */
+export function aggregateCampaigns(campaigns: AttributedSaleRef[][]) {
+  const orders = new Map<string, number>();
+  const buyers = new Set<string>();
+  for (const sales of campaigns) {
+    for (const sale of sales) {
+      orders.set(sale.orderKey, sale.valor);
+      buyers.add(sale.buyerKey);
+    }
+  }
+  const revenueCents = [...orders.values()].reduce((sum, value) => sum + Math.round(value * 100), 0);
+  return { revenue: revenueCents / 100, orders: orders.size, buyers: buyers.size };
+}
+
 /** Linha do espelho do ERP (VmsetSale): um item de venda ou de devolução. */
 export type SaleItemRow = {
   sourceKey: string;

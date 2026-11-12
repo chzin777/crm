@@ -14,7 +14,7 @@ type Overview = {
   windowDays: number;
 };
 
-const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const int = (value: number) => value.toLocaleString("pt-BR");
 const rate = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : "—");
 
@@ -81,7 +81,7 @@ function CampaignsOverview() {
           <article className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/20">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"><ShoppingBag className="h-3.5 w-3.5" />Vendas no ERP</p>
             <p className="mt-1.5 text-xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">{brl(data.revenue)}</p>
-            <p className="mt-1 text-[10px] text-emerald-700/80 dark:text-emerald-300/80">{int(data.funnel.converted)} clientes · {int(data.orders)} pedidos</p>
+            <p className="mt-1 text-[10px] text-emerald-700/80 dark:text-emerald-300/80">{int(data.funnel.converted)} clientes ({int(data.orders)} pedidos) · soma de {int(data.campaigns)} disparos</p>
           </article>
           <article className="rounded-xl bg-[#C4D600]/15 p-3 dark:bg-[#C4D600]/10">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#051647] dark:text-[#C4D600]"><TrendingUp className="h-3.5 w-3.5" />ROI</p>

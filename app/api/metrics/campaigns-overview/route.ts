@@ -2,7 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
 import { cachedStale } from "@/lib/cache";
 import { bulkCampaignId, listBulkJobs } from "@/lib/bulk-dispatch";
-import { campaignMetrics } from "@/lib/campaign-metrics";
+import { campaignMetrics, type ConvertedSale } from "@/lib/campaign-metrics";
+import { aggregateCampaigns } from "@/lib/campaign-attribution";
 import { listTemplates } from "@/lib/meta-whatsapp";
 
 type Template = { name: string; language: string; category?: string | null } | null | undefined;
@@ -34,6 +35,9 @@ async function loadOverview(): Promise<CampaignsOverview> {
     template ? template.category ?? templates.find((item) => item.name === template.name && item.language === template.language)?.category ?? null : null;
 
   const total: CampaignsOverview = { campaigns: 0, funnel: { dispatched: 0, delivered: 0, read: 0, replied: 0, converted: 0 }, revenue: 0, orders: 0, cost: 0, roi: null, windowDays: 0 };
+  // Mesma fonte do detalhe de cada campanha (campaignMetrics, com last-touch): cada pedido pertence a um só disparo,
+  // então o total é a soma exata das campanhas; clientes que compraram via dois disparos contam uma vez.
+  const attributed: ConvertedSale[][] = [];
   for (const { campaignId } of ids) {
     const metrics = await campaignMetrics(campaignId, categoryOf(templateOf.get(campaignId)));
     if (metrics.funnel.dispatched === 0) continue;
@@ -42,12 +46,15 @@ async function loadOverview(): Promise<CampaignsOverview> {
     total.funnel.delivered += metrics.funnel.delivered;
     total.funnel.read += metrics.funnel.read;
     total.funnel.replied += metrics.funnel.replied;
-    total.funnel.converted += metrics.funnel.converted;
-    total.revenue += metrics.revenue;
-    total.orders += metrics.orders;
     total.cost += metrics.cost.real;
     total.windowDays = metrics.windowDays;
+    attributed.push(metrics.sales);
   }
+  const sales = aggregateCampaigns(attributed);
+  total.revenue = sales.revenue;
+  total.orders = sales.orders;
+  total.funnel.converted = sales.buyers;
+  total.cost = Math.round(total.cost * 100) / 100;
   total.roi = total.cost > 0 ? (total.revenue - total.cost) / total.cost : null;
   return total;
 }

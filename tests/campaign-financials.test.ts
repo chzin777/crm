@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brDay, buildOrders, campaignFinancials, isAttributedSale, type SaleItemRow } from "@/lib/campaign-attribution";
+import { aggregateCampaigns, brDay, buildOrders, campaignFinancials, isAttributedSale, lastTouch, type SaleItemRow, type Touch } from "@/lib/campaign-attribution";
 import { phoneVariants } from "@/lib/chat/phone";
 
 const item = (patch: Partial<SaleItemRow>): SaleItemRow => ({
@@ -86,6 +86,46 @@ describe("indicadores financeiros", () => {
 
   it("retorno negativo quando vende menos que o gasto", () => {
     expect(campaignFinancials({ revenue: 50, cost: 100, buyers: 1, recipients: 10, orders: 1 }).roi).toBe(-50);
+  });
+});
+
+describe("total geral × detalhe das campanhas (last-touch)", () => {
+  const blackFriday: Touch = { campaignId: "black-friday", sentAt: new Date("2026-11-10T19:30:00Z") };
+  const teste: Touch = { campaignId: "teste", sentAt: new Date("2026-11-10T15:43:00Z") };
+
+  it("cliente que recebeu 2 campanhas antes de comprar: o pedido fica só com a mais recente", () => {
+    const sale = { saleDay: "2026-11-11", firstSeen: new Date("2026-11-11T18:33:00Z") };
+    expect(lastTouch(sale, [teste, blackFriday], 7)).toBe("black-friday");
+    expect(lastTouch(sale, [blackFriday, teste], 7)).toBe("black-friday");
+  });
+
+  it("pedido que entrou no ERP antes do disparo mais recente fica com o anterior", () => {
+    // Recebeu o teste às 12:43, comprou e o pedido entrou às 15:58; a Black Friday saiu às 16:30.
+    const sale = { saleDay: "2026-11-10", firstSeen: new Date("2026-11-10T18:58:00Z") };
+    expect(lastTouch(sale, [teste, blackFriday], 7)).toBe("teste");
+  });
+
+  it("pedido fora da janela de todos os disparos não é de ninguém", () => {
+    expect(lastTouch({ saleDay: "2026-11-30", firstSeen: null }, [teste, blackFriday], 7)).toBeNull();
+  });
+
+  it("soma das campanhas bate 100% com o total geral, sem contar cliente ou pedido duas vezes", () => {
+    const touches = [teste, blackFriday];
+    const sales = [
+      { buyerKey: "ana", orderKey: "ana|1", valor: 1000, sale: { saleDay: "2026-11-11", firstSeen: null } },
+      { buyerKey: "ana", orderKey: "ana|2", valor: 500.1, sale: { saleDay: "2026-11-12", firstSeen: null } },
+      { buyerKey: "bia", orderKey: "bia|1", valor: 3698.8, sale: { saleDay: "2026-11-10", firstSeen: new Date("2026-11-10T18:00:00Z") } },
+      { buyerKey: "bia", orderKey: "bia|2", valor: 0.2, sale: { saleDay: "2026-11-11", firstSeen: null } },
+    ];
+    const perCampaign = touches.map((touch) => sales.filter((item) => lastTouch(item.sale, touches, 7) === touch.campaignId));
+    const total = aggregateCampaigns(perCampaign);
+    const summed = perCampaign.flat();
+
+    expect(summed).toHaveLength(sales.length); // cada pedido em exatamente uma campanha
+    expect(total.orders).toBe(perCampaign.reduce((sum, list) => sum + list.length, 0));
+    expect(total.revenue).toBe(5199.1);
+    expect(total.revenue).toBe(perCampaign.reduce((sum, list) => sum + list.reduce((acc, item) => acc + Math.round(item.valor * 100), 0), 0) / 100);
+    expect(total.buyers).toBe(2); // bia comprou via as duas campanhas, conta uma vez
   });
 });
 

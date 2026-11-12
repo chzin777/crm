@@ -148,6 +148,8 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
   const categoryLabel = metrics.category === "MARKETING" ? "marketing" : metrics.category === "UTILITY" ? "utilidade" : metrics.category ? metrics.category.toLowerCase() : null;
   const roiPositive = metrics.roi !== null && metrics.roi >= 0;
   const openSales = () => { setVisibleSales(SALES_PAGE); setShowSales(true); };
+  // Um cliente pode fazer mais de um pedido na janela: sempre mostrar os dois números juntos.
+  const clientsAndOrders = `${funnel.converted.toLocaleString("pt-BR")} cliente${funnel.converted === 1 ? "" : "s"} (${metrics.orders.toLocaleString("pt-BR")} pedido${metrics.orders === 1 ? "" : "s"})`;
   const emptySales = (
     <div className="flex flex-col items-center px-6 py-8 text-center">
       <span className="relative mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-[#002187]/[0.06] text-[#002187] dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
@@ -165,7 +167,7 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
     <div className="space-y-4">
       <section aria-label="Resultado financeiro" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <KpiCard icon={Wallet} label="Gasto (R$)" value={brl(metrics.cost.real)} hint={`custo Meta das mensagens entregues · ${brl(metrics.cost.estimated)} estimado`} />
-        <KpiCard icon={CircleDollarSign} label="Vendido (R$)" value={brl(metrics.revenue)} hint={`${metrics.orders} pedido(s) no ERP · ver detalhes`} accent onClick={openSales} />
+        <KpiCard icon={CircleDollarSign} label="Vendido (R$)" value={brl(metrics.revenue)} hint={`${clientsAndOrders} no ERP · ver detalhes`} accent onClick={openSales} />
         <KpiCard
           icon={roiPositive ? TrendingUp : TrendingDown}
           label="Retorno financeiro (%)"
@@ -211,7 +213,7 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
                     style={{ width: `${step.value > 0 ? Math.max(width, 2) : 0}%`, opacity: 1 - index * 0.1 }}
                   />
                   <span className={`absolute inset-y-0 left-2 flex items-center text-[11px] font-bold tabular-nums ${width > 18 ? "text-white dark:text-[#051647]" : "text-slate-700 dark:text-slate-200"}`} style={width > 18 ? undefined : { left: `calc(${Math.max(width, 0)}% + 8px)` }}>
-                    {step.value.toLocaleString("pt-BR")}
+                    {index === steps.length - 1 ? clientsAndOrders : step.value.toLocaleString("pt-BR")}
                   </span>
                 </div>
                 <span className="flex w-[104px] flex-col items-end gap-0.5">
@@ -232,7 +234,7 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
           <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Pedidos convertidos (ERP)</h3>
           <span className="flex items-center gap-2">
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{metrics.sales.length} pedido{metrics.sales.length === 1 ? "" : "s"}</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{clientsAndOrders} · {brl(metrics.revenue)}</span>
             {metrics.sales.length > 0 && (
               <button type="button" onClick={openSales} className="cursor-pointer text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">Ver conversões</button>
             )}

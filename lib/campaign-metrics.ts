@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { phoneVariants } from "@/lib/chat/phone";
-import { addDays, brDay, buildOrders, campaignFinancials, isAttributedSale, type SaleItemRow } from "@/lib/campaign-attribution";
+import { addDays, brDay, buildOrders, campaignFinancials, isAttributedSale, lastTouch, type SaleItemRow, type Touch } from "@/lib/campaign-attribution";
 import { getMetaPricing, priceFor } from "@/lib/meta-pricing";
 
 export type ConvertedSale = {
@@ -22,6 +22,9 @@ export type ConvertedSale = {
   registradoEm: string | null;
   /** Conversa do comprador no chat, se houver. */
   conversationId: string | null;
+  /** Chaves do comprador e do pedido, para o total geral contar cada um uma vez. */
+  buyerKey: string;
+  orderKey: string;
 };
 
 export type CampaignMetrics = {
@@ -132,13 +135,41 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   `;
   const sales = buildOrders(rows.map((row) => ({ ...row, amount: row.amount === null ? null : Number(row.amount), syncedAt: row.syncedAt ? new Date(row.syncedAt) : null })));
 
+  const candidates = sales.filter((sale) => {
+    const owner = owners.get(sale.sourceKey);
+    return owner && isAttributedSale({ saleDay: sale.dia, firstSeen: sale.firstSeen, sentDay: owner.sentDay, sentAt: owner.sentAt, windowDays });
+  });
+  // Outros disparos entregues aos mesmos compradores (por contato ou telefone): o pedido fica com o mais recente (last-touch).
+  const buyers = [...new Set(candidates.map((sale) => owners.get(sale.sourceKey) as Recipient))];
+  const buyerPhones = [...new Set(buyers.flatMap((buyer) => phoneVariants(buyer.phone)))];
+  const otherTouches = buyers.length === 0 ? [] : await prisma.campaignMessage.findMany({
+    where: {
+      campaignId: { not: campaignId },
+      sentAt: { not: null },
+      status: { not: "failed" },
+      AND: [
+        { OR: [{ deliveredAt: { not: null } }, { readAt: { not: null } }, { repliedAt: { not: null } }] },
+        { OR: [{ contactId: { in: buyers.map((buyer) => buyer.contactId).filter(Boolean) } }, { phone: { in: buyerPhones } }] },
+      ],
+    },
+    select: { campaignId: true, contactId: true, phone: true, sentAt: true },
+  });
+  const touchesOf = (owner: Recipient): Touch[] => {
+    const variants = new Set(phoneVariants(owner.phone));
+    return [
+      { campaignId, sentAt: owner.sentAt },
+      ...otherTouches
+        .filter((touch) => (owner.contactId && touch.contactId === owner.contactId) || variants.has(touch.phone))
+        .map((touch) => ({ campaignId: touch.campaignId, sentAt: touch.sentAt as Date })),
+    ];
+  };
+
   const converted = new Set<string>();
   const convertedSales: ConvertedSale[] = [];
   let revenue = 0;
-  for (const sale of sales) {
-    const owner = owners.get(sale.sourceKey);
-    if (!owner) continue;
-    if (!isAttributedSale({ saleDay: sale.dia, firstSeen: sale.firstSeen, sentDay: owner.sentDay, sentAt: owner.sentAt, windowDays })) continue;
+  for (const sale of candidates) {
+    const owner = owners.get(sale.sourceKey) as Recipient;
+    if (lastTouch({ saleDay: sale.dia, firstSeen: sale.firstSeen }, touchesOf(owner), windowDays) !== campaignId) continue;
     const ownerKey = owner.contactId || `phone:${owner.phone}`;
     converted.add(ownerKey);
     revenue += sale.total;
@@ -147,6 +178,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       contactId: owner.contactId, nome: info?.name ?? owner.phone, telefone: owner.phone, pedido: sale.pedido, data: sale.dia, valor: sale.total,
       loja: sale.loja, itens: sale.itens, resumo: sale.resumo, notaFiscal: sale.notaFiscal,
       enviadoEm: owner.sentAt.toISOString(), registradoEm: sale.firstSeen ? sale.firstSeen.toISOString() : null, conversationId: null,
+      buyerKey: ownerKey, orderKey: `${sale.sourceKey}|${sale.loja}|${sale.pedido}|${sale.dia}`,
     });
   }
   revenue = Math.round(revenue * 100) / 100;
