@@ -1,10 +1,9 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/cache";
-import { formatBr } from "@/lib/br-time";
+import { formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
 import { loadCustomerHistory } from "@/lib/chat/customer-history";
 import { aiJson } from "@/lib/ai/openai";
-import type { CustomerHistory } from "@/lib/chat/types";
 
 const MESSAGES_LIMIT = 40;
 const CATALOG_LIMIT = 60;
@@ -12,7 +11,6 @@ const CATALOG_DAYS = 180;
 
 export type ConversationRef = { id: string; contactId: string; phone: string; subject: string; queueId: string | null };
 
-const AUTHOR_LABEL = { customer: "Cliente", agent: "Atendente", bot: "Robô", system: "Sistema" } as const;
 
 export const BRAND_RULES = [
   "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato, armações e exames de vista).",
@@ -30,28 +28,12 @@ async function transcript(conversationId: string) {
   });
   return rows
     .reverse()
-    .map((row) => {
-      const attachment = row.attachment as { kind?: string; name?: string } | null;
-      const body = row.text.trim() || (attachment ? `[${attachment.kind ?? "arquivo"}${attachment.name ? `: ${attachment.name}` : ""}]` : "");
-      if (!body) return null;
-      const who = row.author === "agent" && row.authorName ? `Atendente ${row.authorName.split(" ")[0]}` : AUTHOR_LABEL[row.author];
-      return `[${formatBr(row.createdAt, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}] ${who}${row.internal ? " (nota interna, o cliente não vê)" : ""}: ${body}`;
-    })
+    .map((row) => transcriptLine({ ...row, attachment: row.attachment as TranscriptRow["attachment"] }))
     .filter(Boolean)
     .join("\n");
 }
 
-function historyText(history: CustomerHistory | null) {
-  if (!history) return "Sem cadastro no ERP.";
-  const lines = [
-    `Compras no ERP: ${history.purchases} · total gasto R$ ${history.totalSpent.toFixed(2)} · última compra: ${history.lastPurchaseDate ?? "nunca"}`,
-    `Loja do cadastro: ${history.store ?? "não informada"}`,
-    `Receita: última compra de lentes de grau ${history.prescription.lastLensPurchase ?? "sem registro"}${history.prescription.lensType ? ` (${history.prescription.lensType})` : ""}${history.prescription.renewalDue ? " · receita provavelmente vencida, oportunidade de novo exame/renovação" : ""}`,
-  ];
-  for (const order of history.orders.slice(0, 6)) lines.push(`Pedido ${order.orderNumber} em ${order.date ?? "?"} (${order.status}, R$ ${order.total.toFixed(2)}): ${order.summary || `${order.items} itens`}`);
-  return lines.join("\n");
-}
-
+/** Contexto do cliente (mesmo formato do teste da página /ia, ver formatContext). */
 export async function conversationContext(conversation: ConversationRef, options: { includeHistory?: boolean } = {}) {
   const includeHistory = options.includeHistory ?? true;
   const [contact, queue, messages, history] = await Promise.all([
@@ -62,16 +44,7 @@ export async function conversationContext(conversation: ConversationRef, options
   ]);
   return {
     contactName: contact?.name ?? "Cliente",
-    text: [
-      `Cliente: ${contact?.name ?? "não identificado"}`,
-      `Fila: ${queue?.name ?? "sem fila"}${conversation.subject ? ` · Assunto: ${conversation.subject}` : ""}`,
-      "",
-      "Histórico do cliente no ERP:",
-      includeHistory ? historyText(history) : "(não disponível para a IA)",
-      "",
-      "Conversa (mais antigas primeiro):",
-      messages || "(sem mensagens)",
-    ].join("\n"),
+    text: formatContext({ contactName: contact?.name ?? null, queueName: queue?.name ?? null, subject: conversation.subject, includeHistory, history, conversation: messages }),
   };
 }
 

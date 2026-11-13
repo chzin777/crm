@@ -6,7 +6,7 @@ import { sanitizeAiSettings } from "@/lib/ai/settings";
 import { validateAiAttachment } from "@/lib/ai/attachments";
 import type { AiMediaInput } from "@/lib/ai/multimodal";
 
-type Payload = { settings?: unknown; messages?: unknown } | null;
+type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown } | null;
 
 /**
  * Teste da IA com os parâmetros da tela (ainda não salvos). Nada é enviado ao cliente.
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     .slice(-20);
   if (!messages.some((item) => item.from === "customer")) return NextResponse.json({ error: "Escreva a mensagem do cliente ou anexe um arquivo." }, { status: 400 });
   try {
-    return NextResponse.json(await simulateAgent(sanitizeAiSettings(body?.settings), messages, guard.user.id, media));
+    return NextResponse.json(await simulateAgent(sanitizeAiSettings(body?.settings), messages, guard.user.id, media, { profile: body?.profile === "recorrente" ? "recorrente" : "novo", ignoreMediaTrigger: body?.ignoreMediaTrigger !== false }));
   } catch (error) {
     if (error instanceof AiError) return NextResponse.json({ error: error.message }, { status: error.status === 502 ? 422 : error.status });
     console.error("[ai/playground]", error);

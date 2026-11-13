@@ -6,21 +6,28 @@ import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
+import { SIMULATED_PROFILES, type AgentOutcome, type AgentTrigger, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { AiUsageReport } from "@/lib/ai/store";
 
 type Queue = { id: string; name: string };
 type Tab = "identidade" | "atuacao" | "conexao" | "consumo" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; media?: PlaygroundMedia; historyText?: string };
-type PlaygroundResult = {
-  action: "reply" | "handoff" | "resolved";
-  reply: string;
-  reason: string;
-  queue: string;
-  byKeyword: boolean;
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
+/** Mesmo resultado do motor do WhatsApp (runAiAgent), mais o que o cliente receberia. */
+type PlaygroundResult = AgentOutcome & {
+  messages: string[];
+  handoffQueue: string;
+  wouldClose: boolean;
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
   mediaHandoff?: boolean;
+};
+const TRIGGER_LABELS: Record<AgentTrigger, string> = {
+  keyword: "pedido de atendente",
+  media: "cliente enviou mídia",
+  limit: "limite de respostas da IA",
+  ai: "decisão da IA",
+  no_reply: "a IA não soube responder",
 };
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -101,8 +108,12 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const [attachment, setAttachment] = useState<{ file: File; media: PlaygroundMedia } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [profile, setProfile] = useState<SimulatedProfileId>("novo");
+  const [readMedia, setReadMedia] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Depois do transbordo a IA não volta a responder (igual ao WhatsApp): só recomeçando.
+  const ended = messages.some((message) => message.handoff);
   const urls = useRef<string[]>([]);
   const recorder = useRecorder(setError);
 
@@ -126,7 +137,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const send = async (override?: { file: File; media: PlaygroundMedia } | null) => {
     const text = draft.trim();
     const media = override ?? attachment;
-    if ((!text && !media) || busy) return;
+    if ((!text && !media) || busy || ended) return;
     const customer: PlaygroundMessage = { from: "customer", text, ...(media ? { media: media.media } : {}) };
     const next = [...messages, customer];
     setMessages(next);
@@ -136,7 +147,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     setBusy(true);
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
-      const payload = { settings, messages: next.map((message) => ({ from: message.from, text: message.historyText ?? message.text })) };
+      const payload = { settings, profile, ignoreMediaTrigger: readMedia, messages: next.map((message) => ({ from: message.from, text: message.historyText ?? message.text })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -151,10 +162,11 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         ? { ...customer, historyText: [text, data.media.summary].filter(Boolean).join("\n"), media: customer.media && { ...customer.media, transcript: data.media.transcript } }
         : customer;
       const notes = [
-        data.mediaHandoff ? "No atendimento real, o gatilho \"cliente enviou foto, documento ou áudio\" transferiria esta conversa para a equipe antes da IA responder." : "",
-        data.action === "handoff" ? `Transferiria para uma pessoa${data.queue ? ` (fila ${data.queue})` : ""}: ${data.reason || "sem motivo"}` : data.action === "resolved" ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : "",
+        data.mediaHandoff ? "No atendimento real, o gatilho \"cliente enviou foto, documento ou áudio\" transferiria esta conversa para a equipe antes da IA responder (aqui a leitura do anexo foi mostrada mesmo assim)." : "",
+        data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}` : ""}: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
+        data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
-      setMessages([...messages, sent, { from: "ai", text: data.reply || "(transfere sem mensagem)", note: notes.join(" ") }]);
+      setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff" }]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível testar a IA.");
     } finally {
@@ -173,7 +185,21 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const ghost = "inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5";
 
   return (
-    <Block title="Conversa de teste" hint="Escreva como se fosse o cliente, anexe foto (receita, armação), áudio ou documento (PDF, TXT, CSV, DOCX até 10 MB) ou grave um áudio. A IA responde com os parâmetros desta tela, mesmo os ainda não salvos, e com as mesmas lojas, horários e assuntos do atendimento real. Nada é enviado pelo WhatsApp; cada teste (e cada transcrição de áudio) conta no consumo.">
+    <Block title="Conversa de teste" hint="Escreva como se fosse o cliente, anexe foto (receita, armação), áudio ou documento (PDF, TXT, CSV, DOCX até 10 MB) ou grave um áudio. O teste usa o mesmo motor do atendimento real no WhatsApp (regras de transbordo, lojas, horários, assuntos, leitura de anexos), com os parâmetros desta tela, mesmo os ainda não salvos. Nada é enviado pelo WhatsApp; cada teste (e cada transcrição de áudio) conta no consumo.">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">Cliente simulado
+          <select value={profile} onChange={(event) => setProfile(event.target.value as SimulatedProfileId)} className="h-8 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+            {SIMULATED_PROFILES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+        <span className="text-[11px] text-slate-400">{SIMULATED_PROFILES.find((item) => item.id === profile)?.hint}{profile === "recorrente" && !settings.useCustomerOrders ? " (a IA só vê os pedidos com \"usar pedidos do cliente\" ligado)" : ""}</span>
+        {settings.handoffOnMedia && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+            <input type="checkbox" checked={readMedia} onChange={(event) => setReadMedia(event.target.checked)} className="cursor-pointer accent-[#002187]" />
+            Mostrar a leitura do anexo mesmo com o gatilho de mídia ligado
+          </label>
+        )}
+      </div>
       <div className="h-96 space-y-2 overflow-y-auto rounded-lg bg-slate-50 p-3 dark:bg-white/5">
         {messages.length === 0 && <p className="pt-28 text-center text-[11px] text-slate-400">Ex.: “Oi, vocês fazem exame de vista? Qual loja abre sábado?” ou envie a foto de uma receita.</p>}
         {messages.map((message, index) => (
@@ -187,6 +213,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
             </div>
           </div>
         ))}
+        {ended && <p className="text-center text-[11px] text-slate-500 dark:text-slate-400">Conversa com a equipe a partir daqui: no WhatsApp a IA não responde mais. Clique em Limpar para recomeçar.</p>}
         {busy && <p className="text-[11px] text-slate-400">{messages.at(-1)?.media?.kind === "audio" ? "Transcrevendo o áudio e pensando..." : messages.at(-1)?.media ? "A IA está lendo o anexo..." : "A IA está pensando..."}</p>}
         <div ref={endRef} />
       </div>
@@ -211,10 +238,10 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         </div>
       ) : (
         <div className="flex gap-2">
-          <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} title="Anexar imagem, áudio ou documento" aria-label="Anexar arquivo" className={ghost}><Paperclip className="h-4 w-4" /></button>
-          <button type="button" disabled={busy || !!attachment} onClick={() => void recorder.start()} title="Gravar áudio" aria-label="Gravar áudio" className={ghost}><Mic className="h-4 w-4" /></button>
+          <button type="button" disabled={busy || ended} onClick={() => fileRef.current?.click()} title="Anexar imagem, áudio ou documento" aria-label="Anexar arquivo" className={ghost}><Paperclip className="h-4 w-4" /></button>
+          <button type="button" disabled={busy || ended || !!attachment} onClick={() => void recorder.start()} title="Gravar áudio" aria-label="Gravar áudio" className={ghost}><Mic className="h-4 w-4" /></button>
           <input aria-label="Mensagem do cliente" value={draft} placeholder={attachment ? "Texto opcional junto do anexo e Enter" : "Mensagem do cliente e Enter"} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const picked = pick(event.clipboardData.files?.[0]); if (picked) { event.preventDefault(); setAttachment(picked); } }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void send(); } }} className={input} />
-          <button type="button" disabled={busy || (!draft.trim() && !attachment)} onClick={() => void send()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" />Enviar</button>
+          <button type="button" disabled={busy || ended || (!draft.trim() && !attachment)} onClick={() => void send()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" />Enviar</button>
           <button type="button" disabled={busy || messages.length === 0} onClick={() => { setMessages([]); setError(""); }} title="Começar outra conversa" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RotateCcw className="h-3.5 w-3.5" />Limpar</button>
         </div>
       )}

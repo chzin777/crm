@@ -16,6 +16,7 @@ import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { BRAND_RULES, catalog, conversationContext } from "@/lib/ai/assist";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { AI_TONES, aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
+import { customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 
 /** Nome gravado nas mensagens da IA (o atendimento vê quem respondeu). */
@@ -25,8 +26,6 @@ export const AI_HANDOFF_MARK = "IA transferiu o atendimento";
 /** Espera curta para juntar mensagens seguidas do cliente numa só resposta. */
 const DEBOUNCE_MS = 6_000;
 const CREDIT_RETRY_MS = 10 * 60 * 1000;
-
-type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "resolved"; reason?: string; queue?: string };
 
 const handedOff = (conversationId: string) =>
   prisma.chatMessage.findFirst({ where: { conversationId, author: "system", text: { startsWith: AI_HANDOFF_MARK } }, select: { id: true } }).then(Boolean);
@@ -110,15 +109,20 @@ function rules(settings: AiSettings, queueNames: string[]) {
   ].filter(Boolean).join("\n\n");
 }
 
-async function handoff(conversation: ChatConversation, settings: AiSettings, reason: string, queueName?: string) {
-  const contact = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } });
-  let queueId = settings.handoffQueueId || conversation.queueId;
+/** Fila de destino da transferência: a fixa da configuração, a escolhida pela IA ou a atual. Mesma regra no teste. */
+async function handoffQueue(settings: AiSettings, currentQueueId: string | null, queueName?: string) {
+  let queueId = settings.handoffQueueId || currentQueueId;
   if (!settings.handoffQueueId && settings.aiChoosesQueue && queueName) {
     const match = await prisma.chatQueue.findFirst({ where: { archivedAt: null, name: { equals: queueName.trim(), mode: "insensitive" } }, select: { id: true } });
     if (match) queueId = match.id;
   }
   const queue = queueId ? await prisma.chatQueue.findUnique({ where: { id: queueId }, select: { id: true, name: true, archivedAt: true } }) : null;
-  const target = queue && !queue.archivedAt ? queue : null;
+  return queue && !queue.archivedAt ? queue : null;
+}
+
+async function handoff(conversation: ChatConversation, settings: AiSettings, reason: string, queueName?: string) {
+  const contact = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } });
+  const target = await handoffQueue(settings, conversation.queueId, queueName);
 
   if (settings.handoffMessage.trim() && isWindowOpen(conversation.lastInboundAt)) {
     await sendAutomaticMessage(conversation, fillVariables(settings.handoffMessage, { customer: contact?.name, queue: target?.name }), undefined, undefined, AI_AUTHOR);
@@ -132,69 +136,6 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   });
   await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}` : ""}: ${reason}`);
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
-}
-
-async function respond(conversationId: string, messageId: string) {
-  const conversation = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
-  if (!conversation || conversation.assigneeId || conversation.closedAt) return;
-  // Chegou mensagem mais nova: a espera dela responde tudo de uma vez.
-  const latest = await prisma.chatMessage.findFirst({ where: { conversationId, author: "customer" }, orderBy: { createdAt: "desc" }, select: { id: true, text: true } });
-  if (latest?.id !== messageId) return;
-  if (!(await firstDispatch(`ai:${messageId}`))) return;
-  if (await handedOff(conversationId)) return;
-  const settings = await readAiSettings();
-  if (!settings.autonomousEnabled) return;
-
-  // Mensagens do cliente desde a última resposta (bot ou atendente).
-  const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
-  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true, attachment: true, metaMedia: true } });
-  const pendingText = pending.map((item) => item.text).join("\n");
-
-  if (asksForHuman(settings, pendingText)) return handoff(conversation, settings, "Cliente pediu para falar com uma pessoa");
-  if (settings.handoffOnMedia && pending.some((item) => item.attachment || item.metaMedia)) return handoff(conversation, settings, "Cliente enviou foto, documento ou áudio (ex.: receita)");
-  const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR } });
-  if (aiReplies >= settings.maxAiReplies) return handoff(conversation, settings, `Limite de ${settings.maxAiReplies} respostas da IA atingido`);
-
-  const [context, info, queues] = await Promise.all([
-    conversationContext(conversation, { includeHistory: settings.useCustomerOrders }),
-    knowledge(settings),
-    settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
-  ]);
-
-  // Foto, áudio ou documento do cliente: a IA lê o anexo mais recente (falha no arquivo não impede a resposta).
-  const media = await customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), { feature: "agent", conversationId });
-  if (media?.transcript && asksForHuman(settings, media.transcript)) return handoff(conversation, settings, "Cliente pediu para falar com uma pessoa (áudio)");
-
-  let decision: AgentDecision;
-  try {
-    decision = await aiJson<AgentDecision>(
-      [
-        { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info, !!media) },
-        { role: "user", content: media ? [{ type: "text", text: context.text }, ...media.parts] : context.text },
-      ],
-      { feature: "agent", conversationId, maxTokens: 700 },
-    );
-  } catch (error) {
-    // IA fora do ar: ninguém fica sem resposta, a conversa vai para a equipe.
-    return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
-  }
-
-  // Pode ter sido assumida enquanto a IA pensava.
-  const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
-  if (!fresh || fresh.assigneeId || fresh.closedAt) return;
-
-  const reply = decision.reply?.trim() ?? "";
-  const reason = decision.reason?.trim() || "Sem motivo informado";
-  if (decision.action === "handoff") {
-    if (reply && !settings.handoffMessage.trim()) await sendAutomaticMessage(fresh, reply, undefined, undefined, AI_AUTHOR);
-    return handoff(fresh, settings, reason, decision.queue);
-  }
-  if (!reply) return handoff(fresh, settings, "A IA não soube responder");
-  await sendAutomaticMessage(fresh, reply, undefined, undefined, AI_AUTHOR);
-  if (decision.action === "resolved" && settings.closeWhenResolved) {
-    // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
-    await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${reason}`, "");
-  }
 }
 
 const systemPrompt = (settings: AiSettings, queueNames: string[], info: string, hasMedia = false) =>
@@ -214,60 +155,171 @@ export async function prepareMedia(media: AiMediaInput, meta: Omit<AiCallMeta, "
   }
 }
 
-/** Atendimento real: lê o anexo mais recente do cliente (guardado no MinIO). Qualquer falha segue só com o texto. */
+/** Atendimento real: lê o anexo mais recente do cliente (baixado da Meta e guardado no MinIO pelo webhook). Falha segue só com o texto. */
 async function customerMedia(attachments: (ChatAttachment | null)[], meta: Omit<AiCallMeta, "maxTokens">) {
   const latest = attachments.filter((item): item is ChatAttachment => !!item?.key && !!aiAttachmentKind(item.mime, item.name) && item.size <= AI_ATTACHMENT_MAX_BYTES).at(-1);
   if (!latest) return null;
   try {
     return await prepareMedia({ name: latest.name, mime: latest.mime, data: await readFile(latest.key) }, meta);
   } catch (error) {
-    console.error(`[ai] ${meta.conversationId}: anexo ignorado:`, error instanceof Error ? error.message : error);
+    console.error(`[ai] ${meta.conversationId ?? "teste"}: anexo ignorado:`, error instanceof Error ? error.message : error);
     return null;
   }
 }
 
+export type AgentRunInput = {
+  settings: AiSettings;
+  /** Mensagens do cliente desde a última resposta (regra de palavra de transferência). */
+  pendingText: string;
+  /** O cliente mandou mídia nessas mensagens (gatilho de transferência por mídia). */
+  hasMedia: boolean;
+  /** Respostas que a IA já deu nesta conversa (limite de respostas). */
+  aiReplies: number;
+  /** Contexto do cliente montado por formatContext (cadastro, fila, ERP e conversa). */
+  buildContext: (media: PreparedMedia | null) => Promise<string> | string;
+  /** Anexo da última mensagem do cliente, carregado só se a IA for de fato responder. */
+  loadMedia: () => Promise<PreparedMedia | null>;
+  meta: Omit<AiCallMeta, "maxTokens">;
+  /** Só no teste: lê o anexo mesmo com o gatilho de mídia ligado, para ver como a IA o interpretaria. */
+  ignoreMediaTrigger?: boolean;
+};
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean };
+
+/**
+ * Motor único do agente de IA: o atendimento real (WhatsApp) e o teste da página /ia passam por aqui.
+ * Regras antes da IA → anexo (visão, transcrição, PDF, documento) → prompt com base de conhecimento e filas →
+ * modelo → interpretação. Erro do modelo sobe para quem chamou (o WhatsApp transfere; o teste mostra o erro).
+ */
+export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
+  const { settings } = input;
+  const early = preAgentOutcome(settings, input);
+  if (early) return { outcome: early, media: null, mediaTriggerSkipped: false };
+  const mediaTriggerSkipped = !!input.ignoreMediaTrigger && settings.handoffOnMedia && input.hasMedia;
+
+  const media = await input.loadMedia();
+  // Áudio pedindo atendente: a palavra de transferência vale também na transcrição.
+  if (media?.transcript && asksForHuman(settings, media.transcript)) {
+    return { outcome: { action: "handoff", reply: "", reason: "Cliente pediu para falar com uma pessoa (áudio)", queue: "", trigger: "keyword" }, media, mediaTriggerSkipped };
+  }
+  const [context, info, queues] = await Promise.all([
+    input.buildContext(media),
+    knowledge(settings),
+    settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
+  ]);
+  const decision = await aiJson<AgentDecision>(
+    [
+      { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info, !!media) },
+      { role: "user", content: media ? [{ type: "text", text: context }, ...media.parts] : context },
+    ],
+    { ...input.meta, maxTokens: 700 },
+  );
+  return { outcome: interpretDecision(decision), media, mediaTriggerSkipped };
+}
+
+async function respond(conversationId: string, messageId: string) {
+  const conversation = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
+  if (!conversation || conversation.assigneeId || conversation.closedAt) return;
+  // Chegou mensagem mais nova: a espera dela responde tudo de uma vez.
+  const latest = await prisma.chatMessage.findFirst({ where: { conversationId, author: "customer" }, orderBy: { createdAt: "desc" }, select: { id: true, text: true } });
+  if (latest?.id !== messageId) return;
+  if (!(await firstDispatch(`ai:${messageId}`))) return;
+  if (await handedOff(conversationId)) return;
+  const settings = await readAiSettings();
+  if (!settings.autonomousEnabled) return;
+
+  // Mensagens do cliente desde a última resposta (bot ou atendente).
+  const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true, attachment: true, metaMedia: true } });
+  const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR } });
+  const meta = { feature: "agent", conversationId };
+
+  let run: AgentRun;
+  try {
+    run = await runAiAgent({
+      settings,
+      pendingText: pending.map((item) => item.text).join("\n"),
+      hasMedia: pending.some((item) => item.attachment || item.metaMedia),
+      aiReplies,
+      meta,
+      loadMedia: () => customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), meta),
+      buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
+    });
+  } catch (error) {
+    // IA fora do ar: ninguém fica sem resposta, a conversa vai para a equipe.
+    return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
+  }
+  const { outcome } = run;
+  if (outcome.trigger !== "ai") return handoff(conversation, settings, outcome.reason);
+
+  // Pode ter sido assumida enquanto a IA pensava.
+  const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
+  if (!fresh || fresh.assigneeId || fresh.closedAt) return;
+
+  if (outcome.action === "handoff") {
+    if (outcome.reply && !settings.handoffMessage.trim()) await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
+    return handoff(fresh, settings, outcome.reason, outcome.queue);
+  }
+  await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
+  if (outcome.action === "resolved" && settings.closeWhenResolved) {
+    // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
+    await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${outcome.reason}`, "");
+  }
+}
+
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string };
-export type PlaygroundResult = {
-  action: "reply" | "handoff" | "resolved";
-  reply: string;
-  reason: string;
-  queue: string;
-  byKeyword: boolean;
+export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean };
+export type PlaygroundResult = AgentOutcome & {
+  /** O que o cliente receberia no WhatsApp (resposta e/ou mensagem de transferência). */
+  messages: string[];
+  /** Fila para onde a conversa iria na transferência. */
+  handoffQueue: string;
+  /** Encerraria a conversa (resolvido com a opção ligada). */
+  wouldClose: boolean;
   /** Anexo da última mensagem do cliente, como a IA o recebeu. */
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
-  /** O gatilho "cliente enviou mídia" está ligado: no atendimento real a conversa iria direto para a equipe. */
+  /** O gatilho de mídia foi ignorado só no teste: no atendimento real a conversa iria direto para a equipe. */
   mediaHandoff?: boolean;
 };
 
 /**
- * Teste da página /ia: simula a conversa com os parâmetros da tela (mesmo ainda não salvos),
- * com as mesmas regras e informações do atendimento real. Não envia nada ao cliente.
- * O anexo (opcional) pertence à última mensagem do cliente; anexos anteriores chegam como resumo no texto.
+ * Teste da página /ia: mesmo motor (runAiAgent) e mesmo formato de contexto do WhatsApp, com os parâmetros
+ * da tela (mesmo ainda não salvos) e um cliente fictício (novo ou recorrente com pedidos no ERP).
+ * Não envia nada ao cliente. O anexo (opcional) pertence à última mensagem do cliente.
  */
-export async function simulateAgent(settings: AiSettings, messages: PlaygroundMessage[], userId: string, attachment?: AiMediaInput): Promise<PlaygroundResult> {
+export async function simulateAgent(settings: AiSettings, messages: PlaygroundMessage[], userId: string, attachment?: AiMediaInput, options: PlaygroundOptions = {}): Promise<PlaygroundResult> {
   const meta = { feature: "playground", userId, settings };
-  const media = attachment ? await prepareMedia(attachment, meta) : null;
-  const history = media ? attachSummary(messages, media.summary) : messages;
-  const summary = media ? { kind: media.kind, summary: media.summary, ...(media.transcript !== undefined ? { transcript: media.transcript } : {}) } : undefined;
-  const mediaHandoff = media ? settings.handoffOnMedia : undefined;
+  const profile = SIMULATED_PROFILES.find((item) => item.id === options.profile) ?? SIMULATED_PROFILES[0];
+  const lastAi = messages.map((message) => message.from).lastIndexOf("ai");
+  const pendingText = messages.slice(lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).join("\n");
+  const now = Date.now();
 
-  const lastAi = history.map((message) => message.from).lastIndexOf("ai");
-  const pendingText = history.slice(lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).join("\n");
-  if (asksForHuman(settings, pendingText)) return { action: "handoff", reply: settings.handoffMessage, reason: "Cliente pediu para falar com uma pessoa (palavra de transferência)", queue: "", byKeyword: true, media: summary, mediaHandoff };
+  const run = await runAiAgent({
+    settings,
+    pendingText,
+    hasMedia: !!attachment,
+    aiReplies: messages.filter((message) => message.from === "ai").length,
+    meta,
+    ignoreMediaTrigger: options.ignoreMediaTrigger,
+    loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
+    buildContext: (media) => {
+      const history = media ? attachSummary(messages, media.summary) : messages;
+      // Mesmo formato de linha do WhatsApp (IA aparece como "Robô"), um minuto entre mensagens.
+      const conversation = history
+        .map((message, index) => transcriptLine({ author: message.from === "customer" ? "customer" : "bot", authorName: message.from === "ai" ? AI_AUTHOR : null, text: message.text, internal: false, attachment: null, createdAt: new Date(now - (history.length - index) * 60_000) }))
+        .filter(Boolean)
+        .join("\n");
+      return formatContext({ contactName: profile.name, queueName: null, subject: "", includeHistory: settings.useCustomerOrders, history: simulatedHistory(profile.id), conversation });
+    },
+  });
 
-  const [info, queues] = await Promise.all([
-    knowledge(settings),
-    settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
-  ]);
-  const transcript = history.map((message) => `${message.from === "customer" ? "Cliente" : settings.agentName}: ${message.text}`).join("\n");
-  const text = `Conversa de teste (cliente fictício, sem histórico no ERP):\n${transcript}`;
-  const decision = await aiJson<AgentDecision>(
-    [
-      { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info, !!media) },
-      { role: "user", content: media ? [{ type: "text", text }, ...media.parts] : text },
-    ],
-    { ...meta, maxTokens: 700 },
-  );
-  const action = decision.action === "handoff" || decision.action === "resolved" ? decision.action : "reply";
-  return { action, reply: decision.reply?.trim() ?? "", reason: decision.reason?.trim() ?? "", queue: decision.queue?.trim() ?? "", byKeyword: false, media: summary, mediaHandoff };
+  const { outcome, media } = run;
+  const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue) : null;
+  return {
+    ...outcome,
+    messages: customerMessages(outcome, settings, { customer: profile.name, queue: target?.name }),
+    handoffQueue: target?.name ?? "",
+    wouldClose: outcome.action === "resolved" && settings.closeWhenResolved,
+    media: media ? { kind: media.kind, summary: media.summary, ...(media.transcript !== undefined ? { transcript: media.transcript } : {}) } : undefined,
+    mediaHandoff: run.mediaTriggerSkipped || undefined,
+  };
 }
