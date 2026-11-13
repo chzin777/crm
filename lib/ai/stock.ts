@@ -149,6 +149,10 @@ export type StockToolProduct = StockProduct & {
   /** Tem saldo, mas o ERP não tem preço cadastrado: só aqui a IA oferece transferir para confirmar o valor. */
   precoSobConsulta: boolean;
   totalDisponivelRede: number;
+  /** Ficha resumida (web, cache 30 dias): só no produto principal com estoque. */
+  miniDescricao?: string | null;
+  /** "⭐ 4,8 (120 avaliações)"; null = sem nota confiável (nunca mencionar avaliação). */
+  avaliacaoWeb?: string | null;
 };
 export type StockToolResult = { cenario: StockScenario; termoBusca: string; regiao: string; regiaoReconhecida: boolean; produtos: StockToolProduct[]; orientacao: string };
 
@@ -281,7 +285,7 @@ export const STOCK_TOOL = {
 };
 
 /** Registro da consulta mostrado no teste da página /ia. */
-export type StockLog = { term: string; region: string; scenario: StockScenario; products: number; stores: number; ms: number; cached: boolean; /** Foto do produto: do cache, da web ou não achada. */ image?: "cache" | "web" | "none" };
+export type StockLog = { term: string; region: string; scenario: StockScenario; products: number; stores: number; ms: number; cached: boolean; /** Foto do produto: do cache, da web, não achada ou já enviada nesta etapa. */ image?: "cache" | "web" | "none" | "sent"; /** Ficha resumida (mini-descrição/avaliação). */ sheet?: "cache" | "web" | "none"; rating?: string | null };
 
 /** Passos da busca textual: todas as palavras; depois sem a última, até sobrar uma (marca). */
 export function stockSearchTerms(term: string) {

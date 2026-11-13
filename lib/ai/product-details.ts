@@ -10,9 +10,70 @@ export const DETAILS_MISS_TTL_MS = 24 * 60 * 60 * 1000;
 export const DETAILS_TIMEOUT_MS = 15_000;
 export const DETAILS_MAX_CHARS = 1200;
 
+export const MINI_DESCRIPTION_MAX = 120;
+
 export type DetailsCacheRow = { key: string; query: string; details: string | null; updatedAt: Date };
 export type DetailsCache = { get: (key: string) => Promise<DetailsCacheRow | null>; set: (row: { key: string; query: string; details: string | null }) => Promise<unknown> };
-export type ProductDetails = { text: string | null; source: "cache" | "web" | "none" };
+/** Avaliação média na web: só quando a página mostra a nota de forma explícita (nunca estimada). */
+export type WebRating = { nota: string; contagem: number | null; fonte: string | null };
+/** Ficha do modelo guardada no cache (JSON na coluna details). */
+export type ProductSheet = { miniDescricao: string | null; descricaoDetalhada: string | null; avaliacaoWeb: WebRating | null };
+/** text = descrição detalhada (compatível com o uso anterior). */
+export type ProductDetails = { text: string | null; sheet: ProductSheet | null; source: "cache" | "web" | "none" };
+
+/** "4.8" / "4,8" / 4.8 → "4,8" (escala de 1 a 5); fora disso, sem nota. */
+export function formatRating(value: unknown) {
+  const number = typeof value === "number" ? value : Number(String(value ?? "").replace(",", ".").replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(number) || number < 1 || number > 5) return null;
+  return number.toFixed(1).replace(".", ",");
+}
+
+/** Mini-descrição de 1 frase, até 120 caracteres. */
+export function shortLine(value: unknown) {
+  const text = typeof value === "string" ? cleanDetails(value)?.split("\n")[0]?.replace(/^[-•\s]+/, "").trim() : "";
+  if (!text) return null;
+  return text.length > MINI_DESCRIPTION_MAX ? `${text.slice(0, MINI_DESCRIPTION_MAX - 1).replace(/[\s,;:]+\S*$/, "")}…` : text;
+}
+
+/**
+ * Lê a ficha devolvida pela pesquisa (JSON pedido no prompt; aceita texto em volta). Avaliação só com nota válida
+ * e fonte informada; sem isso, avaliacaoWeb = null. Texto solto (sem JSON) vira só a descrição detalhada.
+ */
+export function parseSheet(raw: string | null | undefined): ProductSheet | null {
+  if (!raw?.trim()) return null;
+  const block = raw.match(/\{[\s\S]*\}/)?.[0];
+  if (block) {
+    try {
+      const data = JSON.parse(block) as { miniDescricao?: unknown; descricaoDetalhada?: unknown; avaliacao?: { nota?: unknown; contagem?: unknown; fonte?: unknown } | null; avaliacaoWeb?: WebRating | null };
+      const rating = data.avaliacao ?? data.avaliacaoWeb ?? null;
+      const nota = rating ? formatRating(rating.nota) : null;
+      const fonte = rating && typeof rating.fonte === "string" && rating.fonte.trim() ? rating.fonte.trim().slice(0, 60) : null;
+      const contagem = rating && Number.isInteger(Number(rating.contagem)) && Number(rating.contagem) > 0 ? Number(rating.contagem) : null;
+      const detailed = Array.isArray(data.descricaoDetalhada) ? data.descricaoDetalhada.map((item) => `- ${item}`).join("\n") : data.descricaoDetalhada;
+      const sheet: ProductSheet = {
+        miniDescricao: shortLine(data.miniDescricao),
+        descricaoDetalhada: typeof detailed === "string" ? cleanDetails(detailed) : null,
+        avaliacaoWeb: nota && fonte ? { nota, contagem, fonte } : null,
+      };
+      return sheet.miniDescricao || sheet.descricaoDetalhada ? sheet : null;
+    } catch {
+      // Segue como texto solto.
+    }
+  }
+  const text = cleanDetails(raw);
+  return text ? { miniDescricao: null, descricaoDetalhada: text, avaliacaoWeb: null } : null;
+}
+
+/** Ficha guardada no cache (JSON); linha antiga só com texto conta como desatualizada (pesquisa de novo). */
+function cachedSheet(details: string): ProductSheet | null {
+  if (!details.trim().startsWith("{")) return null;
+  try {
+    const data = JSON.parse(details) as ProductSheet;
+    return data.miniDescricao || data.descricaoDetalhada ? data : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Busca com cache: acerto em 30 dias (ou "sem resultado" em 1 dia) não chama a web. Nunca lança erro. */
 export function createProductDetailsService(deps: { cache: DetailsCache; search: (query: string) => Promise<string | null>; now?: () => number }) {
@@ -21,14 +82,21 @@ export function createProductDetailsService(deps: { cache: DetailsCache; search:
     const row = await deps.cache.get(key).catch(() => null);
     if (row) {
       const age = now() - row.updatedAt.getTime();
-      if (row.details && age < DETAILS_TTL_MS) return { text: row.details, source: "cache" };
-      if (!row.details && age < DETAILS_MISS_TTL_MS) return { text: null, source: "none" };
+      const sheet = row.details ? cachedSheet(row.details) : null;
+      if (sheet && age < DETAILS_TTL_MS) return { text: sheet.descricaoDetalhada, sheet, source: "cache" };
+      if (!row.details && age < DETAILS_MISS_TTL_MS) return { text: null, sheet: null, source: "none" };
     }
-    const text = await deps.search(query).catch(() => null);
-    const clean = text ? cleanDetails(text) : null;
-    await deps.cache.set({ key, query, details: clean }).catch(() => undefined);
-    return { text: clean, source: clean ? "web" : "none" };
+    const raw = await deps.search(query).catch(() => null);
+    const sheet = parseSheet(raw);
+    await deps.cache.set({ key, query, details: sheet ? JSON.stringify(sheet) : null }).catch(() => undefined);
+    return { text: sheet?.descricaoDetalhada ?? null, sheet, source: sheet ? "web" : "none" };
   };
+}
+
+/** Avaliação para o cliente: "⭐ 4,8 (1.234 avaliações)"; null quando não há nota confiável. */
+export function ratingLabel(rating: WebRating | null | undefined) {
+  if (!rating?.nota) return null;
+  return `⭐ ${rating.nota}${rating.contagem ? ` (${rating.contagem.toLocaleString("pt-BR")} avaliações)` : ""}`;
 }
 
 /** Tira links/citações da busca e limita o tamanho (a IA reescreve em linguagem de WhatsApp). */
@@ -48,9 +116,12 @@ export function cleanDetails(text: string) {
 /** Pedido de pesquisa: só características verificáveis, sem preço/loja (esses vêm do ERP). */
 export function detailsPrompt(product: string, colorCodes: string[] = []) {
   return [
-    "Pesquise na web as características reais deste produto de ótica e responda em português do Brasil, em até 6 tópicos curtos:",
-    "material da armação/lentes, formato e estilo, público (feminino/masculino/unissex), lentes e proteção (UV, polarizada, grau), funcionalidades ou diferenciais (ex.: câmera e áudio nos Ray-Ban Meta), conforto/peso.",
-    colorCodes.length ? `Se encontrar, diga o nome da cor destes códigos do fabricante: ${colorCodes.slice(0, 6).join(", ")}.` : "",
+    "Pesquise na web as características reais deste produto de ótica. Responda SOMENTE com um JSON, em português do Brasil:",
+    "{\"miniDescricao\": \"1 frase objetiva de até 120 caracteres com o principal atributo (ex.: Armação leve em acetato com design gatinho moderno)\",",
+    "\"descricaoDetalhada\": \"até 6 tópicos curtos, um por linha começando com '- ': material da armação/lentes, formato e estilo, público, lentes e proteção (UV, polarizada, grau), tecnologias/diferenciais (ex.: câmera e áudio nos Ray-Ban Meta), conforto/peso/medidas\",",
+    "\"avaliacao\": {\"nota\": 4.8, \"contagem\": 120, \"fonte\": \"nome do site\"} ou null}",
+    "A avaliação só entra se uma página mostrar explicitamente a nota média deste modelo (escala de 1 a 5); se não achar com certeza, use null. Nunca estime nota.",
+    colorCodes.length ? `Se encontrar, inclua na descricaoDetalhada o nome da cor destes códigos do fabricante: ${colorCodes.slice(0, 6).join(", ")}.` : "",
     "Não invente: o que não achar, omita. Não informe preços, lojas nem links.",
     `Produto: ${product}`,
   ].filter(Boolean).join("\n");
@@ -65,7 +136,7 @@ export async function webSearchDetails(prompt: string, deps: { apiKey: string; m
     const response = await call("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${deps.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: deps.model, tools: [{ type: "web_search" }], max_output_tokens: 700, input: prompt }),
+      body: JSON.stringify({ model: deps.model, tools: [{ type: "web_search" }], max_output_tokens: 1400, input: prompt }),
       signal: AbortSignal.timeout(deps.timeoutMs ?? DETAILS_TIMEOUT_MS),
     });
     const body = (await response.json()) as { output_text?: string; output?: { content?: { text?: string }[] }[]; usage?: { input_tokens?: number; output_tokens?: number } };
@@ -84,7 +155,12 @@ export type DetailsToolResult = {
   encontrado: boolean;
   nomeProduto: string;
   referencia: string | null;
+  /** Descrição técnica completa (pedido de "mais detalhes"). */
   caracteristicas: string | null;
+  descricaoDetalhada: string | null;
+  miniDescricao: string | null;
+  /** Nota média na web ("⭐ 4,8 (120 avaliações)"); null = não encontrada, nunca mencione nota. */
+  avaliacaoWeb: string | null;
   fonteCaracteristicas: "cache" | "web" | "none";
   variacoesEmEstoque: DetailsVariation[];
   estoque: "ok" | "indisponivel" | "sem_codigo";
@@ -96,7 +172,7 @@ export function buildDetailsResult(input: { nomeProduto: string; referencia: str
   const withStock = input.variations.filter((variation) => variation.totalDisponivel > 0);
   const tips = [
     input.details.text
-      ? "Responda com 2 a 4 características reais de caracteristicas (material, formato, público, lentes/proteção, diferenciais), em linguagem natural de WhatsApp, sem copiar a lista inteira."
+      ? "Pedido de mais detalhes: entregue a descricaoDetalhada de forma natural e consultiva (materiais, diferenciais técnicos, conforto/medidas e lentes/proteção), sem repetir a lista de lojas nem a ficha resumida já enviada."
       : "Não achei a ficha técnica na web: use só o que o nome e a referência indicam (tipo de produto e marca) e ofereça ver o modelo pessoalmente na loja; nunca invente material ou funções.",
     withStock.length > 1
       ? "Cite as cores/variações com saldo (variacoesEmEstoque; traduza códigos de cor para o nome quando caracteristicas trouxer o nome, senão diga apenas que há outras opções de cor)."
@@ -110,6 +186,9 @@ export function buildDetailsResult(input: { nomeProduto: string; referencia: str
     nomeProduto: input.nomeProduto,
     referencia: input.referencia,
     caracteristicas: input.details.text,
+    descricaoDetalhada: input.details.text,
+    miniDescricao: input.details.sheet?.miniDescricao ?? null,
+    avaliacaoWeb: ratingLabel(input.details.sheet?.avaliacaoWeb),
     fonteCaracteristicas: input.details.source,
     variacoesEmEstoque: withStock.slice(0, 6),
     estoque: input.stock,
@@ -140,3 +219,49 @@ export const DETAILS_RULES = [
   "DETALHES DO PRODUTO (regra fixa): quando o cliente pedir \"mais detalhes\", \"como é esse modelo?\", \"quais os diferenciais?\", \"do que é feito?\" ou parecido, chame buscarDetalhesProdutoWeb com o produto da conversa e responda com as características reais devolvidas (material, formato, público, lentes/proteção, funções especiais) e as cores/variações com saldo no ERP.",
   "Proibido responder pedido de detalhes com frase vazia (\"Posso te ajudar com disponibilidade e lojas\") ou repetir só a loja e o estoque.",
 ].join("\n");
+
+/** Regra fixa do prompt: ficha padrão na 1ª consulta do modelo e descrição técnica quando pedirem mais detalhes. */
+export const PRODUCT_CARD_RULES = [
+  "APRESENTAÇÃO DE PRODUTO (regra fixa, vale antes e depois de o cliente entrar na fila):",
+  "Na PRIMEIRA consulta de um modelo com estoque (resultado de consultarEstoqueProduto), a 1ª bolha (que vai como legenda da foto) segue esta ficha:",
+  "1. Nome humanizado do modelo em negrito (campo nomeProduto, nunca o código bruto do ERP).",
+  "2. A miniDescricao em 1 linha (se vier null, omita; nunca invente material ou função).",
+  "3. Preço (precoVenda em R$), quantidade disponível (ex.: \"3 unidades disponíveis na rede\" com totalDisponivelRede, ou a quantidade da loja pedida) e a avaliacaoWeb (ex.: \"⭐ 4,8\") SOMENTE se ela vier preenchida; avaliacaoWeb null = não fale de nota nem de avaliação.",
+  "4. As lojas com estoque agrupadas por cidade/região (formatação das listas de lojas).",
+  "Depois, obrigatoriamente ---SPLIT--- e uma pergunta natural de continuação na 2ª bolha (ex.: \"Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?\").",
+  "Exemplo:\n*Armação Miu Miu (ref. 0MU 01XV)*\nArmação leve em acetato com design oval feminino\n💰 *R$ 1.290,00* · 3 unidades disponíveis na rede · ⭐ 4,8\n\n📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8, 235\n\n---SPLIT---\n\nQuer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização dessa loja?",
+  "Quando o cliente pedir \"mais detalhes\", \"mais informações\" ou \"como é\": NÃO repita a ficha nem a lista de lojas; chame buscarDetalhesProdutoWeb e entregue a descricaoDetalhada (materiais, diferenciais técnicos, conforto e cores em estoque) em texto natural, terminando com um próximo passo.",
+].join("\n");
+
+/** O cliente pediu para ver o modelo/foto ("manda a foto", "tem imagem?", "quero ver"). */
+export function asksForPhoto(text: string) {
+  return /\b(foto|fotos|imagem|imagens|figura|print)\b|\b(quero|queria|posso|pode|deixa)\s+(eu\s+)?ver\b|\bmostr[ae]\b|\bcomo\s+(ele|ela|é|e)\s+(é|e|fica)?\s*\??$/i.test(text);
+}
+
+/**
+ * Foto do produto: vai na 1ª consulta do modelo na conversa (ou desde a entrada na fila) e sempre que o cliente
+ * pedir para ver. Só evita reenviar a mesma foto já mandada nessa etapa; estar na fila nunca bloqueia.
+ */
+export function shouldSendProductPhoto(input: { sku: string; sentSkus: Iterable<string>; pendingText: string }) {
+  if (asksForPhoto(input.pendingText)) return true;
+  for (const sku of input.sentSkus) if (sku === input.sku) return false;
+  return true;
+}
+
+/**
+ * Orientação da ficha resumida que vai no próprio resultado de estoque (o modelo segue melhor o que vem junto dos
+ * dados): nome, mini-descrição, preço · quantidade · avaliação (só se houver), lojas e a pergunta na 2ª bolha.
+ */
+export function cardGuidance(product: { nomeProduto: string; miniDescricao?: string | null; precoVenda?: string | null; totalDisponivelRede: number; avaliacaoWeb?: string | null }) {
+  const units = `${product.totalDisponivelRede} ${product.totalDisponivelRede === 1 ? "unidade disponível" : "unidades disponíveis"} na rede`;
+  const line = [product.precoVenda ? `💰 *${product.precoVenda}*` : "", units, product.avaliacaoWeb ?? ""].filter(Boolean).join(" · ");
+  return [
+    "FICHA DO PRODUTO (1ª consulta deste modelo): monte a 1ª bolha exatamente nesta ordem:",
+    `*${product.nomeProduto}*`,
+    product.miniDescricao ? product.miniDescricao : "(sem mini-descrição: pule esta linha)",
+    line,
+    "e depois as lojas agrupadas por cidade. Em seguida ---SPLIT--- e a pergunta: \"Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?\".",
+    product.avaliacaoWeb ? "" : "Não mencione avaliação nem nota (não encontrada).",
+    "Se a ficha já foi enviada antes nesta conversa, não repita: responda só o que o cliente perguntou agora.",
+  ].filter(Boolean).join("\n");
+}

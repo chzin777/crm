@@ -5,7 +5,7 @@ import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
 import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
-import { DETAILS_RULES } from "@/lib/ai/product-details";
+import { DETAILS_RULES, PRODUCT_CARD_RULES } from "@/lib/ai/product-details";
 import { NATURAL_RULES } from "@/lib/ai/product-names";
 import { LOCATION_RULES } from "@/lib/ai/store-location";
 import { humanRequestMode, queuedAssistBlock, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
@@ -92,6 +92,14 @@ export function interpretDecision(decision: AgentDecision): AgentOutcome {
 }
 
 /**
+ * Foto do produto e localização acompanham a resposta ao cliente. Na fila (espera assistida) a resposta sai mesmo
+ * que o modelo marque transferência (não transfere de novo), então foto e mapa vão junto, igual fora da fila.
+ */
+export function carriesProductExtras(outcome: Pick<AgentOutcome, "action" | "reply">, queued: boolean) {
+  return (outcome.action === "reply" || outcome.action === "resolved" || (queued && outcome.action === "handoff")) && !!outcome.reply;
+}
+
+/**
  * Mensagens que o cliente receberia (janela de 24h aberta): na transferência pela IA, a resposta dela só sai
  * quando não há mensagem de transferência configurada; a mensagem de transferência sai preenchida.
  */
@@ -159,6 +167,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     BRAND_RULES,
     IMAGE_RULE,
     STOCK_RULES,
+    PRODUCT_CARD_RULES,
     DETAILS_RULES,
     LOCATION_RULES,
     NATURAL_RULES,

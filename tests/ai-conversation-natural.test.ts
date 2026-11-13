@@ -38,7 +38,7 @@ describe("buscarDetalhesProdutoWeb: ficha real + cores com saldo", () => {
     const service = createProductDetailsService({ cache: { get: async (key) => rows.get(key) ?? null, set: async (row) => { rows.set(row.key, { ...row, updatedAt: new Date() }); } }, search });
     const first = await service("MIU MIU|0MU 01XV", "prompt");
     const second = await service("MIU MIU|0MU 01XV", "prompt");
-    expect(first).toEqual({ text: "- Material: acetato\n- Formato: oval", source: "web" });
+    expect(first).toMatchObject({ text: "- Material: acetato\n- Formato: oval", source: "web" });
     expect(second.source).toBe("cache");
     expect(search).toHaveBeenCalledTimes(1);
   });
@@ -58,7 +58,7 @@ describe("buscarDetalhesProdutoWeb: ficha real + cores com saldo", () => {
       nomeProduto: "Armação Miu Miu (ref. 0MU 01XV)",
       referencia: "0MU 01XV",
       found: true,
-      details: { text: "- Material: acetato\n- Formato: oval, aro fechado\n- Público: feminino", source: "web" },
+      details: { text: "- Material: acetato\n- Formato: oval, aro fechado\n- Público: feminino", sheet: null, source: "web" },
       variations: [
         { nomeProduto: "Armação Miu Miu (ref. 0MU 01XV)", cor: "1AB1O1", totalDisponivel: 2, lojas: ["Loja Setor Bueno"] },
         { nomeProduto: "Armação Miu Miu (ref. 0MU 01XV)", cor: "19P1O1", totalDisponivel: 1, lojas: ["Loja Marista"] },
@@ -68,7 +68,7 @@ describe("buscarDetalhesProdutoWeb: ficha real + cores com saldo", () => {
     });
     expect(result.caracteristicas).toContain("acetato");
     expect(result.variacoesEmEstoque.map((item) => item.cor)).toEqual(["1AB1O1", "19P1O1"]);
-    expect(result.orientacao).toContain("características reais");
+    expect(result.orientacao).toContain("entregue a descricaoDetalhada");
     expect(result.orientacao).toContain("cores/variações com saldo");
     expect(DETAILS_TOOL.function.name).toBe("buscarDetalhesProdutoWeb");
     expect(prompt).toContain(DETAILS_RULES);
@@ -76,7 +76,7 @@ describe("buscarDetalhesProdutoWeb: ficha real + cores com saldo", () => {
   });
 
   it("sem ficha na web: orienta a não inventar material nem funções", () => {
-    const result = buildDetailsResult({ nomeProduto: "X", referencia: null, found: false, details: { text: null, source: "none" }, variations: [], stock: "sem_codigo" });
+    const result = buildDetailsResult({ nomeProduto: "X", referencia: null, found: false, details: { text: null, sheet: null, source: "none" }, variations: [], stock: "sem_codigo" });
     expect(result.orientacao).toContain("nunca invente material ou funções");
   });
 });

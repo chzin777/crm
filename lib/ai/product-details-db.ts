@@ -5,7 +5,7 @@ import { matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
 import { retailStock, stockSearchTerms, STOCK_MAX_CODES } from "@/lib/ai/stock";
 import { getStockByProductCodes, storeDirectory } from "@/lib/ai/stock-db";
 import { humanizeProductName, modelKey, parseErpName } from "@/lib/ai/product-names";
-import { buildDetailsResult, createProductDetailsService, detailsPrompt, webSearchDetails, type DetailsToolResult, type DetailsVariation } from "@/lib/ai/product-details";
+import { buildDetailsResult, createProductDetailsService, detailsPrompt, ratingLabel, webSearchDetails, type DetailsToolResult, type DetailsVariation, type ProductDetails } from "@/lib/ai/product-details";
 
 const DETAILS_MODEL = "gpt-5.4-mini";
 
@@ -27,13 +27,29 @@ const searchDetails = createProductDetailsService({
 });
 
 /** Registro mostrado no teste da página /ia. */
-export type DetailsLog = { product: string; source: "cache" | "web" | "none"; variations: number; ms: number };
+export type DetailsLog = { product: string; source: "cache" | "web" | "none"; variations: number; ms: number; rating?: string | null };
+
+type CatalogItem = { code?: string | null; description: string; brand: string | null };
+
+/** Ficha do modelo (mini-descrição, descrição detalhada, avaliação): cache de 30 dias por modelo, depois a web. */
+export function productSheet(product: CatalogItem, colorCodes: string[] = []): Promise<ProductDetails> {
+  const parsed = parseErpName(product.description, product.brand);
+  const query = parsed.referencia ? `${[parsed.tipo, parsed.marca].filter(Boolean).join(" ")} ${parsed.referencia}` : humanizeProductName(product.description, product.brand);
+  const key = modelKey(product.description, product.brand) ?? `sku:${product.code ?? query.toUpperCase()}`;
+  return searchDetails(key, detailsPrompt(query, colorCodes));
+}
+
+/** Resumo para a ficha da 1ª consulta (vai junto do resultado de estoque). */
+export async function productSummary(product: CatalogItem) {
+  const details = await productSheet(product).catch(() => null);
+  return { miniDescricao: details?.sheet?.miniDescricao ?? null, avaliacaoWeb: ratingLabel(details?.sheet?.avaliacaoWeb), source: details?.source ?? "none" };
+}
 
 /**
  * Tool buscarDetalhesProdutoWeb: acha o produto no catálogo do CRM, junta as cores do mesmo modelo com saldo no
  * VMSet e a ficha técnica da web (cache de 30 dias por modelo). Nunca lança erro.
  */
-export async function buscarDetalhesProduto(args: { nomeProduto?: unknown; marca?: unknown; referencia?: unknown }, deps: { products: () => Promise<IndexedProduct[]> }): Promise<{ result: DetailsToolResult; log: DetailsLog }> {
+export async function buscarDetalhesProduto(args: { nomeProduto?: unknown; marca?: unknown; referencia?: unknown }, deps: { products: () => Promise<IndexedProduct[]> }): Promise<{ result: DetailsToolResult; log: DetailsLog; product: { codigo: string; produto: string; marca: string | null } | null }> {
   const started = Date.now();
   const asked = [args.marca, args.nomeProduto, args.referencia].filter((value) => typeof value === "string" && value.trim()).join(" ").slice(0, 120);
   const term = asked.replace(/\b(arma[cç][aã]o|[oó]culos( de sol| de grau)?|ref\.?)\b|[()]/gi, " ").replace(/\s+/g, " ").trim();
@@ -64,8 +80,9 @@ export async function buscarDetalhesProduto(args: { nomeProduto?: unknown; marca
   }
 
   const colorCodes = siblings.map((product) => parseErpName(product.description, product.brand).cor).filter((cor): cor is string => !!cor);
-  const query = parsed?.referencia ? `${[parsed.tipo, parsed.marca].filter(Boolean).join(" ")} ${parsed.referencia}` : name;
-  const details = query ? await searchDetails(key ?? `q:${query.toUpperCase()}`, detailsPrompt(query, colorCodes)) : { text: null, source: "none" as const };
+  const details: ProductDetails = found
+    ? await productSheet(found, colorCodes)
+    : term ? await searchDetails(`q:${term.toUpperCase()}`, detailsPrompt(name)) : { text: null, sheet: null, source: "none" };
 
   const result = buildDetailsResult({
     nomeProduto: name,
@@ -75,7 +92,10 @@ export async function buscarDetalhesProduto(args: { nomeProduto?: unknown; marca
     variations,
     stock: !codes.length ? "sem_codigo" : lookup?.stockStatus === "ok" ? "ok" : "indisponivel",
   });
-  const log: DetailsLog = { product: name, source: details.source, variations: result.variacoesEmEstoque.length, ms: Date.now() - started };
+  // Foto: a versão com saldo (ou a encontrada) do modelo.
+  const withStock = siblings.find((product) => variations.some((variation) => variation.totalDisponivel > 0 && variation.cor === parseErpName(product.description, product.brand).cor));
+  const photo = withStock ?? found;
+  const log: DetailsLog = { product: name, source: details.source, variations: result.variacoesEmEstoque.length, ms: Date.now() - started, rating: result.avaliacaoWeb };
   console.log(`[ai][detalhes] "${name}": ficha ${log.source}, ${log.variations} variações com saldo, ${log.ms} ms`);
-  return { result, log };
+  return { result, log, product: photo?.code ? { codigo: photo.code, produto: photo.description, marca: photo.brand } : null };
 }

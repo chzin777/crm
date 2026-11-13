@@ -45,7 +45,7 @@ async function deliver(messageId: string, send: () => Promise<{ messages?: { id:
  * Mensagem automática com foto (produto achado na web): baixa e confere a imagem, guarda no armazenamento, envia
  * com legenda (até 1024 caracteres, o resto em texto). Qualquer falha invalida a foto e manda a resposta em texto.
  */
-export async function sendAutomaticImage(conversation: Pick<ChatConversation, "id" | "phone">, imageUrl: string, rawText: string, authorName: string, invalidate: () => Promise<unknown>) {
+export async function sendAutomaticImage(conversation: Pick<ChatConversation, "id" | "phone">, imageUrl: string, rawText: string, authorName: string, invalidate: () => Promise<unknown>, productSku?: string) {
   if (await isBlocked(conversation.phone)) return null;
   const text = withoutDashes(rawText);
   await deliverImageOrText({
@@ -61,6 +61,8 @@ export async function sendAutomaticImage(conversation: Pick<ChatConversation, "i
           conversationId: conversation.id, author: "bot", authorName, text: caption, delivery: "sent", createdAt: now,
           externalId: (sent as { messages?: { id: string }[] })?.messages?.[0]?.id ?? null,
           ...(attachment ? { attachment: attachment as unknown as Prisma.InputJsonValue } : {}),
+          // Código do produto da foto: a IA não reenvia a mesma foto na mesma etapa da conversa.
+          ...(productSku ? { metaMedia: { productImageSku: productSku } as unknown as Prisma.InputJsonValue } : {}),
         },
       });
       await prisma.chatConversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now } });

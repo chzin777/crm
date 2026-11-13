@@ -6,7 +6,7 @@ import { sanitizeAiSettings } from "@/lib/ai/settings";
 import { validateAiAttachment } from "@/lib/ai/attachments";
 import type { AiMediaInput } from "@/lib/ai/multimodal";
 
-type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown } | null;
+type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown; queued?: unknown } | null;
 
 /**
  * Teste da IA com os parâmetros da tela (ainda não salvos). Nada é enviado ao cliente.
@@ -39,13 +39,13 @@ export async function POST(request: Request) {
 
   const raw = Array.isArray(body?.messages) ? (body.messages as Record<string, unknown>[]) : [];
   const messages = raw
-    .map((item): PlaygroundMessage => ({ from: item?.from === "ai" ? "ai" : "customer", text: String(item?.text ?? "").slice(0, 2000).trim() }))
+    .map((item): PlaygroundMessage => ({ from: item?.from === "ai" ? "ai" : "customer", text: String(item?.text ?? "").slice(0, 2000).trim(), ...(typeof item?.imageSku === "string" && /^[w.-]{1,40}$/.test(item.imageSku) ? { imageSku: item.imageSku } : {}) }))
     // Mensagem só com anexo (sem texto) é a última do cliente.
     .filter((item, index, list) => item.text || (media && index === list.length - 1 && item.from === "customer"))
     .slice(-20);
   if (!messages.some((item) => item.from === "customer")) return NextResponse.json({ error: "Escreva a mensagem do cliente ou anexe um arquivo." }, { status: 400 });
   try {
-    return NextResponse.json(await simulateAgent(sanitizeAiSettings(body?.settings), messages, guard.user.id, media, { profile: body?.profile === "recorrente" ? "recorrente" : "novo", ignoreMediaTrigger: body?.ignoreMediaTrigger !== false }));
+    return NextResponse.json(await simulateAgent(sanitizeAiSettings(body?.settings), messages, guard.user.id, media, { profile: body?.profile === "recorrente" ? "recorrente" : "novo", ignoreMediaTrigger: body?.ignoreMediaTrigger !== false, queued: body?.queued === true }));
   } catch (error) {
     if (error instanceof AiError) return NextResponse.json({ error: error.message }, { status: error.status === 502 ? 422 : error.status });
     console.error("[ai/playground]", error);

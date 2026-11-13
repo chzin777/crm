@@ -19,8 +19,8 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
-import { DETAILS_TOOL } from "@/lib/ai/product-details";
-import { buscarDetalhesProduto, type DetailsLog } from "@/lib/ai/product-details-db";
+import { cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
+import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { storeDirectory } from "@/lib/ai/stock-db";
 import { deliverLocation, findStores, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
@@ -34,7 +34,7 @@ import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext } from "@/lib/ai/assist";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
-import { buildSystemPrompt, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
+import { buildSystemPrompt, carriesProductExtras, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 
 /**
@@ -266,6 +266,8 @@ export type AgentRunInput = {
   earlierCustomerTexts?: string[];
   /** Última mensagem enviada pela IA (despedida → silêncio diante de mais um "obrigado"). */
   lastAiText?: string | null;
+  /** Produtos cuja foto já foi enviada nesta etapa (conversa, ou desde a entrada na fila). */
+  sentImageSkus?: string[];
 };
 export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
@@ -337,19 +339,31 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
-  // Foto do produto (web + cache por código): só com modelo confirmado no estoque e a opção ligada em /ia.
+  // Foto do produto (web + cache por código): 1ª consulta do modelo na etapa ou pedido do cliente; mesmo pipeline
+  // com ou sem fila (alreadyQueued não bloqueia a foto).
   let image: ProductImage | null = null;
+  const photoFor = async (product: { codigo: string; produto: string; marca?: string | null }): Promise<ProductImage | null | "sent"> => {
+    if (image || !settings.sendProductImage || !imageSearchStatus()) return null;
+    if (!shouldSendProductPhoto({ sku: product.codigo, sentSkus: input.sentImageSkus ?? [], pendingText: input.pendingText })) return "sent";
+    image = await searchAndCacheProductImage(product);
+    return image;
+  };
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
       const { result, log } = await consultarEstoqueProduto(args, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
       const inStock = result.produtos.find((product) => product.lojasComEstoque.length > 0);
-      if (!image && inStock && settings.sendProductImage && imageSearchStatus()) {
-        image = await searchAndCacheProductImage(inStock);
-        log.image = image ? image.source : "none";
-      }
-      return image ? { ...result, fotoAnexada: true } : result;
+      if (!inStock) return result;
+      // Ficha resumida (mini-descrição + avaliação, cache 30 dias) e foto em paralelo.
+      const [photo, summary] = await Promise.all([photoFor(inStock), productSummary({ code: inStock.codigo, description: inStock.produto, brand: inStock.marca })]);
+      if (photo !== null || !image) log.image = photo === "sent" ? "sent" : photo ? photo.source : log.image ?? (settings.sendProductImage && imageSearchStatus() ? "none" : undefined);
+      log.sheet = summary.source;
+      log.rating = summary.avaliacaoWeb;
+      inStock.miniDescricao = summary.miniDescricao;
+      inStock.avaliacaoWeb = summary.avaliacaoWeb;
+      const card = { ...result, orientacao: `${result.orientacao}\n${cardGuidance(inStock)}` };
+      return image ? { ...card, fotoAnexada: true } : card;
     },
   };
   // Ficha do produto (web, cache 30 dias) + cores do mesmo modelo com saldo no ERP.
@@ -357,9 +371,11 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const detailsTool = {
     definition: DETAILS_TOOL,
     run: async (args: Record<string, unknown>) => {
-      const { result, log } = await buscarDetalhesProduto(args, { products: catalogProducts });
+      const { result, log, product } = await buscarDetalhesProduto(args, { products: catalogProducts });
       details.push(log);
-      return result;
+      // Pedido de detalhes também leva a foto se ela ainda não foi enviada nesta etapa (ou se o cliente pediu).
+      if (product) await photoFor(product);
+      return image ? { ...result, fotoAnexada: true } : result;
     },
   };
   // Localização da loja: enviada depois da resposta (pin nativo com coordenadas; senão link do Google Maps).
@@ -392,7 +408,8 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
   const photo = image as ProductImage | null;
   const pin = location as StoreLocation | null;
-  const answered = (outcome.action === "reply" || outcome.action === "resolved") && !!outcome.reply;
+  // Na fila, a resposta sai mesmo que o modelo marque transferência (não transfere de novo): foto e mapa vão junto.
+  const answered = carriesProductExtras(outcome, !!input.queued);
   return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered ? photo : null, details, location: pin && answered ? pin : null };
 }
 
@@ -424,6 +441,9 @@ async function respond(conversationId: string, messageId: string) {
   // Mensagens anteriores do cliente: insistência em tentativa de manipulação leva para a equipe.
   const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
   const meta = { feature: "agent", conversationId };
+  // Fotos já enviadas: na fila, só as mandadas depois da transferência (perguntar de novo na fila reenvia a foto).
+  const photos = await prisma.chatMessage.findMany({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, NOT: { metaMedia: { equals: Prisma.DbNull } }, ...(queued && since ? { createdAt: { gt: since } } : {}) }, orderBy: { createdAt: "desc" }, take: 30, select: { metaMedia: true } });
+  const sentImageSkus = photos.map((item) => (item.metaMedia as { productImageSku?: string } | null)?.productImageSku).filter((sku): sku is string => !!sku);
 
   let run: AgentRun;
   try {
@@ -440,6 +460,7 @@ async function respond(conversationId: string, messageId: string) {
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
       queued,
       lastAiText: lastAnswer?.author === "bot" && lastAnswer.authorName === AI_AUTHOR ? lastAnswer.text : null,
+      sentImageSkus,
     }));
   } catch (error) {
     // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
@@ -482,7 +503,7 @@ async function respond(conversationId: string, messageId: string) {
 async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null) {
   // Bolhas separadas por ---SPLIT---: a 1ª pode ser foto com legenda; as seguintes saem em texto, com "digitando..." e pausa curta.
   const sent = await sendBubbles(splitBubbles(text), {
-    sendFirst: (part) => (image ? sendAutomaticImage(conversation, image.url, part, AI_AUTHOR, () => invalidateProductImage(image.sku)) : sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR)),
+    sendFirst: (part) => (image ? sendAutomaticImage(conversation, image.url, part, AI_AUTHOR, () => invalidateProductImage(image.sku), image.sku) : sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR)),
     sendNext: (part) => sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR),
     typing: () => sendTypingIndicator(typingMessageId),
   });
@@ -509,8 +530,10 @@ async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, i
   await sendAiReply(fresh, outcome.reply, image, typingMessageId, location);
 }
 
-export type PlaygroundMessage = { from: "customer" | "ai"; text: string };
-export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean };
+/** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
+export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string };
+/** queued: simula o cliente já na fila (espera assistida), com o mesmo pipeline de produto. */
+export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean };
 export type PlaygroundResult = AgentOutcome & {
   /** O que o cliente receberia no WhatsApp (resposta e/ou mensagem de transferência). */
   messages: string[];
@@ -533,7 +556,7 @@ export type PlaygroundResult = AgentOutcome & {
   /** Consultas de estoque feitas pela tool (termo, região, cenário, lojas e tempo). */
   stock?: StockLog[];
   /** Foto do produto que iria junto com a resposta (do cache ou da busca na web). */
-  image?: { url: string; source: "cache" | "web"; query: string };
+  image?: { url: string; source: "cache" | "web"; query: string; sku: string };
   /** Fichas de produto consultadas (web ou cache) e cores com saldo. */
   details?: DetailsLog[];
   /** Localização que sairia logo depois da resposta (pin ou link do Google Maps). */
@@ -561,6 +584,8 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     ignoreMediaTrigger: options.ignoreMediaTrigger,
     earlierCustomerTexts: messages.slice(0, lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text),
     lastAiText: lastAi >= 0 ? messages[lastAi].text : null,
+    sentImageSkus: messages.map((message) => message.imageSku).filter((sku): sku is string => !!sku),
+    queued: options.queued ? { queueName: "Vendas" } : null,
     loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
     buildContext: (media) => {
       const history = media ? attachSummary(messages, media.summary) : messages;
@@ -587,7 +612,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     search: run.search ?? undefined,
     injection: run.injection.risk === "none" ? undefined : run.injection,
     stock: run.stock?.length ? run.stock : undefined,
-    image: run.image ? { url: run.image.url, source: run.image.source, query: run.image.query } : undefined,
+    image: run.image ? { url: run.image.url, source: run.image.source, query: run.image.query, sku: run.image.sku } : undefined,
     details: run.details?.length ? run.details : undefined,
     location: run.location ?? undefined,
   };

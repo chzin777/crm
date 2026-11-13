@@ -29,8 +29,8 @@ type PlaygroundResult = AgentOutcome & {
   search?: { kind: string; term: string; found: number };
   injection?: { risk: "suspect" | "high"; matches: string[] };
   stock?: StockLog[];
-  image?: { url: string; source: "cache" | "web"; query: string };
-  details?: { product: string; source: "cache" | "web" | "none"; variations: number; ms: number }[];
+  image?: { url: string; source: "cache" | "web"; query: string; sku?: string };
+  details?: { product: string; source: "cache" | "web" | "none"; variations: number; ms: number; rating?: string | null }[];
   location?: { nome: string; endereco: string; mapsUrl: string; pinNativo: boolean; latitude: number | null; longitude: number | null };
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
@@ -199,6 +199,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<SimulatedProfileId>("novo");
   const [readMedia, setReadMedia] = useState(true);
+  const [queuedTest, setQueuedTest] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Depois do transbordo a IA não volta a responder (igual ao WhatsApp): só recomeçando.
@@ -237,7 +238,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     setBusy(true);
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
-      const payload = { settings, profile, ignoreMediaTrigger: readMedia, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text })) };
+      const payload = { settings, profile, ignoreMediaTrigger: readMedia, queued: queuedTest, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku } : {}) })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -321,6 +322,10 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
             Mostrar a leitura de áudio/documento mesmo com o gatilho de mídia ligado
           </label>
         )}
+        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300" title="A IA responde como na espera assistida: mesma consulta de estoque, ficha e foto do produto">
+          <input type="checkbox" checked={queuedTest} onChange={(event) => setQueuedTest(event.target.checked)} className="cursor-pointer accent-[#002187]" />
+          Cliente já na fila (aguardando atendente)
+        </label>
       </div>
       <div className="h-96 space-y-2 overflow-y-auto rounded-lg bg-slate-50 p-3 dark:bg-white/5">
         {messages.length === 0 && <p className="pt-28 text-center text-[11px] text-slate-400">Ex.: “Oi, vocês fazem exame de vista? Qual loja abre sábado?” ou envie a foto de uma receita.</p>}
@@ -352,8 +357,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
               {message.text && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
               {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
-              {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {STOCK_SCENARIO_LABELS[item.scenario]} · {item.products} produto{item.products === 1 ? "" : "s"}, {item.stores} loja{item.stores === 1 ? "" : "s"} · {item.ms} ms{item.cached ? " (cache)" : ""}</p>)}
-              {message.details?.map((item, index) => <p key={`d${index}`} className="inline-flex items-center gap-1 rounded-md bg-[#002187]/10 px-2 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-slate-200" title="Só aparece no teste: ficha do produto"><BookOpenText className="h-3 w-3" />Ficha do produto: {item.product} · {DETAILS_SOURCE_LABELS[item.source]} · {item.variations} cor{item.variations === 1 ? "" : "es"} com saldo · {item.ms} ms</p>)}
+              {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {STOCK_SCENARIO_LABELS[item.scenario]} · {item.products} produto{item.products === 1 ? "" : "s"}, {item.stores} loja{item.stores === 1 ? "" : "s"} · {item.ms} ms{item.cached ? " (cache)" : ""}{item.sheet ? ` · ficha resumida ${DETAILS_SOURCE_LABELS[item.sheet]}` : ""}{item.sheet ? (item.rating ? ` · avaliação ${item.rating}` : " · sem avaliação confiável") : ""}{item.image === "sent" ? " · foto já enviada nesta etapa" : item.image === "none" ? " · foto não encontrada" : ""}</p>)}
+              {message.details?.map((item, index) => <p key={`d${index}`} className="inline-flex items-center gap-1 rounded-md bg-[#002187]/10 px-2 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-slate-200" title="Só aparece no teste: ficha do produto"><BookOpenText className="h-3 w-3" />Ficha do produto: {item.product} · {DETAILS_SOURCE_LABELS[item.source]} · {item.variations} cor{item.variations === 1 ? "" : "es"} com saldo{item.rating ? ` · avaliação ${item.rating}` : ""} · {item.ms} ms</p>)}
               {message.search && <p className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300" title="Só aparece no teste"><Search className="h-3 w-3" />{message.search.kind === "produto" ? <>Busca no ERP: “{message.search.term}” · {message.search.found} resultado{message.search.found === 1 ? "" : "s"}</> : <>Foto identificada como {message.search.kind}{message.search.kind === "outro" ? " (sem busca)" : " (conferência humana)"}</>}</p>}
             </div>
           </div>
