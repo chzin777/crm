@@ -7,6 +7,7 @@ import { attributeCampaignReply } from "@/lib/chat/campaign-origin";
 import { AUTO_REPLY_AUTHOR, detectAutoReply } from "@/lib/chat/auto-reply";
 import { openConversationFor } from "@/lib/chat/conversation";
 import { recordSurveyReply } from "@/lib/chat/nps";
+import { absorbPostCloseCourtesy } from "@/lib/chat/post-close";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
 
@@ -113,6 +114,8 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
 
   const receivedAt = message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date();
   const content = readContent(message);
+  // "valeu"/"👍" logo depois do encerramento: fica na conversa encerrada, sem abrir outro atendimento.
+  if (await absorbPostCloseCourtesy({ externalId: message.id, phone: message.from, text: content.media ? "" : content.text, isText: message.type === "text", receivedAt })) return null;
   const answeredSurvey = await recordSurveyReply({
     externalId: message.id,
     phone: message.from,

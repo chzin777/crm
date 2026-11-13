@@ -24,6 +24,7 @@ type PlaygroundResult = AgentOutcome & {
   handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none";
   triage?: boolean;
   wouldClose: boolean;
+  closeBlocked?: string;
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
   mediaHandoff?: boolean;
   search?: { kind: string; term: string; found: number };
@@ -256,7 +257,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         data.mediaHandoff ? "No atendimento real, o gatilho \"cliente enviou foto, documento ou áudio\" transferiria esta conversa para a equipe antes da IA responder (aqui a leitura do anexo foi mostrada mesmo assim)." : "",
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
-        data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
+        data.closeBlocked ? `A IA quis encerrar, mas não encerra porque ${data.closeBlocked}.` : "",
+        data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento logo após a despedida e enviaria a pesquisa de satisfação (se estiver ativa): ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
       // Encerramento silencioso: nada vai ao cliente; o teste mostra o aviso fora do histórico da conversa.
       if (data.action === "no_reply") {
@@ -863,7 +865,7 @@ export function AiSettingsPanel() {
           </Block>
 
           <Block title="Quando a IA resolve sozinha">
-            <Toggle label="Encerrar quando o cliente confirmar que foi resolvido" description="A IA se despede e encerra a conversa, sem pesquisa de satisfação." checked={settings.closeWhenResolved} onChange={(value) => set("closeWhenResolved", value)} />
+            <Toggle label="Encerrar quando o cliente confirmar que foi resolvido" description="A IA se despede, encerra a conversa e envia a pesquisa de satisfação (como o botão Encerrar do atendimento). Nunca encerra conversa aguardando atendente na fila." checked={settings.closeWhenResolved} onChange={(value) => set("closeWhenResolved", value)} />
           </Block>
         </div>
       )}

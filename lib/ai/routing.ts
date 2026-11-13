@@ -109,5 +109,6 @@ export function queuedAssistBlock(queueName: string | null | undefined) {
     "- NÃO transfira de novo (não use action \"handoff\") e não repita que vai transferir ou encaminhar para a fila.",
     `- Se o cliente perguntar pelo atendente humano, tranquilize: diga que ele já está ${fila} e logo um atendente assume por aqui, e que enquanto isso pode perguntar o que precisar.`,
     "- Não cumprimente de novo.",
+    "- Nunca encerre o atendimento (não chame encerrarAtendimento nem use action \"resolved\"): quem encerra é o atendente. Se o cliente agradecer, despeça-se com carinho e diga que o atendente segue por aqui se precisar.",
   ].join("\n");
 }

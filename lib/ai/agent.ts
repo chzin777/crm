@@ -8,7 +8,7 @@ import { withTyping } from "@/lib/chat/typing";
 import { sendLocation, sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { Prisma } from "@/generated/prisma/client";
 import { hoursFor } from "@/lib/chat/operations";
-import { sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { ChatRuleError, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables } from "@/lib/chat/text";
 import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
@@ -24,6 +24,8 @@ import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai
 import { storeDirectory } from "@/lib/ai/stock-db";
 import { deliverLocation, findStores, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
+import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
+import { sendSatisfactionSurvey } from "@/lib/chat/nps";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
@@ -269,7 +271,7 @@ export type AgentRunInput = {
   /** Produtos cuja foto já foi enviada nesta etapa (conversa, ou desde a entrada na fila). */
   sentImageSkus?: string[];
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
@@ -378,6 +380,17 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       return image ? { ...result, fotoAnexada: true } : result;
     },
   };
+  // Encerramento pedido pela IA: a trava fixa decide de verdade depois da resposta (fila, atendente, dúvida).
+  let closeReason: string | null = null;
+  const closeTool = {
+    definition: CLOSE_TOOL,
+    run: async (args: Record<string, unknown>) => {
+      const check = aiCloseDecision({ requested: true, enabled: settings.closeWhenResolved, queued: !!input.queued, assigned: false, asksHuman: asksForHuman(settings, input.pendingText), pendingText: input.pendingText });
+      if (!check.close) return { encerrado: false, motivo: CLOSE_BLOCK_LABELS[check.blocked ?? "disabled"], orientacao: "Não encerre: responda normalmente ao cliente." };
+      closeReason = typeof args.motivoResumo === "string" && args.motivoResumo.trim() ? args.motivoResumo.trim().slice(0, 200) : "Cliente agradeceu e encerrou";
+      return { encerrado: true, orientacao: "O atendimento será encerrado logo depois da sua despedida e a pesquisa de satisfação será enviada. Responda só com a despedida curta (sem pergunta), action \"resolved\"." };
+    },
+  };
   // Localização da loja: enviada depois da resposta (pin nativo com coordenadas; senão link do Google Maps).
   let location: StoreLocation | null = null;
   const locationTool = {
@@ -398,9 +411,15 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       { role: "system", content: system },
       { role: "user", content: sendMedia && media ? [{ type: "text", text: context }, ...media.parts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [stockTool, detailsTool, locationTool] },
+    { ...input.meta, maxTokens: 700, tools: [stockTool, detailsTool, locationTool, closeTool] },
   );
   let outcome = interpretDecision(decision);
+  // Encerramento: tool encerrarAtendimento ou action "resolved", sempre pela trava fixa.
+  const requestedClose = closeReason as string | null;
+  if (requestedClose && outcome.trigger === "no_reply") outcome = { action: "resolved", reply: AI_FAREWELL, reason: requestedClose, queue: "", trigger: "ai" };
+  const close = aiCloseDecision({ requested: !!requestedClose || outcome.action === "resolved", enabled: settings.closeWhenResolved, queued: !!input.queued, assigned: false, asksHuman: asksForHuman(settings, input.pendingText), pendingText: input.pendingText });
+  if (close.close) outcome = { ...outcome, action: "resolved", reason: requestedClose ?? outcome.reason };
+  else if (outcome.action === "resolved") outcome = { ...outcome, action: "reply" };
   // Silêncio só faz sentido diante de um fechamento de cortesia; em outra mensagem, a equipe assume.
   if (outcome.action === "no_reply" && !isCourtesyClosing(input.pendingText.replace(/\n+/g, " "))) outcome = { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
@@ -410,7 +429,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const pin = location as StoreLocation | null;
   // Na fila, a resposta sai mesmo que o modelo marque transferência (não transfere de novo): foto e mapa vão junto.
   const answered = carriesProductExtras(outcome, !!input.queued);
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered ? photo : null, details, location: pin && answered ? pin : null };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -487,11 +506,26 @@ async function respond(conversationId: string, messageId: string) {
     if (outcome.reply && !settings.handoffMessage.trim()) await sendAiReply(fresh, outcome.reply, null, latest.externalId);
     return handoff(fresh, settings, outcome.reason, outcome.queue);
   }
-  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location);
-  if (outcome.action === "resolved" && settings.closeWhenResolved) {
-    // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
-    await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${outcome.reason}`, "");
+  // Encerramento pela IA (só atendimento exclusivo dela): despedida → encerramento oficial → pesquisa de satisfação,
+  // a mesma sequência do botão "Encerrar" do /chat.
+  if (outcome.action === "resolved" && run.close?.close && !fresh.assigneeId && !fresh.closedAt) {
+    const steps = await runAiClose(outcome.reply, {
+      sendFarewell: (text) => sendAiReply(fresh, text, null, latest.externalId),
+      close: async () => {
+        try {
+          await closeConversation(fresh, null, `Atendimento encerrado pela IA: ${outcome.reason}`, "");
+          return true;
+        } catch (error) {
+          if (error instanceof ChatRuleError) return false;
+          throw error;
+        }
+      },
+      survey: () => sendSatisfactionSurvey(fresh, null),
+    });
+    console.log(`[ai] ${conversationId}: encerramento pela IA (${steps.join(" → ")})`);
+    return;
   }
+  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location);
 }
 
 /**
@@ -545,6 +579,8 @@ export type PlaygroundResult = AgentOutcome & {
   triage?: boolean;
   /** Encerraria a conversa (resolvido com a opção ligada). */
   wouldClose: boolean;
+  /** A IA quis encerrar, mas a trava fixa impediu (motivo). */
+  closeBlocked?: string;
   /** Anexo da última mensagem do cliente, como a IA o recebeu. */
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
   /** O gatilho de mídia foi ignorado só no teste: no atendimento real a conversa iria direto para a equipe. */
@@ -606,7 +642,8 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     handoffQueue: target?.name ?? "",
     handoffQueueSource: target?.source,
     triage: run.humanMode === "triage" || undefined,
-    wouldClose: outcome.action === "resolved" && settings.closeWhenResolved,
+    wouldClose: outcome.action === "resolved" && !!run.close?.close,
+    closeBlocked: run.close && !run.close.close && run.close.blocked ? CLOSE_BLOCK_LABELS[run.close.blocked] : undefined,
     media: media ? { kind: media.kind, summary: media.summary, ...(media.transcript !== undefined ? { transcript: media.transcript } : {}) } : undefined,
     mediaHandoff: run.mediaTriggerSkipped || undefined,
     search: run.search ?? undefined,

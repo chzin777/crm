@@ -5,6 +5,7 @@ import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
 import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
+import { CLOSE_RULES } from "@/lib/ai/ai-close";
 import { DETAILS_RULES, PRODUCT_CARD_RULES } from "@/lib/ai/product-details";
 import { NATURAL_RULES } from "@/lib/ai/product-names";
 import { LOCATION_RULES } from "@/lib/ai/store-location";
@@ -180,7 +181,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     settings.useCustomerOrders ? "Você pode informar ao cliente dados dos pedidos dele que aparecem no histórico do ERP (data, loja, situação)." : "Não comente pedidos ou compras anteriores do cliente.",
     settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
     handoff.join("\n"),
-    settings.closeWhenResolved ? "Use action \"resolved\" quando o cliente confirmar que a dúvida foi resolvida ou se despedir agradecendo; nesse caso a resposta deve ser uma despedida curta." : "",
+    settings.closeWhenResolved ? `${CLOSE_RULES}\nAo encerrar, use action "resolved" com a despedida curta em reply (a mesma mensagem, sem pergunta).` : "",
     settings.extraInstructions.trim() ? `Instruções da empresa:\n${settings.extraInstructions.trim()}` : "",
     settings.aiChoosesQueue ? ROUTING_RULES : "",
     settings.aiChoosesQueue ? queueRoutingBlock(queues, settings.queueHints ?? {}) : "",
