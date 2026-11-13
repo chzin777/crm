@@ -50,6 +50,8 @@ export type AiSettings = {
   /** Fila de destino na transferência; vazio mantém a fila atual (ou a IA escolhe, se permitido). */
   handoffQueueId: string;
   aiChoosesQueue: boolean;
+  /** Quando usar cada fila (id → texto curto), mostrado à IA na escolha do transbordo; vazio usa a descrição da fila. */
+  queueHints: Record<string, string>;
   handoffMessage: string;
   closeWhenResolved: boolean;
 
@@ -98,6 +100,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   maxAiReplies: 8,
   handoffQueueId: "",
   aiChoosesQueue: true,
+  queueHints: {},
   handoffMessage: "Vou te passar para um dos nossos atendentes, só um instante! 😊",
   closeWhenResolved: true,
   model: "gpt-5.4-mini",
@@ -114,6 +117,11 @@ const isTime = (value: unknown): value is string => typeof value === "string" &&
 const num = (value: unknown, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = typeof value === "string" ? Number(value.replace(",", ".")) : Number(value);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+};
+/** Dicas de fila: só ids e textos curtos (até 60 filas). */
+const hints = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([id, text]) => id.length <= 60 && typeof text === "string" && text.trim()).slice(0, 60).map(([id, text]) => [id, (text as string).trim().slice(0, 300)]));
 };
 const str = (value: unknown, fallback: string, max = 4000) => (typeof value === "string" ? value.slice(0, max) : fallback);
 const bool = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
@@ -159,6 +167,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     maxAiReplies: Math.round(num(raw.maxAiReplies, d.maxAiReplies, 1, 50)),
     handoffQueueId: str(raw.handoffQueueId, d.handoffQueueId, 60),
     aiChoosesQueue: bool(raw.aiChoosesQueue, d.aiChoosesQueue),
+    queueHints: hints(raw.queueHints),
     handoffMessage: str(raw.handoffMessage, d.handoffMessage, 1000),
     closeWhenResolved: bool(raw.closeWhenResolved, d.closeWhenResolved),
     model: str(raw.model, d.model, 60).trim() || d.model,

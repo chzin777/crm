@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { customerMessages, formatContext, historyText, interpretDecision, preAgentOutcome, simulatedHistory, transcriptLine } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 
-const settings = { ...DEFAULT_AI_SETTINGS, handoffKeywords: ["atendente"], handoffOnMedia: true, maxAiReplies: 3, handoffMessage: "Oi {cliente}, vou te passar para a equipe." };
+const settings = { ...DEFAULT_AI_SETTINGS, aiChoosesQueue: false, handoffKeywords: ["atendente"], handoffOnMedia: true, maxAiReplies: 3, handoffMessage: "Oi {cliente}, vou te passar para a equipe." };
 
 describe("regras antes da IA (mesmas no WhatsApp e no teste)", () => {
   it("pedido de atendente, mídia e limite de respostas transferem na ordem do atendimento real", () => {

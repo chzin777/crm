@@ -10,7 +10,7 @@ export async function GET() {
   if (guard.response) return guard.response;
   const [settings, queues] = await Promise.all([
     readAiSettings(),
-    prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
+    prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true, description: true } }),
   ]);
   return NextResponse.json({ settings, queues, configured: aiConfigured() });
 }

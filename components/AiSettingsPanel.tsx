@@ -9,8 +9,9 @@ import { extractClipboardImages } from "@/lib/clipboard";
 import { SIMULATED_PROFILES, type AgentOutcome, type AgentTrigger, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { AiUsageReport } from "@/lib/ai/store";
 import type { StockLog } from "@/lib/ai/stock";
+import { defaultQueueHint, isGeneralQueue } from "@/lib/ai/routing";
 
-type Queue = { id: string; name: string };
+type Queue = { id: string; name: string; description?: string };
 type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
@@ -19,6 +20,8 @@ type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string;
 type PlaygroundResult = AgentOutcome & {
   messages: string[];
   handoffQueue: string;
+  handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none";
+  triage?: boolean;
   wouldClose: boolean;
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
   mediaHandoff?: boolean;
@@ -33,6 +36,13 @@ const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   sem_estoque_na_rede: "sem estoque na rede",
   unavailable_api: "VMSet não respondeu (transfere)",
   produto_nao_encontrado: "produto não encontrado",
+};
+const QUEUE_SOURCE_LABELS: Record<NonNullable<PlaygroundResult["handoffQueueSource"]>, string> = {
+  ai: " (escolhida pela IA)",
+  fallback: " (fila padrão: assunto não identificado ou fila inválida)",
+  fixed: " (fila fixa da configuração)",
+  current: " (fila atual da conversa)",
+  none: "",
 };
 const TRIGGER_LABELS: Record<AgentTrigger, string> = {
   keyword: "pedido de atendente",
@@ -232,7 +242,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         : customer;
       const notes = [
         data.mediaHandoff ? "No atendimento real, o gatilho \"cliente enviou foto, documento ou áudio\" transferiria esta conversa para a equipe antes da IA responder (aqui a leitura do anexo foi mostrada mesmo assim)." : "",
-        data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}` : ""}: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
+        data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
+        data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
       setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff", search: data.search, injection: data.injection, stock: data.stock }]);
@@ -748,14 +759,43 @@ export function AiSettingsPanel() {
             </label>
           </Block>
 
-          <Block title="Para onde vai" hint="Fila que recebe a conversa transferida.">
-            <label className={labelCls}>Fila de destino
+          <Block title="Para onde vai" hint="Fila que recebe a conversa transferida. Com a IA escolhendo, ela roteia pelo assunto; pedido de atendente sem assunto ganha 1 pergunta de triagem antes.">
+            <Toggle label="A IA escolhe a fila pelo assunto" description="Orçamento vai para Vendas, garantia para Pós-venda, boleto para Financeiro. A escolha é conferida no servidor." checked={settings.aiChoosesQueue} onChange={(value) => set("aiChoosesQueue", value)} />
+            <label className={labelCls}>{settings.aiChoosesQueue ? "Fila padrão (assunto não identificado ou fila inválida)" : "Fila de destino"}
               <select value={settings.handoffQueueId} onChange={(event) => set("handoffQueueId", event.target.value)} className={`${input} cursor-pointer`}>
-                <option value="">Manter a fila atual da conversa</option>
+                <option value="">{settings.aiChoosesQueue ? "Atendimento Geral (automático pelo nome)" : "Manter a fila atual da conversa"}</option>
                 {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
               </select>
             </label>
-            {!settings.handoffQueueId && <Toggle label="A IA escolhe a fila pelo assunto" description="Ex.: dúvida de pagamento vai para Financeiro." checked={settings.aiChoosesQueue} onChange={(value) => set("aiChoosesQueue", value)} />}
+            {settings.aiChoosesQueue && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Filas que a IA enxerga</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Descreva quando usar cada fila. Em branco, vale a descrição da fila ou a sugestão pelo nome (mostrada em cinza).</p>
+                {queues.length === 0 ? <p className="text-xs text-slate-400">Nenhuma fila ativa cadastrada.</p> : (
+                  <ul className="divide-y divide-slate-200/70 rounded-lg border border-slate-200/70 dark:divide-slate-800 dark:border-slate-800">
+                    {queues.map((queue) => {
+                      const fallbackHint = queue.description?.trim() || defaultQueueHint(queue.name) || "Descreva os assuntos desta fila";
+                      const isDefault = settings.handoffQueueId ? settings.handoffQueueId === queue.id : isGeneralQueue(queue);
+                      return (
+                        <li key={queue.id} className="flex flex-col gap-1.5 p-3 sm:flex-row sm:items-center sm:gap-3">
+                          <span className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-[#051647] sm:w-44 dark:text-white">
+                            {queue.name}
+                            {isDefault && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">padrão</span>}
+                          </span>
+                          <input aria-label={`Quando usar a fila ${queue.name}`} value={settings.queueHints[queue.id] ?? ""} placeholder={fallbackHint} maxLength={300}
+                            onChange={(event) => {
+                              const next = { ...settings.queueHints };
+                              if (event.target.value) next[queue.id] = event.target.value; else delete next[queue.id];
+                              set("queueHints", next);
+                            }}
+                            className={input} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
             <label className={labelCls}>Mensagem ao transferir
               <textarea rows={2} value={settings.handoffMessage} onChange={(event) => set("handoffMessage", event.target.value)} className={area} />
               <span className="block text-[10px] font-normal text-slate-400">Vazia: transfere sem avisar o cliente. Aceita {"{cliente}"} e {"{fila}"}.</span>

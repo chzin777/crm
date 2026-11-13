@@ -19,6 +19,7 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
 import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext } from "@/lib/ai/assist";
@@ -122,14 +123,13 @@ async function knowledge(settings: AiSettings) {
 
 
 /** Fila de destino da transferência: a fixa da configuração, a escolhida pela IA ou a atual. Mesma regra no teste. */
-async function handoffQueue(settings: AiSettings, currentQueueId: string | null, queueName?: string) {
-  let queueId = settings.handoffQueueId || currentQueueId;
-  if (!settings.handoffQueueId && settings.aiChoosesQueue && queueName) {
-    const match = await prisma.chatQueue.findFirst({ where: { archivedAt: null, name: { equals: queueName.trim(), mode: "insensitive" } }, select: { id: true } });
-    if (match) queueId = match.id;
-  }
-  const queue = queueId ? await prisma.chatQueue.findUnique({ where: { id: queueId }, select: { id: true, name: true, archivedAt: true } }) : null;
-  return queue && !queue.archivedAt ? queue : null;
+async function handoffQueue(settings: AiSettings, currentQueueId: string | null, chosen?: string) {
+  // Validação no servidor: a fila escolhida pela IA precisa existir e estar ativa; senão fila padrão / Atendimento Geral.
+  const queues = await prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true }, orderBy: { order: "asc" } });
+  const choice = resolveHandoffQueue(queues, { fixedQueueId: settings.handoffQueueId, aiChooses: settings.aiChoosesQueue, chosen, currentQueueId });
+  const queue = queues.find((item) => item.id === choice.queueId) ?? null;
+  if (chosen && choice.source !== "ai") console.warn(`[ai] fila escolhida pela IA inválida ("${chosen.slice(0, 60)}"): usando ${queue?.name ?? "nenhuma"} (${choice.source})`);
+  return queue ? { ...queue, source: choice.source } : null;
 }
 
 const mediaKind = (item: { attachment: unknown; metaMedia: unknown }) => ((item.attachment ?? item.metaMedia) as { kind?: string } | null)?.kind;
@@ -151,7 +151,9 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
     where: { id: conversation.id },
     data: { ...handoffPatch(target?.id ?? conversation.queueId, new Date()), menuState: state as unknown as Prisma.InputJsonValue },
   });
-  await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}` : ""}: ${reason}`);
+  // Nota para o atendente: fila, como foi escolhida e o resumo do que o cliente precisa.
+  const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : "";
+  await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}${how}` : ""}: ${reason}`);
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
 }
 
@@ -200,7 +202,7 @@ export type AgentRunInput = {
   /** Mensagens anteriores do cliente nesta conversa (insistência em tentativa de manipulação). */
   earlierCustomerTexts?: string[];
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[] };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
@@ -254,16 +256,18 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const [context, info, queues] = await Promise.all([
     input.buildContext(media),
     knowledge(settings),
-    settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
+    settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
   ]);
+  // Pedido de pessoa com a IA roteando: sem assunto → 1 pergunta de triagem; com assunto → transfere já para a fila certa.
+  const humanMode = humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
   const system = buildSystemPrompt({
     settings,
-    queueNames: queues.map((queue) => queue.name),
+    queues,
     info,
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
-    extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : ""],
+    extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -282,7 +286,10 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     ],
     { ...input.meta, maxTokens: 700, tools: [stockTool] },
   );
-  return { outcome: interpretDecision(decision), media, mediaTriggerSkipped, search, injection, stock };
+  let outcome = interpretDecision(decision);
+  // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
+  if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -353,6 +360,10 @@ export type PlaygroundResult = AgentOutcome & {
   messages: string[];
   /** Fila para onde a conversa iria na transferência. */
   handoffQueue: string;
+  /** Como a fila foi definida: escolha da IA validada, fila padrão (fallback), fixa ou a atual. */
+  handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none";
+  /** A IA fez a pergunta de triagem do setor em vez de transferir. */
+  triage?: boolean;
   /** Encerraria a conversa (resolvido com a opção ligada). */
   wouldClose: boolean;
   /** Anexo da última mensagem do cliente, como a IA o recebeu. */
@@ -405,6 +416,8 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     ...outcome,
     messages: customerMessages(outcome, settings, { customer: profile.name, queue: target?.name }),
     handoffQueue: target?.name ?? "",
+    handoffQueueSource: target?.source,
+    triage: run.humanMode === "triage" || undefined,
     wouldClose: outcome.action === "resolved" && settings.closeWhenResolved,
     media: media ? { kind: media.kind, summary: media.summary, ...(media.transcript !== undefined ? { transcript: media.transcript } : {}) } : undefined,
     mediaHandoff: run.mediaTriggerSkipped || undefined,

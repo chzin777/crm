@@ -33,7 +33,7 @@ describe("saudação natural no prompt", () => {
   const settings = { ...DEFAULT_AI_SETTINGS, extraInstructions: "" };
 
   it("proíbe apresentação como assistente virtual e manda saudar pelo horário", () => {
-    const prompt = buildSystemPrompt({ settings, queueNames: [], info: "", now: br("11:10"), firstReply: true });
+    const prompt = buildSystemPrompt({ settings, info: "", now: br("11:10"), firstReply: true });
     expect(prompt).toContain(GREETING_RULES);
     expect(GREETING_RULES).toContain('NUNCA se apresente como "assistente virtual"');
     expect(GREETING_RULES).toContain('"Olá! Eu sou a assistente virtual da Óticas Brasil"');
@@ -44,7 +44,7 @@ describe("saudação natural no prompt", () => {
   });
 
   it("à noite usa Boa noite e, depois da primeira resposta, não cumprimenta de novo", () => {
-    const later = buildSystemPrompt({ settings, queueNames: [], info: "", now: br("21:00"), firstReply: false });
+    const later = buildSystemPrompt({ settings, info: "", now: br("21:00"), firstReply: false });
     expect(later).toContain('(período: noite -> use "Boa noite")');
     expect(later).toContain("não cumprimente de novo");
     expect(later).not.toContain("primeira resposta nesta conversa");

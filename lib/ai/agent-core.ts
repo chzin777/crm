@@ -3,6 +3,7 @@ import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
+import { humanRequestMode, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
 import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
 
@@ -11,7 +12,7 @@ import type { CustomerHistory } from "@/lib/chat/types";
  * da página /ia. A chamada ao modelo fica em runAiAgent (lib/ai/agent), que usa estas funções nos dois caminhos.
  */
 
-export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "resolved"; reason?: string; queue?: string };
+export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "resolved"; reason?: string; queue?: string; queue_id?: string };
 
 /** O que disparou o resultado: regra antes da IA (keyword, media, limit) ou a própria IA. */
 /** catalog_miss: foto de produto sem resultado no catálogo; prescription: receita/documento em foto (conferência humana). */
@@ -61,7 +62,8 @@ export function formatContext(input: { contactName: string | null; queueName: st
  */
 export function preAgentOutcome(settings: AiSettings, input: { pendingText: string; hasMedia: boolean; aiReplies: number; ignoreMediaTrigger?: boolean }): AgentOutcome | null {
   const handoff = (reason: string, trigger: AgentTrigger): AgentOutcome => ({ action: "handoff", reply: "", reason, queue: "", trigger });
-  if (asksForHuman(settings, input.pendingText)) return handoff("Cliente pediu para falar com uma pessoa", "keyword");
+  // Pedido de pessoa: com a IA escolhendo a fila, ela faz a triagem ou roteia (runAiAgent); sem isso, transfere direto.
+  if (humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) }) === "direct") return handoff("Cliente pediu para falar com uma pessoa", "keyword");
   if (settings.handoffOnMedia && input.hasMedia && !input.ignoreMediaTrigger) return handoff("Cliente enviou documento ou áudio", "media");
   if (input.aiReplies >= settings.maxAiReplies) return handoff(`Limite de ${settings.maxAiReplies} respostas da IA atingido`, "limit");
   return null;
@@ -71,7 +73,7 @@ export function preAgentOutcome(settings: AiSettings, input: { pendingText: stri
 export function interpretDecision(decision: AgentDecision): AgentOutcome {
   const reply = decision.reply?.trim() ?? "";
   const reason = decision.reason?.trim() || "Sem motivo informado";
-  const queue = decision.queue?.trim() ?? "";
+  const queue = (typeof decision.queue_id === "string" && decision.queue_id.trim()) || (typeof decision.queue === "string" ? decision.queue.trim() : "");
   if (decision.action === "handoff") return { action: "handoff", reply, reason, queue, trigger: "ai" };
   if (!reply) return { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
   return { action: decision.action === "resolved" ? "resolved" : "reply", reply, reason, queue, trigger: "ai" };
@@ -129,7 +131,7 @@ export const BRAND_RULES = [
 ].join("\n");
 
 /** Regras do agente (WhatsApp e teste da página /ia). A regra de imagens é fixa no código, logo após as da marca. */
-export function agentRules(settings: AiSettings, queueNames: string[]) {
+export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
   const handoff = [
     "Transfira para uma pessoa (action \"handoff\") quando:",
     "- o cliente pedir para falar com uma pessoa;",
@@ -152,8 +154,9 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
     handoff.join("\n"),
     settings.closeWhenResolved ? "Use action \"resolved\" quando o cliente confirmar que a dúvida foi resolvida ou se despedir agradecendo; nesse caso a resposta deve ser uma despedida curta." : "",
     settings.extraInstructions.trim() ? `Instruções da empresa:\n${settings.extraInstructions.trim()}` : "",
-    settings.aiChoosesQueue && queueNames.length ? `Filas disponíveis para transferência: ${queueNames.join(", ")}. Em "queue", indique a mais adequada (ou vazio).` : "",
-    `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved", "reason": "motivo curto para a equipe", "queue": "nome da fila ou vazio"}.`,
+    settings.aiChoosesQueue ? ROUTING_RULES : "",
+    settings.aiChoosesQueue ? queueRoutingBlock(queues, settings.queueHints ?? {}) : "",
+    `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved", "reason": "resumo curto para o atendente do que o cliente precisa", "queue_id": "${settings.aiChoosesQueue ? "id da fila de transbordo (só com action handoff) ou vazio" : "vazio"}"}.`,
   ].filter(Boolean).join("\n\n");
 }
 
@@ -162,11 +165,11 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
  * blocos extras do sistema (anexos, resultado do catálogo, alerta de manipulação), informações e o lembrete de
  * segurança por último. Nada vindo do cliente entra aqui: os dados dele vão só na mensagem "user", delimitados.
  */
-export function buildSystemPrompt(input: { settings: AiSettings; queueNames: string[]; info: string; extra?: string[]; now?: Date; firstReply?: boolean }) {
+export function buildSystemPrompt(input: { settings: AiSettings; queues?: RoutingQueue[]; info: string; extra?: string[]; now?: Date; firstReply?: boolean }) {
   const now = input.now ?? new Date();
   const time = brasiliaGreeting(now);
   return [
-    agentRules(input.settings, input.queueNames),
+    agentRules(input.settings, input.queues ?? []),
     ...(input.extra ?? []).filter(Boolean),
     `Agora: ${formatBr(now, { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
     `Horário atual em Brasília: ${time.time} (período: ${time.period} -> use "${time.greeting}").`,
