@@ -274,6 +274,44 @@ describe("localização de loja listada pelo estoque (cascata sessão → CRM �
     expect(listed.type === "found" && storeLocation(listed.code, listed.store).endereco).toContain("Av. Rio Verde, 1234");
   });
 
+  const TWO_PINS = "📍 Loja Jardim Nova Era - Aparecida de Goiânia (Av. Rio Verde)\n📍 Loja Jardim Goiás - Goiânia (Av. Deputado Jamel Cecilio, 3300)";
+
+  it("lista com duas lojas em linhas 📍: extrai 2 lojas limpas, sem a segunda colada no endereço da primeira", () => {
+    expect(storesIn(TWO_PINS)).toEqual([
+      { lojaId: null, nome: "Loja Jardim Nova Era", cidade: "Aparecida de Goiânia", enderecoCompleto: "Av. Rio Verde" },
+      { lojaId: null, nome: "Loja Jardim Goiás", cidade: "Goiânia", enderecoCompleto: "Av. Deputado Jamel Cecilio, 3300" },
+    ]);
+    expect(storesIn(TWO_PINS.replace("\n", "\r\n"))).toHaveLength(2);
+    expect(storesIn(TWO_PINS).every((store) => !/📍|\n/u.test(`${store.nome}${store.cidade}${store.enderecoCompleto}`))).toBe(true);
+  });
+
+  it("\"Manda a localização dessa loja do jardim goias\" → só a Loja Jardim Goiás, sem desambiguação", () => {
+    const query = "Manda a localização dessa loja do jardim goias";
+    const session = resolveStoreRequest({ queries: [query], sessionStores: storesIn(TWO_PINS), directory: new Map() });
+    expect(session).toMatchObject({ type: "found", source: "session", store: { name: "Loja Jardim Goiás", address: "Av. Deputado Jamel Cecilio, 3300" } });
+    // Endereço de outra loja citando "Jardim Goiás" não disputa com o nome da unidade.
+    const polluted = [{ nome: "Loja Jardim Nova Era", cidade: "Aparecida de Goiânia", enderecoCompleto: "Av. Rio Verde, perto do Jardim Goiás" }, ...storesIn(TWO_PINS).slice(1)];
+    expect(resolveStoreRequest({ queries: [query], sessionStores: polluted, directory: new Map() })).toMatchObject({ type: "found", store: { name: "Loja Jardim Goiás" } });
+    expect(resolveStoreRequest({ queries: [query], sessionStores: storesIn(TWO_PINS), directory: STORES })).toMatchObject({ type: "found", source: "crm" });
+  });
+
+  it("fluxo /ia: Ray-Ban Meta RW4014 em 2 lojas → \"manda a localização dessa loja do jardim goias\" envia direto", async () => {
+    const card = buildProductCard({ nomeComercial: "Ray-Ban Meta Wayfarer", referencia: "RW4014", categoriaModelo: "Óculos inteligente", formatoArmacao: null, acabamentoOuMaterial: null, valorFormatado: "R$ 2.499,00", totalUnidades: 2, lojasDisponiveis: [{ loja: "Loja Jardim Nova Era", cidade: "Aparecida de Goiânia", endereco: "Av. Rio Verde", quantidade: 1 }, { loja: "Loja Jardim Goiás", cidade: "Goiânia", endereco: "Av. Deputado Jamel Cecilio, 3300", quantidade: 1 }] });
+    const history: PlaygroundMessage[] = [
+      { from: "customer", text: "Tem o Ray-Ban Meta RW4014?" },
+      { from: "ai", text: card },
+      { from: "customer", text: "Manda a localização dessa loja do jardim goias" },
+    ];
+    model.script = async (tools) => {
+      const result = (await tools.enviarLocalizacaoLoja({ nomeLoja: "jardim goias" })) as { enviado: boolean; lojasPossiveis?: string[] };
+      expect(result.lojasPossiveis).toBeUndefined();
+      expect(result.enviado).toBe(true);
+      return { reply: "Claro! Te mandei a localização aqui embaixo 👇", action: "reply" };
+    };
+    const run = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-rw4014" });
+    expect(run.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
+  });
+
   it("nome da filial no CRM (\"Flamboyant\") também resolve", () => {
     expect(resolveStoreRequest({ queries: ["Flamboyant"], sessionStores: [], directory: STORES })).toMatchObject({ type: "found", source: "crm" });
   });

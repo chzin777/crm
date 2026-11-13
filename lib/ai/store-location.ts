@@ -195,6 +195,16 @@ export function storeQueryMatches(query: string, name: string, extra = "") {
   return containsWords(wanted, own) || containsWords(`${own} ${normalizeStoreQuery(extra)}`, wanted);
 }
 
+/** Pedido casa só pelo nome da unidade ou bairro (sem olhar endereço nem cidade). */
+export function storeNameMatches(query: string, store: StoreInfo) {
+  const wanted = normalizeStoreQuery(query);
+  if (!wanted) return false;
+  return [store.neighborhood ?? "", erpUnitPlace(store.name)].some((name) => {
+    const own = normalizeStoreQuery(name);
+    return !!own && (containsWords(wanted, own) || (wanted.length >= 4 && containsWords(own, wanted)));
+  });
+}
+
 /** Nome da filial no ERP sem código, razão social nem sufixos ("LJ 39-ZVC FLAMBOYANT SAULO ... LTDA" → "Flamboyant Saulo ..."). */
 export function erpUnitPlace(name: string) {
   return titleCase(name.replace(/\bLJ\s*\d+\b(-\w+)?/gi, " ").replace(/\b(LTDA|EIRELI|ME|EPP|S\/?A|IND|COM|DE|LENTES|UNILENTES|OPTICA|OTICA|ÓTICA|BRASIL)\b\.?/gi, " ").replace(/[()]/g, " ").replace(/\s+/g, " ").trim());
@@ -233,8 +243,10 @@ export function resolveStoreRequest(input: { queries: string[]; sessionStores: S
 
   // 1) Sessão atual: a loja que a IA acabou de listar, com o endereço que ela mostrou.
   for (const query of queries) {
-    const hits = input.sessionStores.filter((store, index, list) => storeQueryMatches(query, store.nome, store.enderecoCompleto)
-      && list.findIndex((other) => normalizeStoreQuery(other.enderecoCompleto) === normalizeStoreQuery(store.enderecoCompleto)) === index);
+    const distinct = input.sessionStores.filter((store, index, list) => list.findIndex((other) => normalizeStoreQuery(other.enderecoCompleto) === normalizeStoreQuery(store.enderecoCompleto)) === index);
+    // Nome/bairro da loja primeiro; o endereço só entra se nenhum nome casar ("jardim goias" nunca casa a Nova Era pelo endereço).
+    const byName = distinct.filter((store) => storeQueryMatches(query, store.nome));
+    const hits = byName.length ? byName : distinct.filter((store) => storeQueryMatches(query, store.nome, store.enderecoCompleto));
     const numbered = hits.length > 1 ? hits.filter((store) => containsWords(normalizeStoreQuery(query), normalizeStoreQuery(store.enderecoCompleto))) : hits;
     if (numbered.length === 1) {
       const crm = inCrm(`${numbered[0].nome} ${numbered[0].enderecoCompleto}`);
@@ -247,7 +259,8 @@ export function resolveStoreRequest(input: { queries: string[]; sessionStores: S
   for (const query of queries) {
     const normalized = normalizeStoreQuery(query);
     const number = query.match(/\b(?:lj|loja)\s*0*(\d{1,3})\b/i)?.[1];
-    const matches = entries.filter(({ code, store }) => (number ? code === number : false)
+    const named = entries.filter(({ code, store }) => (number ? code === number : false) || storeNameMatches(query, store));
+    const matches = named.length ? named : entries.filter(({ code, store }) => (number ? code === number : false)
       || storeQueryMatches(query, store.neighborhood ?? "", [store.city, store.address, erpUnitPlace(store.name)].filter(Boolean).join(" "))
       || (normalized.length >= 4 && containsWords(normalizeStoreQuery(erpUnitPlace(store.name)), normalized)));
     if (!matches.length) continue;
@@ -319,6 +332,9 @@ export function resolveStoreMatch<T extends { code: string; store: StoreInfo }>(
   const unique = dedupeStores(matches);
   if (!unique.length) return { type: "none" };
   if (unique.length === 1 || /^\s*(lj|loja)?\s*\d+\s*$/i.test(options.wanted)) return { type: "found", match: unique[0] };
+  // Uma só unidade casa pelo nome/bairro: é ela (o endereço das outras não entra na disputa).
+  const byName = unique.filter((item) => storeNameMatches(options.wanted, item.store));
+  if (byName.length === 1) return { type: "found", match: byName[0] };
   for (const text of options.recentAiTexts ?? []) {
     const cited = unique.filter((item) => citesStreet(text, item.store));
     if (cited.length === 1) return { type: "found", match: cited[0] };

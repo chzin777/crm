@@ -45,10 +45,33 @@ function productFrom(message: AnchorMessage): ActiveProduct | null {
 const STREET = /\b(Rua|R\.|Avenida|Av\.?|Alameda|Al\.|Rodovia|Pra[cç]a|Quadra|Qd\.?)\s+[^\n()]*\d[^\n()]*/i;
 
 /** Lojas citadas com endereço numa mensagem: ficha ("📍 *Loja X* – Cidade (Rua 9, 2106)"), texto livre e localização enviada. */
+/** Linha "📍 *Loja X* – Cidade (Endereço)" lida sozinha (regex não gulosa presa à linha). */
+const PIN_LINE = /^📍\s*\*?([^*–—-]+?)\*?\s*[–—-]\s*([^(]+?)(?:\s*\(([^)]+)\))?\.?$/;
+const cleanField = (value: string) => value.replace(/\*/g, "").replace(/\s+/g, " ").trim().replace(/[.!;,]+$/, "");
+/** Campo extraído nunca pode carregar outra loja (📍) nem quebra de linha. */
+const validField = (value: string | null) => !value || !/[📍\r\n]/u.test(value);
+
+/** Linha da lista de lojas (estoque/ficha), parseada isoladamente; null se não for desse formato. */
+export function pinLineStore(line: string): ActiveStore | null {
+  const match = line.trim().match(PIN_LINE);
+  if (!match || !match[3]) return null;
+  const nome = cleanField(match[1]);
+  const cidade = cleanField(match[2]) || null;
+  const endereco = cleanField(match[3]).replace(/^\s*(na|no|em)\s+/i, "");
+  if (!/^Loja\s+\S/i.test(nome) || !endereco || ![nome, cidade, endereco].every(validField)) return null;
+  return { lojaId: null, nome: nome.replace(/^loja/i, "Loja"), cidade: cidade && !/\d/.test(cidade) ? cidade : null, enderecoCompleto: endereco };
+}
+
 export function storesIn(text: string): ActiveStore[] {
   const found: ActiveStore[] = [];
-  const lines = text.split("\n");
+  const add = (store: ActiveStore) => {
+    if (!found.some((other) => compact(other.nome) === compact(store.nome) && compact(other.enderecoCompleto) === compact(store.enderecoCompleto))) found.push(store);
+  };
+  // Linha a linha: um endereço nunca vem da linha de outra loja.
+  const lines = text.split(/\r?\n/);
   lines.forEach((line, index) => {
+    const pinned = /^\s*📍/u.test(line) ? pinLineStore(line) : null;
+    if (pinned) return add(pinned);
     const name = line.match(/\bLoja\s+([^\n*()–—,]+)/);
     if (!name) return;
     const nome = `Loja ${name[1].trim().replace(/\s+-\s*$/, "")}`;
@@ -64,10 +87,11 @@ export function storesIn(text: string): ActiveStore[] {
     } else if (dash) endereco = dash[1];
     else if (STREET.test(after)) endereco = after.match(STREET)![0];
     // Localização enviada: "📍 *Óticas Brasil - Loja X*" e o endereço na linha de baixo.
-    else if (/📍/.test(line) && lines[index + 1] && /\d/.test(lines[index + 1]) && !/^https?:/i.test(lines[index + 1].trim())) endereco = lines[index + 1];
+    // (a linha de baixo nunca pode ser outra loja da lista: 📍 ou "Loja ...").
+    else if (/📍/u.test(line) && lines[index + 1] && /\d/.test(lines[index + 1]) && !/^https?:/i.test(lines[index + 1].trim()) && !/📍|\bLoja\s/iu.test(lines[index + 1])) endereco = lines[index + 1];
     endereco = endereco.replace(/\*/g, "").replace(/^\s*(na|no|em)\s+/i, "").trim().replace(/[.!;,]+$/, "");
-    if (!endereco) return;
-    if (!found.some((store) => compact(store.nome) === compact(nome) && compact(store.enderecoCompleto) === compact(endereco))) found.push({ lojaId: null, nome, cidade, enderecoCompleto: endereco });
+    if (!endereco || ![nome, cidade, endereco].every(validField)) return;
+    add({ lojaId: null, nome, cidade, enderecoCompleto: endereco });
   });
   return found;
 }

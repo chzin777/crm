@@ -28,7 +28,7 @@ import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai
 import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
 import { geocodeStoreAddress } from "@/lib/ai/store-geolocation";
-import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, STORE_MISS_REPLY, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
+import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, STORE_MISS_REPLY, LOCATION_TOOL, locationText, storeLocation, type SessionStore, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
 import { sendSatisfactionSurvey } from "@/lib/chat/nps";
@@ -441,6 +441,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     image = await searchAndCacheProductImage(product);
     return image;
   };
+  const toolStores: SessionStore[] = [];
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
@@ -453,6 +454,13 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
         : anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" } : args;
       const { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
+      // Lojas da consulta, direto do objeto estruturado (o texto da conversa é só o fallback).
+      for (const product of result.produtos ?? []) {
+        for (const store of product.lojasComEstoque ?? []) {
+          const card = cardStore(store);
+          if (card.endereco) toolStores.push({ nome: /^loja\b/i.test(card.loja) ? card.loja : `Loja ${card.loja}`, cidade: card.cidade, enderecoCompleto: card.endereco });
+        }
+      }
       // Trava anti-loop: a mesma vitrine já enviada nesta sessão não sai de novo; o cliente escolhe pelo número/referência.
       if (result.tipoBusca === "marca_ampla" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(result.vitrineFormatada ?? "", listed)) {
         return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Essa vitrine já foi enviada: NÃO repita a lista. Responda: "${pickFromListQuestion(listed)}"` };
@@ -541,7 +549,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   };
   // Loja pedida em cascata (sessão → CRM → ERP); endereço só da conversa ou do ERP: geocodifica na hora (senão link do Maps).
   const locateStoreRequest = async (queries: string[]): Promise<{ type: "found"; location: StoreLocation } | { type: "ambiguous"; options: string[] } | { type: "none" }> => {
-    const sessionStores = (input.recentAiTexts ?? []).flatMap((text) => storesIn(text));
+    const sessionStores = [...toolStores, ...(input.recentAiTexts ?? []).flatMap((text) => storesIn(text))];
     const resolved = resolveStoreRequest({ queries, sessionStores, directory: await storeDirectory(), erpUnits: erpUnitDirectory(), recentAiTexts: input.recentAiTexts });
     if (resolved.type !== "found") return resolved;
     if (resolved.source === "crm") return { type: "found", location: await pinStore(resolved.code, resolved.store) };
