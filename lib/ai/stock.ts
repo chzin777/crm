@@ -235,7 +235,13 @@ export function buildStockResult(input: {
   const anyStock = produtos.some((product) => product.lojasComEstoque.length);
   const anyRegion = produtos.some((product) => product.lojasNaRegiao.length);
   const cenario: StockScenario = !anyStock ? "sem_estoque_na_rede" : !regionKnown ? "disponivel_em_lojas" : anyRegion ? "disponivel_na_regiao" : "esgotado_na_regiao_disponivel_em_outras";
-  return { ...base, cenario, regiaoReconhecida: regionKnown, produtos, orientacao: GUIDANCE[cenario] };
+  // Orientação de preço junto do cenário: valor direto quando existe; sem preço no ERP, oferecer confirmar o orçamento.
+  const priceGuidance = !anyStock || !input.withPrices
+    ? ""
+    : produtos.some((product) => product.precoSobConsulta)
+      ? " O preço não está cadastrado no sistema para este modelo (precoSobConsulta): informe a disponibilidade e as lojas normalmente e ofereça transferir para um atendente confirmar o valor/orçamento (action handoff se o cliente aceitar)."
+      : " Informe o precoVenda exato e, se o cliente perguntou quantidade, quantas unidades há (quantidade por loja ou totalDisponivelRede). Liste as lojas completas (nome e endereço) antes de terminar; não transfira.";
+  return { ...base, cenario, regiaoReconhecida: regionKnown, produtos, orientacao: GUIDANCE[cenario] + priceGuidance };
 }
 
 /** Regras fixas no código (não editáveis na tela) sobre estoque. */
