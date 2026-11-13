@@ -4,6 +4,7 @@ import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
 import { BROAD_SEARCH_RULES } from "@/lib/ai/stock-showcase";
+import { BRAND_TYPO_RULES } from "@/lib/ai/brand-resolve";
 import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
 import { CLOSE_RULES } from "@/lib/ai/ai-close";
@@ -170,6 +171,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     IMAGE_RULE,
     STOCK_RULES,
     BROAD_SEARCH_RULES,
+    BRAND_TYPO_RULES,
     PRODUCT_CARD_RULES,
     DETAILS_RULES,
     LOCATION_RULES,

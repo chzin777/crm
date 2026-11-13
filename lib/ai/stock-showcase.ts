@@ -80,6 +80,10 @@ export type ShowcaseResult = {
   modelos: ShowcaseModel[];
   vitrineFormatada: string | null;
   orientacao: string;
+  /** Marca real reconhecida no termo do cliente ("rada" → "RADDA"). */
+  marcaResolvida?: string;
+  /** A marca foi reconhecida, mas não há modelo dela com estoque/cadastro agora. */
+  semEstoqueDaMarca?: boolean;
 };
 
 /** Agrupa cores/tamanhos do mesmo modelo (mais vendidos primeiro) e escolhe os códigos a consultar no saldo. */
@@ -143,9 +147,12 @@ export function buildShowcaseResult(input: {
   lookup: StockLookup | null;
   stores: Map<string, StoreInfo>;
   withPrices: boolean;
+  /** Marca real reconhecida (com erro de digitação ou não). */
+  brand?: string | null;
 }): ShowcaseResult {
-  const base = { tipoBusca: "marca_ampla" as const, termoBusca: input.term, regiao: "", regiaoReconhecida: false as const, produtos: [] as [] };
-  if (!input.groups.length) return { ...base, cenario: "produto_nao_encontrado", modelos: [], vitrineFormatada: null, orientacao: SHOWCASE_GUIDANCE.produto_nao_encontrado };
+  const base = { tipoBusca: "marca_ampla" as const, termoBusca: input.term, regiao: "", regiaoReconhecida: false as const, produtos: [] as [], ...(input.brand ? { marcaResolvida: input.brand } : {}) };
+  const brandMissing = input.brand ? `Não há modelos da marca ${input.brand} em estoque no momento: diga isso com clareza (sem listar produtos de outras marcas) e ofereça outras marcas ou um atendente para verificar encomenda.` : "";
+  if (!input.groups.length) return { ...base, cenario: "produto_nao_encontrado", modelos: [], vitrineFormatada: null, orientacao: brandMissing || SHOWCASE_GUIDANCE.produto_nao_encontrado, ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
   if (!input.lookup || input.lookup.stockStatus === "unavailable_api") return { ...base, cenario: "unavailable_api", modelos: [], vitrineFormatada: null, orientacao: SHOWCASE_GUIDANCE.unavailable_api };
   const lookup = input.lookup;
   const models: ShowcaseModel[] = [];
@@ -170,7 +177,7 @@ export function buildShowcaseResult(input: {
     });
     if (models.length >= SHOWCASE_MAX_MODELS) break;
   }
-  if (!models.length) return { ...base, cenario: "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: SHOWCASE_GUIDANCE.sem_estoque_na_rede };
+  if (!models.length) return { ...base, cenario: "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: brandMissing || SHOWCASE_GUIDANCE.sem_estoque_na_rede, ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
   return {
     ...base,
     cenario: "disponivel_em_lojas",
