@@ -42,7 +42,7 @@ describe("contexto do cliente", () => {
     expect(transcriptLine({ author: "bot", authorName: "Assistente IA", text: "Olá!", internal: false, attachment: null, createdAt: at })).toBe("[13/11, 10:05] Robô: Olá!");
     expect(transcriptLine({ author: "customer", authorName: null, text: "", internal: false, attachment: { kind: "image", name: "r.jpg" }, createdAt: at })).toBe("[13/11, 10:05] Cliente: [image: r.jpg]");
     const text = formatContext({ contactName: "Maria Teste", queueName: null, subject: "", includeHistory: false, history: null, conversation: "" });
-    expect(text).toContain("Cliente: Maria Teste");
+    expect(text).toContain('Cliente: <dados_cliente_nao_confiaveis origem="nome do contato">\nMaria Teste\n</dados_cliente_nao_confiaveis>');
     expect(text).toContain("(não disponível para a IA)");
     expect(text).toContain("(sem mensagens)");
   });

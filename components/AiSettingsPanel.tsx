@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, Coins, FileText, FlaskConical, Mic, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, Coins, FileText, FlaskConical, Mic, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
@@ -14,7 +14,7 @@ type Queue = { id: string; name: string };
 type Tab = "identidade" | "atuacao" | "conexao" | "consumo" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
 /** Mesmo resultado do motor do WhatsApp (runAiAgent), mais o que o cliente receberia. */
 type PlaygroundResult = AgentOutcome & {
   messages: string[];
@@ -23,6 +23,7 @@ type PlaygroundResult = AgentOutcome & {
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
   mediaHandoff?: boolean;
   search?: { kind: string; term: string; found: number };
+  injection?: { risk: "suspect" | "high"; matches: string[] };
 };
 const TRIGGER_LABELS: Record<AgentTrigger, string> = {
   keyword: "pedido de atendente",
@@ -32,6 +33,7 @@ const TRIGGER_LABELS: Record<AgentTrigger, string> = {
   no_reply: "a IA não soube responder",
   catalog_miss: "foto de produto sem resultado no catálogo",
   prescription: "receita ou documento para conferência",
+  security: "tentativas repetidas de manipular a IA",
 };
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -171,7 +173,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}` : ""}: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
         data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
-      setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff", search: data.search }]);
+      setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff", search: data.search, injection: data.injection }]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível testar a IA.");
     } finally {
@@ -229,6 +231,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
               {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
               {message.text && <p className="whitespace-pre-wrap">{message.text}</p>}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
+              {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
               {message.search && <p className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300" title="Só aparece no teste"><Search className="h-3 w-3" />{message.search.kind === "produto" ? <>Busca no ERP: “{message.search.term}” · {message.search.found} resultado{message.search.found === 1 ? "" : "s"}</> : <>Foto identificada como {message.search.kind}{message.search.kind === "outro" ? " (sem busca)" : " (conferência humana)"}</>}</p>}
             </div>
           </div>

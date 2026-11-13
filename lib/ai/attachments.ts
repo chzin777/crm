@@ -5,7 +5,7 @@
  */
 export const AI_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 /** Limite do texto extraído de documentos (o resto é cortado com aviso). */
-export const AI_DOCUMENT_TEXT_LIMIT = 30_000;
+export const AI_DOCUMENT_TEXT_LIMIT = 12_000;
 /** Preço do whisper-1 por minuto de áudio (US$). */
 export const TRANSCRIPTION_USD_PER_MINUTE = 0.006;
 export const TRANSCRIPTION_MODEL = "whisper-1";

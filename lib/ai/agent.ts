@@ -7,18 +7,18 @@ import { hoursFor } from "@/lib/chat/operations";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables } from "@/lib/chat/text";
-import { formatBr } from "@/lib/br-time";
 import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
 import { AI_ATTACHMENT_MAX_BYTES, aiAttachmentKind, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { attachSummary, MEDIA_RULES, mediaParts, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { readFile } from "@/lib/minio";
 import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { searchErpCatalog } from "@/lib/ai/catalog-db";
+import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext } from "@/lib/ai/assist";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
-import { agentRules, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type SimulatedProfileId } from "@/lib/ai/agent-core";
+import { buildSystemPrompt, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 
 /** Nome gravado nas mensagens da IA (o atendimento vê quem respondeu). */
@@ -120,8 +120,6 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
 }
 
-const systemPrompt = (settings: AiSettings, queueNames: string[], info: string, hasMedia = false) =>
-  `${agentRules(settings, queueNames)}${hasMedia ? `\n\n${MEDIA_RULES}` : ""}\n\nAgora: ${formatBr(new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).\n\nInformações que você pode usar:\n${info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`;
 
 /** Anexo pronto para a IA: áudio é transcrito (registrado no consumo); documento vira texto; imagem e PDF seguem nativos. */
 export async function prepareMedia(media: AiMediaInput, meta: Omit<AiCallMeta, "maxTokens">): Promise<PreparedMedia> {
@@ -164,8 +162,11 @@ export type AgentRunInput = {
   meta: Omit<AiCallMeta, "maxTokens">;
   /** Só no teste: lê o anexo mesmo com o gatilho de mídia ligado, para ver como a IA o interpretaria. */
   ignoreMediaTrigger?: boolean;
+  /** Mensagens anteriores do cliente nesta conversa (insistência em tentativa de manipulação). */
+  earlierCustomerTexts?: string[];
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck };
+const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
  * Motor único do agente de IA: o atendimento real (WhatsApp) e o teste da página /ia passam por aqui.
@@ -175,13 +176,25 @@ export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; med
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const { settings } = input;
   const early = preAgentOutcome(settings, input);
-  if (early) return { outcome: early, media: null, mediaTriggerSkipped: false, search: null };
+  if (early) return { outcome: early, media: null, mediaTriggerSkipped: false, search: null, injection: NO_INJECTION };
   const mediaTriggerSkipped = !!input.ignoreMediaTrigger && settings.handoffOnMedia && input.hasMedia;
 
   const media = await input.loadMedia();
   // Áudio pedindo atendente: a palavra de transferência vale também na transcrição.
   if (media?.transcript && asksForHuman(settings, media.transcript)) {
-    return { outcome: { action: "handoff", reply: "", reason: "Cliente pediu para falar com uma pessoa (áudio)", queue: "", trigger: "keyword" }, media, mediaTriggerSkipped, search: null };
+    return { outcome: { action: "handoff", reply: "", reason: "Cliente pediu para falar com uma pessoa (áudio)", queue: "", trigger: "keyword" }, media, mediaTriggerSkipped, search: null, injection: NO_INJECTION };
+  }
+
+  // Prompt injection: texto, transcrição e documento do cliente passam pelo detector (dados nunca viram regra).
+  const documentText = media && (media.kind === "text" || media.kind === "docx") ? media.parts.map((part) => (part.type === "text" ? part.text : "")) : [];
+  const untrusted = [input.pendingText, media?.transcript ?? "", ...documentText].join("\n");
+  const injection = detectPromptInjection(untrusted);
+  if (injection.risk !== "none") {
+    const insisted = injection.risk === "high" && (input.earlierCustomerTexts ?? []).some((earlier) => detectPromptInjection(earlier).risk === "high");
+    console.warn(`[ai][security] ${securityLog({ feature: input.meta.feature, conversationId: input.meta.conversationId, userId: input.meta.userId, check: injection, action: insisted ? "handoff" : injection.risk === "high" ? "guard" : "log", sample: untrusted })}`);
+    if (insisted) {
+      return { outcome: { action: "handoff", reply: "", reason: "Tentativas repetidas de manipular a IA (pedido de regras internas ou mudança de papel)", queue: "", trigger: "security" }, media, mediaTriggerSkipped, search: null, injection };
+    }
   }
 
   // Foto: identificação silenciosa → busca no catálogo do ERP → resultado ou transbordo (a foto não é narrada).
@@ -195,7 +208,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       withPrices: settings.canQuotePrices,
     });
     search = flow.log;
-    if (flow.type === "handoff") return { outcome: { action: "handoff", reply: flow.reply, reason: flow.reason, queue: "", trigger: flow.trigger }, media, mediaTriggerSkipped, search };
+    if (flow.type === "handoff") return { outcome: { action: "handoff", reply: flow.reply, reason: flow.reason, queue: "", trigger: flow.trigger }, media, mediaTriggerSkipped, search, injection };
     if (flow.type === "found") {
       catalogContext = `${CATALOG_FOUND_RULE}\n\n${flow.context}`;
       // A resposta usa só o resultado da busca: sem a imagem, não há o que narrar.
@@ -208,15 +221,21 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     knowledge(settings),
     settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
   ]);
-  const text = catalogContext ? `${context}\n\n${catalogContext}` : context;
+  // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
+  const system = buildSystemPrompt({
+    settings,
+    queueNames: queues.map((queue) => queue.name),
+    info,
+    extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : ""],
+  });
   const decision = await aiJson<AgentDecision>(
     [
-      { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info, !!media) },
-      { role: "user", content: sendMedia && media ? [{ type: "text", text }, ...media.parts] : text },
+      { role: "system", content: system },
+      { role: "user", content: sendMedia && media ? [{ type: "text", text: context }, ...media.parts] : context },
     ],
     { ...input.meta, maxTokens: 700 },
   );
-  return { outcome: interpretDecision(decision), media, mediaTriggerSkipped, search };
+  return { outcome: interpretDecision(decision), media, mediaTriggerSkipped, search, injection };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -234,6 +253,8 @@ async function respond(conversationId: string, messageId: string) {
   const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
   const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true, attachment: true, metaMedia: true } });
   const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR } });
+  // Mensagens anteriores do cliente: insistência em tentativa de manipulação leva para a equipe.
+  const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
   const meta = { feature: "agent", conversationId };
 
   let run: AgentRun;
@@ -246,6 +267,7 @@ async function respond(conversationId: string, messageId: string) {
       aiReplies,
       meta,
       loadMedia: () => customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), meta),
+      earlierCustomerTexts: earlier.map((item) => item.text),
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
     });
   } catch (error) {
@@ -290,6 +312,8 @@ export type PlaygroundResult = AgentOutcome & {
   mediaHandoff?: boolean;
   /** Busca no catálogo do ERP feita a partir da foto (termo e quantidade de resultados). */
   search?: SearchLog;
+  /** Tentativa de manipulação detectada (o teste mostra; o WhatsApp registra no log de segurança). */
+  injection?: InjectionCheck;
 };
 
 /**
@@ -311,6 +335,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     aiReplies: messages.filter((message) => message.from === "ai").length,
     meta,
     ignoreMediaTrigger: options.ignoreMediaTrigger,
+    earlierCustomerTexts: messages.slice(0, lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text),
     loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
     buildContext: (media) => {
       const history = media ? attachSummary(messages, media.summary) : messages;
@@ -333,5 +358,6 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     media: media ? { kind: media.kind, summary: media.summary, ...(media.transcript !== undefined ? { transcript: media.transcript } : {}) } : undefined,
     mediaHandoff: run.mediaTriggerSkipped || undefined,
     search: run.search ?? undefined,
+    injection: run.injection.risk === "none" ? undefined : run.injection,
   };
 }

@@ -2,6 +2,7 @@ import { formatBr } from "@/lib/br-time";
 import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
+import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
 
 /**
@@ -13,7 +14,7 @@ export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "re
 
 /** O que disparou o resultado: regra antes da IA (keyword, media, limit) ou a própria IA. */
 /** catalog_miss: foto de produto sem resultado no catálogo; prescription: receita/documento em foto (conferência humana). */
-export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription";
+export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription" | "security";
 export type AgentOutcome = { action: "reply" | "handoff" | "resolved"; reply: string; reason: string; queue: string; trigger: AgentTrigger };
 
 const AUTHOR_LABEL = { customer: "Cliente", agent: "Atendente", bot: "Robô", system: "Sistema" } as const;
@@ -21,7 +22,7 @@ export type TranscriptRow = { author: keyof typeof AUTHOR_LABEL; authorName: str
 
 /** Uma linha da conversa como a IA lê (mesmo formato no WhatsApp e no teste). */
 export function transcriptLine(row: TranscriptRow) {
-  const body = row.text.trim() || (row.attachment ? `[${row.attachment.kind ?? "arquivo"}${row.attachment.name ? `: ${row.attachment.name}` : ""}]` : "");
+  const body = limitText(row.text.trim(), MESSAGE_TEXT_LIMIT) || (row.attachment ? `[${row.attachment.kind ?? "arquivo"}${row.attachment.name ? `: ${row.attachment.name}` : ""}]` : "");
   if (!body) return null;
   const who = row.author === "agent" && row.authorName ? `Atendente ${row.authorName.split(" ")[0]}` : AUTHOR_LABEL[row.author];
   return `[${formatBr(row.createdAt, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}] ${who}${row.internal ? " (nota interna, o cliente não vê)" : ""}: ${body}`;
@@ -41,14 +42,15 @@ export function historyText(history: CustomerHistory | null) {
 /** Contexto do cliente enviado à IA: cadastro, fila, histórico do ERP (se permitido) e a conversa. */
 export function formatContext(input: { contactName: string | null; queueName: string | null; subject: string; includeHistory: boolean; history: CustomerHistory | null; conversation: string }) {
   return [
-    `Cliente: ${input.contactName ?? "não identificado"}`,
+    // O nome do contato é escolhido pelo cliente no WhatsApp: também é dado não confiável.
+    `Cliente: ${input.contactName ? wrapUntrusted(input.contactName, "nome do contato", 80) : "não identificado"}`,
     `Fila: ${input.queueName ?? "sem fila"}${input.subject ? ` · Assunto: ${input.subject}` : ""}`,
     "",
     "Histórico do cliente no ERP:",
     input.includeHistory ? historyText(input.history) : "(não disponível para a IA)",
     "",
     "Conversa (mais antigas primeiro):",
-    input.conversation || "(sem mensagens)",
+    input.conversation ? wrapUntrusted(input.conversation, "conversa") : "(sem mensagens)",
   ].join("\n");
 }
 
@@ -135,8 +137,9 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
     settings.handoffWhenUnsure ? "- a resposta não estiver nas informações abaixo ou você não tiver certeza;" : "",
   ].filter(Boolean);
   return [
+    // Fixas no código, antes e depois das instruções da tela: segurança, marca e imagens.
+    SECURITY_RULES,
     BRAND_RULES,
-    // Fixa no código: vale mesmo que as instruções da tela digam o contrário.
     IMAGE_RULE,
     `Você é ${settings.agentName}, assistente virtual que atende clientes pelo WhatsApp. Se for a primeira resposta da conversa, apresente-se brevemente como assistente virtual.`,
     `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
@@ -149,4 +152,19 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
     settings.aiChoosesQueue && queueNames.length ? `Filas disponíveis para transferência: ${queueNames.join(", ")}. Em "queue", indique a mais adequada (ou vazio).` : "",
     `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved", "reason": "motivo curto para a equipe", "queue": "nome da fila ou vazio"}.`,
   ].filter(Boolean).join("\n\n");
+}
+
+/**
+ * Prompt de sistema completo (WhatsApp e teste): regras fixas de segurança no início, instruções da tela no meio,
+ * blocos extras do sistema (anexos, resultado do catálogo, alerta de manipulação), informações e o lembrete de
+ * segurança por último. Nada vindo do cliente entra aqui: os dados dele vão só na mensagem "user", delimitados.
+ */
+export function buildSystemPrompt(input: { settings: AiSettings; queueNames: string[]; info: string; extra?: string[]; now?: Date }) {
+  return [
+    agentRules(input.settings, input.queueNames),
+    ...(input.extra ?? []).filter(Boolean),
+    `Agora: ${formatBr(input.now ?? new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
+    `Informações que você pode usar:\n${input.info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`,
+    SECURITY_REMINDER,
+  ].join("\n\n");
 }
