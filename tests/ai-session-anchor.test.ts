@@ -12,6 +12,8 @@ const STORES = vi.hoisted(() => {
     ["30", marista("LJ 21 UNILENTES", "RUA 135 ESQUINA COM AVENIDA AMERICANO DO BRASIL", "208")],
     ["23", marista("LJ 33 BEATRIZ", "RUA 9", "2106")],
     ["19", { id: "19", name: "LJ 37", address: "RUA 95", addressNumber: "95", neighborhood: "SETOR SUL", city: "GOIANIA", lat: null, lng: null }],
+    ["39", { id: "39", name: "LJ 39-ZVC FLAMBOYANT SAULO DE TARSO FERREIRA MOTTA LTDA", address: "AVENIDA DEPUTADO JAMEL CECILIO", addressNumber: "3300", neighborhood: "JARDIM GOIAS", city: "GOIANIA", lat: null, lng: null }],
+    ["4", { id: "4", name: "LJ 04 UNILENTES IND COM DE LENTES LTDA", address: "AVENIDA DEPUTADO JAMEL CECILIO", addressNumber: "3300", neighborhood: "JARDIM GOIAS", city: "GOIANIA", lat: null, lng: null }],
   ]);
 });
 
@@ -44,6 +46,7 @@ vi.mock("@/lib/ai/product-image-db", () => ({
 }));
 vi.mock("@/lib/ai/stock-db", () => ({
   storeDirectory: vi.fn(async () => STORES),
+  erpUnitDirectory: vi.fn(() => new Map<string, string>()),
   clearStoreDirectory: vi.fn(),
   consultarEstoqueProduto: vi.fn(async (args: Record<string, unknown>) => {
     calls.stock.push(args);
@@ -77,7 +80,7 @@ import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { buildProductCard } from "@/lib/ai/product-card";
 import { extractSessionAnchor, isProductFollowUp, isStoreFollowUp, mentionsOtherProduct, sessionRows, storesIn } from "@/lib/ai/session-anchor";
-import { anchoredStoreMatch, citesAddress, findStores, resolveStoreMatch } from "@/lib/ai/store-location";
+import { anchoredStoreMatch, citesAddress, findStores, normalizeStoreQuery, resolveStoreMatch, resolveStoreRequest, storeLocation, storeQueryMatches } from "@/lib/ai/store-location";
 import { formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
 
 const settings = { ...DEFAULT_AI_SETTINGS, sendProductImage: true, canQuotePrices: true, useStores: false, useOperatingHours: false, topics: [], aiChoosesQueue: false, maxAiReplies: 20, closeWhenResolved: false };
@@ -212,5 +215,69 @@ describe("fluxo completo RB3025 → mais detalhes → localização da loja", ()
     expect(fallback.location?.endereco).toBe("Rua 9, 2106");
     expect(fallback.messages.join("\n")).not.toContain("1855");
     expect(fallback.messages[0]).toContain("Loja Setor Marista");
+  });
+});
+
+describe("localização de loja listada pelo estoque (cascata sessão → CRM → ERP)", () => {
+  const PRADA_CARD = buildProductCard({ nomeComercial: "Prada Linea Rossa", referencia: "PS 07RV", categoriaModelo: "Armação de grau", formatoArmacao: null, acabamentoOuMaterial: null, valorFormatado: "R$ 1.290,00", totalUnidades: 2, lojasDisponiveis: [{ loja: "Loja Jardim Goiás", cidade: "Goiânia", endereco: "Av. Deputado Jamel Cecilio, 3300", quantidade: 1 }, { loja: "Loja Setor Marista", cidade: "Goiânia", endereco: "Rua 9, 2106", quantidade: 1 }] });
+  const ASK = "Manda a localização dessa loja do jardim goias ai pra eu comprar ele";
+
+  it("normaliza o pedido sem acento, prefixo nem ruído", () => {
+    expect(normalizeStoreQuery("essa loja do jardim goias")).toBe("jardim goias");
+    expect(normalizeStoreQuery("Óticas Brasil - Filial Jardim Goiás")).toBe("jardim goias");
+    expect(normalizeStoreQuery(ASK)).toBe("jardim goias");
+    expect(storeQueryMatches("dessa loja do jardim goias", "Loja Jardim Goiás")).toBe(true);
+  });
+
+  it("turno 1 lista a loja do Jardim Goiás → turno 2 sem acento e com \"dessa loja do\" resolve de primeira", () => {
+    const resolved = resolveStoreRequest({ queries: ["dessa loja do jardim goias", ASK], sessionStores: storesIn(PRADA_CARD), directory: STORES, recentAiTexts: [PRADA_CARD] });
+    expect(resolved).toMatchObject({ type: "found", source: "crm" });
+    expect(resolved.type === "found" && storeLocation(resolved.code, resolved.store).endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
+  });
+
+  it("loja só na conversa (sem cadastro no CRM): usa o endereço exibido e o link do Maps", () => {
+    const resolved = resolveStoreRequest({ queries: [ASK], sessionStores: storesIn(PRADA_CARD), directory: new Map() });
+    expect(resolved).toMatchObject({ type: "found", source: "session" });
+    const location = resolved.type === "found" ? storeLocation(resolved.code, resolved.store) : null;
+    expect(location?.endereco).toContain("Jamel Cecilio, 3300");
+    expect(location?.mapsUrl).toMatch(/^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=.*Jamel/);
+  });
+
+  it("filial só no espelho do ERP (sem cadastro no CRM): encontra pela filial e envia a localização", () => {
+    const erpUnits = new Map([["50", "LJ 50 OTICA BRASIL BURITI SHOPPING LTDA"]]);
+    const byName = resolveStoreRequest({ queries: ["manda a localização da loja do buriti shopping"], sessionStores: [], directory: STORES, erpUnits });
+    expect(byName).toMatchObject({ type: "found", source: "erp", code: "50" });
+    const location = byName.type === "found" ? storeLocation(byName.code, byName.store) : null;
+    expect(location?.nome).toContain("Buriti Shopping");
+    expect(location?.mapsUrl).toContain("Buriti");
+    // Listada na conversa com endereço: o endereço completo vai junto.
+    const listed = resolveStoreRequest({ queries: ["essa loja do buriti"], sessionStores: storesIn("📍 *Loja Buriti Shopping* – Aparecida de Goiânia (Av. Rio Verde, 1234)"), directory: STORES, erpUnits });
+    expect(listed.type === "found" && storeLocation(listed.code, listed.store).endereco).toContain("Av. Rio Verde, 1234");
+  });
+
+  it("nome da filial no CRM (\"Flamboyant\") também resolve", () => {
+    expect(resolveStoreRequest({ queries: ["Flamboyant"], sessionStores: [], directory: STORES })).toMatchObject({ type: "found", source: "crm" });
+  });
+
+  it("fluxo /ia: Prada PS 07RV → \"manda a localização dessa loja do jardim goias\" envia a localização de primeira", async () => {
+    const history: PlaygroundMessage[] = [
+      { from: "customer", text: "Tem o Prada Linea Rossa PS 07RV?" },
+      { from: "ai", text: PRADA_CARD },
+      { from: "ai", text: "Gostaria de reservar essa peça ou saber mais detalhes sobre o modelo?" },
+      { from: "customer", text: ASK },
+    ];
+    // Modelo chama a ferramenta com o nome como veio na ficha.
+    model.script = async (tools) => {
+      const result = (await tools.enviarLocalizacaoLoja({ nomeLoja: "Loja Jardim Goiás - Goiânia" })) as { enviado: boolean };
+      expect(result.enviado).toBe(true);
+      return { reply: "Claro! Te mandei a localização aqui embaixo 👇", action: "reply" };
+    };
+    const viaTool = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-prada" });
+    expect(viaTool.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
+    // Modelo responde "não identifiquei" sem chamar a ferramenta: o backend resolve e envia mesmo assim.
+    model.script = async () => ({ reply: "Não identifiquei essa unidade no cadastro. Pode me dizer o bairro?", action: "reply" });
+    const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-prada" });
+    expect(fallback.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
+    expect(fallback.messages.join("\n")).not.toMatch(/não identifiquei/i);
   });
 });

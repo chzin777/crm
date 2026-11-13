@@ -165,6 +165,121 @@ export function citesStreet(text: string, store: StoreInfo) {
   return false;
 }
 
+/** Palavras de ruído no pedido de loja: prefixos, artigos, pronomes e o resto da frase do cliente. */
+const STORE_NOISE = new Set([
+  "loja", "lojas", "lj", "unidade", "unidades", "filial", "filiais", "oticas", "otica", "essa", "esse", "dessa", "desse", "nessa", "nesse", "esta", "este", "desta", "deste",
+  "nesta", "aquela", "daquela", "da", "do", "de", "das", "dos", "a", "o", "as", "os", "na", "no", "em", "ai", "pra", "para", "eu", "me", "manda", "mandar", "envia", "enviar", "localizacao",
+  "endereco", "mapa", "onde", "fica", "por", "favor", "pf", "pfv", "qual", "que", "e", "comprar", "ele", "ela", "la", "aqui", "voce", "vc", "poderia", "pode", "the",
+]);
+
+/**
+ * Pedido de loja comparável: sem acento, minúsculo, sem pontuação e sem ruído ("Óticas Brasil", "loja", "dessa", "do").
+ * "essa loja do jardim goias" → "jardim goias" (bate com "Loja Jardim Goiás", "Jardim Goias", "Filial Jardim Goiás").
+ */
+export function normalizeStoreQuery(value: string) {
+  return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\boticas\s+brasil\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
+    .split(" ").filter((word) => word && !STORE_NOISE.has(word)).join(" ");
+}
+
+/** Sequência de palavras contida em outra (palavras inteiras). */
+function containsWords(hay: string, needle: string) {
+  if (!needle) return false;
+  return ` ${hay} `.includes(` ${needle} `);
+}
+
+/** O pedido cita a loja: o nome (bairro) aparece inteiro no pedido, ou o pedido inteiro aparece no nome/endereço da loja. */
+export function storeQueryMatches(query: string, name: string, extra = "") {
+  const wanted = normalizeStoreQuery(query);
+  const own = normalizeStoreQuery(name);
+  if (!wanted || !own) return false;
+  return containsWords(wanted, own) || containsWords(`${own} ${normalizeStoreQuery(extra)}`, wanted);
+}
+
+/** Nome da filial no ERP sem código, razão social nem sufixos ("LJ 39-ZVC FLAMBOYANT SAULO ... LTDA" → "Flamboyant Saulo ..."). */
+export function erpUnitPlace(name: string) {
+  return titleCase(name.replace(/\bLJ\s*\d+\b(-\w+)?/gi, " ").replace(/\b(LTDA|EIRELI|ME|EPP|S\/?A|IND|COM|DE|LENTES|UNILENTES|OPTICA|OTICA|ÓTICA|BRASIL)\b\.?/gi, " ").replace(/[()]/g, " ").replace(/\s+/g, " ").trim());
+}
+
+/** Loja citada pela IA nesta sessão (ficha do estoque, texto livre ou localização), com o endereço exato que foi exibido. */
+export type SessionStore = { nome: string; cidade: string | null; enderecoCompleto: string };
+export type StoreSource = "session" | "crm" | "erp";
+export type StoreRequestResult =
+  | { type: "found"; source: StoreSource; code: string; store: StoreInfo }
+  | { type: "ambiguous"; options: string[] }
+  | { type: "none" };
+
+/** Loja só com o endereço exibido na conversa (sem cadastro no CRM): vira StoreInfo para o pin/link do Maps. */
+export function sessionStoreInfo(store: SessionStore): StoreInfo {
+  return { name: store.nome, address: store.enderecoCompleto, addressNumber: null, neighborhood: store.nome.replace(/^Loja\s+/i, ""), city: store.cidade, state: "GO" };
+}
+
+/** Resposta da IA dizendo que não achou a loja ou pedindo para escolher: trocada pelo envio da localização resolvida. */
+export const STORE_MISS_REPLY = /n[aã]o\s+(identifiquei|encontrei|localizei|achei)|n[aã]o\s+consegui\s+(identificar|encontrar|localizar)|qual\s+(delas|dessas|unidade|loja)/i;
+
+const STREET_IN_TEXT = /\b(Rua|R\.|Avenida|Av\.?|Alameda|Al\.|Rodovia|Pra[cç]a|Quadra|Qd\.?)\s+[^\n()]*\d[^\n()]*/i;
+
+/**
+ * Loja pedida para localização, em cascata: (1) lojas citadas na sessão atual (endereço exato já exibido),
+ * (2) cadastro de lojas do CRM (nome, bairro e endereço sem acento), (3) filiais do ERP vistas no estoque.
+ * Com endereço conhecido nunca devolve "none". queries: o que a IA pediu e a mensagem do cliente.
+ */
+export function resolveStoreRequest(input: { queries: string[]; sessionStores: SessionStore[]; directory: Map<string, StoreInfo>; erpUnits?: Map<string, string>; recentAiTexts?: string[] }): StoreRequestResult {
+  const queries = input.queries.map((query) => query.slice(0, 200)).filter((query) => normalizeStoreQuery(query));
+  const entries = [...input.directory].map(([code, store]) => ({ code, store }));
+  const inCrm = (text: string) => {
+    const exact = dedupeStores(entries.filter((item) => citesAddress(text, item.store)));
+    return exact.length === 1 ? exact[0] : null;
+  };
+
+  // 1) Sessão atual: a loja que a IA acabou de listar, com o endereço que ela mostrou.
+  for (const query of queries) {
+    const hits = input.sessionStores.filter((store, index, list) => storeQueryMatches(query, store.nome, store.enderecoCompleto)
+      && list.findIndex((other) => normalizeStoreQuery(other.enderecoCompleto) === normalizeStoreQuery(store.enderecoCompleto)) === index);
+    const numbered = hits.length > 1 ? hits.filter((store) => containsWords(normalizeStoreQuery(query), normalizeStoreQuery(store.enderecoCompleto))) : hits;
+    if (numbered.length === 1) {
+      const crm = inCrm(`${numbered[0].nome} ${numbered[0].enderecoCompleto}`);
+      return crm ? { type: "found", source: "crm", code: crm.code, store: crm.store } : { type: "found", source: "session", code: "", store: sessionStoreInfo(numbered[0]) };
+    }
+    if (hits.length > 1) return { type: "ambiguous", options: hits.slice(0, 5).map((store) => `${store.nome} — ${store.enderecoCompleto}`) };
+  }
+
+  // 2) Cadastro do CRM: bairro, cidade, rua, nome da loja/filial ou "LJ 36", sem acento nem prefixo.
+  for (const query of queries) {
+    const normalized = normalizeStoreQuery(query);
+    const number = query.match(/\b(?:lj|loja)\s*0*(\d{1,3})\b/i)?.[1];
+    const matches = entries.filter(({ code, store }) => (number ? code === number : false)
+      || storeQueryMatches(query, store.neighborhood ?? "", [store.city, store.address, erpUnitPlace(store.name)].filter(Boolean).join(" "))
+      || (normalized.length >= 4 && containsWords(normalizeStoreQuery(erpUnitPlace(store.name)), normalized)));
+    if (!matches.length) continue;
+    const resolved = resolveStoreMatch(matches, { wanted: number ? `LJ ${number}` : query, recentAiTexts: [query, ...(input.recentAiTexts ?? [])] });
+    if (resolved.type === "found") return { type: "found", source: "crm", code: resolved.match.code, store: resolved.match.store };
+    if (resolved.type === "ambiguous") return resolved;
+  }
+
+  // 3) Filiais do ERP (VMSet) sem cadastro no CRM: pelo nome da filial ou "LJ 36".
+  for (const query of queries) {
+    const normalized = normalizeStoreQuery(query);
+    const number = query.match(/\b(?:lj|loja)\s*0*(\d{1,3})\b/i)?.[1];
+    const hits = [...(input.erpUnits ?? new Map<string, string>())].filter(([code, name]) => !input.directory.has(code)
+      && ((number && code.replace(/^0+/, "") === number) || (normalized.length >= 4 && (storeQueryMatches(query, erpUnitPlace(name)) || containsWords(normalizeStoreQuery(erpUnitPlace(name)), normalized)))));
+    if (hits.length === 1) {
+      const [code, name] = hits[0];
+      return { type: "found", source: "erp", code, store: { name, address: null, addressNumber: null, neighborhood: erpUnitPlace(name) || `Loja ${code}`, city: null, state: "GO" } };
+    }
+  }
+
+  // Endereço escrito no próprio pedido ("Av. Deputado Jamel Cecilio, 3300"): com endereço conhecido, sempre localiza.
+  for (const query of queries) {
+    const street = query.match(STREET_IN_TEXT)?.[0];
+    if (!street) continue;
+    const crm = inCrm(street);
+    if (crm) return { type: "found", source: "crm", code: crm.code, store: crm.store };
+    const name = query.match(/\bLoja\s+([^\n*()–—,-]+)/i)?.[1]?.trim();
+    return { type: "found", source: "session", code: "", store: sessionStoreInfo({ nome: `Loja ${name || "Óticas Brasil"}`, cidade: null, enderecoCompleto: street.replace(/[.!?]+$/, "").trim() }) };
+  }
+  return { type: "none" };
+}
+
 /** Rua e número da loja em sequência no texto ("Rua 9, 2106", "Rua 9 nº 2106"); sem número no cadastro vale só a rua. */
 export function citesAddress(text: string, store: StoreInfo) {
   const street = tokens(titleCase(store.address ?? ""));

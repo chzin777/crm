@@ -23,9 +23,10 @@ import { allowsProductPhoto } from "@/lib/ai/stock-showcase";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
 import { buildProductCard, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
-import { clearStoreDirectory, storeDirectory } from "@/lib/ai/stock-db";
+import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
-import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
+import { geocodeStoreAddress } from "@/lib/ai/store-geolocation";
+import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, STORE_MISS_REPLY, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
 import { sendSatisfactionSurvey } from "@/lib/chat/nps";
@@ -37,7 +38,7 @@ import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type Huma
 import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext, sessionStartedAt } from "@/lib/ai/assist";
-import { anchorPromptBlock, EMPTY_ANCHOR, extractSessionAnchor, isProductFollowUp, isStoreFollowUp, modelNumbers, SESSION_ANCHOR_RULES, type AnchorMessage, type SessionAnchor } from "@/lib/ai/session-anchor";
+import { anchorPromptBlock, asksStoreLocation, EMPTY_ANCHOR, extractSessionAnchor, isProductFollowUp, isStoreFollowUp, storesIn, modelNumbers, SESSION_ANCHOR_RULES, type AnchorMessage, type SessionAnchor } from "@/lib/ai/session-anchor";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { buildSystemPrompt, carriesProductExtras, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
@@ -452,6 +453,17 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     const match = anchoredStoreMatch(directory, `${anchor.activeStore.nome} ${anchor.activeStore.enderecoCompleto}`, named);
     return match ? pinStore(match.code, match.store) : null;
   };
+  // Loja pedida em cascata (sessão → CRM → ERP); endereço só da conversa ou do ERP: geocodifica na hora (senão link do Maps).
+  const locateStoreRequest = async (queries: string[]): Promise<{ type: "found"; location: StoreLocation } | { type: "ambiguous"; options: string[] } | { type: "none" }> => {
+    const sessionStores = (input.recentAiTexts ?? []).flatMap((text) => storesIn(text));
+    const resolved = resolveStoreRequest({ queries, sessionStores, directory: await storeDirectory(), erpUnits: erpUnitDirectory(), recentAiTexts: input.recentAiTexts });
+    if (resolved.type !== "found") return resolved;
+    if (resolved.source === "crm") return { type: "found", location: await pinStore(resolved.code, resolved.store) };
+    const pin = resolved.store.address
+      ? await geocodeStoreAddress({ ...resolved.store, state: resolved.store.state ?? "GO" }, { fetch: (url, init) => fetch(url, init), googleKey: process.env.GOOGLE_MAPS_API_KEY?.trim() || null, timeoutMs: 4000 }).catch(() => null)
+      : null;
+    return { type: "found", location: storeLocation(resolved.code, pin ? { ...resolved.store, lat: pin.lat, lng: pin.lng } : resolved.store) };
+  };
   const locationTool = {
     definition: LOCATION_TOOL,
     run: async (args: Record<string, unknown>) => {
@@ -461,6 +473,13 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
         location = fixed;
         return { enviado: true, loja: fixed.nome, endereco: fixed.endereco, tipo: fixed.pinNativo ? "pin no mapa do WhatsApp" : "link do Google Maps", orientacao: "Esta é a loja já informada nesta conversa: a localização sai automaticamente logo depois da sua resposta. Responda curto, sem listar outras unidades e sem repetir o endereço inteiro." };
       }
+      // Cascata: lojas listadas nesta sessão (endereço exato) → cadastro do CRM → filiais do ERP.
+      const request = await locateStoreRequest([wanted, input.pendingText]);
+      if (request.type === "found") {
+        location = request.location;
+        return { enviado: true, loja: location.nome, endereco: location.endereco, tipo: location.pinNativo ? "pin no mapa do WhatsApp" : "link do Google Maps", orientacao: "A localização sai automaticamente logo depois da sua resposta: responda curto, sem repetir o endereço inteiro e sem dizer que não encontrou a loja." };
+      }
+      if (request.type === "ambiguous") return { enviado: false, lojasPossiveis: request.options, orientacao: "Há mais de uma unidade real com esse nome: pergunte qual delas listando cada opção com o endereço exatamente como em lojasPossiveis (ex.: \"• *Loja Setor Sul* — Rua 95\")." };
       const directory = wanted ? await storeDirectory() : new Map<string, Parameters<typeof storeLocation>[1]>();
       // "Setor Sul Rua 95": sem casar tudo, tenta só o começo (bairro) e usa a rua para escolher a unidade.
       const words = wanted.split(/\s+/).filter(Boolean);
@@ -490,6 +509,14 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     if (fixed) {
       location = fixed;
       outcome = { ...outcome, reply: `Claro! Te mandei a localização da *${fixed.nome.replace(/^Óticas Brasil - /, "")}* aqui embaixo 👇` };
+    }
+  }
+  // Pediu a localização e o modelo não enviou (ou disse que não achou a loja): a cascata resolve pelo pedido do cliente.
+  if (!location && outcome.action === "reply" && asksStoreLocation(input.pendingText)) {
+    const request = await locateStoreRequest([input.pendingText]).catch(() => null);
+    if (request?.type === "found") {
+      location = request.location;
+      if (STORE_MISS_REPLY.test(outcome.reply)) outcome = { ...outcome, reply: `Claro! Te mandei a localização da *${request.location.nome.replace(/^Óticas Brasil - /, "")}* aqui embaixo 👇` };
     }
   }
   // Encerramento: tool encerrarAtendimento ou action "resolved", sempre pela trava fixa.

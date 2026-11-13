@@ -12,7 +12,18 @@ const client = createStockClient({
   url: process.env.VMSET_STOCK_URL?.trim() || "http://host.docker.internal:9005",
   token: process.env.VMSET_STOCK_TOKEN?.trim() ?? "",
 });
-export const getStockByProductCodes = client.getStockByProductCodes;
+/** Espelho das filiais do ERP vistas nas consultas de estoque (código → nome da filial no VMSet). */
+const erpUnits = new Map<string, string>();
+export const getStockByProductCodes: typeof client.getStockByProductCodes = async (codes) => {
+  const lookup = await client.getStockByProductCodes(codes);
+  for (const units of Object.values(lookup.byCode)) for (const unit of units) if (unit.unit && unit.name) erpUnits.set(unit.unit.replace(/^0+(?=\d)/, ""), unit.name);
+  return lookup;
+};
+
+/** Filiais do ERP já vistas no estoque (inclui as que ainda não têm cadastro de loja no CRM). */
+export function erpUnitDirectory(): Map<string, string> {
+  return erpUnits;
+}
 
 /** Saldo de mais códigos que o limite por chamada (5): lotes em paralelo, resultado unido; falha só se todos falharem. */
 export async function getStockInBatches(codes: string[]): Promise<StockLookup> {
