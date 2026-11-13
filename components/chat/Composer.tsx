@@ -1,6 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "react";
+import { typingAllowed } from "@/lib/chat/typing";
 import { CalendarClock, Check, FileText, Image as ImageIcon, Loader2, Lock, Mic, Paperclip, Search, Send, Smile, Sparkles, StickyNote, Trash2, X, Zap } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ComposerPopover } from "@/components/chat/ComposerPopover";
@@ -51,6 +52,15 @@ const roundButton = "grid h-[42px] w-[42px] shrink-0 cursor-pointer place-items-
 
 export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error, onScheduled, draft }: Props) {
   const [text, setText] = useState("");
+  // "digitando..." no WhatsApp do cliente enquanto o atendente escreve: no máximo 1 chamada a cada 15 s.
+  const lastTyping = useRef(0);
+  const signalTyping = (value: string) => {
+    if (!canWrite || internal || !conversation.windowOpen || !value.trim() || value.startsWith("/")) return;
+    const now = Date.now();
+    if (!typingAllowed(lastTyping.current, now)) return;
+    lastTyping.current = now;
+    void fetch("/api/chat/typing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conversation.id }) }).catch(() => undefined);
+  };
   const [suggesting, setSuggesting] = useState(false);
   /** Texto congelado ao abrir "Agendar envio"; null enquanto o diálogo está fechado. */
   const [scheduling, setScheduling] = useState<string | null>(null);
@@ -331,7 +341,10 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
             ref={field}
             rows={1}
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value);
+              signalTyping(event.target.value);
+            }}
             onPaste={onPaste}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {

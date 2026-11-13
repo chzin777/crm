@@ -4,6 +4,8 @@ import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conver
 import { closeConversation } from "@/lib/chat/actions";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
+import { withTyping } from "@/lib/chat/typing";
+import { sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { Prisma } from "@/generated/prisma/client";
 import { hoursFor } from "@/lib/chat/operations";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -287,7 +289,7 @@ async function respond(conversationId: string, messageId: string) {
   const conversation = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
   if (!conversation || conversation.assigneeId || conversation.closedAt) return;
   // Chegou mensagem mais nova: a espera dela responde tudo de uma vez.
-  const latest = await prisma.chatMessage.findFirst({ where: { conversationId, author: "customer" }, orderBy: { createdAt: "desc" }, select: { id: true, text: true } });
+  const latest = await prisma.chatMessage.findFirst({ where: { conversationId, author: "customer" }, orderBy: { createdAt: "desc" }, select: { id: true, text: true, externalId: true } });
   if (latest?.id !== messageId) return;
   if (!(await firstDispatch(`ai:${messageId}`))) return;
   if (await handedOff(conversationId)) return;
@@ -305,7 +307,8 @@ async function respond(conversationId: string, messageId: string) {
 
   let run: AgentRun;
   try {
-    run = await runAiAgent({
+    // "digitando..." no WhatsApp do cliente antes de mídia, estoque e modelo (renova uma vez após 20 s).
+    run = await withTyping(() => sendTypingIndicator(latest.externalId), () => runAiAgent({
       settings,
       pendingText: pending.map((item) => item.text).join("\n"),
       // Foto não dispara o gatilho de mídia: passa pela busca no catálogo. Áudio e documento disparam.
@@ -315,7 +318,7 @@ async function respond(conversationId: string, messageId: string) {
       loadMedia: () => customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), meta),
       earlierCustomerTexts: earlier.map((item) => item.text),
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
-    });
+    }));
   } catch (error) {
     // IA fora do ar: ninguém fica sem resposta, a conversa vai para a equipe.
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");

@@ -10,8 +10,9 @@
 
 import { request } from "node:https";
 import { connect, type TLSSocket } from "node:tls";
+import { sendWhatsAppTypingIndicator, WHATSAPP_GRAPH_API } from "@/lib/chat/typing";
 
-const GRAPH_API = "https://graph.facebook.com/v21.0";
+const GRAPH_API = WHATSAPP_GRAPH_API;
 
 /**
  * Certificados que o FortiGate (emissor FGT91GTK23002401) apresenta para *.fbsbx.com ao inspecionar o tráfego, sem enviar a CA.
@@ -348,6 +349,18 @@ export async function sendMedia(
       ...payload,
     }),
   });
+}
+
+/** "digitando..." no WhatsApp do cliente (marca como lida). Nunca lança erro: falha vira aviso no log. */
+export async function sendTypingIndicator(messageId: string | null | undefined) {
+  if (!messageId) return false;
+  try {
+    const { phoneNumberId, accessToken } = getConfig();
+    return await sendWhatsAppTypingIndicator({ phoneNumberId, accessToken, messageId });
+  } catch (error) {
+    console.warn(`[meta] digitando... sem configuração: ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
 }
 
 /** Confirma a leitura da mensagem recebida (tiques azuis no celular do cliente). */
