@@ -228,6 +228,8 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     settings,
     queueNames: queues.map((queue) => queue.name),
     info,
+    // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
+    firstReply: input.aiReplies === 0,
     extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).

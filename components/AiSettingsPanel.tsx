@@ -620,8 +620,8 @@ export function AiSettingsPanel() {
 
       {tab === "identidade" && (
         <div className="space-y-6">
-          <Block title="Identidade" hint="Como a IA se apresenta e fala com o cliente.">
-            <label className={labelCls}>Nome com que a IA se apresenta
+          <Block title="Identidade" hint="Como a IA fala com o cliente. Ela cumprimenta pelo horário de Brasília (Bom dia, Boa tarde, Boa noite) sem se apresentar como assistente virtual.">
+            <label className={labelCls}>Nome no atendimento (usado só se o cliente perguntar)
               <input value={settings.agentName} onChange={(event) => set("agentName", event.target.value)} className={input} maxLength={60} />
             </label>
             <div>

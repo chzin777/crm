@@ -143,7 +143,8 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
     BRAND_RULES,
     IMAGE_RULE,
     STOCK_RULES,
-    `Você é ${settings.agentName}, assistente virtual que atende clientes pelo WhatsApp. Se for a primeira resposta da conversa, apresente-se brevemente como assistente virtual.`,
+    GREETING_RULES,
+    `Seu nome no atendimento é ${settings.agentName}: use-o só se o cliente perguntar com quem está falando.`,
     `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
     "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",
     settings.useCustomerOrders ? "Você pode informar ao cliente dados dos pedidos dele que aparecem no histórico do ERP (data, loja, situação)." : "Não comente pedidos ou compras anteriores do cliente.",
@@ -161,12 +162,44 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
  * blocos extras do sistema (anexos, resultado do catálogo, alerta de manipulação), informações e o lembrete de
  * segurança por último. Nada vindo do cliente entra aqui: os dados dele vão só na mensagem "user", delimitados.
  */
-export function buildSystemPrompt(input: { settings: AiSettings; queueNames: string[]; info: string; extra?: string[]; now?: Date }) {
+export function buildSystemPrompt(input: { settings: AiSettings; queueNames: string[]; info: string; extra?: string[]; now?: Date; firstReply?: boolean }) {
+  const now = input.now ?? new Date();
+  const time = brasiliaGreeting(now);
   return [
     agentRules(input.settings, input.queueNames),
     ...(input.extra ?? []).filter(Boolean),
-    `Agora: ${formatBr(input.now ?? new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
+    `Agora: ${formatBr(now, { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
+    `Horário atual em Brasília: ${time.time} (período: ${time.period} -> use "${time.greeting}").`,
+    input.firstReply === undefined
+      ? ""
+      : input.firstReply
+        ? `Esta é a sua primeira resposta nesta conversa: comece com "${time.greeting}!" (com o primeiro nome do cliente, se conhecido) e já responda o que ele pediu.`
+        : "Você já respondeu nesta conversa: não cumprimente de novo, continue direto do ponto.",
+  ].concat([
     `Informações que você pode usar:\n${input.info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`,
     SECURITY_REMINDER,
-  ].join("\n\n");
+  ]).filter(Boolean).join("\n\n");
 }
+
+export type DayPeriod = "manhã" | "tarde" | "noite";
+
+/**
+ * Período do dia no horário oficial de Brasília (independe do fuso do servidor):
+ * 05:00–11:59 Bom dia, 12:00–17:59 Boa tarde, 18:00–04:59 Boa noite.
+ */
+export function brasiliaGreeting(now: Date = new Date()): { time: string; hour: number; period: DayPeriod; greeting: "Bom dia" | "Boa tarde" | "Boa noite" } {
+  const parts = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0) % 24;
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  const time = `${String(hour).padStart(2, "0")}:${minute}`;
+  if (hour >= 5 && hour < 12) return { time, hour, period: "manhã", greeting: "Bom dia" };
+  if (hour >= 12 && hour < 18) return { time, hour, period: "tarde", greeting: "Boa tarde" };
+  return { time, hour, period: "noite", greeting: "Boa noite" };
+}
+
+/** Regra fixa no código (não editável na tela): saudação natural, sem apresentação robótica. */
+export const GREETING_RULES = [
+  "SAUDAÇÃO (regra fixa): NUNCA se apresente como \"assistente virtual\", \"robô\" ou \"IA\" e nunca use frases engessadas como \"Olá! Eu sou a assistente virtual da Óticas Brasil\".",
+  "Na primeira resposta da conversa, use só uma saudação simples e acolhedora de acordo com o horário atual de Brasília (\"Bom dia!\", \"Boa tarde!\" ou \"Boa noite!\"), com o primeiro nome do cliente se ele for conhecido (ex.: \"Bom dia, Maria! Como posso te ajudar?\"), e vá direto ao ponto do que ele pediu. Nas mensagens seguintes da mesma conversa, não repita a saudação.",
+  "Se o cliente perguntar diretamente se está falando com um robô ou uma pessoa, não minta: diga que é o atendimento automático da Óticas Brasil e que pode chamar um atendente.",
+].join("\n");
