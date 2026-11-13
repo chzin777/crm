@@ -20,6 +20,13 @@ const STORES = vi.hoisted(() => {
 // Catálogo: o Aviator pedido e o Justin (modelo que vazava de outra sessão).
 const AVIATOR = { codigo: "7858001", produto: "OCS RAY BAN REF 0RB3025 004/78 58", marca: "RAY BAN" };
 const JUSTIN = { codigo: "4165001", produto: "OCS RAY BAN REF 0RB4165L 622/8G 55", marca: "RAY BAN" };
+// Radda do cadastro real: o 1º mais vendido não tem "REF" (era o "Radda" genérico que abria o loop).
+const RADDA = [
+  { code: "140701", description: "ARM RADDA    OPBR 455 C2", brand: "RADDA", ref: "OPBR 455" },
+  { code: "145145", description: "ARM RADDA       REF- JC60020 C6 53", brand: "RADDA", ref: "JC60020" },
+  { code: "145154", description: "ARM RADDA       REF- JC2501 C6 53", brand: "RADDA", ref: "JC2501" },
+  { code: "145149", description: "ARM RADDA       REF- JC60016 C4 54", brand: "RADDA", ref: "JC60016" },
+];
 
 const calls = vi.hoisted(() => ({ stock: [] as Record<string, unknown>[], details: [] as Record<string, unknown>[], photos: [] as string[], prompts: [] as string[] }));
 type Tool = { definition: { function: { name: string } }; run: (args: Record<string, unknown>) => Promise<unknown> };
@@ -51,6 +58,18 @@ vi.mock("@/lib/ai/stock-db", () => ({
   consultarEstoqueProduto: vi.fn(async (args: Record<string, unknown>) => {
     calls.stock.push(args);
     const term = String(args.termoBusca ?? "");
+    // Radda: só a marca → vitrine (a do código, com o item sem REF do cadastro real); com referência → o modelo.
+    if (/radda/i.test(term)) {
+      const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
+      const raddaUnit = (qty: number) => [{ unit: "36", name: "LJ 36", qty, price: 120 }];
+      if (!/\d/.test(term) && args.tipoBusca !== "modelo_especifico") {
+        const result = buildShowcaseResult({ term, groups: showcaseCandidates(RADDA), lookup: { stockStatus: "ok", fromCache: 0, requested: 4, byCode: { "140701": raddaUnit(2), "145145": raddaUnit(1), "145154": raddaUnit(3), "145149": raddaUnit(1) } }, stores: STORES, withPrices: true, brand: "RADDA" });
+        return { result, log: { term, region: "", scenario: result.cenario, products: result.modelos.length, stores: 0, ms: 1, cached: false, kind: "marca_ampla" } };
+      }
+      const chosen = RADDA.find((item) => term.toUpperCase().includes(item.ref)) ?? RADDA[0];
+      const produtos = [{ codigo: chosen.code, produto: chosen.description, marca: "RADDA", preco: 120, precoVenda: "R$ 120,00", nomeProduto: chosen.description, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 1, lojasComEstoque: [{ code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
+      return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 1, ms: 1, cached: false } };
+    }
     // Busca aproximada que devolve o Justin primeiro (o vazamento original), com o Aviator logo atrás.
     const product = (item: typeof AVIATOR) => ({ ...item, preco: 899, precoVenda: "R$ 899,00", nomeProduto: item.produto, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 1, lojasComEstoque: [{ code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] });
     const produtos = /3025/.test(term) ? [product(JUSTIN), product(AVIATOR)] : [product(JUSTIN)];
@@ -279,5 +298,55 @@ describe("localização de loja listada pelo estoque (cascata sessão → CRM �
     const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-prada" });
     expect(fallback.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
     expect(fallback.messages.join("\n")).not.toMatch(/não identifiquei/i);
+  });
+});
+
+describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse primeiro\"", () => {
+  it("lista numerada, pergunta número/referência no preço repetido e abre o 1º com foto e ficha", async () => {
+    // Turno 1: busca ampla → vitrine numerada com referências reais (o item sem REF vai para o fim, com a ref. do cadastro).
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { vitrineFormatada: string };
+      return { reply: `${result.vitrineFormatada}\n---SPLIT---\nGostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?`, action: "reply" };
+    };
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "ta, tem radda?" }];
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    expect(turn1.messages[0]).toContain("1. 👓 *Radda (Ref. JC60020)* — R$ 120,00");
+    expect(turn1.messages[0]).toContain("4. 👓 *Radda (Ref. OPBR 455)* — R$ 120,00");
+    expect(turn1.messages[0]).not.toMatch(/\*Radda\* —/);
+    history.push(...turn1.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
+
+    // Turno 2: "esse de 120" com 4 itens a R$ 120 → o modelo tenta a busca ampla de novo; nada de vitrine repetida.
+    const searchesBefore = calls.stock.length;
+    model.script = async (tools) => {
+      const again = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { vitrineFormatada?: string };
+      return { reply: again.vitrineFormatada ?? turn1.messages[0], action: "reply" };
+    };
+    history.push({ from: "customer", text: "deixa eu ver esse de 120 ai" });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    expect(calls.stock.length).toBe(searchesBefore);
+    expect(turn2.messages.join("\n")).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número ou referência você quer ver primeiro? (ex.: o 1 - Ref. JC60020, ou o 2 - Ref. JC2501)");
+    expect(turn2.image).toBeUndefined();
+    history.push(...turn2.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
+
+    // Turno 3: "esse primeiro" → o modelo insiste na marca, o backend força JC60020 específico: foto + ficha + lojas.
+    calls.photos.length = 0;
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { fichaFormatada?: string; vitrineFormatada?: string };
+      return { reply: `${result.fichaFormatada ?? result.vitrineFormatada}\n---SPLIT---\nGostaria de reservar essa peça?`, action: "reply" };
+    };
+    history.push({ from: "customer", text: "ata, deixa eu ver esse primeiro" });
+    const turn3 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Radda JC60020", tipoBusca: "modelo_especifico" });
+    expect(turn3.image?.sku).toBe("145145");
+    expect(turn3.messages[0]).toContain("Radda | Ref. JC60020");
+    expect(turn3.messages[0]).toContain("📍 *Loja Setor Marista*");
+    expect(turn3.messages[0]).not.toMatch(/^\d\. /m);
+
+    // Mesmo pedido, mas o modelo nem chama a ferramenta: o backend abre a ficha do 1º mesmo assim.
+    calls.photos.length = 0;
+    model.script = async () => ({ reply: "Qual modelo você quer ver?", action: "reply" });
+    const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    expect(fallback.messages[0]).toContain("Radda | Ref. JC60020");
+    expect(fallback.image?.sku).toBe("145145");
   });
 });

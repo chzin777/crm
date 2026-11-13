@@ -60,9 +60,9 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
     expect(result.vitrineFormatada).toBe([
       "Temos vários modelos *Ray-Ban* disponíveis em estoque! Confira alguns deles:",
       "",
-      "🕶️ *Ray-Ban Justin (Ref. RB4165)* — R$ 1.210,27",
-      "🕶️ *Ray-Ban Aviator (Ref. RB3025)* — R$ 1.150,00",
-      "🕶️ *Ray-Ban Wayfarer (Ref. RB2140)* — R$ 1.190,00",
+      "1. 🕶️ *Ray-Ban Justin (Ref. RB4165)* — R$ 1.210,27",
+      "2. 🕶️ *Ray-Ban Aviator (Ref. RB3025)* — R$ 1.150,00",
+      "3. 🕶️ *Ray-Ban Wayfarer (Ref. RB2140)* — R$ 1.190,00",
     ].join("\n"));
     // Sem foto e sem detalhamento por loja nesta etapa.
     expect(allowsProductPhoto(result)).toBe(false);
@@ -110,7 +110,7 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
     expect(groups).toHaveLength(3);
     const byCode = { "145677": [unit("34", 2, 1210.27)], "145880": [unit("201", 1, 899)], "145844": [], "145605": [unit("34", 1, 650)] };
     const result = buildShowcaseResult({ term: "Ray-Ban", groups, lookup: { ...lookup, byCode }, stores, withPrices: true });
-    expect(result.vitrineFormatada).toContain("🕶️ *Ray-Ban Justin (Ref. RB4165L)* — R$ 1.210,27\n🕶️ *Ray-Ban (Ref. RB4340)* — R$ 899,00\n👓 *Ray-Ban (Ref. RX5429)* — R$ 650,00");
+    expect(result.vitrineFormatada).toContain("1. 🕶️ *Ray-Ban Justin (Ref. RB4165L)* — R$ 1.210,27\n2. 🕶️ *Ray-Ban (Ref. RB4340)* — R$ 899,00\n3. 👓 *Ray-Ban (Ref. RX5429)* — R$ 650,00");
     expect(expandModelNicknames("Ray-Ban Justin")).toBe("Ray-Ban RB4165");
     expect(expandModelNicknames("Justin")).toBe("RB4165");
     expect(expandModelNicknames("Oakley Holbrook XL")).toBe("Oakley OO9417");

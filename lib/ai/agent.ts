@@ -19,9 +19,10 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
-import { allowsProductPhoto } from "@/lib/ai/stock-showcase";
+import { allowsProductPhoto, fallbackReference, showcaseReference } from "@/lib/ai/stock-showcase";
+import { ambiguousChoiceQuestion, asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, pickFromListQuestion, repeatsShowcase, resolveListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
-import { buildProductCard, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
+import { buildProductCard, CARD_QUESTION, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
@@ -279,6 +280,8 @@ export type AgentRunInput = {
   sentImageSkus?: string[];
   /** Produto e loja fixados nas mensagens da IA DESTE atendimento (nunca de sessões encerradas ou testes anteriores). */
   anchor?: SessionAnchor;
+  /** Vitrine numerada mostrada nesta sessão (ordem exibida). */
+  listedProducts?: ListedProduct[];
 };
 export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
@@ -343,6 +346,10 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const anchoredProduct = isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
   const anchorNumbers = anchoredProduct ? modelNumbers(`${anchoredProduct.referencia ?? ""} ${anchoredProduct.nomeComercial}`) : [];
   const sameModel = (description: string) => modelNumbers(description).some((number) => anchorNumbers.includes(number));
+  // Vitrine desta sessão: "o 1", "esse primeiro", "o de 120" escolhem um item (pedido de localização não é escolha).
+  const listed = input.listedProducts ?? [];
+  const choice = asksStoreLocation(input.pendingText) ? null : resolveListedChoice(input.pendingText, listed);
+  let cardShown: string | null = null;
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
   const system = buildSystemPrompt({
@@ -352,7 +359,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
+    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -373,15 +380,27 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
-      const query = anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" } : args;
+      // Preço que serve para vários itens da vitrine: nada de nova busca (nem a mesma lista); pergunta número/referência.
+      if (choice?.type === "ambiguous") return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Não repita a vitrine. Responda exatamente: "${ambiguousChoiceQuestion(choice.items, choice.price)}"` };
+      // Item escolhido na vitrine (número, posição, referência ou preço único): busca específica com a referência exata.
+      const chosen = choice?.type === "item" ? choice.item : null;
+      const query = chosen
+        ? { ...args, termoBusca: listedSearchTerm(chosen), tipoBusca: "modelo_especifico" }
+        : anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" } : args;
       const { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
+      // Trava anti-loop: a mesma vitrine já enviada nesta sessão não sai de novo; o cliente escolhe pelo número/referência.
+      if (result.tipoBusca === "marca_ampla" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(result.vitrineFormatada ?? "", listed)) {
+        return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Essa vitrine já foi enviada: NÃO repita a lista. Responda: "${pickFromListQuestion(listed)}"` };
+      }
       // Busca ampla (só marca/categoria): vitrine com nome e preço, sem foto nem ficha nesta etapa.
       if (result.tipoBusca === "marca_ampla" || !allowsProductPhoto(result)) return result;
       // Referência pedida (ou o produto fixado) primeiro: a ficha e a foto nunca saem de outro modelo da lista.
       const wantedNumbers = anchorNumbers.length ? anchorNumbers : modelNumbers(String(query.termoBusca ?? ""));
       const available = result.produtos.filter((product) => product.lojasComEstoque.length > 0);
-      const inStock = available.find((product) => !!anchoredProduct?.sku && product.codigo === anchoredProduct.sku)
+      const chosenRef = chosen?.referencia ? chosen.referencia.replace(/[^A-Za-z0-9]/g, "").toUpperCase() : "";
+      const inStock = available.find((product) => !!chosen && (chosen.sku ? product.codigo === chosen.sku : showcaseReference(product.produto, product.marca, product.codigo).replace(/[^A-Za-z0-9]/g, "").toUpperCase() === chosenRef))
+        ?? available.find((product) => !!anchoredProduct?.sku && product.codigo === anchoredProduct.sku)
         ?? available.find((product) => modelNumbers(product.produto).some((number) => wantedNumbers.includes(number)))
         ?? available[0];
       if (!inStock) return result;
@@ -396,6 +415,8 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       const naming = commercialName(inStock.produto, inStock.marca);
       const fields: ProductCardFields = {
         ...naming,
+        // Sem "REF" no cadastro: a mesma referência que a vitrine mostrou ("OPBR 455").
+        referencia: naming.referencia ?? fallbackReference(inStock.produto, inStock.marca),
         formatoArmacao: summary.formato,
         acabamentoOuMaterial: summary.acabamento,
         valorFormatado: inStock.precoVenda,
@@ -403,6 +424,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
         lojasDisponiveis: inStock.lojasComEstoque.map(cardStore),
       };
       const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, cardOpening(input.pendingText)), orientacao: `${result.orientacao}\n${cardGuidance()}` };
+      cardShown = card.fichaFormatada;
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };
@@ -511,6 +533,15 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       outcome = { ...outcome, reply: `Claro! Te mandei a localização da *${fixed.nome.replace(/^Óticas Brasil - /, "")}* aqui embaixo 👇` };
     }
   }
+  // Escolha na vitrine resolvida no código: preço ambíguo → pergunta número/referência; item → ficha + foto mesmo se o
+  // modelo não buscou; nunca a mesma vitrine duas vezes seguidas.
+  if (outcome.action === "reply" && choice?.type === "ambiguous") outcome = { ...outcome, reply: ambiguousChoiceQuestion(choice.items, choice.price) };
+  else if (outcome.action === "reply" && choice?.type === "item" && !cardShown) {
+    const forced = (await stockTool.run({ termoBusca: listedSearchTerm(choice.item), tipoBusca: "modelo_especifico" }).catch(() => null)) as { fichaFormatada?: string } | null;
+    if (forced?.fichaFormatada) outcome = { ...outcome, reply: `${forced.fichaFormatada}\n---SPLIT---\n${CARD_QUESTION}` };
+  } else if (outcome.action === "reply" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(outcome.reply, listed)) {
+    outcome = { ...outcome, reply: pickFromListQuestion(listed) };
+  }
   // Pediu a localização e o modelo não enviou (ou disse que não achou a loja): a cascata resolve pelo pedido do cliente.
   if (!location && outcome.action === "reply" && asksStoreLocation(input.pendingText)) {
     const request = await locateStoreRequest([input.pendingText]).catch(() => null);
@@ -602,6 +633,7 @@ async function respond(conversationId: string, messageId: string) {
       recentAiTexts,
       sentImageSkus,
       anchor,
+      listedProducts: extractListedProducts(aiSession.slice().reverse().map((item) => item.text ?? "")),
     }));
   } catch (error) {
     // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
@@ -750,6 +782,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     sentImageSkus: messages.map((message) => message.imageSku).filter((sku): sku is string => !!sku),
     // Âncora só das mensagens desta sessão de teste (o "Limpar" começa outra, vazia).
     anchor: extractSessionAnchor(messages.filter((message) => message.from === "ai").map((message) => ({ text: message.text, imageSku: message.imageSku ?? null, imageUrl: message.imageUrl ?? null }))),
+    listedProducts: extractListedProducts(messages.filter((message) => message.from === "ai").map((message) => message.text)),
     queued: options.queued ? { queueName: "Vendas" } : null,
     loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
     buildContext: (media) => {

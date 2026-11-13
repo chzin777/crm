@@ -86,12 +86,32 @@ export type ShowcaseResult = {
   semEstoqueDaMarca?: boolean;
 };
 
+/**
+ * Referência de cadastro sem "REF" ("ARM RADDA OPBR 455 C2" → "OPBR 455"): o que sobra depois do tipo e da marca,
+ * sem a cor (C2) nem o tamanho final. null = nada que identifique o modelo.
+ */
+export function fallbackReference(description: string, brand?: string | null) {
+  const brandWords = new Set(norm(brand ?? "").split(" ").filter(Boolean));
+  const words = norm(description).split(" ").filter(Boolean);
+  const rest = words.slice(1).filter((word) => !brandWords.has(word));
+  while (rest.length > 1 && (/^C\d{1,2}$/.test(rest[rest.length - 1]) || /^\d{2}$/.test(rest[rest.length - 1]))) rest.pop();
+  const reference = rest.join(" ").trim();
+  return /\d/.test(reference) ? reference : null;
+}
+
+/** Referência exibida na vitrine: a do cadastro, a de fallback ou o código interno ("#145158"); nunca dois itens iguais. */
+export function showcaseReference(description: string, brand: string | null, code: string) {
+  return commercialName(description, brand).referencia ?? fallbackReference(description, brand) ?? `#${code}`;
+}
+
 /** Agrupa cores/tamanhos do mesmo modelo (mais vendidos primeiro) e escolhe os códigos a consultar no saldo. */
 export function showcaseCandidates<T extends ShowcaseCandidate>(products: T[]) {
   const groups = new Map<string, T[]>();
   for (const product of products) {
-    // Família pelo código-base da referência: "RB4165L" e "4165L" são o mesmo modelo na vitrine.
-    const key = modelFamilyKey(product.description, product.brand) ?? compact(product.description);
+    // Família pelo código-base da referência: "RB4165L" e "4165L" são o mesmo modelo na vitrine; sem "REF", a
+    // referência de cadastro ("OPBR 455") junta as cores do mesmo modelo.
+    const fallback = fallbackReference(product.description, product.brand);
+    const key = modelFamilyKey(product.description, product.brand) ?? (fallback ? `${compact(product.brand ?? "")}|${compact(fallback)}` : compact(product.description));
     const group = groups.get(key);
     if (group) group.push(product);
     else if (groups.size < SHOWCASE_CANDIDATES) groups.set(key, [product]);
@@ -111,10 +131,11 @@ export function formatShowcase(models: ShowcaseModel[]) {
   const header = models.length === 1
     ? `Temos este modelo${brand ? ` *${brand}*` : ""} disponível em estoque:`
     : `Temos vários modelos${brand ? ` *${brand}*` : ""} disponíveis em estoque! Confira alguns deles:`;
-  const lines = models.map((model) => {
+  // Numerada para o cliente escolher rápido ("o 1", "o segundo"); a sessão guarda a ordem (listedProducts).
+  const lines = models.map((model, index) => {
     const icon = /sol/i.test(model.categoriaModelo ?? "") || !model.categoriaModelo ? "🕶️" : /lente/i.test(model.categoriaModelo) ? "👁️" : "👓";
     const name = `${model.nomeComercial}${model.referencia ? ` (Ref. ${model.referencia})` : ""}`;
-    return `${icon} *${name}*${model.precoVenda ? ` — ${model.precoVaria ? "a partir de " : ""}${model.precoVenda}` : ""}`;
+    return `${index + 1}. ${icon} *${name}*${model.precoVenda ? ` — ${model.precoVaria ? "a partir de " : ""}${model.precoVenda}` : ""}`;
   });
   return [header, "", ...lines].join("\n");
 }
@@ -156,6 +177,7 @@ export function buildShowcaseResult(input: {
   if (!input.lookup || input.lookup.stockStatus === "unavailable_api") return { ...base, cenario: "unavailable_api", modelos: [], vitrineFormatada: null, orientacao: SHOWCASE_GUIDANCE.unavailable_api };
   const lookup = input.lookup;
   const models: ShowcaseModel[] = [];
+  const fallbackOnly = new Set<ShowcaseModel>();
   for (const group of input.groups) {
     const stores = group.flatMap((product) => retailStock(lookup.byCode[product.code] ?? [], input.stores));
     const total = stores.reduce((sum, store) => sum + store.quantidade, 0);
@@ -168,15 +190,19 @@ export function buildShowcaseResult(input: {
     const distinct = [...new Set(prices)].sort((a, b) => toNumber(a) - toNumber(b));
     models.push({
       nomeComercial: naming.nomeComercial,
-      referencia: naming.referencia,
+      referencia: naming.referencia ?? showcaseReference(withStock[0].description, withStock[0].brand, withStock[0].code),
       categoriaModelo: naming.categoriaModelo,
       precoVenda: distinct[0] ?? null,
       precoVaria: distinct.length > 1,
       totalDisponivelRede: Math.round(total * 100) / 100,
       codigos: withStock.map((product) => product.code),
     });
-    if (models.length >= SHOWCASE_MAX_MODELS) break;
+    if (!naming.referencia) fallbackOnly.add(models[models.length - 1]);
   }
+  // Modelos com referência comercial do cadastro primeiro; código interno (#) por último; até 8.
+  const rank = (model: ShowcaseModel) => (model.referencia?.startsWith("#") ? 2 : fallbackOnly.has(model) ? 1 : 0);
+  models.sort((a, b) => rank(a) - rank(b));
+  models.splice(SHOWCASE_MAX_MODELS);
   if (!models.length) return { ...base, cenario: "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: brandMissing || SHOWCASE_GUIDANCE.sem_estoque_na_rede, ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
   return {
     ...base,
@@ -196,7 +222,8 @@ export function allowsProductPhoto(result: { tipoBusca?: SearchKind }) {
 export const BROAD_SEARCH_RULES = [
   "BUSCA AMPLA x BUSCA ESPECÍFICA (regra fixa, 2 etapas):",
   "Etapa 1 — descoberta: o cliente perguntou só pela marca ou por um tipo (\"tem rayban?\", \"quais modelos da Oakley vocês têm?\", \"quais armações femininas têm?\"). Chame consultarEstoqueProduto com tipoBusca \"marca_ampla\" e termoBusca só com a marca/categoria. A ferramenta devolve vitrineFormatada (modelos distintos com estoque e preço): copie exatamente como 1ª bolha, SEM foto e SEM lista de lojas, e na 2ª bolha pergunte qual modelo ele quer ver. Exemplo:",
-  "Temos vários modelos *Ray-Ban* disponíveis em estoque! Confira alguns deles:\n\n🕶️ *Ray-Ban Justin (Ref. RB4165)* — R$ 1.210,27\n🕶️ *Ray-Ban Aviator Classic (Ref. RB3025)* — R$ 1.150,00\n🕶️ *Ray-Ban Erika (Ref. RB4171)* — R$ 980,00\n\n---SPLIT---\n\nGostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?",
+  "Temos vários modelos *Ray-Ban* disponíveis em estoque! Confira alguns deles:\n\n1. 🕶️ *Ray-Ban Justin (Ref. RB4165)* — R$ 1.210,27\n2. 🕶️ *Ray-Ban Aviator Classic (Ref. RB3025)* — R$ 1.150,00\n3. 🕶️ *Ray-Ban Erika (Ref. RB4171)* — R$ 980,00\n\n---SPLIT---\n\nGostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?",
+  "Depois da vitrine, \"o 1\", \"esse primeiro\", \"o segundo\", \"o último\" ou \"o de R$ 830\" são escolhas de um item da lista: NUNCA chame marca_ampla de novo nem repita a vitrine; abra o item escolhido com modelo_especifico e a referência dele. Se o preço citado servir para mais de um item, pergunte qual número ou referência o cliente quer ver.",
   "Se o termo tiver nome de modelo ou referência junto da marca (\"Ray-Ban Justin\", \"Oakley Holbrook\", \"RB4165\"), é SEMPRE modelo_especifico, nunca marca_ampla.",
   "Etapa 2 — detalhamento: o cliente escolheu um modelo da vitrine (\"me manda foto do Justin\", \"quero saber mais do Erika\") ou já perguntou direto por um modelo/referência. Chame consultarEstoqueProduto com tipoBusca \"modelo_especifico\" e termoBusca com a marca + a referência EXATA exibida na vitrine (ex.: \"Ray-Ban RB3025L\" para \"Ray-Ban Aviator Classic (Ref. RB3025L)\"), para o preço do card bater com a lista; sem vitrine anterior, marca + modelo (ex.: \"Ray-Ban Justin\"). A foto vai anexada e a resposta é a ficha completa (fichaFormatada, com estoque e lojas) + ---SPLIT--- + pergunta de continuação no singular ou plural conforme as lojas.",
 ].join("\n");
