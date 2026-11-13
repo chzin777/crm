@@ -21,7 +21,7 @@ import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto } from "@/lib/ai/stock-showcase";
 import { cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
-import { buildProductCard, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
+import { buildProductCard, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { storeDirectory } from "@/lib/ai/stock-db";
 import { deliverLocation, findStores, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
@@ -378,7 +378,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
         totalUnidades: inStock.lojasComEstoque.reduce((sum, store) => sum + store.quantidade, 0),
         lojasDisponiveis: inStock.lojasComEstoque.map(cardStore),
       };
-      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields), orientacao: `${result.orientacao}\n${cardGuidance()}` };
+      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, cardOpening(input.pendingText)), orientacao: `${result.orientacao}\n${cardGuidance()}` };
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };

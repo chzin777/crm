@@ -112,3 +112,19 @@ export function expandModelNicknames(term: string) {
   }
   return term;
 }
+
+/**
+ * Código-base da referência para agrupar o mesmo modelo: sem "REF", espaços, o "0" interno e o prefixo de 2 letras
+ * da linha ("0RB4165L", "RB4165L" e "4165L" → "4165L"; "0MU 01XV" → "01XV").
+ */
+export function referenceKey(referencia: string | null | undefined) {
+  const text = (referencia ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\bREF\b[-.:]?/g, "").replace(/[^A-Z0-9]/g, "");
+  return text.replace(/^0?[A-Z]{2}(?=\d)/, "").replace(/^0(?=\d{4})/, "");
+}
+
+/** Família do modelo (marca + código-base): cores, tamanhos e grafias da referência viram um item só. */
+export function modelFamilyKey(description: string, brand?: string | null) {
+  const parsed = parseErpName(description, brand);
+  if (!parsed.referencia) return null;
+  return `${(parsed.marca ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")}|${referenceKey(parsed.referencia)}`;
+}
