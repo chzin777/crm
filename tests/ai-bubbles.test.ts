@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { DEFAULT_STORE_QUESTION, splitAiResponseMessages, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { buildSystemPrompt, customerMessages, interpretDecision } from "@/lib/ai/agent-core";
 import { deliverImageOrText } from "@/lib/ai/product-image";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
@@ -79,5 +79,40 @@ describe("regras fixas de formatação e cadência no prompt", () => {
     expect(prompt).toContain("• *Nome da loja* — endereço");
     expect(prompt).toContain(`escreva ${BUBBLE_SPLIT} (sozinho numa linha) antes da pergunta final`);
     expect(prompt).toContain("No máximo 5 lojas".replace("No", "no"));
+  });
+});
+
+describe("segunda bolha garantida (splitAiResponseMessages)", () => {
+  const STORES = "Temos o *Ray-Ban Meta* disponível nestas unidades:\n\n📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8 esq. com Rua 27, 235\n• *Loja Setor Marista* — Rua 135 esq. com Av. Americano do Brasil, 208";
+
+  it("com ---SPLIT--- (e variações [SPLIT] e linha ---): 2 mensagens limpas na ordem", () => {
+    const ask = "Qual dessas lojas fica melhor pra você? Assim já te passo os detalhes do modelo certo!";
+    for (const sep of ["\n\n---SPLIT---\n\n", "\n[SPLIT]\n", "\n---\n"]) {
+      const parts = splitAiResponseMessages(`${STORES}${sep}${ask}`);
+      expect(parts).toEqual([STORES, ask]);
+      expect(parts.join("\n")).not.toMatch(/SPLIT|^---$/m);
+    }
+  });
+
+  it("lista de lojas sem ---SPLIT--- e com pergunta no último parágrafo: a pergunta vira a 2ª bolha", () => {
+    expect(splitAiResponseMessages(`${STORES}\n\nQual dessas fica mais fácil pra você ir?`)).toEqual([STORES, "Qual dessas fica mais fácil pra você ir?"]);
+    // Pergunta colada na última linha da lista (sem linha em branco) também é separada.
+    expect(splitAiResponseMessages(`${STORES}\nQual delas prefere?`)).toEqual([STORES, "Qual delas prefere?"]);
+  });
+
+  it("só a lista de lojas, sem pergunta final: injeta a pergunta de condução como 2ª bolha", () => {
+    expect(splitAiResponseMessages(STORES)).toEqual([STORES, DEFAULT_STORE_QUESTION]);
+    expect(splitAiResponseMessages(`${STORES}\n\nTodas abrem às 9h.`)).toEqual([`${STORES}\n\nTodas abrem às 9h.`, DEFAULT_STORE_QUESTION]);
+  });
+
+  it("resposta comum (sem lista de lojas) não ganha pergunta extra", () => {
+    expect(splitAiResponseMessages("Abrimos sábado das 9h às 13h.")).toEqual(["Abrimos sábado das 9h às 13h."]);
+    expect(splitAiResponseMessages("A loja do Bueno fica na Av. T-8, 235. Quer que eu veja outro modelo?")).toHaveLength(1);
+  });
+
+  it("prompt traz a regra obrigatória com o exemplo literal do ---SPLIT---", () => {
+    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    expect(prompt).toContain("REGRA OBRIGATÓRIA DE DUAS MENSAGENS");
+    expect(prompt).toContain("• *Loja Setor Marista* — Rua 135 esq. com Av. Americano do Brasil, 208\n\n---SPLIT---\n\nQual dessas lojas fica melhor pra você?");
   });
 });
