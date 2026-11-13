@@ -10,7 +10,7 @@ export const STOCK_TIMEOUT_MS = 3_000;
 /** No máximo 5 produtos por consulta (por turno de conversa). */
 export const STOCK_MAX_CODES = 5;
 
-export type StockUnit = { unit: string; name: string; qty: number };
+export type StockUnit = { unit: string; name: string; qty: number; /** Preço de venda vigente na loja (ERP); null = sem preço cadastrado. */ price?: number | null };
 export type StockStatus = "ok" | "unavailable_api";
 export type StockLookup = { stockStatus: StockStatus; byCode: Record<string, StockUnit[]>; fromCache: number; requested: number };
 
@@ -45,14 +45,15 @@ export function createStockClient(options: { url: string; token: string; fetch?:
         signal: AbortSignal.timeout(timeout),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const body = (await response.json()) as { items?: { code?: unknown; unit?: unknown; name?: unknown; qty?: unknown }[] };
+      const body = (await response.json()) as { items?: { code?: unknown; unit?: unknown; name?: unknown; qty?: unknown; price?: unknown }[] };
       if (!Array.isArray(body?.items)) throw new Error("resposta sem items");
       const at = now();
       for (const code of missing) byCode[code] = [];
       for (const item of body.items) {
         const code = String(item.code ?? "");
         if (!(code in byCode)) continue;
-        byCode[code].push({ unit: String(item.unit ?? ""), name: String(item.name ?? ""), qty: Number(item.qty) || 0 });
+        const price = Number(item.price);
+        byCode[code].push({ unit: String(item.unit ?? ""), name: String(item.name ?? ""), qty: Number(item.qty) || 0, price: Number.isFinite(price) && price > 0 ? price : null });
       }
       for (const code of missing) cache.set(code, { at, units: byCode[code] });
       return { stockStatus: "ok", byCode, fromCache, requested: missing.length };
@@ -121,7 +122,7 @@ export function matchesRegion(code: string, store: StoreInfo | undefined, region
   return hay.includes(wanted) || wanted.includes(norm(store?.neighborhood ?? "#"));
 }
 
-export type StockStore = { code: string; loja: string; quantidade: number; /** Cidade para agrupar a lista (ex.: "Goiânia", "Águas Claras (DF)"). */ cidade?: string };
+export type StockStore = { code: string; loja: string; quantidade: number; /** Preço de venda vigente nesta loja, em reais (ex.: "R$ 1.070,00"). */ precoVenda?: string; /** Cidade para agrupar a lista (ex.: "Goiânia", "Águas Claras (DF)"). */ cidade?: string };
 
 /** Regiões administrativas do DF que aparecem como cidade no cadastro das lojas. */
 const DF_PLACES = /^(BRASILIA|AGUAS CLARAS|TAGUATINGA|CEILANDIA|GAMA|SOBRADINHO|SAMAMBAIA|GUARA|PLANALTINA|SUDOESTE|ASA (SUL|NORTE)|LAGO (SUL|NORTE)|RECANTO DAS EMAS|SANTA MARIA|RIACHO FUNDO|NUCLEO BANDEIRANTE|VICENTE PIRES|JARDIM BOTANICO|SAO SEBASTIAO|PARANOA|CRUZEIRO|NOROESTE|OCTOGONAL|ARNIQUEIRA|DISTRITO FEDERAL|DF)(s|$)/;
@@ -136,9 +137,34 @@ export function storeCity(store: StoreInfo | undefined) {
 }
 export type StockProduct = { codigo: string; produto: string; marca: string | null; preco: number | null; lojasComEstoque: StockStore[] };
 export type StockScenario = "disponivel_na_regiao" | "esgotado_na_regiao_disponivel_em_outras" | "disponivel_em_lojas" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
-export type StockToolResult = { cenario: StockScenario; termoBusca: string; regiao: string; regiaoReconhecida: boolean; produtos: (StockProduct & { lojasNaRegiao: StockStore[] })[]; orientacao: string };
+export type StockToolProduct = StockProduct & {
+  lojasNaRegiao: StockStore[];
+  nomeProduto: string;
+  referencia: string;
+  /** Preço de venda vigente (o da loja pedida ou o mais comum na rede), em reais. */
+  precoVenda: string | null;
+  /** O preço muda conforme a loja: use o precoVenda de cada loja. */
+  precoVariaPorLoja: boolean;
+  /** Tem saldo, mas o ERP não tem preço cadastrado: só aqui a IA oferece transferir para confirmar o valor. */
+  precoSobConsulta: boolean;
+  totalDisponivelRede: number;
+};
+export type StockToolResult = { cenario: StockScenario; termoBusca: string; regiao: string; regiaoReconhecida: boolean; produtos: StockToolProduct[]; orientacao: string };
 
 const MAX_STORES_PER_PRODUCT = 6;
+
+/** Valor em reais no padrão brasileiro: 1070 → "R$ 1.070,00". */
+export function formatBrl(value: number) {
+  return `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.replace(/\u00a0/g, " ");
+}
+
+/** Preço mais comum entre as lojas (o que vale para a maioria); empate → o menor. */
+export function mainPrice(stores: StockStore[]) {
+  const count = new Map<string, number>();
+  for (const store of stores) if (store.precoVenda) count.set(store.precoVenda, (count.get(store.precoVenda) ?? 0) + 1);
+  const toNumber = (text: string) => Number(text.replace(/[^\d,]/g, "").replace(",", "."));
+  return [...count.entries()].sort((a, b) => b[1] - a[1] || toNumber(a[0]) - toNumber(b[0]))[0]?.[0] ?? null;
+}
 
 /** Saldo por loja de varejo (filtra ADM/CD/fábrica e saldo ≤ 0), maior estoque primeiro. */
 export function retailStock(units: StockUnit[], stores: Map<string, StoreInfo>): StockStore[] {
@@ -148,7 +174,7 @@ export function retailStock(units: StockUnit[], stores: Map<string, StoreInfo>):
     if (!isRetailUnit(unit.name) || (store && !isRetailUnit(store.name)) || unit.qty <= 0) continue;
     const current = byCode.get(unit.unit);
     if (current) current.quantidade += unit.qty;
-    else byCode.set(unit.unit, { code: unit.unit, loja: storeLabel(unit.unit, store), quantidade: unit.qty, ...(storeCity(store) ? { cidade: storeCity(store) } : {}) });
+    else byCode.set(unit.unit, { code: unit.unit, loja: storeLabel(unit.unit, store), quantidade: unit.qty, ...(storeCity(store) ? { cidade: storeCity(store) } : {}), ...(unit.price ? { precoVenda: formatBrl(unit.price) } : {}) });
   }
   return [...byCode.values()].sort((a, b) => b.quantidade - a.quantidade);
 }
@@ -184,13 +210,26 @@ export function buildStockResult(input: {
     const all = retailStock(lookup.byCode[product.code] ?? [], input.stores);
     const inRegion = all.filter((store) => regionCodes.includes(store.code));
     const others = all.filter((store) => !regionCodes.includes(store.code));
+    // Preço oficial do ERP por loja (PRECO_VENDA); sem a opção "pode informar preços", nenhum valor vai para a IA.
+    const strip = (stores: StockStore[]) => (input.withPrices ? stores : stores.map(({ precoVenda: _omit, ...store }) => store));
+    const listed = strip([...inRegion, ...others].slice(0, MAX_STORES_PER_PRODUCT));
+    const priced = input.withPrices ? (inRegion.length ? inRegion : all) : [];
+    const precoVenda = mainPrice(priced);
+    const distinct = new Set(all.map((store) => store.precoVenda).filter(Boolean));
+    const total = all.reduce((sum, store) => sum + store.quantidade, 0);
     return {
       codigo: product.code,
+      referencia: product.code,
       produto: product.description,
+      nomeProduto: product.description,
       marca: product.brand,
-      preco: input.withPrices ? product.price : null,
-      lojasNaRegiao: inRegion,
-      lojasComEstoque: [...inRegion, ...others].slice(0, MAX_STORES_PER_PRODUCT),
+      preco: input.withPrices && precoVenda ? Number(precoVenda.replace(/[^\d,]/g, "").replace(",", ".")) : null,
+      precoVenda,
+      precoVariaPorLoja: input.withPrices && distinct.size > 1,
+      precoSobConsulta: input.withPrices && total > 0 && !precoVenda,
+      totalDisponivelRede: total,
+      lojasNaRegiao: strip(inRegion),
+      lojasComEstoque: listed,
     };
   });
   const anyStock = produtos.some((product) => product.lojasComEstoque.length);
@@ -208,7 +247,12 @@ export const STOCK_RULES = [
   "- disponivel_em_lojas: diga em quais lojas há unidades agora;",
   "- sem_estoque_na_rede: diga que o modelo está sem estoque na rede no momento e ofereça transferir para um atendente verificar encomenda ou similares;",
   "- unavailable_api: diga que não foi possível verificar o estoque no sistema agora e transfira (action handoff) para um atendente confirmar.",
-  "Use só as lojas e os endereços devolvidos pela ferramenta; não informe quantidades exatas, diga apenas que há unidades disponíveis.",
+  "Use só as lojas e os endereços devolvidos pela ferramenta.",
+  "PREÇO E QUANTIDADE (regra fixa): sempre que o cliente perguntar preço, valor, disponibilidade ou quantidade de um modelo, consulte consultarEstoqueProduto e informe diretamente:",
+  "1. O valor exato devolvido em precoVenda (ex.: \"O *Ray-Ban Justin* está saindo por *R$ 1.070,00*.\"). Se precoVariaPorLoja for true, informe o precoVenda da loja que o cliente pediu (ou diga que o valor muda conforme a loja e cite o de cada uma listada). Nunca invente nem arredonde valores; não use o histórico de vendas como preço.",
+  "2. A disponibilidade real por loja; quando o cliente perguntar a quantidade, informe quantas unidades constam (campo quantidade da loja, ou totalDisponivelRede para a rede toda).",
+  "NÃO transfira para um atendente quando a ferramenta devolveu preço e estoque. Só transfira se: (a) o produto estiver sem estoque em todas as lojas, (b) precoSobConsulta for true (tem estoque mas sem preço no sistema: informe a disponibilidade e ofereça transferir para confirmar o orçamento), (c) a consulta falhar (unavailable_api) ou (d) o cliente pedir explicitamente para fechar a compra ou negociar condições especiais com um vendedor.",
+  "Depois do preço e da disponibilidade, mande a pergunta de condução numa segunda bolha com ---SPLIT--- (ex.: \"Você gostaria de reservar em alguma dessas lojas ou tirar mais alguma dúvida sobre o modelo?\").",
 ].join("\n");
 
 /** Definição da tool para a OpenAI (somente leitura). */

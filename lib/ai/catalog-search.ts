@@ -1,3 +1,4 @@
+import { formatBrl } from "@/lib/ai/stock";
 /**
  * Foto de produto enviada pelo cliente: a IA identifica o produto em silêncio (JSON interno), o CRM busca
  * no histórico de vendas do ERP e a resposta sai só com o resultado da busca, ou a conversa vai para a equipe.
@@ -71,7 +72,7 @@ export type SearchLog = { kind: string; term: string; found: number };
 export function formatCatalogResults(search: CatalogSearch, withPrices: boolean) {
   const live = search.stock === "ok";
   const lines = search.results.map((product) => {
-    const price = withPrices && product.price ? ` · preço médio R$ ${product.price.toFixed(2)}` : "";
+    const price = withPrices && product.price ? ` · preço ${formatBrl(product.price)}` : "";
     const where = live ? (product.stores.length ? `com estoque agora em: ${product.stores.join("; ")}` : "sem estoque nas lojas no momento") : `vendido recentemente em: ${product.stores.join("; ") || "lojas não informadas"}`;
     return `- ${product.description}${product.brand ? ` (${product.brand})` : ""}${price} · ${where}`;
   });

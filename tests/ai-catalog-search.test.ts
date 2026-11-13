@@ -26,7 +26,7 @@ describe("foto de óculos com resultado no catálogo", () => {
     expect(flow.context).toContain("LJ 23 · Centro, Goiânia");
     expect(flow.context).not.toContain("899"); // sem permissão de preço
     expect(flow.context).not.toMatch(/pela imagem|na foto|dourad/i);
-    expect(formatCatalogResults(rayBan, true)).toContain("R$ 899.90");
+    expect(formatCatalogResults(rayBan, true)).toContain("preço R$ 899,90");
   });
 });
 

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { indexProduct, matchProducts, type CatalogSearch, type IndexedProduct, type SearchStep } from "@/lib/ai/catalog-search";
-import { isRetailUnit, retailStock, storeLabel } from "@/lib/ai/stock";
+import { isRetailUnit, mainPrice, retailStock, storeLabel } from "@/lib/ai/stock";
 import { getStockByProductCodes, storeDirectory } from "@/lib/ai/stock-db";
 
 const DAYS = 730;
@@ -70,15 +70,21 @@ export async function searchErpCatalog(steps: SearchStep[]): Promise<CatalogSear
     const codes = found.map((product) => product.code).filter((code): code is string => !!code);
     const [lookup, stores] = await Promise.all([codes.length ? getStockByProductCodes(codes) : null, storeDirectory()]);
     if (lookup?.stockStatus === "ok") {
-      const results = found.map((product) => ({
-        description: product.description, brand: product.brand, category: product.category, sales: product.sales, price: product.price,
-        stores: retailStock(lookup.byCode[product.code ?? ""] ?? [], stores).slice(0, MAX_STORES).map((store) => store.loja),
-      }));
+      // Preço oficial de venda do ERP (o mais comum entre as lojas), não a média das vendas com desconto.
+      const results = found.map((product) => {
+        const live = retailStock(lookup.byCode[product.code ?? ""] ?? [], stores);
+        const official = mainPrice(live);
+        return {
+          description: product.description, brand: product.brand, category: product.category, sales: product.sales,
+          price: official ? Number(official.replace(/[^d,]/g, "").replace(",", ".")) : null,
+          stores: live.slice(0, MAX_STORES).map((store) => store.loja),
+        };
+      });
       return { term: step.label, results, stock: "ok" };
     }
     const sold = await soldAt(found.map((product) => product.description));
     const results = found
-      .map((product) => ({ description: product.description, brand: product.brand, category: product.category, sales: product.sales, price: product.price, stores: sold.get(product.description) ?? [] }))
+      .map((product) => ({ description: product.description, brand: product.brand, category: product.category, sales: product.sales, price: null, stores: sold.get(product.description) ?? [] }))
       .filter((product) => product.stores.length);
     if (results.length) return { term: step.label, results, stock: "unavailable_api" };
   }

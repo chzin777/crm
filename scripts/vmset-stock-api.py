@@ -43,6 +43,18 @@ WHERE PR.PRDT_CODIGO IN ({binds})
 GROUP BY PR.PRDT_CODIGO, UE.UNEM_CODIGO
 """
 
+# Preço de venda vigente por loja (tabela PRECO_VENDA do ERP): ativo e dentro da validade.
+PRICE_SQL = """
+SELECT PR.PRDT_CODIGO, UE.UNEM_CODIGO, MAX(PV.PRVD_PRECO)
+FROM PRODUTO PR
+JOIN EMBALAGEM_VENDA EV ON EV.PRODUTO_ID = PR.PRODUTO_ID
+JOIN PRECO_VENDA PV ON PV.EMBALAGEM_VENDA_ID = EV.EMBALAGEM_VENDA_ID AND PV.STATUS = 'Ativo'
+JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PV.UNIDADE_EMPRESARIAL_ID AND UE.STATUS = 'Ativo'
+WHERE PR.PRDT_CODIGO IN ({binds})
+  AND (PV.PRVD_DT_VALIDADE IS NULL OR PV.PRVD_DT_VALIDADE >= TRUNC(SYSDATE))
+GROUP BY PR.PRDT_CODIGO, UE.UNEM_CODIGO
+"""
+
 oracledb.init_oracle_client(lib_dir=os.environ.get("ORACLE_LIB_DIR"))
 pool = oracledb.create_pool(
     user=os.environ["ORACLE_USER"], password=os.environ["ORACLE_PASSWORD"], dsn=os.environ["ORACLE_DSN"],
@@ -60,11 +72,23 @@ def stock(codes):
     with pool.acquire() as conn:
         conn.call_timeout = CALL_TIMEOUT_MS
         cur = conn.cursor()
-        cur.execute(SQL.format(binds=binds), {f"c{i}": code for i, code in enumerate(codes)})
-        return [
-            {"code": str(code), "unit": str(int(unit)) if str(unit).isdigit() else str(unit), "name": (name or "").strip(), "qty": float(qty or 0)}
-            for code, unit, name, qty in cur.fetchall()
-        ]
+        params = {f"c{i}": code for i, code in enumerate(codes)}
+        cur.execute(SQL.format(binds=binds), params)
+        rows = cur.fetchall()
+        # Preço é complemento: se a consulta falhar, o saldo segue sem preço (o CRM trata como "sob consulta").
+        prices = {}
+        try:
+            cur.execute(PRICE_SQL.format(binds=binds), params)
+            for code, unit, price in cur.fetchall():
+                key = (str(code), str(int(unit)) if str(unit).isdigit() else str(unit))
+                prices[key] = round(float(price), 2) if price is not None and float(price) > 0 else None
+        except Exception as error:
+            log(f"preço indisponível ({','.join(codes)}): {str(error)[:160]}")
+        items = []
+        for code, unit, name, qty in rows:
+            unit_code = str(int(unit)) if str(unit).isdigit() else str(unit)
+            items.append({"code": str(code), "unit": unit_code, "name": (name or "").strip(), "qty": float(qty or 0), "price": prices.get((str(code), unit_code))})
+        return items
 
 
 class Handler(BaseHTTPRequestHandler):
