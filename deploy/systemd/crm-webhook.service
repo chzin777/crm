@@ -1,0 +1,13 @@
+[Unit]
+Description=CRM Deploy Webhook (GitHub push -> /opt/crm/deploy/auto-deploy.sh)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/crm/deploy/webhook.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

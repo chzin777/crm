@@ -1,0 +1,9 @@
+[Unit]
+Description=CRM auto-deploy (confere a main do GitHub e aplica commit novo)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/crm/deploy/auto-deploy.sh poll
+TimeoutStartSec=20min

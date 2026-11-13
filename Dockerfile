@@ -34,6 +34,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Versão e commit (passados pelo deploy/auto-deploy.sh) expostos em /api/health.
+ARG GIT_COMMIT=unknown
+ARG APP_VERSION=unknown
+ENV GIT_COMMIT=$GIT_COMMIT \
+    APP_VERSION=$APP_VERSION
+
 USER nextjs
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
