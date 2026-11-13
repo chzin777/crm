@@ -47,13 +47,15 @@ const STREET = /\b(Rua|R\.|Avenida|Av\.?|Alameda|Al\.|Rodovia|Pra[cç]a|Quadra|Q
 /** Lojas citadas com endereço numa mensagem: ficha ("📍 *Loja X* – Cidade (Rua 9, 2106)"), texto livre e localização enviada. */
 /** Linha "📍 *Loja X* – Cidade (Endereço)" lida sozinha (regex não gulosa presa à linha). */
 const PIN_LINE = /^📍\s*\*?([^*–—-]+?)\*?\s*[–—-]\s*([^(]+?)(?:\s*\(([^)]+)\))?\.?$/;
+/** Quantidade no fim da linha ("— 2 unidades"): fica fora do endereço e da busca de localização. */
+const QTY_SUFFIX = /\s*[–—-]\s*\d+(?:[.,]\d+)?\s*unidades?(?:\s+dispon[íi]ve(?:l|is))?\s*\.?\s*$/i;
 const cleanField = (value: string) => value.replace(/\*/g, "").replace(/\s+/g, " ").trim().replace(/[.!;,]+$/, "");
 /** Campo extraído nunca pode carregar outra loja (📍) nem quebra de linha. */
 const validField = (value: string | null) => !value || !/[📍\r\n]/u.test(value);
 
 /** Linha da lista de lojas (estoque/ficha), parseada isoladamente; null se não for desse formato. */
 export function pinLineStore(line: string): ActiveStore | null {
-  const match = line.trim().match(PIN_LINE);
+  const match = line.trim().replace(QTY_SUFFIX, "").match(PIN_LINE);
   if (!match || !match[3]) return null;
   const nome = cleanField(match[1]);
   const cidade = cleanField(match[2]) || null;
@@ -68,7 +70,7 @@ export function storesIn(text: string): ActiveStore[] {
     if (!found.some((other) => compact(other.nome) === compact(store.nome) && compact(other.enderecoCompleto) === compact(store.enderecoCompleto))) found.push(store);
   };
   // Linha a linha: um endereço nunca vem da linha de outra loja.
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r?\n/).map((line) => line.replace(QTY_SUFFIX, ""));
   lines.forEach((line, index) => {
     const pinned = /^\s*📍/u.test(line) ? pinLineStore(line) : null;
     if (pinned) return add(pinned);

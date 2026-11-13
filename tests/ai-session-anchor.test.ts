@@ -312,6 +312,35 @@ describe("localização de loja listada pelo estoque (cascata sessão → CRM �
     expect(run.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
   });
 
+  it("card com quantidade por loja: 3 unidades em 2 lojas e o sufixo não contamina endereço nem localização", () => {
+    const card = buildProductCard({ nomeComercial: "Ray-Ban Meta Wayfarer", referencia: "RW4014", categoriaModelo: "Óculos inteligente", formatoArmacao: null, acabamentoOuMaterial: null, valorFormatado: "R$ 2.499,00", totalUnidades: 3, lojasDisponiveis: [{ loja: "Loja Setor Bueno", cidade: "Goiânia", endereco: "Av. T 8 Esquina com Rua-27, 235", quantidade: 2 }, { loja: "Loja Jardim Nova Era", cidade: "Aparecida de Goiânia", endereco: "Av. Rio Verde", quantidade: 1 }] });
+    expect(card).toContain("📦 *Estoque:* 3 unidades disponíveis nas seguintes lojas:\n📍 *Loja Setor Bueno* - Goiânia (Av. T 8 Esquina com Rua-27, 235) — 2 unidades\n📍 *Loja Jardim Nova Era* - Aparecida de Goiânia (Av. Rio Verde) — 1 unidade");
+    expect(storesIn(card)).toEqual([
+      { lojaId: null, nome: "Loja Setor Bueno", cidade: "Goiânia", enderecoCompleto: "Av. T 8 Esquina com Rua-27, 235" },
+      { lojaId: null, nome: "Loja Jardim Nova Era", cidade: "Aparecida de Goiânia", enderecoCompleto: "Av. Rio Verde" },
+    ]);
+    const resolved = resolveStoreRequest({ queries: ["manda a localização da loja do jardim nova era"], sessionStores: storesIn(card), directory: new Map() });
+    expect(resolved).toMatchObject({ type: "found", source: "session", store: { name: "Loja Jardim Nova Era", address: "Av. Rio Verde" } });
+  });
+
+  it("1 loja só: singular/plural certo e a localização dessa loja sai direto", async () => {
+    const one = (quantidade: number) => buildProductCard({ nomeComercial: "Prada Linea Rossa", referencia: "PS 07RV", categoriaModelo: "Armação de grau", formatoArmacao: null, acabamentoOuMaterial: null, valorFormatado: "R$ 1.290,00", totalUnidades: quantidade, lojasDisponiveis: [{ loja: "Loja Jardim Goiás", cidade: "Goiânia", endereco: "Av. Deputado Jamel Cecilio, 3300", quantidade }] });
+    expect(one(1)).toContain("📦 *Estoque:* 1 unidade disponível na seguinte loja:\n📍 *Loja Jardim Goiás* - Goiânia (Av. Deputado Jamel Cecilio, 3300) — 1 unidade");
+    expect(one(2)).toContain("📦 *Estoque:* 2 unidades disponíveis na seguinte loja:\n📍 *Loja Jardim Goiás* - Goiânia (Av. Deputado Jamel Cecilio, 3300) — 2 unidades");
+    expect(storesIn(one(2))[0].enderecoCompleto).toBe("Av. Deputado Jamel Cecilio, 3300");
+    const history: PlaygroundMessage[] = [
+      { from: "customer", text: "Tem o Prada PS 07RV?" },
+      { from: "ai", text: one(2) },
+      { from: "customer", text: "me manda a localização dessa loja" },
+    ];
+    model.script = async (tools) => {
+      expect(await tools.enviarLocalizacaoLoja({ nomeLoja: "Loja Jardim Goiás" })).toMatchObject({ enviado: true });
+      return { reply: "Claro! Te mandei a localização aqui embaixo 👇", action: "reply" };
+    };
+    const run = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-uma-loja" });
+    expect(run.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
+  });
+
   it("nome da filial no CRM (\"Flamboyant\") também resolve", () => {
     expect(resolveStoreRequest({ queries: ["Flamboyant"], sessionStores: [], directory: STORES })).toMatchObject({ type: "found", source: "crm" });
   });

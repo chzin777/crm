@@ -46,6 +46,8 @@ export function cardStore(store: Pick<StockStore, "loja" | "quantidade" | "cidad
 
 const units = (count: number) => `${count} ${count === 1 ? "unidade disponível" : "unidades disponíveis"}`;
 const plainQty = (value: number) => (Number.isInteger(value) ? value : Math.round(value * 100) / 100);
+/** Quantidade da loja no fim da linha 📍 ("— 1 unidade", "— 2 unidades"). */
+export const storeUnits = (count: number) => `${plainQty(count)} ${plainQty(count) === 1 ? "unidade" : "unidades"}`;
 
 /** Abertura para pergunta de disponibilidade ("Vocês têm o Justin?"). */
 export const AVAILABILITY_OPENING = "Temos sim! 😊";
@@ -78,7 +80,7 @@ export function buildProductCard(fields: ProductCardFields, opening: string = AV
     `📦 *Estoque:* ${units(total)} ${stores.length === 1 ? "na seguinte loja:" : "nas seguintes lojas:"}`,
     ...stores.map((store) => {
       const where = [store.cidade, store.endereco ? `(${store.endereco})` : ""].filter(Boolean).join(" ");
-      return `📍 *${store.loja}*${where ? ` – ${where}` : ""}`;
+      return `📍 *${store.loja}*${where ? ` - ${where}` : ""} — ${storeUnits(store.quantidade)}`;
     }),
   ];
   return lines.filter((line, index) => line !== "" || index === 1).join("\n");
@@ -90,10 +92,10 @@ export const CARD_QUESTION = "Gostaria de reservar essa peça ou saber mais deta
 /** Regra fixa do prompt: o card do produto segue o template exato; com fichaFormatada, copie sem alterar. */
 export const PRODUCT_CARD_TEMPLATE = [
   "FICHA DE PRODUTO (template visual obrigatório, vale antes e depois de o cliente entrar na fila): ao apresentar um modelo com estoque, a 1ª bolha segue EXATAMENTE este formato (vai como legenda da foto):",
-  "Temos sim! 😊\n\n🕶️ *[Nome Comercial] | Ref. [Referência]*\nⓂ️ *Modelo:* [Categoria/Tipo]\n👓 *Armação:* [Formato]\n✨ *Acabamento:* [Material/Acabamento]\n💵 *Valor:* [Valor Formatado]\n📦 *Estoque:* [X unidade(s)] disponível(is) na(s) seguinte(s) loja(s):\n📍 *[Nome da Loja]* – [Cidade] ([Endereço completo])\n\n---SPLIT---\n\n[Pergunta curta de continuação, ex.: \"Gostaria de reservar essa peça ou saber mais detalhes sobre o modelo?\"]",
+  "Temos sim! 😊\n\n🕶️ *[Nome Comercial] | Ref. [Referência]*\nⓂ️ *Modelo:* [Categoria/Tipo]\n👓 *Armação:* [Formato]\n✨ *Acabamento:* [Material/Acabamento]\n💵 *Valor:* [Valor Formatado]\n📦 *Estoque:* [Total] unidade(s) disponível(is) na(s) seguinte(s) loja(s):\n📍 *[Nome da Loja]* - [Cidade] ([Endereço completo]) — [X] unidade(s)\n\n---SPLIT---\n\n[Pergunta curta de continuação, ex.: \"Gostaria de reservar essa peça ou saber mais detalhes sobre o modelo?\"]",
   "- ABERTURA CONFORME A INTENÇÃO: \"Temos sim! 😊\" só quando o cliente perguntou se existe/tem (\"Vocês têm o modelo X?\", \"Tem Ray-Ban Justin?\"). Quando ele pediu para ver ou saber mais de um modelo (\"Deixa eu ver esse...\", \"Me mostra o Aviator\", \"Quero saber mais sobre o Justin\"), abra com \"Aqui estão os detalhes desse modelo! 😊\" ou \"Claro! Confira os detalhes dele: 😊\"; NUNCA \"Temos sim! 😊\" nesse caso. A fichaFormatada já vem com a abertura certa.",
   "- Quando o resultado de consultarEstoqueProduto trouxer fichaFormatada, copie esse texto exatamente como veio (sem reescrever, sem acrescentar linhas) como 1ª bolha, depois ---SPLIT--- e a pergunta.",
-  "- 1 loja: \"📦 *Estoque:* 1 unidade disponível na seguinte loja:\" e uma linha 📍. 2 ou mais lojas: \"📦 *Estoque:* X unidades disponíveis nas seguintes lojas:\" e uma linha 📍 por loja. Esta ficha substitui a lista agrupada por cidade.",
+  "- 1 loja: \"📦 *Estoque:* 1 unidade disponível na seguinte loja:\" (ou \"2 unidades disponíveis na seguinte loja:\") e uma linha 📍. 2 ou mais lojas: \"📦 *Estoque:* [total] unidades disponíveis nas seguintes lojas:\" e uma linha 📍 por loja. Cada linha 📍 termina com a quantidade exata daquela loja (campo quantidade): \"— 1 unidade\" no singular, \"— 2 unidades\" no plural. Ex.: \"📍 *Loja Setor Bueno* - Goiânia (Av. T 8 Esquina com Rua-27, 235) — 2 unidades\". Esta ficha substitui a lista agrupada por cidade.",
   "- Atributo sem dado (Armação, Acabamento, Valor): omita só aquela linha; nunca escreva \"Não informado\" ou \"N/A\".",
   "- Pergunta da 2ª bolha concorda com as lojas da ficha: 1 loja → singular (\"dessa loja\", \"nessa loja\"; ex.: \"Gostaria de reservar nessa loja ou receber a localização dela no mapa?\"); 2 ou mais → plural (\"de alguma dessas lojas\").",
 ].join("\n");

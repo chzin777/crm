@@ -36,7 +36,7 @@ describe("ficha de produto no template visual do negócio", () => {
       "✨ *Acabamento:* Emborrachado",
       "💵 *Valor:* R$ 1.210,27",
       "📦 *Estoque:* 1 unidade disponível na seguinte loja:",
-      "📍 *Loja Setor Marista* – Goiânia (Rua 27, 2106)",
+      "📍 *Loja Setor Marista* - Goiânia (Rua 27, 2106) — 1 unidade",
     ].join("\n"));
     // Resposta da IA copiando a ficha + pergunta: 2 mensagens, a ficha intacta na 1ª.
     const parts = splitBubbles(`${card}\n\n---SPLIT---\n\n${CARD_QUESTION}`);
@@ -52,7 +52,7 @@ describe("ficha de produto no template visual do negócio", () => {
         cardStore({ loja: "Loja Taguatinga Centro (Taguatinga) — C 9", quantidade: 1, cidade: "Taguatinga (DF)" }),
       ],
     });
-    expect(card).toContain("📦 *Estoque:* 3 unidades disponíveis nas seguintes lojas:\n📍 *Loja Setor Marista* – Goiânia (Rua 27, 2106)\n📍 *Loja Taguatinga Centro* – Taguatinga (DF) (C 9)");
+    expect(card).toContain("📦 *Estoque:* 3 unidades disponíveis nas seguintes lojas:\n📍 *Loja Setor Marista* - Goiânia (Rua 27, 2106) — 2 unidades\n📍 *Loja Taguatinga Centro* - Taguatinga (DF) (C 9) — 1 unidade");
     expect(card.match(/📍/g)).toHaveLength(2);
   });
 
@@ -72,7 +72,7 @@ describe("ficha de produto no template visual do negócio", () => {
   it("prompt traz o template exato e o resultado orienta copiar a fichaFormatada", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(PRODUCT_CARD_TEMPLATE);
-    for (const piece of ["Temos sim! 😊", "🕶️ *[Nome Comercial] | Ref. [Referência]*", "Ⓜ️ *Modelo:*", "👓 *Armação:*", "✨ *Acabamento:*", "💵 *Valor:*", "📦 *Estoque:*", "📍 *[Nome da Loja]* – [Cidade] ([Endereço completo])", "---SPLIT---", "nunca escreva \"Não informado\" ou \"N/A\""]) {
+    for (const piece of ["Temos sim! 😊", "🕶️ *[Nome Comercial] | Ref. [Referência]*", "Ⓜ️ *Modelo:*", "👓 *Armação:*", "✨ *Acabamento:*", "💵 *Valor:*", "📦 *Estoque:*", "📍 *[Nome da Loja]* - [Cidade] ([Endereço completo]) — [X] unidade(s)", "---SPLIT---", "nunca escreva \"Não informado\" ou \"N/A\""]) {
       expect(PRODUCT_CARD_TEMPLATE).toContain(piece);
     }
     expect(cardGuidance()).toContain("use o campo fichaFormatada exatamente como veio");
