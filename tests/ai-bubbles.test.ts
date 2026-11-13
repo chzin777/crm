@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_STORE_QUESTION, splitAiResponseMessages, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { DEFAULT_STORE_QUESTION, splitAiResponseMessages, tidyBubble, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { buildSystemPrompt, customerMessages, interpretDecision } from "@/lib/ai/agent-core";
 import { deliverImageOrText } from "@/lib/ai/product-image";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
@@ -20,7 +20,7 @@ describe("divisão da resposta em bolhas", () => {
   it("resposta sem separador segue numa bolha; partes vazias somem; no máximo 3", () => {
     expect(splitBubbles("Tudo ótimo por aqui, e com você?")).toEqual(["Tudo ótimo por aqui, e com você?"]);
     expect(splitBubbles(`${BUBBLE_SPLIT}\nOi!\n${BUBBLE_SPLIT}\n${BUBBLE_SPLIT}`)).toEqual(["Oi!"]);
-    expect(splitBubbles(`a ${BUBBLE_SPLIT} b ${BUBBLE_SPLIT} c ${BUBBLE_SPLIT} d`)).toEqual(["a", "b", "c\n\nd"]);
+    expect(splitBubbles(`a ${BUBBLE_SPLIT} b ${BUBBLE_SPLIT} c ${BUBBLE_SPLIT} d`)).toEqual(["a", "b", "c d"]);
     expect(joinBubbles(`A ${BUBBLE_SPLIT} B`)).toBe("A\n\nB");
   });
 
@@ -108,6 +108,33 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
   it("resposta comum (sem lista de lojas) não ganha pergunta extra", () => {
     expect(splitAiResponseMessages("Abrimos sábado das 9h às 13h.")).toEqual(["Abrimos sábado das 9h às 13h."]);
     expect(splitAiResponseMessages("A loja do Bueno fica na Av. T-8, 235. Quer que eu veja outro modelo?")).toHaveLength(1);
+  });
+
+  it("sem ---SPLIT---: informação + oferta/pergunta em parágrafos separados viram 2 bolhas limpas", () => {
+    const info = "No momento não temos modelos *Versace* em estoque na rede.";
+    const offer = "Se quiser, posso te encaminhar para um atendente verificar encomenda ou opções parecidas.";
+    expect(splitAiResponseMessages(`${info}\n\n${offer}`)).toEqual([info, offer]);
+    expect(splitAiResponseMessages(`${info}\n\n\n\nQuer que eu veja modelos parecidos?`)).toEqual([info, "Quer que eu veja modelos parecidos?"]);
+    expect(splitAiResponseMessages(`Abrimos sábado das 9h às 13h.\n\nPosso te passar a loja mais perto?`)).toEqual(["Abrimos sábado das 9h às 13h.", "Posso te passar a loja mais perto?"]);
+    // Último parágrafo informativo (sem pergunta/oferta): segue numa bolha, sem linha em branco no meio.
+    expect(splitAiResponseMessages("Abrimos sábado.\n\nDomingo fechamos.")).toEqual(["Abrimos sábado. Domingo fechamos."]);
+  });
+
+  it("com ---SPLIT--- explícito: 2 mensagens sem linhas vazias sobrando", () => {
+    const parts = splitAiResponseMessages("No momento não temos modelos *Versace* em estoque na rede.\n\n\n---SPLIT---\n\n\nSe quiser, posso te encaminhar para um atendente.\n\nO que acha?");
+    expect(parts).toEqual(["No momento não temos modelos *Versace* em estoque na rede.", "Se quiser, posso te encaminhar para um atendente. O que acha?"]);
+    for (const part of parts) expect(part).not.toMatch(/\n\s*\n|^\s|\s$/);
+  });
+
+  it("bolha com lista mantém as quebras (no máximo uma linha em branco)", () => {
+    expect(tidyBubble("*Ray-Ban*\nÓculos leve\n\n\n\n📍 *Goiânia*\n• *Loja Bueno* — Av. T-8")).toBe("*Ray-Ban*\nÓculos leve\n\n📍 *Goiânia*\n• *Loja Bueno* — Av. T-8");
+  });
+
+  it("prompt: regra para toda resposta com o exemplo Versace e proibição de linha em branco em mensagem curta", () => {
+    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    expect(prompt).toContain("VALE PARA TODA RESPOSTA (não só listas de lojas)");
+    expect(prompt).toContain("No momento não temos modelos *Versace* em estoque na rede.\n---SPLIT---\nSe quiser, posso te encaminhar para um atendente verificar encomenda ou opções parecidas. O que acha?");
+    expect(prompt).toContain("Proibido usar linha em branco (quebra dupla) para separar frases dentro da mesma mensagem curta");
   });
 
   it("prompt traz a regra obrigatória com o exemplo literal do ---SPLIT---", () => {
