@@ -139,6 +139,11 @@ function Collapsible({ title, hint, defaultOpen = false, children }: { title: st
   );
 }
 
+/** Negrito do WhatsApp (*texto*) como o cliente vê. */
+function WhatsAppText({ text }: { text: string }) {
+  return <>{text.split(/(\*[^*\n]+\*)/g).map((part, index) => (/^\*[^*\n]+\*$/.test(part) ? <strong key={index}>{part.slice(1, -1)}</strong> : part))}</>;
+}
+
 function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-lg bg-slate-200/70 dark:bg-white/10 ${className}`} />;
 }
@@ -247,7 +252,16 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
-      setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff", search: data.search, injection: data.injection, stock: data.stock, image: data.image }]);
+      // Uma bolha por mensagem, como no WhatsApp: foto e selos na primeira, nota de transferência na última.
+      const parts = data.messages.length ? data.messages : [""];
+      const replies: PlaygroundMessage[] = parts.map((part, position) => ({
+        from: "ai",
+        text: part || "(nenhuma mensagem ao cliente)",
+        historyText: part,
+        ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image } : {}),
+        ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff" } : {}),
+      }));
+      setMessages([...messages, sent, ...replies]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível testar a IA.");
     } finally {
@@ -300,7 +314,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         {messages.map((message, index) => (
           <div key={index} className={`flex ${message.from === "customer" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[80%] space-y-1 rounded-xl px-3 py-2 text-xs leading-relaxed ${message.from === "customer" ? "bg-[#002187] text-white" : "border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"}`}>
-              {message.from === "ai" && <p className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{settings.agentName}</p>}
+              {message.from === "ai" && messages[index - 1]?.from !== "ai" && <p className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{settings.agentName}</p>}
               {message.media && <MediaPreview media={message.media} />}
               {message.image && (
                 <figure className="space-y-1">
@@ -312,7 +326,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
                 </figure>
               )}
               {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
-              {message.text && <p className="whitespace-pre-wrap">{message.text}</p>}
+              {message.text && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
               {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
               {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {STOCK_SCENARIO_LABELS[item.scenario]} · {item.products} produto{item.products === 1 ? "" : "s"}, {item.stores} loja{item.stores === 1 ? "" : "s"} · {item.ms} ms{item.cached ? " (cache)" : ""}</p>)}

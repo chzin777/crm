@@ -3,6 +3,7 @@ import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
+import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { humanRequestMode, queuedAssistBlock, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
 import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
@@ -76,7 +77,7 @@ export function interpretDecision(decision: AgentDecision): AgentOutcome {
   const reason = decision.reason?.trim() || "Sem motivo informado";
   const queue = (typeof decision.queue_id === "string" && decision.queue_id.trim()) || (typeof decision.queue === "string" ? decision.queue.trim() : "");
   if (decision.action === "handoff") return { action: "handoff", reply, reason, queue, trigger: "ai" };
-  if (!reply) return { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
+  if (!joinBubbles(reply)) return { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
   return { action: decision.action === "resolved" ? "resolved" : "reply", reply, reason, queue, trigger: "ai" };
 }
 
@@ -85,11 +86,12 @@ export function interpretDecision(decision: AgentDecision): AgentOutcome {
  * quando não há mensagem de transferência configurada; a mensagem de transferência sai preenchida.
  */
 export function customerMessages(outcome: AgentOutcome, settings: Pick<AiSettings, "handoffMessage">, vars: { customer?: string | null; queue?: string | null }, now = new Date()) {
-  if (outcome.action !== "handoff") return outcome.reply ? [outcome.reply] : [];
+  // Cada parte separada por ---SPLIT--- é uma bolha (mensagem) própria, como o cliente vê no WhatsApp.
+  if (outcome.action !== "handoff") return splitBubbles(outcome.reply);
   // Foto sem resultado no catálogo ou receita: a resposta já avisa o encaminhamento (sem repetir a de transferência).
-  if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") return outcome.reply ? [outcome.reply] : [];
+  if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") return splitBubbles(outcome.reply);
   const messages: string[] = [];
-  if (outcome.trigger === "ai" && outcome.reply && !settings.handoffMessage.trim()) messages.push(outcome.reply);
+  if (outcome.trigger === "ai" && outcome.reply && !settings.handoffMessage.trim()) messages.push(...splitBubbles(outcome.reply));
   if (settings.handoffMessage.trim()) messages.push(fillVariables(settings.handoffMessage, { customer: vars.customer ?? undefined, queue: vars.queue ?? undefined }, now));
   return messages;
 }
@@ -146,6 +148,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     BRAND_RULES,
     IMAGE_RULE,
     STOCK_RULES,
+    FORMAT_RULES,
     GREETING_RULES,
     `Seu nome no atendimento é ${settings.agentName}: use-o só se o cliente perguntar com quem está falando.`,
     `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,

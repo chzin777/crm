@@ -1,0 +1,83 @@
+import { describe, expect, it, vi } from "vitest";
+import { BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { buildSystemPrompt, customerMessages, interpretDecision } from "@/lib/ai/agent-core";
+import { deliverImageOrText } from "@/lib/ai/product-image";
+import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+
+const LIST = "Temos o *Ray-Ban Meta* disponível nestas unidades:\n\n📍 *Goiânia*\n• *Setor Bueno* — Av. T-8, 235\n\n📍 *Águas Claras (DF)*\n• *Areal* — QS 1, Rua 210";
+const QUESTION = "Qual dessas lojas fica mais fácil pra você ir experimentar?";
+
+describe("divisão da resposta em bolhas", () => {
+  it("---SPLIT--- vira 2 mensagens limpas, sem vazar o separador", () => {
+    const parts = splitBubbles(`${LIST}\n\n${BUBBLE_SPLIT}\n\n${QUESTION}`);
+    expect(parts).toEqual([LIST, QUESTION]);
+    expect(parts.join(" ")).not.toMatch(/split/i);
+    // Variações do separador também são aceitas.
+    expect(splitBubbles(`Lista\n--- split ---\nPergunta?`)).toEqual(["Lista", "Pergunta?"]);
+    expect(splitBubbles(`Lista\n-----SPLIT-----Pergunta?`)).toEqual(["Lista", "Pergunta?"]);
+  });
+
+  it("resposta sem separador segue numa bolha; partes vazias somem; no máximo 3", () => {
+    expect(splitBubbles("Tudo ótimo por aqui, e com você?")).toEqual(["Tudo ótimo por aqui, e com você?"]);
+    expect(splitBubbles(`${BUBBLE_SPLIT}\nOi!\n${BUBBLE_SPLIT}\n${BUBBLE_SPLIT}`)).toEqual(["Oi!"]);
+    expect(splitBubbles(`a ${BUBBLE_SPLIT} b ${BUBBLE_SPLIT} c ${BUBBLE_SPLIT} d`)).toEqual(["a", "b", "c\n\nd"]);
+    expect(joinBubbles(`A ${BUBBLE_SPLIT} B`)).toBe("A\n\nB");
+  });
+
+  it("resposta só com o separador conta como vazia (vai para a equipe)", () => {
+    expect(interpretDecision({ action: "reply", reply: BUBBLE_SPLIT })).toMatchObject({ action: "handoff", trigger: "no_reply" });
+  });
+
+  it("o teste da página /ia recebe cada bolha como uma mensagem", () => {
+    const outcome = interpretDecision({ action: "reply", reply: `${LIST}\n${BUBBLE_SPLIT}\n${QUESTION}` });
+    expect(customerMessages(outcome, { handoffMessage: "" }, {})).toEqual([LIST, QUESTION]);
+  });
+});
+
+describe("envio sequencial no WhatsApp", () => {
+  it("2 requisições na Cloud API na ordem, com digitando e pausa de 600 a 1000 ms entre elas", async () => {
+    const calls: string[] = [];
+    const meta = vi.fn(async (body: { type: string; text?: { body: string }; status?: string }) => {
+      calls.push(body.status === "read" ? "typing" : `${body.type}:${body.text?.body ?? ""}`);
+      return { messages: [{ id: `wamid.${calls.length}` }] };
+    });
+    const sleeps: number[] = [];
+    const sent = await sendBubbles(splitBubbles(`${LIST}\n${BUBBLE_SPLIT}\n${QUESTION}`), {
+      sendFirst: (text) => meta({ type: "text", text: { body: text } }),
+      sendNext: (text) => meta({ type: "text", text: { body: text } }),
+      typing: () => meta({ type: "", status: "read" }),
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+    expect(sent).toBe(2);
+    expect(calls).toEqual([`text:${LIST}`, "typing", `text:${QUESTION}`]);
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(BUBBLE_DELAY_MIN_MS);
+    expect(sleeps[0]).toBeLessThanOrEqual(BUBBLE_DELAY_MAX_MS);
+    expect(bubbleDelay(() => 0)).toBe(600);
+    expect(bubbleDelay(() => 1)).toBe(1000);
+  });
+
+  it("foto com legenda na primeira bolha e a pergunta logo depois em texto; falha do digitando não interrompe", async () => {
+    const order: string[] = [];
+    await sendBubbles(splitBubbles(`${LIST}\n${BUBBLE_SPLIT}\n${QUESTION}`), {
+      sendFirst: (text) => deliverImageOrText({ sendImage: async (caption) => { order.push(`image:${caption}`); }, sendText: async (t) => { order.push(`text:${t}`); }, invalidate: async () => undefined }, text),
+      sendNext: async (text) => { order.push(`text:${text}`); },
+      typing: async () => { throw new Error("Meta fora"); },
+      sleep: async () => undefined,
+    });
+    expect(order).toEqual([`image:${LIST}`, `text:${QUESTION}`]);
+  });
+});
+
+describe("regras fixas de formatação e cadência no prompt", () => {
+  it("agrupamento por cidade/região, negrito do WhatsApp e pergunta final em bolha separada", () => {
+    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    expect(prompt).toContain(FORMAT_RULES);
+    expect(prompt).toContain("agrupe por cidade/região");
+    expect(prompt).toContain("nunca misture DF com Goiás");
+    expect(prompt).toContain("📍 *Cidade*");
+    expect(prompt).toContain("• *Nome da loja* — endereço");
+    expect(prompt).toContain(`escreva ${BUBBLE_SPLIT} (sozinho numa linha) antes da pergunta final`);
+    expect(prompt).toContain("No máximo 5 lojas".replace("No", "no"));
+  });
+});

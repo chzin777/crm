@@ -121,7 +121,19 @@ export function matchesRegion(code: string, store: StoreInfo | undefined, region
   return hay.includes(wanted) || wanted.includes(norm(store?.neighborhood ?? "#"));
 }
 
-export type StockStore = { code: string; loja: string; quantidade: number };
+export type StockStore = { code: string; loja: string; quantidade: number; /** Cidade para agrupar a lista (ex.: "Goiânia", "Águas Claras (DF)"). */ cidade?: string };
+
+/** Regiões administrativas do DF que aparecem como cidade no cadastro das lojas. */
+const DF_PLACES = /^(BRASILIA|AGUAS CLARAS|TAGUATINGA|CEILANDIA|GAMA|SOBRADINHO|SAMAMBAIA|GUARA|PLANALTINA|SUDOESTE|ASA (SUL|NORTE)|LAGO (SUL|NORTE)|RECANTO DAS EMAS|SANTA MARIA|RIACHO FUNDO|NUCLEO BANDEIRANTE|VICENTE PIRES|JARDIM BOTANICO|SAO SEBASTIAO|PARANOA|CRUZEIRO|NOROESTE|OCTOGONAL|ARNIQUEIRA|DISTRITO FEDERAL|DF)(s|$)/;
+
+/** Cidade da loja para o agrupamento da lista; DF identificado pelo nome da região. */
+export function storeCity(store: StoreInfo | undefined) {
+  const raw = store?.city?.trim();
+  if (!raw) return undefined;
+  const plain = raw.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+  const name = titleCase(raw.replace(/\s*[-/]\s*(DF|GO)$/i, ""));
+  return DF_PLACES.test(plain) && !/\(DF\)/.test(name) ? `${name} (DF)` : name;
+}
 export type StockProduct = { codigo: string; produto: string; marca: string | null; preco: number | null; lojasComEstoque: StockStore[] };
 export type StockScenario = "disponivel_na_regiao" | "esgotado_na_regiao_disponivel_em_outras" | "disponivel_em_lojas" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
 export type StockToolResult = { cenario: StockScenario; termoBusca: string; regiao: string; regiaoReconhecida: boolean; produtos: (StockProduct & { lojasNaRegiao: StockStore[] })[]; orientacao: string };
@@ -136,7 +148,7 @@ export function retailStock(units: StockUnit[], stores: Map<string, StoreInfo>):
     if (!isRetailUnit(unit.name) || (store && !isRetailUnit(store.name)) || unit.qty <= 0) continue;
     const current = byCode.get(unit.unit);
     if (current) current.quantidade += unit.qty;
-    else byCode.set(unit.unit, { code: unit.unit, loja: storeLabel(unit.unit, store), quantidade: unit.qty });
+    else byCode.set(unit.unit, { code: unit.unit, loja: storeLabel(unit.unit, store), quantidade: unit.qty, ...(storeCity(store) ? { cidade: storeCity(store) } : {}) });
   }
   return [...byCode.values()].sort((a, b) => b.quantidade - a.quantidade);
 }

@@ -19,6 +19,7 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
 import { imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
 import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
@@ -375,10 +376,10 @@ async function respond(conversationId: string, messageId: string) {
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
   }
   const { outcome } = run;
-  if (queued) return replyWhileQueued(conversationId, outcome, run.image);
+  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId);
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
-    if (isWindowOpen(conversation.lastInboundAt)) await sendAutomaticMessage(conversation, outcome.reply, undefined, undefined, AI_AUTHOR);
+    if (isWindowOpen(conversation.lastInboundAt)) await sendAiReply(conversation, outcome.reply, null, latest.externalId);
     return handoff(conversation, settings, outcome.reason, undefined, false);
   }
   if (outcome.trigger !== "ai") return handoff(conversation, settings, outcome.reason);
@@ -388,10 +389,10 @@ async function respond(conversationId: string, messageId: string) {
   if (!fresh || (await conversationMode(fresh)).mode === "paused") return;
 
   if (outcome.action === "handoff") {
-    if (outcome.reply && !settings.handoffMessage.trim()) await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
+    if (outcome.reply && !settings.handoffMessage.trim()) await sendAiReply(fresh, outcome.reply, null, latest.externalId);
     return handoff(fresh, settings, outcome.reason, outcome.queue);
   }
-  await sendAiReply(fresh, outcome.reply, run.image);
+  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId);
   if (outcome.action === "resolved" && settings.closeWhenResolved) {
     // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
     await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${outcome.reason}`, "");
@@ -404,16 +405,20 @@ async function respond(conversationId: string, messageId: string) {
  * Confere de novo antes de enviar: se um atendente assumiu ou escreveu enquanto a IA pensava, não responde.
  */
 /** Resposta da IA ao cliente: com foto do produto (legenda) quando houver; se a foto falhar, segue em texto. */
-async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null) {
-  if (!image) return sendAutomaticMessage(conversation, text, undefined, undefined, AI_AUTHOR);
-  return sendAutomaticImage(conversation, image.url, text, AI_AUTHOR, () => invalidateProductImage(image.sku));
+async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null) {
+  // Bolhas separadas por ---SPLIT---: a 1ª pode ser foto com legenda; as seguintes saem em texto, com "digitando..." e pausa curta.
+  return sendBubbles(splitBubbles(text), {
+    sendFirst: (part) => (image ? sendAutomaticImage(conversation, image.url, part, AI_AUTHOR, () => invalidateProductImage(image.sku)) : sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR)),
+    sendNext: (part) => sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR),
+    typing: () => sendTypingIndicator(typingMessageId),
+  });
 }
 
-async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null) {
+async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null) {
   const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
   if (!fresh || (await conversationMode(fresh)).mode !== "queued") return;
   if (!outcome.reply || !isWindowOpen(fresh.lastInboundAt)) return;
-  await sendAiReply(fresh, outcome.reply, image);
+  await sendAiReply(fresh, outcome.reply, image, typingMessageId);
 }
 
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string };

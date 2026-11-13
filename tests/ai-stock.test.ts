@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildStockResult, createStockClient, isRetailUnit, retailStock, STOCK_CACHE_TTL_MS, STOCK_RULES, STOCK_TIMEOUT_MS, storeLabel, stockSearchTerms, type StoreInfo } from "@/lib/ai/stock";
+import { buildStockResult, createStockClient, isRetailUnit, retailStock, STOCK_CACHE_TTL_MS, STOCK_RULES, STOCK_TIMEOUT_MS, storeCity, storeLabel, stockSearchTerms, type StoreInfo } from "@/lib/ai/stock";
 import { agentRules } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 
@@ -70,7 +70,9 @@ describe("lojas de varejo", () => {
       { unit: "13", name: "LJ 13 UNILENTES IND COM DE LENTES LTDA", qty: 0 },
       { unit: "36", name: "LJ 36 THAIS MOTTA GOMES DE OLIVEIRA - EIRELI", qty: 2 },
     ], stores);
-    expect(list).toEqual([{ code: "36", loja: "Loja Parque Amazônia — Av. Padre Orlando de Morais, 2017", quantidade: 2 }]);
+    expect(list).toEqual([{ code: "36", loja: "Loja Parque Amazônia — Av. Padre Orlando de Morais, 2017", quantidade: 2, cidade: "Goiânia" }]);
+    expect(storeCity({ name: "LJ 50", address: null, addressNumber: null, neighborhood: null, city: "AGUAS CLARAS" })).toBe("Águas Claras (DF)");
+    expect(storeCity({ name: "LJ 13", address: null, addressNumber: null, neighborhood: null, city: "APARECIDA DE GOIANIA" })).toBe("Aparecida de Goiânia");
   });
 
   it("nome comercial limpo, com cidade fora de Goiânia e sem S/N", () => {
