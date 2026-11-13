@@ -1,4 +1,4 @@
-import { matchesRegion, storeLabel, type StoreInfo } from "@/lib/ai/stock";
+import { matchesRegion, storeLabel, titleCase, type StoreInfo } from "@/lib/ai/stock";
 
 /**
  * Localização da loja (tool enviarLocalizacaoLoja): pin nativo do WhatsApp quando a loja tem latitude/longitude
@@ -104,5 +104,86 @@ export const LOCATION_TOOL = {
 /** Regra fixa do prompt: pedido de localização vira pin/link de verdade. */
 export const LOCATION_RULES = [
   "LOCALIZAÇÃO (regra fixa): quando o cliente pedir a localização, o mapa, como chegar ou onde fica a loja, chame enviarLocalizacaoLoja com a loja da conversa. A localização (pin no mapa ou link do Google Maps) é enviada automaticamente logo depois da sua resposta.",
-  "Nesse caso responda curto, sem repetir o endereço inteiro (ex.: \"Claro! Te mandei a localização da *Loja Setor Bueno* aqui embaixo 👇\"). Se a ferramenta devolver mais de uma loja possível, pergunte qual delas. Nunca diga que não consegue mandar a localização.",
+  "Nesse caso responda curto, sem repetir o endereço inteiro (ex.: \"Claro! Te mandei a localização da *Loja Setor Bueno* aqui embaixo 👇\"). Se a ferramenta devolver mais de uma loja possível, pergunte qual delas listando cada opção com o endereço completo exatamente como veio em lojasPossiveis (ex.: \"• *Loja Setor Sul* — Rua 95\" e \"• *Loja Setor Sul* — Rua 90, 118\"). Nunca diga que não consegue mandar a localização.",
+  "NUNCA pergunte \"Qual dessas unidades você quer?\" listando nomes iguais sem endereço. Se o cliente disser \"essa loja\" (ou \"dessa loja do setor X\") referindo-se à unidade que você acabou de informar, chame enviarLocalizacaoLoja com o nome e o endereço dessa unidade (ex.: \"Setor Sul Rua 95\") e envie direto, sem pedir confirmação.",
 ].join("\n");
+
+/** Endereço comparável: sem acento/caixa, "Avenida"→"AV", "Rua"→"R", sem "nº"/"número" e sem pontuação. */
+export function addressKey(store: StoreInfo) {
+  // Sem rua no cadastro não há como comparar (só a cidade não identifica a unidade).
+  if (!store.address?.trim()) return "";
+  const number = store.addressNumber && !/^s\/?n$/i.test(store.addressNumber.trim()) ? store.addressNumber : "";
+  return [store.address, number, store.city]
+    .filter(Boolean)
+    .join(" ")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/\bAVENIDA\b|\bAV\b\.?/g, " AV ")
+    .replace(/\bRUA\b|\bR\b\.?/g, " R ")
+    .replace(/\b(N[º°O]?|NUMERO|NRO)\b\.?/g, " ")
+    .replace(/[º°]/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+/** Distância em metros entre duas lojas com coordenadas (Infinity se faltar alguma). */
+export function distanceMeters(a: StoreInfo, b: StoreInfo) {
+  if (!hasCoords(a) || !hasCoords(b)) return Infinity;
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = rad(b.lat! - a.lat!);
+  const dLng = rad(b.lng! - a.lng!);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat!)) * Math.cos(rad(b.lat!)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+/** Mesma unidade física: mesmo endereço normalizado ou coordenadas a menos de 50 m. */
+export function sameStorePlace(a: StoreInfo, b: StoreInfo) {
+  const keyA = addressKey(a);
+  return (!!keyA && keyA === addressKey(b)) || distanceMeters(a, b) < 50;
+}
+
+/** Filiais do ERP no mesmo endereço físico viram uma unidade só (fica a primeira). */
+export function dedupeStores<T extends { code: string; store: StoreInfo }>(matches: T[]) {
+  const unique: T[] = [];
+  for (const match of matches) if (!unique.some((kept) => sameStorePlace(kept.store, match.store))) unique.push(match);
+  return unique;
+}
+
+/** Palavras comparáveis: sem acento/caixa, "Avenida"/"Av." → AV, "Rua"/"R." → R, sem "nº". */
+const tokens = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim().split(" ")
+  .map((word) => (word === "AVENIDA" ? "AV" : word === "RUA" ? "R" : word)).filter((word) => word && !["N", "NO", "NUMERO", "NRO"].includes(word));
+
+/** A rua da loja (com o número da via, ex.: "Rua 95") aparece em sequência no texto. */
+export function citesStreet(text: string, store: StoreInfo) {
+  const street = tokens(titleCase(store.address ?? ""));
+  if (street.length < 2) return false;
+  const hay = tokens(text);
+  for (let index = 0; index + street.length <= hay.length; index += 1) if (street.every((word, offset) => hay[index + offset] === word)) return true;
+  return false;
+}
+
+/**
+ * Loja pedida pelo cliente, já resolvida: filiais no mesmo endereço mescladas; com mais de uma unidade real, vale a
+ * que acabou de ser citada (endereço presente na última mensagem da IA, ex.: "essa loja do setor sul" depois da ficha);
+ * senão, desambiguação com o endereço completo de cada uma (nunca dois rótulos iguais).
+ */
+export function resolveStoreMatch<T extends { code: string; store: StoreInfo }>(matches: T[], options: { wanted: string; recentAiTexts?: string[] }):
+  | { type: "found"; match: T }
+  | { type: "ambiguous"; options: string[] }
+  | { type: "none" } {
+  const unique = dedupeStores(matches);
+  if (!unique.length) return { type: "none" };
+  if (unique.length === 1 || /^\s*(lj|loja)?\s*\d+\s*$/i.test(options.wanted)) return { type: "found", match: unique[0] };
+  for (const text of options.recentAiTexts ?? []) {
+    const cited = unique.filter((item) => citesStreet(text, item.store));
+    if (cited.length === 1) return { type: "found", match: cited[0] };
+    if (cited.length > 1) break;
+  }
+  const labels = unique.slice(0, 5).map((item) => {
+    const label = storeLabel(item.code, item.store);
+    return label.includes(" — ") ? label : `${label} — ${fullAddress(item.store) || `LJ ${item.code}`}`;
+  });
+  // Rótulos ainda iguais: acrescenta o número da loja para diferenciar.
+  const distinct = labels.map((label, index) => (labels.indexOf(label) !== index || labels.lastIndexOf(label) !== index ? `${label} (LJ ${unique[index].code})` : label));
+  return { type: "ambiguous", options: distinct };
+}

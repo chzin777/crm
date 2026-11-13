@@ -24,7 +24,7 @@ import { cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/pro
 import { buildProductCard, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { storeDirectory } from "@/lib/ai/stock-db";
-import { deliverLocation, findStores, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
+import { deliverLocation, findStores, resolveStoreMatch, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
 import { sendSatisfactionSurvey } from "@/lib/chat/nps";
@@ -270,6 +270,8 @@ export type AgentRunInput = {
   earlierCustomerTexts?: string[];
   /** Última mensagem enviada pela IA (despedida → silêncio diante de mais um "obrigado"). */
   lastAiText?: string | null;
+  /** Últimas mensagens da IA (mais recente primeiro): "essa loja" resolve para a unidade citada nelas. */
+  recentAiTexts?: string[];
   /** Produtos cuja foto já foi enviada nesta etapa (conversa, ou desde a entrada na fila). */
   sentImageSkus?: string[];
 };
@@ -411,12 +413,18 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     definition: LOCATION_TOOL,
     run: async (args: Record<string, unknown>) => {
       const wanted = typeof args.nomeLoja === "string" ? args.nomeLoja.slice(0, 60) : "";
-      const matches = wanted ? findStores(await storeDirectory(), wanted) : [];
-      if (matches.length === 1 || (matches.length > 1 && /^\s*(lj|loja)?\s*\d+\s*$/i.test(wanted))) {
-        location = storeLocation(matches[0].code, matches[0].store);
+      const directory = wanted ? await storeDirectory() : new Map<string, Parameters<typeof storeLocation>[1]>();
+      // "Setor Sul Rua 95": sem casar tudo, tenta só o começo (bairro) e usa a rua para escolher a unidade.
+      const words = wanted.split(/\s+/).filter(Boolean);
+      let matches: ReturnType<typeof findStores> = [];
+      for (let size = words.length; size >= 1 && !matches.length; size -= 1) matches = findStores(directory, words.slice(0, size).join(" "));
+      // Filiais no mesmo endereço viram uma; "essa loja" vale a unidade citada nas últimas mensagens da IA.
+      const resolved = resolveStoreMatch(matches, { wanted, recentAiTexts: [wanted, ...(input.recentAiTexts ?? [])] });
+      if (resolved.type === "found") {
+        location = storeLocation(resolved.match.code, resolved.match.store);
         return { enviado: true, loja: location.nome, endereco: location.endereco, tipo: location.pinNativo ? "pin no mapa do WhatsApp" : "link do Google Maps", orientacao: "A localização sai automaticamente logo depois da sua resposta: responda curto, sem repetir o endereço inteiro." };
       }
-      if (matches.length > 1) return { enviado: false, lojasPossiveis: matches.slice(0, 5).map((item) => storeLocation(item.code, item.store).nome.replace("Óticas Brasil - ", "")), orientacao: "Mais de uma loja combina: pergunte ao cliente qual delas." };
+      if (resolved.type === "ambiguous") return { enviado: false, lojasPossiveis: resolved.options, orientacao: "Há mais de uma unidade real com esse nome: pergunte qual delas listando cada opção com o endereço exatamente como em lojasPossiveis (ex.: \"• *Loja Setor Sul* — Rua 95\")." };
       return { enviado: false, orientacao: "Loja não encontrada no cadastro: pergunte o bairro ou o nome da loja." };
     },
   };
@@ -478,6 +486,9 @@ async function respond(conversationId: string, messageId: string) {
   const photos = await prisma.chatMessage.findMany({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, NOT: { metaMedia: { equals: Prisma.DbNull } }, ...(queued && since ? { createdAt: { gt: since } } : {}) }, orderBy: { createdAt: "desc" }, take: 30, select: { metaMedia: true } });
   const sentImageSkus = photos.map((item) => (item.metaMedia as { productImageSku?: string } | null)?.productImageSku).filter((sku): sku is string => !!sku);
 
+  // Últimas mensagens da IA: "essa loja" resolve para a unidade citada nelas.
+  const recentAiTexts = (await prisma.chatMessage.findMany({ where: { conversationId, author: "bot", authorName: AI_AUTHOR }, orderBy: { createdAt: "desc" }, take: 4, select: { text: true } })).map((item) => item.text ?? "");
+
   let run: AgentRun;
   try {
     // "digitando..." no WhatsApp do cliente antes de mídia, estoque e modelo (renova uma vez após 20 s).
@@ -493,6 +504,7 @@ async function respond(conversationId: string, messageId: string) {
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
       queued,
       lastAiText: lastAnswer?.author === "bot" && lastAnswer.authorName === AI_AUTHOR ? lastAnswer.text : null,
+      recentAiTexts,
       sentImageSkus,
     }));
   } catch (error) {
@@ -634,6 +646,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     ignoreMediaTrigger: options.ignoreMediaTrigger,
     earlierCustomerTexts: messages.slice(0, lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text),
     lastAiText: lastAi >= 0 ? messages[lastAi].text : null,
+    recentAiTexts: messages.filter((message) => message.from === "ai").slice(-4).reverse().map((message) => message.text),
     sentImageSkus: messages.map((message) => message.imageSku).filter((sku): sku is string => !!sku),
     queued: options.queued ? { queueName: "Vendas" } : null,
     loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
