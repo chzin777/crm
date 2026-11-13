@@ -4,6 +4,10 @@ import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
 import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
+import { DETAILS_RULES } from "@/lib/ai/product-details";
+import { NATURAL_RULES } from "@/lib/ai/product-names";
+import { LOCATION_RULES } from "@/lib/ai/store-location";
 import { humanRequestMode, queuedAssistBlock, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
 import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
@@ -13,12 +17,14 @@ import type { CustomerHistory } from "@/lib/chat/types";
  * da página /ia. A chamada ao modelo fica em runAiAgent (lib/ai/agent), que usa estas funções nos dois caminhos.
  */
 
-export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "resolved"; reason?: string; queue?: string; queue_id?: string };
+export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "resolved" | "no_reply"; reason?: string; queue?: string; queue_id?: string };
 
 /** O que disparou o resultado: regra antes da IA (keyword, media, limit) ou a própria IA. */
 /** catalog_miss: foto de produto sem resultado no catálogo; prescription: receita/documento em foto (conferência humana). */
-export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription" | "security";
-export type AgentOutcome = { action: "reply" | "handoff" | "resolved"; reply: string; reason: string; queue: string; trigger: AgentTrigger };
+/** closing: a IA já se despediu e o cliente só mandou mais um fechamento de cortesia (silêncio, sem transferir). */
+export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription" | "security" | "closing";
+/** no_reply: encerramento silencioso, nada é enviado ao cliente. */
+export type AgentOutcome = { action: "reply" | "handoff" | "resolved" | "no_reply"; reply: string; reason: string; queue: string; trigger: AgentTrigger };
 
 const AUTHOR_LABEL = { customer: "Cliente", agent: "Atendente", bot: "Robô", system: "Sistema" } as const;
 export type TranscriptRow = { author: keyof typeof AUTHOR_LABEL; authorName: string | null; text: string; internal: boolean; attachment: { kind?: string; name?: string } | null; createdAt: Date };
@@ -61,8 +67,10 @@ export function formatContext(input: { contactName: string | null; queueName: st
  * Regras que decidem antes de chamar a IA (mesma ordem do atendimento real): pedido de pessoa,
  * gatilho de mídia e limite de respostas da IA. null = a IA responde.
  */
-export function preAgentOutcome(settings: AiSettings, input: { pendingText: string; hasMedia: boolean; aiReplies: number; ignoreMediaTrigger?: boolean; queued?: QueuedState | null }): AgentOutcome | null {
+export function preAgentOutcome(settings: AiSettings, input: { pendingText: string; hasMedia: boolean; aiReplies: number; ignoreMediaTrigger?: boolean; queued?: QueuedState | null; lastAiText?: string | null }): AgentOutcome | null {
   const handoff = (reason: string, trigger: AgentTrigger): AgentOutcome => ({ action: "handoff", reply: "", reason, queue: "", trigger });
+  // A IA já se despediu e o cliente só agradeceu de novo: silêncio (nem resposta, nem transferência, nem limite).
+  if (silentClosing({ pendingText: input.pendingText, lastAiText: input.lastAiText, hasMedia: input.hasMedia })) return { action: "no_reply", reply: "", reason: "Cliente encerrou com cortesia depois da despedida", queue: "", trigger: "closing" };
   // Pedido de pessoa: com a IA escolhendo a fila, ela faz a triagem ou roteia (runAiAgent); sem isso, transfere direto.
   // Já na fila (espera assistida): pedir atendente não transfere de novo; a IA tranquiliza o cliente.
   if (!input.queued && humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) }) === "direct") return handoff("Cliente pediu para falar com uma pessoa", "keyword");
@@ -77,6 +85,8 @@ export function interpretDecision(decision: AgentDecision): AgentOutcome {
   const reason = decision.reason?.trim() || "Sem motivo informado";
   const queue = (typeof decision.queue_id === "string" && decision.queue_id.trim()) || (typeof decision.queue === "string" ? decision.queue.trim() : "");
   if (decision.action === "handoff") return { action: "handoff", reply, reason, queue, trigger: "ai" };
+  // Encerramento silencioso pedido pelo modelo (action "no_reply" ou o token interno): nada sai para o cliente.
+  if (decision.action === "no_reply" || reply.includes(NO_REPLY_TOKEN)) return { action: "no_reply", reply: "", reason: decision.reason?.trim() || "Encerramento silencioso", queue: "", trigger: "ai" };
   if (!joinBubbles(reply)) return { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
   return { action: decision.action === "resolved" ? "resolved" : "reply", reply, reason, queue, trigger: "ai" };
 }
@@ -87,6 +97,7 @@ export function interpretDecision(decision: AgentDecision): AgentOutcome {
  */
 export function customerMessages(outcome: AgentOutcome, settings: Pick<AiSettings, "handoffMessage">, vars: { customer?: string | null; queue?: string | null }, now = new Date()) {
   // Cada parte separada por ---SPLIT--- é uma bolha (mensagem) própria, como o cliente vê no WhatsApp.
+  if (outcome.action === "no_reply") return [];
   if (outcome.action !== "handoff") return splitBubbles(outcome.reply);
   // Foto sem resultado no catálogo ou receita: a resposta já avisa o encaminhamento (sem repetir a de transferência).
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") return splitBubbles(outcome.reply);
@@ -148,8 +159,12 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     BRAND_RULES,
     IMAGE_RULE,
     STOCK_RULES,
+    DETAILS_RULES,
+    LOCATION_RULES,
+    NATURAL_RULES,
     FORMAT_RULES,
     GREETING_RULES,
+    CLOSING_RULES,
     `Seu nome no atendimento é ${settings.agentName}: use-o só se o cliente perguntar com quem está falando.`,
     `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
     "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",
@@ -160,7 +175,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     settings.extraInstructions.trim() ? `Instruções da empresa:\n${settings.extraInstructions.trim()}` : "",
     settings.aiChoosesQueue ? ROUTING_RULES : "",
     settings.aiChoosesQueue ? queueRoutingBlock(queues, settings.queueHints ?? {}) : "",
-    `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved", "reason": "resumo curto para o atendente do que o cliente precisa", "queue_id": "${settings.aiChoosesQueue ? "id da fila de transbordo (só com action handoff) ou vazio" : "vazio"}"}.`,
+    `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved" | "no_reply", "reason": "resumo curto para o atendente do que o cliente precisa", "queue_id": "${settings.aiChoosesQueue ? "id da fila de transbordo (só com action handoff) ou vazio" : "vazio"}"}.`,
   ].filter(Boolean).join("\n\n");
 }
 

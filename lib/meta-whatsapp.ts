@@ -214,6 +214,15 @@ export async function sendText(phone: string, text: string, replyToId?: string) 
   });
 }
 
+/** Localização nativa (pin no mapa do WhatsApp). */
+export async function sendLocation(phone: string, location: { latitude: number; longitude: number; name: string; address: string }) {
+  const { phoneNumberId } = getConfig();
+  return graph<{ messages: { id: string }[] }>(`/${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: normalizePhone(phone), type: "location", location }),
+  });
+}
+
 /** Lista interativa: comporta mais opções que os botões, limitados a 3 pela Meta. */
 export async function sendList(phone: string, list: { header?: string; body: string; footer?: string; button: string; rows: { id: string; title: string; description?: string }[] }) {
   const { phoneNumberId } = getConfig();

@@ -18,12 +18,12 @@ let storesCache: { at: number; stores: Promise<Map<string, StoreInfo>> } | null 
 export function storeDirectory() {
   if (storesCache && Date.now() - storesCache.at < STORES_MS) return storesCache.stores;
   const load = prisma.store
-    .findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { name: true, address: true, addressNumber: true, neighborhoods: true, city: true } })
+    .findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { name: true, address: true, addressNumber: true, neighborhoods: true, city: true, lat: true, lng: true } })
     .then((rows) => {
       const map = new Map<string, StoreInfo>();
       for (const row of rows) {
         const code = storeErpCode(row.name);
-        if (code && !map.has(code)) map.set(code, { name: row.name, address: row.address, addressNumber: row.addressNumber, neighborhood: row.neighborhoods[0] ?? null, city: row.city });
+        if (code && !map.has(code)) map.set(code, { name: row.name, address: row.address, addressNumber: row.addressNumber, neighborhood: row.neighborhoods[0] ?? null, city: row.city, lat: row.lat, lng: row.lng });
       }
       return map;
     });

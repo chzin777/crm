@@ -5,7 +5,7 @@ import { closeConversation } from "@/lib/chat/actions";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
 import { withTyping } from "@/lib/chat/typing";
-import { sendTypingIndicator } from "@/lib/meta-whatsapp";
+import { sendLocation, sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { Prisma } from "@/generated/prisma/client";
 import { hoursFor } from "@/lib/chat/operations";
 import { sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -19,6 +19,11 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { DETAILS_TOOL } from "@/lib/ai/product-details";
+import { buscarDetalhesProduto, type DetailsLog } from "@/lib/ai/product-details-db";
+import { storeDirectory } from "@/lib/ai/stock-db";
+import { deliverLocation, findStores, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
+import { isCourtesyClosing } from "@/lib/ai/closing";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
@@ -259,8 +264,10 @@ export type AgentRunInput = {
   queued?: QueuedState | null;
   /** Mensagens anteriores do cliente nesta conversa (insistência em tentativa de manipulação). */
   earlierCustomerTexts?: string[];
+  /** Última mensagem enviada pela IA (despedida → silêncio diante de mais um "obrigado"). */
+  lastAiText?: string | null;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
@@ -345,19 +352,48 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       return image ? { ...result, fotoAnexada: true } : result;
     },
   };
+  // Ficha do produto (web, cache 30 dias) + cores do mesmo modelo com saldo no ERP.
+  const details: DetailsLog[] = [];
+  const detailsTool = {
+    definition: DETAILS_TOOL,
+    run: async (args: Record<string, unknown>) => {
+      const { result, log } = await buscarDetalhesProduto(args, { products: catalogProducts });
+      details.push(log);
+      return result;
+    },
+  };
+  // Localização da loja: enviada depois da resposta (pin nativo com coordenadas; senão link do Google Maps).
+  let location: StoreLocation | null = null;
+  const locationTool = {
+    definition: LOCATION_TOOL,
+    run: async (args: Record<string, unknown>) => {
+      const wanted = typeof args.nomeLoja === "string" ? args.nomeLoja.slice(0, 60) : "";
+      const matches = wanted ? findStores(await storeDirectory(), wanted) : [];
+      if (matches.length === 1 || (matches.length > 1 && /^\s*(lj|loja)?\s*\d+\s*$/i.test(wanted))) {
+        location = storeLocation(matches[0].code, matches[0].store);
+        return { enviado: true, loja: location.nome, endereco: location.endereco, tipo: location.pinNativo ? "pin no mapa do WhatsApp" : "link do Google Maps", orientacao: "A localização sai automaticamente logo depois da sua resposta: responda curto, sem repetir o endereço inteiro." };
+      }
+      if (matches.length > 1) return { enviado: false, lojasPossiveis: matches.slice(0, 5).map((item) => storeLocation(item.code, item.store).nome.replace("Óticas Brasil - ", "")), orientacao: "Mais de uma loja combina: pergunte ao cliente qual delas." };
+      return { enviado: false, orientacao: "Loja não encontrada no cadastro: pergunte o bairro ou o nome da loja." };
+    },
+  };
   const decision = await aiJson<AgentDecision>(
     [
       { role: "system", content: system },
       { role: "user", content: sendMedia && media ? [{ type: "text", text: context }, ...media.parts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [stockTool] },
+    { ...input.meta, maxTokens: 700, tools: [stockTool, detailsTool, locationTool] },
   );
   let outcome = interpretDecision(decision);
+  // Silêncio só faz sentido diante de um fechamento de cortesia; em outra mensagem, a equipe assume.
+  if (outcome.action === "no_reply" && !isCourtesyClosing(input.pendingText.replace(/\n+/g, " "))) outcome = { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
   const photo = image as ProductImage | null;
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && outcome.action !== "handoff" && outcome.reply ? photo : null };
+  const pin = location as StoreLocation | null;
+  const answered = (outcome.action === "reply" || outcome.action === "resolved") && !!outcome.reply;
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered ? photo : null, details, location: pin && answered ? pin : null };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -376,7 +412,7 @@ async function respond(conversationId: string, messageId: string) {
 
   // Mensagens do cliente desde a última resposta (bot ou atendente), em ordem; mensagens que chegaram enquanto a
   // IA respondia o lote anterior também entram (até onde ela já leu, não até a resposta dela).
-  const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true, text: true, author: true, authorName: true } });
   const consumed = consumedUntil.get(conversationId);
   const lastOther = consumed ? await prisma.chatMessage.findFirst({ where: { conversationId, internal: false, OR: [{ author: "agent" }, { author: "bot", NOT: { authorName: AI_AUTHOR } }] }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }) : null;
   const pendingSince = consumed ? (lastOther && lastOther.createdAt > consumed ? lastOther.createdAt : consumed) : lastAnswer?.createdAt;
@@ -403,6 +439,7 @@ async function respond(conversationId: string, messageId: string) {
       earlierCustomerTexts: earlier.map((item) => item.text),
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
       queued,
+      lastAiText: lastAnswer?.author === "bot" && lastAnswer.authorName === AI_AUTHOR ? lastAnswer.text : null,
     }));
   } catch (error) {
     // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
@@ -411,7 +448,9 @@ async function respond(conversationId: string, messageId: string) {
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
   }
   const { outcome } = run;
-  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId);
+  // Encerramento silencioso: nada é enviado e a conversa não é transferida.
+  if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
+  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location);
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
     if (isWindowOpen(conversation.lastInboundAt)) await sendAiReply(conversation, outcome.reply, null, latest.externalId);
@@ -427,7 +466,7 @@ async function respond(conversationId: string, messageId: string) {
     if (outcome.reply && !settings.handoffMessage.trim()) await sendAiReply(fresh, outcome.reply, null, latest.externalId);
     return handoff(fresh, settings, outcome.reason, outcome.queue);
   }
-  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId);
+  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location);
   if (outcome.action === "resolved" && settings.closeWhenResolved) {
     // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
     await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${outcome.reason}`, "");
@@ -440,20 +479,34 @@ async function respond(conversationId: string, messageId: string) {
  * Confere de novo antes de enviar: se um atendente assumiu ou escreveu enquanto a IA pensava, não responde.
  */
 /** Resposta da IA ao cliente: com foto do produto (legenda) quando houver; se a foto falhar, segue em texto. */
-async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null) {
+async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null) {
   // Bolhas separadas por ---SPLIT---: a 1ª pode ser foto com legenda; as seguintes saem em texto, com "digitando..." e pausa curta.
-  return sendBubbles(splitBubbles(text), {
+  const sent = await sendBubbles(splitBubbles(text), {
     sendFirst: (part) => (image ? sendAutomaticImage(conversation, image.url, part, AI_AUTHOR, () => invalidateProductImage(image.sku)) : sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR)),
     sendNext: (part) => sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR),
     typing: () => sendTypingIndicator(typingMessageId),
   });
+  if (location) await sendStoreLocation(conversation, location);
+  return sent;
 }
 
-async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null) {
+/** Localização da loja logo depois da resposta: pin nativo (coordenadas) ou link do Google Maps com o endereço. */
+async function sendStoreLocation(conversation: ChatConversation, location: StoreLocation) {
+  const text = locationText(location);
+  return deliverLocation(location, {
+    sendPin: async () => {
+      const message = await sendAutomaticMessage(conversation, text, () => sendLocation(conversation.phone, { latitude: location.latitude!, longitude: location.longitude!, name: location.nome, address: location.endereco }), undefined, AI_AUTHOR);
+      if (message?.delivery === "failed") throw new Error("pin recusado");
+    },
+    sendText: (body) => sendAutomaticMessage(conversation, body, undefined, undefined, AI_AUTHOR),
+  }).catch((error) => console.warn(`[ai] ${conversation.id}: localização não enviada (${error instanceof Error ? error.message : error})`));
+}
+
+async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null) {
   const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
   if (!fresh || (await conversationMode(fresh)).mode !== "queued") return;
   if (!outcome.reply || !isWindowOpen(fresh.lastInboundAt)) return;
-  await sendAiReply(fresh, outcome.reply, image, typingMessageId);
+  await sendAiReply(fresh, outcome.reply, image, typingMessageId, location);
 }
 
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string };
@@ -481,6 +534,10 @@ export type PlaygroundResult = AgentOutcome & {
   stock?: StockLog[];
   /** Foto do produto que iria junto com a resposta (do cache ou da busca na web). */
   image?: { url: string; source: "cache" | "web"; query: string };
+  /** Fichas de produto consultadas (web ou cache) e cores com saldo. */
+  details?: DetailsLog[];
+  /** Localização que sairia logo depois da resposta (pin ou link do Google Maps). */
+  location?: StoreLocation;
 };
 
 /**
@@ -503,6 +560,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     meta,
     ignoreMediaTrigger: options.ignoreMediaTrigger,
     earlierCustomerTexts: messages.slice(0, lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text),
+    lastAiText: lastAi >= 0 ? messages[lastAi].text : null,
     loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
     buildContext: (media) => {
       const history = media ? attachSummary(messages, media.summary) : messages;
@@ -530,5 +588,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     injection: run.injection.risk === "none" ? undefined : run.injection,
     stock: run.stock?.length ? run.stock : undefined,
     image: run.image ? { url: run.image.url, source: run.image.source, query: run.image.query } : undefined,
+    details: run.details?.length ? run.details : undefined,
+    location: run.location ?? undefined,
   };
 }

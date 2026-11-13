@@ -599,6 +599,14 @@ model AiUsage {
 }
 
 /// Foto do produto achada na web (o ERP não tem imagens), por código do produto; validade de 30 dias.
+/// Ficha do produto pesquisada na web pela IA (por modelo, 30 dias; details nulo = sem resultado).
+model ProductDetailCache {
+  key       String   @id
+  query     String
+  details   String?
+  updatedAt DateTime @updatedAt
+}
+
 model ProductImageCache {
   sku       String   @id
   query     String

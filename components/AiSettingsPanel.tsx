@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, FileText, FlaskConical, MessagesSquare, Mic, ImageIcon, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, ExternalLink, FileText, FlaskConical, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
@@ -15,7 +15,8 @@ type Queue = { id: string; name: string; description?: string };
 type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
+/** silent: turno sem resposta (encerramento silencioso), só aparece no teste e não entra no histórico. */
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean };
 /** Mesmo resultado do motor do WhatsApp (runAiAgent), mais o que o cliente receberia. */
 type PlaygroundResult = AgentOutcome & {
   messages: string[];
@@ -29,6 +30,8 @@ type PlaygroundResult = AgentOutcome & {
   injection?: { risk: "suspect" | "high"; matches: string[] };
   stock?: StockLog[];
   image?: { url: string; source: "cache" | "web"; query: string };
+  details?: { product: string; source: "cache" | "web" | "none"; variations: number; ms: number }[];
+  location?: { nome: string; endereco: string; mapsUrl: string; pinNativo: boolean; latitude: number | null; longitude: number | null };
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   disponivel_na_regiao: "disponível na região",
@@ -54,7 +57,9 @@ const TRIGGER_LABELS: Record<AgentTrigger, string> = {
   catalog_miss: "foto de produto sem resultado no catálogo",
   prescription: "receita ou documento para conferência",
   security: "tentativas repetidas de manipular a IA",
+  closing: "cliente só agradeceu depois da despedida",
 };
+const DETAILS_SOURCE_LABELS = { web: "pesquisada na web", cache: "do cache (30 dias)", none: "não encontrada na web" } as const;
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const TABS: { id: Tab; label: string; short: string; icon: typeof Bot }[] = [
@@ -232,7 +237,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     setBusy(true);
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
-      const payload = { settings, profile, ignoreMediaTrigger: readMedia, messages: next.map((message) => ({ from: message.from, text: message.historyText ?? message.text })) };
+      const payload = { settings, profile, ignoreMediaTrigger: readMedia, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -252,15 +257,23 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
+      // Encerramento silencioso: nada vai ao cliente; o teste mostra o aviso fora do histórico da conversa.
+      if (data.action === "no_reply") {
+        const why = data.trigger === "closing" ? "a IA já tinha se despedido e o cliente só agradeceu de novo" : "o cliente só encerrou com cortesia";
+        setMessages([...messages, sent, { from: "ai", text: "", silent: true, note: `Silêncio: nenhuma mensagem enviada ao cliente (${why}).` }]);
+        return;
+      }
       // Uma bolha por mensagem, como no WhatsApp: foto e selos na primeira, nota de transferência na última.
       const parts = data.messages.length ? data.messages : [""];
       const replies: PlaygroundMessage[] = parts.map((part, position) => ({
         from: "ai",
         text: part || "(nenhuma mensagem ao cliente)",
         historyText: part,
-        ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image } : {}),
+        ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image, details: data.details } : {}),
         ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff" } : {}),
       }));
+      // Localização sai logo depois da resposta, como mensagem própria (pin ou link do Google Maps).
+      if (data.location) replies.push({ from: "ai", text: "", location: data.location, historyText: `📍 ${data.location.nome}\n${data.location.endereco}\n${data.location.mapsUrl}` });
       setMessages([...messages, sent, ...replies]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível testar a IA.");
@@ -325,11 +338,22 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
                   </figcaption>
                 </figure>
               )}
+              {message.location && (
+                <a href={message.location.mapsUrl} target="_blank" rel="noopener noreferrer" className="block cursor-pointer overflow-hidden rounded-lg border border-slate-200 hover:border-[#002187] dark:border-slate-700" title="Abrir no Google Maps">
+                  <span className="flex h-20 items-center justify-center bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]"><MapPin className="h-8 w-8" /></span>
+                  <span className="block space-y-0.5 px-2 py-1.5">
+                    <span className="block text-[11px] font-bold text-[#051647] dark:text-white">{message.location.nome}</span>
+                    <span className="block text-[10px] text-slate-500 dark:text-slate-300">{message.location.endereco}</span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#002187] dark:text-[#C4D600]"><ExternalLink className="h-3 w-3" />{message.location.pinNativo ? `Pin no mapa do WhatsApp (${message.location.latitude}, ${message.location.longitude})` : "Link do Google Maps (loja sem coordenadas no cadastro)"}</span>
+                  </span>
+                </a>
+              )}
               {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
               {message.text && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
               {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
               {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {STOCK_SCENARIO_LABELS[item.scenario]} · {item.products} produto{item.products === 1 ? "" : "s"}, {item.stores} loja{item.stores === 1 ? "" : "s"} · {item.ms} ms{item.cached ? " (cache)" : ""}</p>)}
+              {message.details?.map((item, index) => <p key={`d${index}`} className="inline-flex items-center gap-1 rounded-md bg-[#002187]/10 px-2 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-slate-200" title="Só aparece no teste: ficha do produto"><BookOpenText className="h-3 w-3" />Ficha do produto: {item.product} · {DETAILS_SOURCE_LABELS[item.source]} · {item.variations} cor{item.variations === 1 ? "" : "es"} com saldo · {item.ms} ms</p>)}
               {message.search && <p className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300" title="Só aparece no teste"><Search className="h-3 w-3" />{message.search.kind === "produto" ? <>Busca no ERP: “{message.search.term}” · {message.search.found} resultado{message.search.found === 1 ? "" : "s"}</> : <>Foto identificada como {message.search.kind}{message.search.kind === "outro" ? " (sem busca)" : " (conferência humana)"}</>}</p>}
             </div>
           </div>

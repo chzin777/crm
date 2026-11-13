@@ -4,6 +4,7 @@
  * Sem banco aqui: a chamada HTTP e o relógio entram por parâmetro (testável; mesma lógica no WhatsApp e no /ia).
  */
 import { storeErpCode } from "@/lib/stores";
+import { humanizeProductName } from "@/lib/ai/product-names";
 
 export const STOCK_CACHE_TTL_MS = 180_000;
 export const STOCK_TIMEOUT_MS = 3_000;
@@ -75,7 +76,7 @@ export function isRetailUnit(name: string) {
 }
 
 /** Cadastro da loja usado para o nome comercial (tabela Store do CRM). */
-export type StoreInfo = { name: string; address: string | null; addressNumber: string | null; neighborhood: string | null; city: string | null };
+export type StoreInfo = { name: string; address: string | null; addressNumber: string | null; neighborhood: string | null; city: string | null; lat?: number | null; lng?: number | null };
 
 const ACCENTS: Record<string, string> = {
   GOIANIA: "Goiânia", AMAZONIA: "Amazônia", GOIAS: "Goiás", BRASILIA: "Brasília", ARAGUAINA: "Araguaína", AEROVIARIO: "Aeroviário",
@@ -125,7 +126,7 @@ export function matchesRegion(code: string, store: StoreInfo | undefined, region
 export type StockStore = { code: string; loja: string; quantidade: number; /** Preço de venda vigente nesta loja, em reais (ex.: "R$ 1.070,00"). */ precoVenda?: string; /** Cidade para agrupar a lista (ex.: "Goiânia", "Águas Claras (DF)"). */ cidade?: string };
 
 /** Regiões administrativas do DF que aparecem como cidade no cadastro das lojas. */
-const DF_PLACES = /^(BRASILIA|AGUAS CLARAS|TAGUATINGA|CEILANDIA|GAMA|SOBRADINHO|SAMAMBAIA|GUARA|PLANALTINA|SUDOESTE|ASA (SUL|NORTE)|LAGO (SUL|NORTE)|RECANTO DAS EMAS|SANTA MARIA|RIACHO FUNDO|NUCLEO BANDEIRANTE|VICENTE PIRES|JARDIM BOTANICO|SAO SEBASTIAO|PARANOA|CRUZEIRO|NOROESTE|OCTOGONAL|ARNIQUEIRA|DISTRITO FEDERAL|DF)(s|$)/;
+const DF_PLACES = /^(BRASILIA|AGUAS CLARAS|TAGUATINGA|CEILANDIA|GAMA|SOBRADINHO|SAMAMBAIA|GUARA|PLANALTINA|SUDOESTE|ASA (SUL|NORTE)|LAGO (SUL|NORTE)|RECANTO DAS EMAS|SANTA MARIA|RIACHO FUNDO|NUCLEO BANDEIRANTE|VICENTE PIRES|JARDIM BOTANICO|SAO SEBASTIAO|PARANOA|CRUZEIRO|NOROESTE|OCTOGONAL|ARNIQUEIRA|DISTRITO FEDERAL|DF)(\s|$)/;
 
 /** Cidade da loja para o agrupamento da lista; DF identificado pelo nome da região. */
 export function storeCity(store: StoreInfo | undefined) {
@@ -221,7 +222,7 @@ export function buildStockResult(input: {
       codigo: product.code,
       referencia: product.code,
       produto: product.description,
-      nomeProduto: product.description,
+      nomeProduto: humanizeProductName(product.description, product.brand),
       marca: product.brand,
       preco: input.withPrices && precoVenda ? Number(precoVenda.replace(/[^\d,]/g, "").replace(",", ".")) : null,
       precoVenda,

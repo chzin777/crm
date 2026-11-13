@@ -26,7 +26,7 @@ describe("preço de venda e quantidade na tool de estoque", () => {
     const result = buildStockResult({ term: "Ray-Ban Justin", region: "Setor Bueno", products: justin, lookup, stores, withPrices: true });
     const [product] = result.produtos;
     expect(result.cenario).toBe("disponivel_na_regiao");
-    expect(product).toMatchObject({ nomeProduto: "OCS RAY BAN REF-RB4165 JUSTIN 601/8G", referencia: "108564", precoVenda: "R$ 1.070,00", precoVariaPorLoja: true, precoSobConsulta: false, totalDisponivelRede: 6 });
+    expect(product).toMatchObject({ nomeProduto: "Óculos de sol Ray-Ban (ref. RB4165 Justin)", referencia: "108564", precoVenda: "R$ 1.070,00", precoVariaPorLoja: true, precoSobConsulta: false, totalDisponivelRede: 6 });
     expect(product.lojasNaRegiao[0]).toMatchObject({ loja: expect.stringContaining("Setor Bueno"), quantidade: 3, precoVenda: "R$ 1.070,00" });
     expect(product.lojasComEstoque.find((store) => store.code === "50")).toMatchObject({ quantidade: 1, precoVenda: "R$ 1.122,55", cidade: "Águas Claras (DF)" });
     // Nunca a média de vendas com desconto (price: 540 do catálogo).
