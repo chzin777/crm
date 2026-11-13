@@ -13,7 +13,7 @@ export async function POST() {
   if (!aiConfigured()) return NextResponse.json({ ok: false, error: "Chave da OpenAI não configurada no servidor.", status: await readAiStatus() });
   const startedAt = Date.now();
   try {
-    await aiJson<{ ok?: boolean }>([{ role: "user", content: 'Responda apenas {"ok": true}' }], { feature: "check", userId: guard.user.id, maxTokens: 300 });
+    await aiJson<{ ok?: boolean }>([{ role: "user", content: 'Responda apenas este json: {"ok": true}' }], { feature: "check", userId: guard.user.id, maxTokens: 300 });
     return NextResponse.json({ ok: true, status: await readAiStatus() });
   } catch (error) {
     const status = await readAiStatus();

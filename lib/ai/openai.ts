@@ -63,6 +63,8 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   }
   if (!response.ok) {
     const error = friendlyError(response.status, body.error?.code, body.error?.type);
+    // Motivo original da OpenAI no log do servidor (a tela mostra a versão traduzida).
+    console.error(`[ai] OpenAI ${response.status} (${meta.feature}): ${(body.error as { message?: string } | undefined)?.message ?? body.error?.code ?? "sem detalhe"}`);
     await recordAiUsage({ ...base, inputTokens: 0, outputTokens: 0, ok: false, error: error.message, creditExhausted: error.creditExhausted });
     throw error;
   }
