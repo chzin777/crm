@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, ExternalLink, FileText, FlaskConical, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
@@ -10,13 +10,38 @@ import { SIMULATED_PROFILES, type AgentOutcome, type AgentTrigger, type Simulate
 import type { AiUsageReport } from "@/lib/ai/store";
 import type { StockLog } from "@/lib/ai/stock";
 import { defaultQueueHint, isGeneralQueue } from "@/lib/ai/routing";
+import { productSelectRef, selectionText, type InteractiveShowcase, type ShowcaseListRow } from "@/lib/ai/interactive-showcase";
 
 type Queue = { id: string; name: string; description?: string };
 type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
 /** silent: turno sem resposta (encerramento silencioso), só aparece no teste e não entra no histórico. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean };
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string };
+
+/** Lista Interativa do WhatsApp simulada: botão "Ver modelos" abre a gaveta; tocar num modelo envia a escolha. */
+function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveShowcase; disabled: boolean; onPick: (row: ShowcaseListRow) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] font-medium text-slate-500 dark:text-slate-300">No WhatsApp vai como lista interativa: <WhatsAppText text={list.bodyText} /></p>
+      <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-[#002187]/30 py-1.5 text-[11px] font-semibold text-[#002187] hover:bg-[#002187]/5 dark:border-white/20 dark:text-[#C4D600] dark:hover:bg-white/5">
+        <List className="h-3.5 w-3.5" />{list.buttonText}
+      </button>
+      {open && (
+        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+          <p className="bg-slate-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-white/5 dark:text-slate-300">{list.sectionTitle}</p>
+          {list.rows.map((row) => (
+            <button key={row.id} type="button" disabled={disabled} onClick={() => { setOpen(false); onPick(row); }} className="block w-full cursor-pointer border-t border-slate-100 px-2 py-1.5 text-left hover:bg-[#C4D600]/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:hover:bg-white/5">
+              <span className="block text-[11px] font-semibold text-[#051647] dark:text-white">{row.title}</span>
+              <span className="block text-[10px] text-slate-500 dark:text-slate-300">{row.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 /** Mesmo resultado do motor do WhatsApp (runAiAgent), mais o que o cliente receberia. */
 type PlaygroundResult = AgentOutcome & {
   messages: string[];
@@ -34,6 +59,7 @@ type PlaygroundResult = AgentOutcome & {
   image?: { url: string; source: "cache" | "web"; query: string; sku?: string };
   details?: { product: string; source: "cache" | "web" | "none"; variations: number; ms: number; rating?: string | null }[];
   location?: { nome: string; endereco: string; mapsUrl: string; pinNativo: boolean; latitude: number | null; longitude: number | null };
+  interactiveList?: InteractiveShowcase;
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   disponivel_na_regiao: "disponível na região",
@@ -235,21 +261,25 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     return { file, media: { kind: check.kind, name: file.name, url } };
   };
 
-  const send = async (override?: { file: File; media: PlaygroundMedia } | null) => {
-    const text = draft.trim();
-    const media = override ?? attachment;
+  const send = async (override?: { file: File; media: PlaygroundMedia } | null, picked?: ShowcaseListRow) => {
+    // Toque na lista interativa: a escolha vai como no WhatsApp (texto legível + referência do modelo).
+    const pickedRef = picked ? productSelectRef(picked.id) : null;
+    const text = pickedRef && picked ? selectionText(pickedRef, picked.title, picked.description) : draft.trim();
+    const media = pickedRef ? null : override ?? attachment;
     if ((!text && !media) || busy || ended) return;
-    const customer: PlaygroundMessage = { from: "customer", text, ...(media ? { media: media.media } : {}) };
+    const customer: PlaygroundMessage = { from: "customer", text, ...(media ? { media: media.media } : {}), ...(pickedRef ? { selectedProductRef: pickedRef } : {}) };
     const next = [...messages, customer];
     setMessages(next);
-    setDraft("");
-    setAttachment(null);
+    if (!pickedRef) {
+      setDraft("");
+      setAttachment(null);
+    }
     setError("");
     setBusy(true);
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
       const session = sessionRef.current;
-      const payload = { settings, profile, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}) })) };
+      const payload = { settings, profile, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}), ...(message.selectedProductRef ? { selectedProductRef: message.selectedProductRef } : {}) })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -286,6 +316,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         historyText: part,
         ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image, details: data.details } : {}),
         ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff" } : {}),
+        // A bolha da vitrine numerada é a que vira lista interativa no WhatsApp.
+        ...(data.interactiveList && (part.match(/^\s*\d+\.\s/gm) ?? []).length >= 2 ? { list: data.interactiveList } : {}),
       }));
       // Localização sai logo depois da resposta, como mensagem própria (pin ou link do Google Maps).
       if (data.location) replies.push({ from: "ai", text: "", location: data.location, historyText: `📍 ${data.location.nome}\n${data.location.endereco}\n${data.location.mapsUrl}` });
@@ -363,6 +395,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
               )}
               {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
               {message.text && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
+              {message.list && <InteractiveListPreview list={message.list} disabled={busy || ended} onPick={(row) => void send(null, row)} />}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
               {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
               {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {item.kind === "marca_ampla" ? `busca ampla (vitrine sem foto) · ${item.products} modelo${item.products === 1 ? "" : "s"} com estoque` : `${STOCK_SCENARIO_LABELS[item.scenario]} · ${item.products} produto${item.products === 1 ? "" : "s"}, ${item.stores} loja${item.stores === 1 ? "" : "s"}`} · {item.ms} ms{item.cached ? " (cache)" : ""}{item.sheet ? ` · ficha resumida ${DETAILS_SOURCE_LABELS[item.sheet]}` : ""}{item.sheet ? (item.rating ? ` · avaliação ${item.rating}` : " · sem avaliação confiável") : ""}{item.image === "sent" ? " · foto já enviada nesta etapa" : item.image === "none" ? " · foto não encontrada" : ""}</p>)}

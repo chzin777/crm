@@ -70,6 +70,19 @@ vi.mock("@/lib/ai/stock-db", () => ({
       const produtos = [{ codigo: chosen.code, produto: chosen.description, marca: "RADDA", preco: 120, precoVenda: "R$ 120,00", nomeProduto: chosen.description, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 1, lojasComEstoque: [{ code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
       return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 1, ms: 1, cached: false } };
     }
+    // Prada Linea Rossa: marca → vitrine com 2 modelos; referência → o modelo com estoque em 2 lojas.
+    if (/prada|07RV|02WV/i.test(term)) {
+      const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
+      const prada = [{ code: "900701", description: "ARM PRADA LINEA ROSSA REF PS 07RV 1AB 54", brand: "PRADA LINEA ROSSA" }, { code: "900702", description: "ARM PRADA LINEA ROSSA REF PS 02WV 1BO 55", brand: "PRADA LINEA ROSSA" }];
+      if (args.tipoBusca !== "modelo_especifico") {
+        const unit = (qty: number) => [{ unit: "36", name: "LJ 36", qty, price: 1960 }];
+        const result = buildShowcaseResult({ term, groups: showcaseCandidates(prada), lookup: { stockStatus: "ok", fromCache: 0, requested: 2, byCode: { "900701": unit(2), "900702": unit(1) } }, stores: STORES, withPrices: true, brand: "PRADA LINEA ROSSA" });
+        return { result, log: { term, region: "", scenario: result.cenario, products: result.modelos.length, stores: 0, ms: 1, cached: false, kind: "marca_ampla" } };
+      }
+      const chosen = /02WV/i.test(term) ? prada[1] : prada[0];
+      const produtos = [{ codigo: chosen.code, produto: chosen.description, marca: chosen.brand, preco: 1960, precoVenda: "R$ 1.960,00", nomeProduto: chosen.description, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 3, lojasComEstoque: [{ code: "39", loja: "Loja Jardim Goiás — Av. Deputado Jamel Cecilio, 3300", quantidade: 2, cidade: "Goiânia" }, { code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
+      return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 2, ms: 1, cached: false } };
+    }
     // Busca aproximada que devolve o Justin primeiro (o vazamento original), com o Aviator logo atrás.
     const product = (item: typeof AVIATOR) => ({ ...item, preco: 899, precoVenda: "R$ 899,00", nomeProduto: item.produto, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 1, lojasComEstoque: [{ code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] });
     const produtos = /3025/.test(term) ? [product(JUSTIN), product(AVIATOR)] : [product(JUSTIN)];
@@ -415,5 +428,40 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
     expect(fallback.messages[0]).toContain("Radda | Ref. JC60020");
     expect(fallback.image?.sku).toBe("145145");
+  });
+});
+
+describe("vitrine como Lista Interativa nativa do WhatsApp", () => {
+  it("\"Vocês têm Prada Linea Rossa?\" → lista com botão Ver modelos; toque em PS 07RV → foto + ficha + lojas", async () => {
+    const { readContent } = await import("@/lib/chat/inbound-content");
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ termoBusca: "Prada Linea Rossa", tipoBusca: "marca_ampla" })) as { vitrineFormatada: string };
+      return { reply: `${result.vitrineFormatada}\n---SPLIT---\nQual desses te interessou?`, action: "reply" };
+    };
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "Vocês têm Prada Linea Rossa?" }];
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-lista" });
+    expect(turn1.interactiveList).toMatchObject({ buttonText: "Ver modelos", sectionTitle: "Modelos em estoque" });
+    expect(turn1.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:PS 07RV", "product_select:PS 02WV"]);
+    expect(turn1.interactiveList?.rows[0]).toMatchObject({ title: "Ref. PS 07RV", description: "Prada Linea Rossa • R$ 1.960,00" });
+    history.push(...turn1.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
+
+    // Webhook: list_reply com o id do modelo → mensagem legível + referência escolhida.
+    const tapped = readContent({ type: "interactive", interactive: { type: "list_reply", list_reply: { id: "product_select:PS 07RV", title: "Ref. PS 07RV", description: "Prada Linea Rossa • R$ 1.960,00" } } });
+    expect(tapped).toEqual({ text: "Quero ver o modelo: Prada Linea Rossa (Ref. PS 07RV)", media: null, selectedProductRef: "PS 07RV" });
+
+    // Turno 2: mesmo com o modelo pedindo a marca de novo, a escolha abre o PS 07RV específico.
+    calls.photos.length = 0;
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ termoBusca: "Prada", tipoBusca: "marca_ampla" })) as { fichaFormatada?: string; vitrineFormatada?: string };
+      return { reply: `${result.fichaFormatada ?? result.vitrineFormatada}\n---SPLIT---\nGostaria de reservar essa peça?`, action: "reply" };
+    };
+    history.push({ from: "customer", text: tapped.text, selectedProductRef: tapped.selectedProductRef });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-lista" });
+    expect(calls.stock.at(-1)).toMatchObject({ tipoBusca: "modelo_especifico" });
+    expect(String(calls.stock.at(-1)?.termoBusca)).toContain("PS 07RV");
+    expect(turn2.image?.sku).toBe("900701");
+    expect(turn2.messages[0]).toContain("Ref. PS 07RV");
+    expect(turn2.messages[0]).toContain("📍 *Loja Jardim Goiás* - Goiânia (Av. Deputado Jamel Cecilio, 3300) — 2 unidades");
+    expect(turn2.interactiveList).toBeUndefined();
   });
 });

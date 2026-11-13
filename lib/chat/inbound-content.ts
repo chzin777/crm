@@ -1,4 +1,5 @@
 import type { AttachmentKind } from "@/lib/chat/media-rules";
+import { productSelectRef, selectionText } from "@/lib/ai/interactive-showcase";
 
 /** Leitura pura do payload da Meta (sem banco), separada de inbound.ts para poder ser testada. */
 export type MetaMedia = { id?: string; mime_type?: string; caption?: string; filename?: string };
@@ -18,7 +19,7 @@ export type MetaInboundMessage = {
   location?: { latitude?: number; longitude?: number; name?: string; address?: string };
   contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string }[] }[];
   button?: { text?: string };
-  interactive?: { type?: string; button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } };
+  interactive?: { type?: string; button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string; description?: string } };
 };
 
 export const MEDIA_LABELS: Record<AttachmentKind, string> = {
@@ -55,7 +56,7 @@ export function mediaFailureReason(detail: string) {
   return "falha ao baixar o arquivo do WhatsApp";
 }
 
-export function readContent(message: MetaInboundMessage): { text: string; media: (MetaMedia & { kind: AttachmentKind }) | null } {
+export function readContent(message: MetaInboundMessage): { text: string; media: (MetaMedia & { kind: AttachmentKind }) | null; /** Referência escolhida na lista interativa da vitrine. */ selectedProductRef?: string } {
   switch (message.type) {
     case "text":
       return { text: message.text?.body ?? "", media: null };
@@ -73,8 +74,13 @@ export function readContent(message: MetaInboundMessage): { text: string; media:
       return { text: message.contacts ? describeContacts(message.contacts) : "👤 Contato", media: null };
     case "button":
       return { text: message.button?.text ?? "[Botão]", media: null };
-    case "interactive":
-      return { text: message.interactive?.button_reply?.title ?? message.interactive?.list_reply?.title ?? "[Resposta interativa]", media: null };
+    case "interactive": {
+      // Modelo escolhido na vitrine interativa: texto legível no histórico ("Quero ver o modelo: ...").
+      const reply = message.interactive?.list_reply;
+      const ref = productSelectRef(reply?.id);
+      if (ref) return { text: selectionText(ref, reply?.title, reply?.description), media: null, selectedProductRef: ref };
+      return { text: message.interactive?.button_reply?.title ?? reply?.title ?? "[Resposta interativa]", media: null };
+    }
     default:
       return { text: `[Mensagem do tipo ${message.type ?? "desconhecido"}]`, media: null };
   }

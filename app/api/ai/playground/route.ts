@@ -44,6 +44,8 @@ export async function POST(request: Request) {
       text: String(item?.text ?? "").slice(0, 2000).trim(),
       ...(typeof item?.imageSku === "string" && /^[\w.-]{1,40}$/.test(item.imageSku) ? { imageSku: item.imageSku } : {}),
       ...(typeof item?.imageUrl === "string" && /^(https?:\/\/|\/)\S{1,500}$/.test(item.imageUrl) ? { imageUrl: item.imageUrl } : {}),
+      // Toque na lista interativa simulada (mesmo id do WhatsApp: "product_select:<ref>").
+      ...(item?.from !== "ai" && typeof item?.selectedProductRef === "string" && /^[\w .#/-]{1,60}$/.test(item.selectedProductRef) ? { selectedProductRef: item.selectedProductRef } : {}),
     }))
     // Mensagem só com anexo (sem texto) é a última do cliente.
     .filter((item, index, list) => item.text || (media && index === list.length - 1 && item.from === "customer"))

@@ -10,6 +10,7 @@
 
 import { request } from "node:https";
 import { connect, type TLSSocket } from "node:tls";
+import { interactiveListPayload, type InteractiveShowcase } from "@/lib/ai/interactive-showcase";
 import { sendWhatsAppTypingIndicator, WHATSAPP_GRAPH_API } from "@/lib/chat/typing";
 
 const GRAPH_API = WHATSAPP_GRAPH_API;
@@ -242,6 +243,15 @@ export async function sendList(phone: string, list: { header?: string; body: str
         action: { button: list.button, sections: [{ rows: list.rows }] },
       },
     }),
+  });
+}
+
+/** Vitrine como Lista Interativa nativa (limites da Meta aplicados em interactiveListPayload para não tomar HTTP 400). */
+export async function sendWhatsAppInteractiveList(phone: string, list: InteractiveShowcase) {
+  const { phoneNumberId } = getConfig();
+  return graph<{ messages: { id: string }[] }>(`/${phoneNumberId}/messages`, {
+    method: "POST",
+    body: JSON.stringify(interactiveListPayload(normalizePhone(phone), list)),
   });
 }
 

@@ -136,9 +136,10 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
   const replyTo = await findQuoted(message.context?.id);
   // error: motivo da falha no download (a IA avisa o cliente em vez de ignorar o arquivo).
-  const metaMedia: SavedMetaMedia | null = content.media
+  // selectedProductRef: modelo escolhido na lista interativa da vitrine (a IA abre a ficha + foto desse item).
+  const metaMedia: SavedMetaMedia | { selectedProductRef: string } | null = content.media
     ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind, ...(mediaError ? { error: mediaError } : {}) }
-    : null;
+    : content.selectedProductRef ? { selectedProductRef: content.selectedProductRef } : null;
   const choiceId = message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
   // Ausência/saudação automática do WhatsApp Business do contato: fica no histórico, mas não abre menu nem conta como resposta.
   const autoReply = await detectAutoReply({
