@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, FileText, FlaskConical, MessagesSquare, Mic, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, FileText, FlaskConical, MessagesSquare, Mic, ImageIcon, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
@@ -15,7 +15,7 @@ type Queue = { id: string; name: string; description?: string };
 type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
 /** Mesmo resultado do motor do WhatsApp (runAiAgent), mais o que o cliente receberia. */
 type PlaygroundResult = AgentOutcome & {
   messages: string[];
@@ -28,6 +28,7 @@ type PlaygroundResult = AgentOutcome & {
   search?: { kind: string; term: string; found: number };
   injection?: { risk: "suspect" | "high"; matches: string[] };
   stock?: StockLog[];
+  image?: { url: string; source: "cache" | "web"; query: string };
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   disponivel_na_regiao: "disponível na região",
@@ -246,7 +247,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
       ].filter(Boolean);
-      setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff", search: data.search, injection: data.injection, stock: data.stock }]);
+      setMessages([...messages, sent, { from: "ai", text: data.messages.join("\n\n") || "(nenhuma mensagem ao cliente)", historyText: data.messages.join("\n\n"), note: notes.join(" "), handoff: data.action === "handoff", search: data.search, injection: data.injection, stock: data.stock, image: data.image }]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível testar a IA.");
     } finally {
@@ -301,6 +302,15 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
             <div className={`max-w-[80%] space-y-1 rounded-xl px-3 py-2 text-xs leading-relaxed ${message.from === "customer" ? "bg-[#002187] text-white" : "border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"}`}>
               {message.from === "ai" && <p className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{settings.agentName}</p>}
               {message.media && <MediaPreview media={message.media} />}
+              {message.image && (
+                <figure className="space-y-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- foto externa do produto, só no teste */}
+                  <img src={message.image.url} alt={`Foto do produto: ${message.image.query}`} className="max-h-56 w-full rounded-lg bg-white object-contain" referrerPolicy="no-referrer" loading="lazy" />
+                  <figcaption className="inline-flex items-center gap-1 rounded-md bg-[#002187]/10 px-2 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-slate-200" title={`Busca: ${message.image.query}`}>
+                    <ImageIcon className="h-3 w-3" />Foto do produto · {message.image.source === "cache" ? "do cache" : "busca na web"} (no WhatsApp vai com a resposta como legenda)
+                  </figcaption>
+                </figure>
+              )}
               {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
               {message.text && <p className="whitespace-pre-wrap">{message.text}</p>}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
@@ -452,6 +462,7 @@ export function AiSettingsPanel() {
   const [saved, setSaved] = useState<string>("");
   const [queues, setQueues] = useState<Queue[]>([]);
   const [configured, setConfigured] = useState(true);
+  const [imageSearch, setImageSearch] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [usage, setUsage] = useState<AiUsageReport | null>(null);
@@ -463,13 +474,14 @@ export function AiSettingsPanel() {
     let active = true;
     fetch("/api/ai/settings")
       .then(async (response) => {
-        const data = (await response.json()) as { settings?: AiSettings; queues?: Queue[]; configured?: boolean; error?: string };
+        const data = (await response.json()) as { settings?: AiSettings; queues?: Queue[]; configured?: boolean; imageSearch?: string | null; error?: string };
         if (!active) return;
         if (!response.ok || !data.settings) throw new Error(data.error ?? "Não foi possível carregar as configurações da IA.");
         setSettings(data.settings);
         setSaved(JSON.stringify(data.settings));
         setQueues(data.queues ?? []);
         setConfigured(data.configured !== false);
+        setImageSearch(data.imageSearch ?? null);
       })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar as configurações da IA."); });
     return () => { active = false; };
@@ -851,6 +863,16 @@ export function AiSettingsPanel() {
             <p className="text-[10px] text-slate-400">A OpenAI não informa o saldo em dinheiro pela chave do projeto. A verificação faz um pedido mínimo (frações de centavo) e diz se a chave, o modelo e os créditos estão funcionando. O valor em R$ do saldo é calculado em Consumo e créditos.</p>
           </Block>
 
+          <Block title="Foto do produto" hint="O ERP não tem fotos: a IA busca a foto do modelo na web (com cache de 30 dias por produto) e envia junto com as informações de estoque.">
+            <Toggle label="Enviar foto do produto encontrada na web junto com as informações" description="Só quando o modelo é confirmado no estoque. Se a foto falhar, a resposta segue em texto." checked={settings.sendProductImage} onChange={(value) => set("sendProductImage", value)} />
+            <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Busca de imagens</p>
+              <p className={`mt-1 flex items-center gap-1.5 text-sm font-bold ${imageSearch ? "text-emerald-700 dark:text-emerald-400" : "text-slate-500"}`}>
+                {imageSearch ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}{imageSearch ? `${imageSearch} configurado` : "Sem chave de busca configurada"}
+              </p>
+              {!imageSearch && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Para ativar, configure SERPER_API_KEY (ou GOOGLE_CSE_API_KEY e GOOGLE_CSE_CX) no .env do servidor. Sem a chave, a IA responde só em texto.</p>}
+            </div>
+          </Block>
           <Block title="Modelo e criatividade">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className={labelCls}>Modelo

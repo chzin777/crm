@@ -8,7 +8,7 @@ import { withTyping } from "@/lib/chat/typing";
 import { sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { Prisma } from "@/generated/prisma/client";
 import { hoursFor } from "@/lib/chat/operations";
-import { sendAutomaticMessage } from "@/lib/chat/outbound";
+import { sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables } from "@/lib/chat/text";
 import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
@@ -19,6 +19,8 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
+import { imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
 import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
 import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
@@ -228,7 +230,7 @@ export type AgentRunInput = {
   /** Mensagens anteriores do cliente nesta conversa (insistência em tentativa de manipulação). */
   earlierCustomerTexts?: string[];
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
@@ -294,16 +296,23 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
+    extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
+  // Foto do produto (web + cache por código): só com modelo confirmado no estoque e a opção ligada em /ia.
+  let image: ProductImage | null = null;
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
       const { result, log } = await consultarEstoqueProduto(args, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
-      return result;
+      const inStock = result.produtos.find((product) => product.lojasComEstoque.length > 0);
+      if (!image && inStock && settings.sendProductImage && imageSearchStatus()) {
+        image = await searchAndCacheProductImage(inStock);
+        log.image = image ? image.source : "none";
+      }
+      return image ? { ...result, fotoAnexada: true } : result;
     },
   };
   const decision = await aiJson<AgentDecision>(
@@ -316,7 +325,9 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   let outcome = interpretDecision(decision);
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode };
+  // Foto só acompanha resposta ao cliente (não vai junto de transferência).
+  const photo = image as ProductImage | null;
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && outcome.action !== "handoff" && outcome.reply ? photo : null };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -364,7 +375,7 @@ async function respond(conversationId: string, messageId: string) {
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
   }
   const { outcome } = run;
-  if (queued) return replyWhileQueued(conversationId, outcome);
+  if (queued) return replyWhileQueued(conversationId, outcome, run.image);
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
     if (isWindowOpen(conversation.lastInboundAt)) await sendAutomaticMessage(conversation, outcome.reply, undefined, undefined, AI_AUTHOR);
@@ -380,7 +391,7 @@ async function respond(conversationId: string, messageId: string) {
     if (outcome.reply && !settings.handoffMessage.trim()) await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
     return handoff(fresh, settings, outcome.reason, outcome.queue);
   }
-  await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
+  await sendAiReply(fresh, outcome.reply, run.image);
   if (outcome.action === "resolved" && settings.closeWhenResolved) {
     // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
     await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${outcome.reason}`, "");
@@ -392,11 +403,17 @@ async function respond(conversationId: string, messageId: string) {
  * vira só a resposta; gatilhos sem resposta (mídia, limite) ficam em silêncio para a equipe ver.
  * Confere de novo antes de enviar: se um atendente assumiu ou escreveu enquanto a IA pensava, não responde.
  */
-async function replyWhileQueued(conversationId: string, outcome: AgentOutcome) {
+/** Resposta da IA ao cliente: com foto do produto (legenda) quando houver; se a foto falhar, segue em texto. */
+async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null) {
+  if (!image) return sendAutomaticMessage(conversation, text, undefined, undefined, AI_AUTHOR);
+  return sendAutomaticImage(conversation, image.url, text, AI_AUTHOR, () => invalidateProductImage(image.sku));
+}
+
+async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null) {
   const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
   if (!fresh || (await conversationMode(fresh)).mode !== "queued") return;
   if (!outcome.reply || !isWindowOpen(fresh.lastInboundAt)) return;
-  await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
+  await sendAiReply(fresh, outcome.reply, image);
 }
 
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string };
@@ -422,6 +439,8 @@ export type PlaygroundResult = AgentOutcome & {
   injection?: InjectionCheck;
   /** Consultas de estoque feitas pela tool (termo, região, cenário, lojas e tempo). */
   stock?: StockLog[];
+  /** Foto do produto que iria junto com a resposta (do cache ou da busca na web). */
+  image?: { url: string; source: "cache" | "web"; query: string };
 };
 
 /**
@@ -470,5 +489,6 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     search: run.search ?? undefined,
     injection: run.injection.risk === "none" ? undefined : run.injection,
     stock: run.stock?.length ? run.stock : undefined,
+    image: run.image ? { url: run.image.url, source: run.image.source, query: run.image.query } : undefined,
   };
 }

@@ -597,3 +597,12 @@ model AiUsage {
 
   @@index([createdAt])
 }
+
+/// Foto do produto achada na web (o ERP não tem imagens), por código do produto; validade de 30 dias.
+model ProductImageCache {
+  sku       String   @id
+  query     String
+  imageUrl  String?
+  source    String   @default("web")
+  updatedAt DateTime @updatedAt
+}

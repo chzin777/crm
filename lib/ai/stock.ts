@@ -218,7 +218,7 @@ export const STOCK_TOOL = {
 };
 
 /** Registro da consulta mostrado no teste da página /ia. */
-export type StockLog = { term: string; region: string; scenario: StockScenario; products: number; stores: number; ms: number; cached: boolean };
+export type StockLog = { term: string; region: string; scenario: StockScenario; products: number; stores: number; ms: number; cached: boolean; /** Foto do produto: do cache, da web ou não achada. */ image?: "cache" | "web" | "none" };
 
 /** Passos da busca textual: todas as palavras; depois sem a última, até sobrar uma (marca). */
 export function stockSearchTerms(term: string) {

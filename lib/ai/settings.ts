@@ -36,6 +36,8 @@ export type AiSettings = {
   useOperatingHours: boolean;
   useCustomerOrders: boolean;
   canQuotePrices: boolean;
+  /** Envia a foto do produto achada na web junto com as informações de estoque. */
+  sendProductImage: boolean;
   topics: AiKnowledgeTopic[];
   extraInstructions: string;
 
@@ -90,6 +92,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   useOperatingHours: true,
   useCustomerOrders: true,
   canQuotePrices: false,
+  sendProductImage: true,
   topics: DEFAULT_AI_TOPICS,
   extraInstructions: "Nunca ofereça descontos nem condições especiais. Não faça diagnóstico de saúde ocular: oriente procurar um oftalmologista.",
   handoffKeywords: ["atendente", "humano", "pessoa", "falar com alguém", "vendedor", "gerente", "reclamação", "procon"],
@@ -157,6 +160,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     useOperatingHours: bool(raw.useOperatingHours, d.useOperatingHours),
     useCustomerOrders: bool(raw.useCustomerOrders, d.useCustomerOrders),
     canQuotePrices: bool(raw.canQuotePrices, d.canQuotePrices),
+    sendProductImage: bool(raw.sendProductImage, d.sendProductImage),
     topics,
     extraInstructions: str(raw.extraInstructions, d.extraInstructions),
     handoffKeywords: Array.isArray(raw.handoffKeywords) ? raw.handoffKeywords.map((item) => String(item).trim()).filter(Boolean).slice(0, 50) : d.handoffKeywords,

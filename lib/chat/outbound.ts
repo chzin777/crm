@@ -10,6 +10,7 @@ import { convertToOggOpus } from "@/lib/chat/audio";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import type { ChatInteractiveList } from "@/lib/chat/types";
 import { withoutDashes } from "@/lib/chat/text";
+import { deliverImageOrText, downloadImage } from "@/lib/ai/product-image";
 
 export class ChatRuleError extends Error {
   constructor(message: string, public status: number, public code?: string) {
@@ -38,6 +39,35 @@ async function deliver(messageId: string, send: () => Promise<{ messages?: { id:
     console.error(`[chat] falha no envio da mensagem ${messageId}:`, error);
     return prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "failed", failureReason: failureText(error) } });
   }
+}
+
+/**
+ * Mensagem automática com foto (produto achado na web): baixa e confere a imagem, guarda no armazenamento, envia
+ * com legenda (até 1024 caracteres, o resto em texto). Qualquer falha invalida a foto e manda a resposta em texto.
+ */
+export async function sendAutomaticImage(conversation: Pick<ChatConversation, "id" | "phone">, imageUrl: string, rawText: string, authorName: string, invalidate: () => Promise<unknown>) {
+  if (await isBlocked(conversation.phone)) return null;
+  const text = withoutDashes(rawText);
+  await deliverImageOrText({
+    sendImage: async (caption) => {
+      const file = await downloadImage(imageUrl);
+      const sent = await sendMedia(conversation.phone, { mimetype: file.mime, fileName: file.name, base64: file.bytes.toString("base64") }, caption);
+      // Só grava depois do aceite da Meta: falha não deixa foto "falhou" no histórico, a resposta segue em texto.
+      const stored = await uploadFile(file.bytes, file.name, file.mime, `chat/ai/${conversation.id}`).catch(() => null);
+      const attachment: ChatAttachment | null = stored ? { kind: "image", name: file.name, mime: file.mime, size: file.bytes.length, key: stored.key } : null;
+      const now = new Date();
+      await prisma.chatMessage.create({
+        data: {
+          conversationId: conversation.id, author: "bot", authorName, text: caption, delivery: "sent", createdAt: now,
+          externalId: (sent as { messages?: { id: string }[] })?.messages?.[0]?.id ?? null,
+          ...(attachment ? { attachment: attachment as unknown as Prisma.InputJsonValue } : {}),
+        },
+      });
+      await prisma.chatConversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now } });
+    },
+    sendText: (value) => sendAutomaticMessage(conversation, value, undefined, undefined, authorName),
+    invalidate,
+  }, text);
 }
 
 /** Nova tentativa de mensagem que falhou; a reserva impede dois relógios de reenviarem a mesma. */

@@ -3,6 +3,8 @@ import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { readAiSettings, saveAiSettings } from "@/lib/ai/store";
 import { aiConfigured } from "@/lib/ai/openai";
+import { imageSearchStatus } from "@/lib/ai/product-image-db";
+import { IMAGE_PROVIDER_LABELS } from "@/lib/ai/product-image";
 
 /** Parâmetros da IA (página /ia): o que responde, onde atende, quando transfere e custos. */
 export async function GET() {
@@ -12,7 +14,8 @@ export async function GET() {
     readAiSettings(),
     prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true, description: true } }),
   ]);
-  return NextResponse.json({ settings, queues, configured: aiConfigured() });
+  const imageSearch = imageSearchStatus();
+  return NextResponse.json({ settings, queues, configured: aiConfigured(), imageSearch: imageSearch ? IMAGE_PROVIDER_LABELS[imageSearch.provider] : null });
 }
 
 export async function PUT(request: Request) {
