@@ -19,6 +19,7 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
 import { imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
@@ -55,8 +56,35 @@ export async function releaseFromAi(conversation: ChatConversation) {
 export const AI_AUTHOR = "Assistente IA";
 /** Marca da mensagem de sistema da transferência: depois dela a IA só ajuda na espera (fila sem atendente). */
 export const AI_HANDOFF_MARK = "IA transferiu o atendimento";
-/** Espera curta para juntar mensagens seguidas do cliente numa só resposta. */
-const DEBOUNCE_MS = 6_000;
+/**
+ * Mensagens picadas: cada mensagem entra no lote da conversa e reinicia a espera adaptativa (1,8 a 5,5 s, teto de
+ * 12 s desde a primeira); ao vencer, a IA responde uma vez só ao lote inteiro.
+ */
+let groupMessages = true;
+const messageBuffer = createMessageBuffer({ enabled: () => groupMessages, onFlush: (batch) => runBatch(batch.key, batch.lastId) });
+/** Conversa com resposta da IA em andamento: um novo lote espera ela terminar (nunca duas respostas ao mesmo tempo). */
+const inFlight = new Map<string, { rerun: boolean }>();
+/** Até onde a IA já leu as mensagens do cliente (inclui as que chegaram enquanto ela respondia o lote anterior). */
+const consumedUntil = new Map<string, Date>();
+
+async function runBatch(conversationId: string, messageId: string): Promise<void> {
+  const running = inFlight.get(conversationId);
+  if (running) { running.rerun = true; return; }
+  inFlight.set(conversationId, { rerun: false });
+  try {
+    await respond(conversationId, messageId);
+  } catch (error) {
+    console.error("[ai] atendimento autônomo:", error);
+  } finally {
+    const state = inFlight.get(conversationId);
+    inFlight.delete(conversationId);
+    if (state?.rerun) {
+      // Chegou lote novo enquanto a IA respondia: responde agora a partir da última mensagem do cliente.
+      const latest = await prisma.chatMessage.findFirst({ where: { conversationId, author: "customer" }, orderBy: { createdAt: "desc" }, select: { id: true } }).catch(() => null);
+      if (latest) void runBatch(conversationId, latest.id);
+    }
+  }
+}
 const CREDIT_RETRY_MS = 10 * 60 * 1000;
 
 /** Transbordo já feito e se algum atendente escreveu ao cliente depois dele (assumiu o controle). */
@@ -119,10 +147,11 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
     });
   }
 
-  setTimeout(() => {
-    void respond(conversation.id, messageId).catch((error) => console.error("[ai] atendimento autônomo:", error));
-  }, DEBOUNCE_MS);
-  console.log(`[ai] ${conversation.id}: ${queued ? "espera assistida na fila" : "assumida pela IA"} (${conversation.status})`);
+  // Lote de mensagens picadas: espera o cliente terminar de digitar e responde tudo de uma vez.
+  groupMessages = settings.groupMessages;
+  const incoming = await prisma.chatMessage.findUnique({ where: { id: messageId }, select: { text: true, attachment: true, metaMedia: true } });
+  const wait = messageBuffer.add(conversation.id, { id: messageId, text: incoming?.text ?? "", hasMedia: !!(incoming?.attachment || incoming?.metaMedia) });
+  console.log(`[ai] ${conversation.id}: ${queued ? "espera assistida na fila" : "assumida pela IA"} (${conversation.status}), lote com ${messageBuffer.pending(conversation.id)} mensagem(ns), resposta em ${wait ?? 0} ms`);
   return true;
 }
 
@@ -345,9 +374,15 @@ async function respond(conversationId: string, messageId: string) {
   // IA desligada enquanto a resposta aguardava: a conversa não fica presa fora da fila.
   if (!settings.autonomousEnabled) { if (!queued) await releaseFromAi(conversation); return; }
 
-  // Mensagens do cliente desde a última resposta (bot ou atendente).
+  // Mensagens do cliente desde a última resposta (bot ou atendente), em ordem; mensagens que chegaram enquanto a
+  // IA respondia o lote anterior também entram (até onde ela já leu, não até a resposta dela).
   const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
-  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true, attachment: true, metaMedia: true } });
+  const consumed = consumedUntil.get(conversationId);
+  const lastOther = consumed ? await prisma.chatMessage.findFirst({ where: { conversationId, internal: false, OR: [{ author: "agent" }, { author: "bot", NOT: { authorName: AI_AUTHOR } }] }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }) : null;
+  const pendingSince = consumed ? (lastOther && lastOther.createdAt > consumed ? lastOther.createdAt : consumed) : lastAnswer?.createdAt;
+  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { text: true, attachment: true, metaMedia: true, createdAt: true } });
+  if (!pending.length) return;
+  consumedUntil.set(conversationId, pending[pending.length - 1].createdAt);
   // Na espera assistida, o limite de respostas conta só as respostas depois do transbordo.
   const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, ...(queued && since ? { createdAt: { gt: since } } : {}) } });
   // Mensagens anteriores do cliente: insistência em tentativa de manipulação leva para a equipe.

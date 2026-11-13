@@ -699,6 +699,9 @@ export function AiSettingsPanel() {
 
       {tab === "atuacao" && (
         <div className="space-y-6">
+          <Block title="Mensagens picadas" hint="Quando o cliente manda várias mensagens seguidas (“Oi” / “queria saber” / “se tem ray ban” / “no bueno”), a IA espera ele terminar e responde tudo de uma vez.">
+            <Toggle label="Agrupar mensagens picadas automaticamente" description="Pergunta completa é respondida em cerca de 2 s; saudação ou frase cortada espera até ~5 s; nunca mais de 12 s desde a primeira mensagem. Desligado: responde cada mensagem em ~1,5 s." checked={settings.groupMessages} onChange={(value) => set("groupMessages", value)} />
+          </Block>
           <Block title="Onde a IA atende" hint="A IA só responde conversas sem atendente. Assim que alguém assume, ela para.">
             <Toggle label="Na entrada, no lugar do menu automático" description="Toda conversa nova é recebida pela IA, que resolve ou transfere para a fila certa." checked={settings.attendAtEntry} onChange={(value) => set("attendAtEntry", value)} />
             <div>
