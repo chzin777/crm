@@ -7,7 +7,7 @@ import { handleOffHours } from "@/lib/chat/operations";
 import type { RecordedInbound } from "@/lib/chat/inbound";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { fillVariables } from "@/lib/chat/text";
-import { aiTakeOver } from "@/lib/ai/agent";
+import { aiTakeOver, releaseFromAi } from "@/lib/ai/agent";
 
 const AUTOMATIC_GAP_MS = 3 * 60 * 1000;
 
@@ -68,6 +68,8 @@ export async function runAutomation(recorded: RecordedInbound) {
     return false;
   });
   if (byAi) return;
+  // A IA vinha atendendo e não pode mais (horário/configuração): entra na fila humana agora, sem menu no meio.
+  if (await releaseFromAi(conversation).catch((error) => { console.error("[ai] devolver para a fila:", error); return false; })) return;
 
   // Fora do horário de atendimento: aviso com o horário e a conversa espera na fila, sem menu.
   if (await handleOffHours(conversation)) return;

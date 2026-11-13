@@ -12,6 +12,7 @@ import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
 import { silenceFarewell } from "@/lib/chat/settings";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
+import { planQueuePositions } from "@/lib/chat/queue-rules";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -102,23 +103,25 @@ export async function runClock() {
   // A posição é guardada sempre (o painel de /filas mostra há quanto tempo o cliente está nela);
   // o aviso ao cliente só sai com a opção ligada.
   await block("posição na fila", async () => {
+    // Conversas em atendimento pela IA ficam de fora (nem posição, nem aviso): regra em lib/chat/queue-rules.
     const rows = await prisma.chatConversation.findMany({
       where: { status: "waiting", closedAt: null, queueId: { not: null } },
       orderBy: { waitingSince: "asc" },
       include: { queue: { select: { name: true } } },
     });
-    const positions = new Map<string, number>();
-    for (const row of rows) {
-      const position = (positions.get(row.queueId!) ?? 0) + 1;
-      positions.set(row.queueId!, position);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const updates = planQueuePositions(
+      rows.map((row) => ({ ...row, queueName: row.queue?.name ?? null })),
+      { now: new Date(now), notifyEnabled: settings.notifyQueuePosition, windowOpen: isWindowOpen },
+    );
+    for (const update of updates) {
+      const row = byId.get(update.id)!;
       const state = readMenuState(row.menuState);
-      const last = state.notifiedPosition ?? null;
-      if (last === position) continue;
-      state.notifiedPosition = position;
-      state.positionSince = last === null ? row.waitingSince!.toISOString() : new Date(now).toISOString();
+      state.notifiedPosition = update.position;
+      state.positionSince = update.positionSince;
       await saveMenuState(row.id, state);
-      if (settings.notifyQueuePosition && last !== null && position < last && isWindowOpen(row.lastInboundAt)) {
-        await sendAutomaticMessage(row, `Você avançou na fila: agora é o ${position}º da fila ${row.queue?.name ?? ""}. Obrigado por aguardar.`);
+      if (update.notify) {
+        await sendAutomaticMessage(row, update.notify);
         summary.positions += 1;
       }
     }
@@ -133,7 +136,8 @@ export async function runClock() {
     for (const queue of queues) {
       const capacity = queue.members.reduce((total, member) => total + (member.user.chatAgent?.paused ? 0 : member.user.chatAgent?.capacity ?? 0), 0);
       if (capacity === 0) continue;
-      const open = await prisma.chatConversation.count({ where: { queueId: queue.id, closedAt: null } });
+      // Conversa com a IA (status bot) não ocupa atendente: fica fora da contagem da fila.
+      const open = await prisma.chatConversation.count({ where: { queueId: queue.id, closedAt: null, status: { not: "bot" } } });
       if (open < capacity || !(await firstDispatch(`queue-full:${queue.id}:${hour}`))) continue;
       await notify(await supervisors(), { type: "queue", title: "Fila no limite", detail: `${queue.name}: ${open} conversas para capacidade ${capacity}`, href: "/filas" });
       summary.queueFull += 1;
