@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_STORE_QUESTION, splitAiResponseMessages, tidyBubble, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { agreeStoreCount, countStores, DEFAULT_STORE_QUESTION, SINGLE_STORE_QUESTION, splitAiResponseMessages, storeQuestion, tidyBubble, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { buildSystemPrompt, customerMessages, interpretDecision } from "@/lib/ai/agent-core";
 import { deliverImageOrText } from "@/lib/ai/product-image";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
@@ -135,6 +135,39 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
     expect(prompt).toContain("VALE PARA TODA RESPOSTA (não só listas de lojas)");
     expect(prompt).toContain("No momento não temos modelos *Versace* em estoque na rede.\n---SPLIT---\nSe quiser, posso te encaminhar para um atendente verificar encomenda ou opções parecidas. O que acha?");
     expect(prompt).toContain("Proibido usar linha em branco (quebra dupla) para separar frases dentro da mesma mensagem curta");
+  });
+
+  it("1 loja listada: a 2ª bolha fica no singular (\"dessa loja\"), nunca \"alguma dessas lojas\"", () => {
+    const card = "Temos sim! 😊\n\n🕶️ *Ray-Ban Justin | Ref. RB4165*\n💵 *Valor:* R$ 1.000,00\n📦 *Estoque:* 1 unidade disponível na seguinte loja:\n📍 *Loja Setor Marista* – Goiânia (Rua 27, 2106)";
+    expect(countStores(card)).toBe(1);
+    // Pós-processamento corrige o plural gerado pelo modelo.
+    const parts = splitAiResponseMessages(`${card}\n---SPLIT---\nQuer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?`);
+    expect(parts[1]).toBe("Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização dessa loja?");
+    expect(parts.join(" ")).not.toMatch(/dessas lojas/);
+    expect(splitAiResponseMessages(`${card}\n---SPLIT---\nVocê gostaria de reservar em alguma dessas lojas?`)[1]).toBe("Você gostaria de reservar nessa loja?");
+    expect(splitAiResponseMessages(`${card}\n---SPLIT---\nQual dessas lojas fica melhor pra você?`)[1]).toBe(SINGLE_STORE_QUESTION);
+    // Sem pergunta: a pergunta padrão já sai no singular.
+    expect(splitAiResponseMessages(card)).toEqual([card, SINGLE_STORE_QUESTION]);
+    expect(storeQuestion(1)).toContain("dessa loja");
+  });
+
+  it("2 ou mais lojas: a 2ª bolha fica no plural (\"de alguma dessas lojas\")", () => {
+    const card = "Temos sim! 😊\n\n🕶️ *Ray-Ban Justin*\n📦 *Estoque:* 2 unidades disponíveis nas seguintes lojas:\n📍 *Loja Setor Marista* – Goiânia (Rua 27, 2106)\n📍 *Loja Taguatinga Centro* – Taguatinga (DF) (C 9)";
+    expect(countStores(card)).toBe(2);
+    const question = "Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?";
+    expect(splitAiResponseMessages(`${card}\n---SPLIT---\n${question}`)[1]).toBe(question);
+    expect(splitAiResponseMessages(card)[1]).toBe(DEFAULT_STORE_QUESTION);
+    // Lista agrupada por cidade: título de cidade não conta como loja.
+    expect(countStores("📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8, 235\n• *Loja Setor Marista* — Rua 27, 2106")).toBe(2);
+    expect(agreeStoreCount(question, 3)).toBe(question);
+  });
+
+  it("prompt traz a regra de concordância singular/plural", () => {
+    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    expect(prompt).toContain("CONCORDÂNCIA DA PERGUNTA (regra fixa)");
+    expect(prompt).toContain("Com 1 loja só, a pergunta da 2ª bolha fica no singular");
+    expect(prompt).toContain("prefere a localização dessa loja?");
+    expect(prompt).toContain("prefere a localização de alguma dessas lojas?");
   });
 
   it("prompt traz a regra obrigatória com o exemplo literal do ---SPLIT---", () => {

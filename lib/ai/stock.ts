@@ -263,7 +263,7 @@ export const STOCK_RULES = [
   "1. O valor exato devolvido em precoVenda (ex.: \"O *Ray-Ban Justin* está saindo por *R$ 1.070,00*.\"). Se precoVariaPorLoja for true, informe o precoVenda da loja que o cliente pediu (ou diga que o valor muda conforme a loja e cite o de cada uma listada). Nunca invente nem arredonde valores; não use o histórico de vendas como preço.",
   "2. A disponibilidade real por loja; quando o cliente perguntar a quantidade, informe quantas unidades constam (campo quantidade da loja, ou totalDisponivelRede para a rede toda).",
   "NÃO transfira para um atendente quando a ferramenta devolveu preço e estoque. Só transfira se: (a) o produto estiver sem estoque em todas as lojas, (b) precoSobConsulta for true (tem estoque mas sem preço no sistema: informe a disponibilidade e ofereça transferir para confirmar o orçamento), (c) a consulta falhar (unavailable_api) ou (d) o cliente pedir explicitamente para fechar a compra ou negociar condições especiais com um vendedor.",
-  "Depois do preço e da disponibilidade, mande a pergunta de condução numa segunda bolha com ---SPLIT--- (ex.: \"Você gostaria de reservar em alguma dessas lojas ou tirar mais alguma dúvida sobre o modelo?\").",
+  "Depois do preço e da disponibilidade, mande a pergunta de condução numa segunda bolha com ---SPLIT--- (ex.: \"Você gostaria de reservar em alguma dessas lojas ou tirar mais alguma dúvida sobre o modelo?\"; com 1 loja só, no singular: \"Você gostaria de reservar nessa loja ou tirar mais alguma dúvida sobre o modelo?\").",
 ].join("\n");
 
 /** Definição da tool para a OpenAI (somente leitura). */

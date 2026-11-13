@@ -75,4 +75,5 @@ export const PRODUCT_CARD_TEMPLATE = [
   "- Quando o resultado de consultarEstoqueProduto trouxer fichaFormatada, copie esse texto exatamente como veio (sem reescrever, sem acrescentar linhas) como 1ª bolha, depois ---SPLIT--- e a pergunta.",
   "- 1 loja: \"📦 *Estoque:* 1 unidade disponível na seguinte loja:\" e uma linha 📍. 2 ou mais lojas: \"📦 *Estoque:* X unidades disponíveis nas seguintes lojas:\" e uma linha 📍 por loja. Esta ficha substitui a lista agrupada por cidade.",
   "- Atributo sem dado (Armação, Acabamento, Valor): omita só aquela linha; nunca escreva \"Não informado\" ou \"N/A\".",
+  "- Pergunta da 2ª bolha concorda com as lojas da ficha: 1 loja → singular (\"dessa loja\", \"nessa loja\"; ex.: \"Gostaria de reservar nessa loja ou receber a localização dela no mapa?\"); 2 ou mais → plural (\"de alguma dessas lojas\").",
 ].join("\n");
