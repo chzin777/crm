@@ -42,7 +42,7 @@ export async function readAiStatus(): Promise<AiStatus> {
 }
 
 /** O registro de consumo nunca derruba a resposta da IA. */
-export async function recordAiUsage(entry: { feature: string; model: string; inputTokens: number; outputTokens: number; conversationId?: string | null; userId?: string | null; ok: boolean; error?: string; creditExhausted?: boolean }) {
+export async function recordAiUsage(entry: { feature: string; model: string; inputTokens: number; outputTokens: number; conversationId?: string | null; userId?: string | null; ok: boolean; error?: string; creditExhausted?: boolean; costUsd?: number }) {
   try {
     const settings = await readAiSettings();
     await prisma.aiUsage.create({
@@ -51,7 +51,8 @@ export async function recordAiUsage(entry: { feature: string; model: string; inp
         model: entry.model,
         inputTokens: entry.inputTokens,
         outputTokens: entry.outputTokens,
-        costUsd: usageCostUsd(settings, entry.inputTokens, entry.outputTokens),
+        // Transcrição de áudio é cobrada por minuto: o custo já vem calculado.
+        costUsd: entry.costUsd ?? usageCostUsd(settings, entry.inputTokens, entry.outputTokens),
         conversationId: entry.conversationId ?? null,
         userId: entry.userId ?? null,
         ok: entry.ok,
@@ -71,6 +72,7 @@ export const AI_FEATURE_LABELS: Record<string, string> = {
   agent: "Atendimento autônomo",
   playground: "Teste na página da IA",
   check: "Verificação de conexão",
+  transcription: "Transcrição de áudio",
 };
 
 type Totals = { calls: number; inputTokens: number; outputTokens: number; costUsd: number };

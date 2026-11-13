@@ -1,9 +1,12 @@
 import "server-only";
 import { readAiSettings, recordAiUsage } from "@/lib/ai/store";
 import type { AiSettings } from "@/lib/ai/settings";
+import { estimateTokens, TRANSCRIPTION_MODEL, transcriptionCostUsd } from "@/lib/ai/attachments";
+import { audioFileName, type AiContentPart } from "@/lib/ai/multimodal";
 
 /** Cliente mínimo da OpenAI (Chat Completions via fetch): a chave fica só no servidor (.env). */
 const API_URL = "https://api.openai.com/v1/chat/completions";
+const TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions";
 const TIMEOUT_MS = 45_000;
 
 export class AiError extends Error {
@@ -14,7 +17,8 @@ export class AiError extends Error {
 
 export const aiConfigured = () => !!process.env.OPENAI_API_KEY?.trim();
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+/** content em partes leva imagem (image_url) e PDF (file) junto do texto. */
+export type ChatMessage = { role: "system" | "user" | "assistant"; content: string | AiContentPart[] };
 export type AiCallMeta = { feature: string; conversationId?: string | null; userId?: string | null; maxTokens?: number; settings?: AiSettings };
 
 /** Erros da OpenAI traduzidos para a equipe: nunca expõe a chave nem o corpo bruto. */
@@ -76,4 +80,39 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   } catch {
     throw new AiError("A IA devolveu uma resposta fora do formato. Tente de novo.");
   }
+}
+
+/**
+ * Transcreve o áudio do cliente (whisper-1, português). Registra no consumo pela duração do áudio;
+ * os tokens gravados são a estimativa do texto transcrito.
+ */
+export async function transcribeAudio(audio: { name: string; mime: string; data: Uint8Array }, meta: Omit<AiCallMeta, "maxTokens">): Promise<string> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) throw new AiError("IA não configurada: defina OPENAI_API_KEY no servidor.", 503);
+  const base = { feature: "transcription", model: TRANSCRIPTION_MODEL, conversationId: meta.conversationId, userId: meta.userId };
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(audio.data)], { type: audio.mime.split(";")[0] || "audio/ogg" }), audioFileName(audio.mime, audio.name || "audio"));
+  form.append("model", TRANSCRIPTION_MODEL);
+  form.append("language", "pt");
+  form.append("response_format", "verbose_json");
+
+  type Body = { error?: { code?: string; type?: string; message?: string }; text?: string; duration?: number };
+  let response: Response;
+  let body: Body;
+  try {
+    response = await fetch(TRANSCRIPTION_URL, { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    body = (await response.json().catch(() => ({}))) as Body;
+  } catch {
+    await recordAiUsage({ ...base, inputTokens: 0, outputTokens: 0, ok: false, error: "Tempo esgotado na transcrição" });
+    throw new AiError("A transcrição do áudio demorou demais. Tente de novo.", 504);
+  }
+  if (!response.ok) {
+    const error = response.status === 400 ? new AiError("Não foi possível ler este áudio. Tente outro formato (OGG, MP3, M4A, WAV ou WEBM).", 422) : friendlyError(response.status, body.error?.code, body.error?.type);
+    console.error(`[ai] OpenAI ${response.status} (transcrição): ${body.error?.message ?? body.error?.code ?? "sem detalhe"}`);
+    await recordAiUsage({ ...base, inputTokens: 0, outputTokens: 0, ok: false, error: error.message, creditExhausted: error.creditExhausted });
+    throw error;
+  }
+  const text = body.text?.trim() ?? "";
+  await recordAiUsage({ ...base, inputTokens: 0, outputTokens: estimateTokens(text), ok: true, costUsd: transcriptionCostUsd(Number(body.duration)) });
+  return text;
 }

@@ -8,7 +8,11 @@ import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables } from "@/lib/chat/text";
 import { formatBr } from "@/lib/br-time";
-import { aiConfigured, aiJson, AiError } from "@/lib/ai/openai";
+import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
+import { AI_ATTACHMENT_MAX_BYTES, aiAttachmentKind, type AiAttachmentKind } from "@/lib/ai/attachments";
+import { attachSummary, MEDIA_RULES, mediaParts, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
+import { readFile } from "@/lib/minio";
+import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { BRAND_RULES, catalog, conversationContext } from "@/lib/ai/assist";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { AI_TONES, aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
@@ -157,12 +161,16 @@ async function respond(conversationId: string, messageId: string) {
     settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
   ]);
 
+  // Foto, áudio ou documento do cliente: a IA lê o anexo mais recente (falha no arquivo não impede a resposta).
+  const media = await customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), { feature: "agent", conversationId });
+  if (media?.transcript && asksForHuman(settings, media.transcript)) return handoff(conversation, settings, "Cliente pediu para falar com uma pessoa (áudio)");
+
   let decision: AgentDecision;
   try {
     decision = await aiJson<AgentDecision>(
       [
-        { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info) },
-        { role: "user", content: context.text },
+        { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info, !!media) },
+        { role: "user", content: media ? [{ type: "text", text: context.text }, ...media.parts] : context.text },
       ],
       { feature: "agent", conversationId, maxTokens: 700 },
     );
@@ -189,33 +197,77 @@ async function respond(conversationId: string, messageId: string) {
   }
 }
 
-const systemPrompt = (settings: AiSettings, queueNames: string[], info: string) =>
-  `${rules(settings, queueNames)}\n\nAgora: ${formatBr(new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).\n\nInformações que você pode usar:\n${info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`;
+const systemPrompt = (settings: AiSettings, queueNames: string[], info: string, hasMedia = false) =>
+  `${rules(settings, queueNames)}${hasMedia ? `\n\n${MEDIA_RULES}` : ""}\n\nAgora: ${formatBr(new Date(), { dateStyle: "full", timeStyle: "short" })} (Brasília).\n\nInformações que você pode usar:\n${info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`;
+
+/** Anexo pronto para a IA: áudio é transcrito (registrado no consumo); documento vira texto; imagem e PDF seguem nativos. */
+export async function prepareMedia(media: AiMediaInput, meta: Omit<AiCallMeta, "maxTokens">): Promise<PreparedMedia> {
+  const kind = aiAttachmentKind(media.mime, media.name);
+  if (!kind) throw new AiError("Formato de anexo não suportado pela IA.", 422);
+  if (media.data.byteLength > AI_ATTACHMENT_MAX_BYTES) throw new AiError("Anexo acima de 10 MB.", 422);
+  const transcript = kind === "audio" ? await transcribeAudio(media, meta) : undefined;
+  try {
+    return mediaParts(kind, media, transcript);
+  } catch (error) {
+    console.error("[ai] leitura do anexo:", error);
+    throw new AiError("Não foi possível ler o conteúdo deste documento.", 422);
+  }
+}
+
+/** Atendimento real: lê o anexo mais recente do cliente (guardado no MinIO). Qualquer falha segue só com o texto. */
+async function customerMedia(attachments: (ChatAttachment | null)[], meta: Omit<AiCallMeta, "maxTokens">) {
+  const latest = attachments.filter((item): item is ChatAttachment => !!item?.key && !!aiAttachmentKind(item.mime, item.name) && item.size <= AI_ATTACHMENT_MAX_BYTES).at(-1);
+  if (!latest) return null;
+  try {
+    return await prepareMedia({ name: latest.name, mime: latest.mime, data: await readFile(latest.key) }, meta);
+  } catch (error) {
+    console.error(`[ai] ${meta.conversationId}: anexo ignorado:`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
 
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string };
-export type PlaygroundResult = { action: "reply" | "handoff" | "resolved"; reply: string; reason: string; queue: string; byKeyword: boolean };
+export type PlaygroundResult = {
+  action: "reply" | "handoff" | "resolved";
+  reply: string;
+  reason: string;
+  queue: string;
+  byKeyword: boolean;
+  /** Anexo da última mensagem do cliente, como a IA o recebeu. */
+  media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
+  /** O gatilho "cliente enviou mídia" está ligado: no atendimento real a conversa iria direto para a equipe. */
+  mediaHandoff?: boolean;
+};
 
 /**
  * Teste da página /ia: simula a conversa com os parâmetros da tela (mesmo ainda não salvos),
  * com as mesmas regras e informações do atendimento real. Não envia nada ao cliente.
+ * O anexo (opcional) pertence à última mensagem do cliente; anexos anteriores chegam como resumo no texto.
  */
-export async function simulateAgent(settings: AiSettings, messages: PlaygroundMessage[], userId: string): Promise<PlaygroundResult> {
-  const lastAi = messages.map((message) => message.from).lastIndexOf("ai");
-  const pendingText = messages.slice(lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).join("\n");
-  if (asksForHuman(settings, pendingText)) return { action: "handoff", reply: settings.handoffMessage, reason: "Cliente pediu para falar com uma pessoa (palavra de transferência)", queue: "", byKeyword: true };
+export async function simulateAgent(settings: AiSettings, messages: PlaygroundMessage[], userId: string, attachment?: AiMediaInput): Promise<PlaygroundResult> {
+  const meta = { feature: "playground", userId, settings };
+  const media = attachment ? await prepareMedia(attachment, meta) : null;
+  const history = media ? attachSummary(messages, media.summary) : messages;
+  const summary = media ? { kind: media.kind, summary: media.summary, ...(media.transcript !== undefined ? { transcript: media.transcript } : {}) } : undefined;
+  const mediaHandoff = media ? settings.handoffOnMedia : undefined;
+
+  const lastAi = history.map((message) => message.from).lastIndexOf("ai");
+  const pendingText = history.slice(lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).join("\n");
+  if (asksForHuman(settings, pendingText)) return { action: "handoff", reply: settings.handoffMessage, reason: "Cliente pediu para falar com uma pessoa (palavra de transferência)", queue: "", byKeyword: true, media: summary, mediaHandoff };
 
   const [info, queues] = await Promise.all([
     knowledge(settings),
     settings.aiChoosesQueue && !settings.handoffQueueId ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }) : [],
   ]);
-  const transcript = messages.map((message) => `${message.from === "customer" ? "Cliente" : settings.agentName}: ${message.text}`).join("\n");
+  const transcript = history.map((message) => `${message.from === "customer" ? "Cliente" : settings.agentName}: ${message.text}`).join("\n");
+  const text = `Conversa de teste (cliente fictício, sem histórico no ERP):\n${transcript}`;
   const decision = await aiJson<AgentDecision>(
     [
-      { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info) },
-      { role: "user", content: `Conversa de teste (cliente fictício, sem histórico no ERP):\n${transcript}` },
+      { role: "system", content: systemPrompt(settings, queues.map((queue) => queue.name), info, !!media) },
+      { role: "user", content: media ? [{ type: "text", text }, ...media.parts] : text },
     ],
-    { feature: "playground", userId, maxTokens: 700, settings },
+    { ...meta, maxTokens: 700 },
   );
   const action = decision.action === "handoff" || decision.action === "resolved" ? decision.action : "reply";
-  return { action, reply: decision.reply?.trim() ?? "", reason: decision.reason?.trim() ?? "", queue: decision.queue?.trim() ?? "", byKeyword: false };
+  return { action, reply: decision.reply?.trim() ?? "", reason: decision.reason?.trim() ?? "", queue: decision.queue?.trim() ?? "", byKeyword: false, media: summary, mediaHandoff };
 }

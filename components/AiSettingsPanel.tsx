@@ -1,15 +1,27 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, CheckCircle2, Coins, FlaskConical, PlugZap, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UserRoundCheck, Wallet, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, Coins, FileText, FlaskConical, Mic, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
+import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
+import { useRecorder } from "@/lib/chat/use-recorder";
 import type { AiUsageReport } from "@/lib/ai/store";
 
 type Queue = { id: string; name: string };
 type Tab = "identidade" | "atuacao" | "conexao" | "consumo" | "teste";
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string };
-type PlaygroundResult = { action: "reply" | "handoff" | "resolved"; reply: string; reason: string; queue: string; byKeyword: boolean };
+type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
+/** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; media?: PlaygroundMedia; historyText?: string };
+type PlaygroundResult = {
+  action: "reply" | "handoff" | "resolved";
+  reply: string;
+  reason: string;
+  queue: string;
+  byKeyword: boolean;
+  media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
+  mediaHandoff?: boolean;
+};
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const TABS: { id: Tab; label: string; icon: typeof Bot }[] = [
@@ -71,61 +83,141 @@ function Stat({ label, value, detail, tone = "default" }: { label: string; value
   );
 }
 
+/** Prévia do anexo (antes do envio e na conversa): miniatura, player ou ícone com o nome. */
+function MediaPreview({ media, compact = false }: { media: PlaygroundMedia; compact?: boolean }) {
+  if (media.kind === "image") return <img src={media.url} alt={media.name} className={`${compact ? "h-12 w-12" : "max-h-48 w-auto max-w-full"} rounded-lg object-cover`} />;
+  if (media.kind === "audio") return <audio controls src={media.url} className={`${compact ? "h-8 w-52" : "h-9 w-60 max-w-full"}`} />;
+  return (
+    <span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold ${compact ? "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200" : "bg-white/15"}`}>
+      <FileText className="h-4 w-4 shrink-0" /><span className="truncate">{media.name}</span><span className="shrink-0 opacity-70">{media.kind === "pdf" ? "PDF" : media.kind === "docx" ? "DOCX" : "TXT/CSV"}</span>
+    </span>
+  );
+}
+
 /** Teste da IA: conversa simulada com os parâmetros da tela, sem enviar nada a clientes. */
-function Playground({ settings }: { settings: AiSettings }) {
+function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => void }) {
   const [messages, setMessages] = useState<PlaygroundMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<{ file: File; media: PlaygroundMedia } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const urls = useRef<string[]>([]);
+  const recorder = useRecorder(setError);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, busy]);
+  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
-  const send = async () => {
+  /** Valida tipo e tamanho na tela (o servidor confere de novo). */
+  const pick = (file: File | null | undefined) => {
+    if (!file) return null;
+    const check = validateAiAttachment({ name: file.name, type: file.type, size: file.size });
+    if (!check.ok) {
+      setError(check.error);
+      return null;
+    }
+    const url = URL.createObjectURL(file);
+    urls.current.push(url);
+    setError("");
+    return { file, media: { kind: check.kind, name: file.name, url } };
+  };
+
+  const send = async (override?: { file: File; media: PlaygroundMedia } | null) => {
     const text = draft.trim();
-    if (!text || busy) return;
-    const next = [...messages, { from: "customer" as const, text }];
+    const media = override ?? attachment;
+    if ((!text && !media) || busy) return;
+    const customer: PlaygroundMessage = { from: "customer", text, ...(media ? { media: media.media } : {}) };
+    const next = [...messages, customer];
     setMessages(next);
     setDraft("");
+    setAttachment(null);
     setError("");
     setBusy(true);
     try {
-      const response = await fetch("/api/ai/playground", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings, messages: next.map(({ from, text: body }) => ({ from, text: body })) }) });
-      const data = (await response.json()) as PlaygroundResult & { error?: string };
+      // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
+      const payload = { settings, messages: next.map((message) => ({ from: message.from, text: message.historyText ?? message.text })) };
+      let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
+      if (media) {
+        const form = new FormData();
+        form.append("payload", JSON.stringify(payload));
+        form.append("file", media.file, media.file.name);
+        request = { method: "POST", body: form };
+      }
+      const response = await fetch("/api/ai/playground", request);
+      const data = (await response.json().catch(() => ({ error: response.status === 413 ? "Arquivo grande demais para o envio." : undefined }))) as PlaygroundResult & { error?: string };
       if (!response.ok) throw new Error(data.error ?? "Não foi possível testar a IA.");
-      const note = data.action === "handoff"
-        ? `Transferiria para uma pessoa${data.queue ? ` (fila ${data.queue})` : ""}: ${data.reason || "sem motivo"}`
-        : data.action === "resolved" ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : "";
-      setMessages([...next, { from: "ai", text: data.reply || "(transfere sem mensagem)", note }]);
+      const sent: PlaygroundMessage = data.media
+        ? { ...customer, historyText: [text, data.media.summary].filter(Boolean).join("\n"), media: customer.media && { ...customer.media, transcript: data.media.transcript } }
+        : customer;
+      const notes = [
+        data.mediaHandoff ? "No atendimento real, o gatilho \"cliente enviou foto, documento ou áudio\" transferiria esta conversa para a equipe antes da IA responder." : "",
+        data.action === "handoff" ? `Transferiria para uma pessoa${data.queue ? ` (fila ${data.queue})` : ""}: ${data.reason || "sem motivo"}` : data.action === "resolved" ? `Encerraria o atendimento: ${data.reason || "resolvido"}` : "",
+      ].filter(Boolean);
+      setMessages([...messages, sent, { from: "ai", text: data.reply || "(transfere sem mensagem)", note: notes.join(" ") }]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível testar a IA.");
     } finally {
       setBusy(false);
+      onUsed();
     }
   };
 
+  /** Gravação: o ✓ encerra e envia na hora, como o áudio do cliente no WhatsApp. */
+  const sendRecording = async () => {
+    const file = await recorder.finish();
+    const picked = pick(file);
+    if (picked) await send(picked);
+  };
+
+  const ghost = "inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5";
+
   return (
-    <Block title="Conversa de teste" hint="Escreva como se fosse o cliente. A IA responde com os parâmetros desta tela, mesmo os ainda não salvos, e com as mesmas lojas, horários e assuntos do atendimento real. Nada é enviado pelo WhatsApp; cada teste conta no consumo.">
-      <div className="h-80 space-y-2 overflow-y-auto rounded-lg bg-slate-50 p-3 dark:bg-white/5">
-        {messages.length === 0 && <p className="pt-24 text-center text-[11px] text-slate-400">Ex.: “Oi, vocês fazem exame de vista? Qual loja abre sábado?”</p>}
+    <Block title="Conversa de teste" hint="Escreva como se fosse o cliente, anexe foto (receita, armação), áudio ou documento (PDF, TXT, CSV, DOCX até 10 MB) ou grave um áudio. A IA responde com os parâmetros desta tela, mesmo os ainda não salvos, e com as mesmas lojas, horários e assuntos do atendimento real. Nada é enviado pelo WhatsApp; cada teste (e cada transcrição de áudio) conta no consumo.">
+      <div className="h-96 space-y-2 overflow-y-auto rounded-lg bg-slate-50 p-3 dark:bg-white/5">
+        {messages.length === 0 && <p className="pt-28 text-center text-[11px] text-slate-400">Ex.: “Oi, vocês fazem exame de vista? Qual loja abre sábado?” ou envie a foto de uma receita.</p>}
         {messages.map((message, index) => (
           <div key={index} className={`flex ${message.from === "customer" ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[80%] space-y-1 rounded-xl px-3 py-2 text-xs leading-relaxed ${message.from === "customer" ? "bg-[#002187] text-white" : "border border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"}`}>
               {message.from === "ai" && <p className="text-[10px] font-bold text-[#002187] dark:text-[#C4D600]">{settings.agentName}</p>}
-              <p className="whitespace-pre-wrap">{message.text}</p>
+              {message.media && <MediaPreview media={message.media} />}
+              {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
+              {message.text && <p className="whitespace-pre-wrap">{message.text}</p>}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
             </div>
           </div>
         ))}
-        {busy && <p className="text-[11px] text-slate-400">A IA está pensando...</p>}
+        {busy && <p className="text-[11px] text-slate-400">{messages.at(-1)?.media?.kind === "audio" ? "Transcrevendo o áudio e pensando..." : messages.at(-1)?.media ? "A IA está lendo o anexo..." : "A IA está pensando..."}</p>}
         <div ref={endRef} />
       </div>
       {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
-      <div className="flex gap-2">
-        <input aria-label="Mensagem do cliente" value={draft} placeholder="Mensagem do cliente e Enter" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void send(); } }} className={input} />
-        <button type="button" disabled={busy || !draft.trim()} onClick={() => void send()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" />Enviar</button>
-        <button type="button" disabled={busy || messages.length === 0} onClick={() => { setMessages([]); setError(""); }} title="Começar outra conversa" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RotateCcw className="h-3.5 w-3.5" />Limpar</button>
-      </div>
+      {attachment && (
+        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+          <MediaPreview media={attachment.media} compact />
+          <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500 dark:text-slate-300">{attachment.media.name} · {(attachment.file.size / 1024 / 1024).toFixed(2)} MB</span>
+          <button type="button" aria-label="Remover anexo" title="Remover anexo" onClick={() => setAttachment(null)} className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+      <input ref={fileRef} type="file" accept={AI_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { const picked = pick(event.target.files?.[0]); if (picked) setAttachment(picked); event.target.value = ""; }} />
+      {recorder.recording ? (
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={recorder.discard} title="Cancelar gravação" aria-label="Cancelar gravação" className={`${ghost} text-red-600 dark:text-red-400`}><Trash2 className="h-4 w-4" /></button>
+          <div className="flex h-9 flex-1 items-center gap-2 rounded-lg bg-slate-100 px-3 dark:bg-slate-800">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+            <span role="timer" aria-label="Tempo de gravação" className="text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-200">{Math.floor(recorder.seconds / 60)}:{String(recorder.seconds % 60).padStart(2, "0")}</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">Gravando o áudio do cliente...</span>
+          </div>
+          <button type="button" onClick={() => void sendRecording()} title="Parar e enviar" aria-label="Parar e enviar" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-bold text-[#051647] hover:brightness-105"><Check className="h-4 w-4" />Enviar</button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} title="Anexar imagem, áudio ou documento" aria-label="Anexar arquivo" className={ghost}><Paperclip className="h-4 w-4" /></button>
+          <button type="button" disabled={busy || !!attachment} onClick={() => void recorder.start()} title="Gravar áudio" aria-label="Gravar áudio" className={ghost}><Mic className="h-4 w-4" /></button>
+          <input aria-label="Mensagem do cliente" value={draft} placeholder={attachment ? "Texto opcional junto do anexo e Enter" : "Mensagem do cliente e Enter"} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const picked = pick(event.clipboardData.files?.[0]); if (picked) { event.preventDefault(); setAttachment(picked); } }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void send(); } }} className={input} />
+          <button type="button" disabled={busy || (!draft.trim() && !attachment)} onClick={() => void send()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" />Enviar</button>
+          <button type="button" disabled={busy || messages.length === 0} onClick={() => { setMessages([]); setError(""); }} title="Começar outra conversa" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RotateCcw className="h-3.5 w-3.5" />Limpar</button>
+        </div>
+      )}
     </Block>
   );
 }
@@ -601,7 +693,7 @@ export function AiSettingsPanel() {
         </div>
       )}
 
-      {tab === "teste" && <Playground settings={settings} />}
+      {tab === "teste" && <Playground settings={settings} onUsed={() => setUsage(null)} />}
 
       <div className="sticky bottom-0 flex items-center justify-end gap-2 rounded-xl border border-slate-200 bg-white/95 p-3 backdrop-blur dark:border-slate-800 dark:bg-[#051647]/95">
         {dirty && <span className="text-[11px] text-slate-500 dark:text-slate-300">Alterações da IA não salvas</span>}

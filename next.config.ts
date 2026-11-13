@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   experimental: {
     agentFeedback: true,
     agentUpgrade: "security",
+    // Anexos de até 10 MB no teste da IA (/ia): o middleware limitaria o corpo a 10 MB no total.
+    proxyClientMaxBodySize: "25mb",
   },
   cacheComponents: true,
   partialPrefetching: true,
