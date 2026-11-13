@@ -63,3 +63,23 @@ export function planQueuePositions(rows: QueueRow[], options: { now: Date; notif
   }
   return updates;
 }
+
+/**
+ * Como a IA atua numa conversa:
+ * - "exclusive": a IA atende sozinha (ainda sem transbordo);
+ * - "queued": já transferida e aguardando na fila, sem atendente humano: a IA continua ajudando (espera assistida),
+ *   sem transferir de novo e sem tirar a conversa da fila;
+ * - "paused": humano assumiu (atendente atribuído ou em atendimento), atendente já escreveu ao cliente depois do
+ *   transbordo, IA pausada pelo operador ou conversa encerrada: a IA fica em silêncio.
+ */
+export type AiConversationMode = "exclusive" | "queued" | "paused";
+
+export function aiConversationMode(
+  conversation: { status: string; assigneeId: string | null; closedAt: Date | null; menuState?: unknown },
+  flags: { handedOff: boolean; humanReplied: boolean },
+): AiConversationMode {
+  if (conversation.closedAt || conversation.assigneeId || conversation.status === "in_progress") return "paused";
+  if (flags.humanReplied || (stateOf(conversation.menuState) as { aiPaused?: boolean }).aiPaused === true) return "paused";
+  if (!flags.handedOff) return "exclusive";
+  return conversation.status === "waiting" ? "queued" : "paused";
+}

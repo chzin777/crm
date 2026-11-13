@@ -99,3 +99,15 @@ export function resolveHandoffQueue(queues: RoutingQueue[], input: { fixedQueueI
   if (current) return { queueId: current.id, source: "current" };
   return { queueId: null, source: "none" };
 }
+
+/** Espera assistida: a conversa já está na fila humana e a IA segue ajudando sem transferir de novo. */
+export function queuedAssistBlock(queueName: string | null | undefined) {
+  const fila = queueName?.trim() ? `na fila ${queueName.trim()}` : "na fila de atendimento";
+  return [
+    `ESTADO DA CONVERSA: o cliente já foi transferido e está aguardando atendimento ${fila} (alreadyQueued = true). Nenhum atendente assumiu ainda.`,
+    "- Continue respondendo com atenção total: dúvidas, produtos, estoque, endereços e horários das lojas e informações gerais.",
+    "- NÃO transfira de novo (não use action \"handoff\") e não repita que vai transferir ou encaminhar para a fila.",
+    `- Se o cliente perguntar pelo atendente humano, tranquilize: diga que ele já está ${fila} e logo um atendente assume por aqui, e que enquanto isso pode perguntar o que precisar.`,
+    "- Não cumprimente de novo.",
+  ].join("\n");
+}

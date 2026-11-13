@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
 import { closeConversation } from "@/lib/chat/actions";
 import { readMenuState } from "@/lib/chat/menu";
-import { aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
+import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
 import { withTyping } from "@/lib/chat/typing";
 import { sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { Prisma } from "@/generated/prisma/client";
@@ -25,7 +25,7 @@ import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext } from "@/lib/ai/assist";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
-import { buildSystemPrompt, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type SimulatedProfileId } from "@/lib/ai/agent-core";
+import { buildSystemPrompt, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 
 /**
@@ -50,14 +50,30 @@ export async function releaseFromAi(conversation: ChatConversation) {
 
 /** Nome gravado nas mensagens da IA (o atendimento vê quem respondeu). */
 export const AI_AUTHOR = "Assistente IA";
-/** Marca da mensagem de sistema da transferência: depois dela a IA não volta a responder nesta conversa. */
+/** Marca da mensagem de sistema da transferência: depois dela a IA só ajuda na espera (fila sem atendente). */
 export const AI_HANDOFF_MARK = "IA transferiu o atendimento";
 /** Espera curta para juntar mensagens seguidas do cliente numa só resposta. */
 const DEBOUNCE_MS = 6_000;
 const CREDIT_RETRY_MS = 10 * 60 * 1000;
 
-const handedOff = (conversationId: string) =>
-  prisma.chatMessage.findFirst({ where: { conversationId, author: "system", text: { startsWith: AI_HANDOFF_MARK } }, select: { id: true } }).then(Boolean);
+/** Transbordo já feito e se algum atendente escreveu ao cliente depois dele (assumiu o controle). */
+async function handoffFlags(conversationId: string) {
+  const mark = await prisma.chatMessage.findFirst({ where: { conversationId, author: "system", text: { startsWith: AI_HANDOFF_MARK } }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  if (!mark) return { handedOff: false, humanReplied: false, since: null };
+  const human = await prisma.chatMessage.findFirst({ where: { conversationId, author: "agent", internal: false, createdAt: { gt: mark.createdAt } }, select: { id: true } });
+  return { handedOff: true, humanReplied: !!human, since: mark.createdAt };
+}
+
+/** Modo da IA nesta conversa agora (exclusiva, espera assistida na fila ou pausada). */
+async function conversationMode(conversation: ChatConversation) {
+  const flags = await handoffFlags(conversation.id);
+  return { mode: aiConversationMode(conversation, flags), since: flags.since };
+}
+
+async function queuedState(conversation: ChatConversation): Promise<QueuedState> {
+  const queue = conversation.queueId ? await prisma.chatQueue.findUnique({ where: { id: conversation.queueId }, select: { name: true } }) : null;
+  return { queueName: queue?.name ?? null };
+}
 
 /**
  * Chamado pelo fluxo automático depois de gravar a mensagem. Devolve true quando a IA assume
@@ -68,10 +84,13 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
   const settings = await readAiSettings();
   if (!settings.autonomousEnabled) return false;
   const now = new Date();
+  // Humano assumiu, escreveu depois do transbordo ou pausou a IA: silêncio. Na fila sem atendente: espera assistida.
+  const { mode } = await conversationMode(conversation);
+  if (mode === "paused") return false;
+  const queued = mode === "queued";
   const rule = await hoursFor(conversation.queueId);
   const storeOpen = !rule || isOpenAt(rule, now);
-  if (!aiShouldAttend(settings, conversation, now, storeOpen)) return false;
-  if (await handedOff(conversation.id)) return false;
+  if (!aiShouldAttend(settings, conversation, now, storeOpen, queued)) return false;
 
   // Sem crédito, a conversa segue o fluxo normal em vez de ficar sem resposta.
   const status = await readAiStatus();
@@ -83,19 +102,24 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
   state.warnedAt = null;
   state.closeAt = null;
   state.closePhrase = null;
-  // Atendimento da IA fica fora da fila humana: sem posição, sem "Você avançou na fila" e sem alerta de espera.
-  state.aiActive = true;
-  state.notifiedPosition = null;
-  state.positionSince = null;
-  await prisma.chatConversation.update({
-    where: { id: conversation.id },
-    data: { ...(wasHandling && conversation.status === "bot" ? {} : aiTakeoverPatch()), menuState: state as unknown as Prisma.InputJsonValue },
-  });
+  if (queued) {
+    // Espera assistida: a conversa continua na fila (posição e avisos seguem), a IA só responde enquanto ninguém assume.
+    await prisma.chatConversation.update({ where: { id: conversation.id }, data: { menuState: state as unknown as Prisma.InputJsonValue } });
+  } else {
+    // Atendimento da IA fica fora da fila humana: sem posição, sem "Você avançou na fila" e sem alerta de espera.
+    state.aiActive = true;
+    state.notifiedPosition = null;
+    state.positionSince = null;
+    await prisma.chatConversation.update({
+      where: { id: conversation.id },
+      data: { ...(wasHandling && conversation.status === "bot" ? {} : aiTakeoverPatch()), menuState: state as unknown as Prisma.InputJsonValue },
+    });
+  }
 
   setTimeout(() => {
     void respond(conversation.id, messageId).catch((error) => console.error("[ai] atendimento autônomo:", error));
   }, DEBOUNCE_MS);
-  console.log(`[ai] ${conversation.id}: assumida pela IA (${conversation.status})`);
+  console.log(`[ai] ${conversation.id}: ${queued ? "espera assistida na fila" : "assumida pela IA"} (${conversation.status})`);
   return true;
 }
 
@@ -199,6 +223,8 @@ export type AgentRunInput = {
   meta: Omit<AiCallMeta, "maxTokens">;
   /** Só no teste: lê o anexo mesmo com o gatilho de mídia ligado, para ver como a IA o interpretaria. */
   ignoreMediaTrigger?: boolean;
+  /** Conversa já na fila humana, sem atendente: a IA segue ajudando sem transferir de novo. */
+  queued?: QueuedState | null;
   /** Mensagens anteriores do cliente nesta conversa (insistência em tentativa de manipulação). */
   earlierCustomerTexts?: string[];
 };
@@ -218,7 +244,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
 
   const media = await input.loadMedia();
   // Áudio pedindo atendente: a palavra de transferência vale também na transcrição.
-  if (media?.transcript && asksForHuman(settings, media.transcript)) {
+  if (!input.queued && media?.transcript && asksForHuman(settings, media.transcript)) {
     return { outcome: { action: "handoff", reply: "", reason: "Cliente pediu para falar com uma pessoa (áudio)", queue: "", trigger: "keyword" }, media, mediaTriggerSkipped, search: null, injection: NO_INJECTION };
   }
 
@@ -259,7 +285,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
   ]);
   // Pedido de pessoa com a IA roteando: sem assunto → 1 pergunta de triagem; com assunto → transfere já para a fila certa.
-  const humanMode = humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
+  const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
   const system = buildSystemPrompt({
     settings,
@@ -267,6 +293,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     info,
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
+    queued: input.queued,
     extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
@@ -299,15 +326,18 @@ async function respond(conversationId: string, messageId: string) {
   const latest = await prisma.chatMessage.findFirst({ where: { conversationId, author: "customer" }, orderBy: { createdAt: "desc" }, select: { id: true, text: true, externalId: true } });
   if (latest?.id !== messageId) return;
   if (!(await firstDispatch(`ai:${messageId}`))) return;
-  if (await handedOff(conversationId)) return;
+  const { mode, since } = await conversationMode(conversation);
+  if (mode === "paused") return;
+  const queued = mode === "queued" ? await queuedState(conversation) : null;
   const settings = await readAiSettings();
   // IA desligada enquanto a resposta aguardava: a conversa não fica presa fora da fila.
-  if (!settings.autonomousEnabled) { await releaseFromAi(conversation); return; }
+  if (!settings.autonomousEnabled) { if (!queued) await releaseFromAi(conversation); return; }
 
   // Mensagens do cliente desde a última resposta (bot ou atendente).
   const lastAnswer = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["bot", "agent"] }, internal: false }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
   const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { gt: lastAnswer.createdAt } } : {}) }, select: { text: true, attachment: true, metaMedia: true } });
-  const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR } });
+  // Na espera assistida, o limite de respostas conta só as respostas depois do transbordo.
+  const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, ...(queued && since ? { createdAt: { gt: since } } : {}) } });
   // Mensagens anteriores do cliente: insistência em tentativa de manipulação leva para a equipe.
   const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
   const meta = { feature: "agent", conversationId };
@@ -325,12 +355,16 @@ async function respond(conversationId: string, messageId: string) {
       loadMedia: () => customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), meta),
       earlierCustomerTexts: earlier.map((item) => item.text),
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders })).text,
+      queued,
     }));
   } catch (error) {
+    // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
+    if (queued) { console.warn(`[ai] ${conversationId}: espera assistida sem resposta (${error instanceof Error ? error.message : error})`); return; }
     // IA fora do ar: ninguém fica sem resposta, a conversa vai para a equipe.
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
   }
   const { outcome } = run;
+  if (queued) return replyWhileQueued(conversationId, outcome);
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
     if (isWindowOpen(conversation.lastInboundAt)) await sendAutomaticMessage(conversation, outcome.reply, undefined, undefined, AI_AUTHOR);
@@ -340,7 +374,7 @@ async function respond(conversationId: string, messageId: string) {
 
   // Pode ter sido assumida enquanto a IA pensava.
   const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
-  if (!fresh || fresh.assigneeId || fresh.closedAt) return;
+  if (!fresh || (await conversationMode(fresh)).mode === "paused") return;
 
   if (outcome.action === "handoff") {
     if (outcome.reply && !settings.handoffMessage.trim()) await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
@@ -351,6 +385,18 @@ async function respond(conversationId: string, messageId: string) {
     // A resposta da IA já é a despedida: sem a mensagem padrão nem pesquisa.
     await closeConversation(fresh, null, `Atendimento resolvido pela IA: ${outcome.reason}`, "");
   }
+}
+
+/**
+ * Espera assistida: responde sem transferir de novo (a conversa já está na fila). Transbordo pedido pelo modelo
+ * vira só a resposta; gatilhos sem resposta (mídia, limite) ficam em silêncio para a equipe ver.
+ * Confere de novo antes de enviar: se um atendente assumiu ou escreveu enquanto a IA pensava, não responde.
+ */
+async function replyWhileQueued(conversationId: string, outcome: AgentOutcome) {
+  const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
+  if (!fresh || (await conversationMode(fresh)).mode !== "queued") return;
+  if (!outcome.reply || !isWindowOpen(fresh.lastInboundAt)) return;
+  await sendAutomaticMessage(fresh, outcome.reply, undefined, undefined, AI_AUTHOR);
 }
 
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string };

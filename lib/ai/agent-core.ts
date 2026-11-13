@@ -3,7 +3,7 @@ import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import { STOCK_RULES } from "@/lib/ai/stock";
-import { humanRequestMode, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
+import { humanRequestMode, queuedAssistBlock, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
 import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
 
@@ -60,10 +60,11 @@ export function formatContext(input: { contactName: string | null; queueName: st
  * Regras que decidem antes de chamar a IA (mesma ordem do atendimento real): pedido de pessoa,
  * gatilho de mídia e limite de respostas da IA. null = a IA responde.
  */
-export function preAgentOutcome(settings: AiSettings, input: { pendingText: string; hasMedia: boolean; aiReplies: number; ignoreMediaTrigger?: boolean }): AgentOutcome | null {
+export function preAgentOutcome(settings: AiSettings, input: { pendingText: string; hasMedia: boolean; aiReplies: number; ignoreMediaTrigger?: boolean; queued?: QueuedState | null }): AgentOutcome | null {
   const handoff = (reason: string, trigger: AgentTrigger): AgentOutcome => ({ action: "handoff", reply: "", reason, queue: "", trigger });
   // Pedido de pessoa: com a IA escolhendo a fila, ela faz a triagem ou roteia (runAiAgent); sem isso, transfere direto.
-  if (humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) }) === "direct") return handoff("Cliente pediu para falar com uma pessoa", "keyword");
+  // Já na fila (espera assistida): pedir atendente não transfere de novo; a IA tranquiliza o cliente.
+  if (!input.queued && humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) }) === "direct") return handoff("Cliente pediu para falar com uma pessoa", "keyword");
   if (settings.handoffOnMedia && input.hasMedia && !input.ignoreMediaTrigger) return handoff("Cliente enviou documento ou áudio", "media");
   if (input.aiReplies >= settings.maxAiReplies) return handoff(`Limite de ${settings.maxAiReplies} respostas da IA atingido`, "limit");
   return null;
@@ -165,15 +166,19 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
  * blocos extras do sistema (anexos, resultado do catálogo, alerta de manipulação), informações e o lembrete de
  * segurança por último. Nada vindo do cliente entra aqui: os dados dele vão só na mensagem "user", delimitados.
  */
-export function buildSystemPrompt(input: { settings: AiSettings; queues?: RoutingQueue[]; info: string; extra?: string[]; now?: Date; firstReply?: boolean }) {
+/** queued: conversa já transferida e aguardando na fila sem atendente (espera assistida, alreadyQueued = true). */
+export type QueuedState = { queueName: string | null };
+
+export function buildSystemPrompt(input: { settings: AiSettings; queues?: RoutingQueue[]; info: string; extra?: string[]; now?: Date; firstReply?: boolean; queued?: QueuedState | null }) {
   const now = input.now ?? new Date();
   const time = brasiliaGreeting(now);
   return [
     agentRules(input.settings, input.queues ?? []),
+    input.queued ? queuedAssistBlock(input.queued.queueName) : "",
     ...(input.extra ?? []).filter(Boolean),
     `Agora: ${formatBr(now, { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
     `Horário atual em Brasília: ${time.time} (período: ${time.period} -> use "${time.greeting}").`,
-    input.firstReply === undefined
+    input.firstReply === undefined || input.queued
       ? ""
       : input.firstReply
         ? `Esta é a sua primeira resposta nesta conversa: comece com "${time.greeting}!" (com o primeiro nome do cliente, se conhecido) e já responda o que ele pediu.`

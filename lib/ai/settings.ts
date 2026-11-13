@@ -205,9 +205,12 @@ export function aiShouldAttend(
   conversation: { status: string; queueId: string | null; assigneeId: string | null; closedAt: Date | null },
   date: Date,
   storeOpen: boolean,
+  /** Já transferida pela IA e aguardando na fila sem atendente: a IA ajuda na espera em qualquer fila. */
+  queued = false,
 ) {
   if (!settings.autonomousEnabled || conversation.assigneeId || conversation.closedAt) return false;
   const inScope =
+    (queued && conversation.status === "waiting") ||
     (conversation.status === "bot" && settings.attendAtEntry) ||
     ((conversation.status === "waiting" || conversation.status === "bot") && !!conversation.queueId && settings.queueIds.includes(conversation.queueId));
   if (!inScope) return false;
