@@ -102,7 +102,8 @@ export function titleCase(value: string) {
 export function storeLabel(code: string, store: StoreInfo | undefined) {
   if (!store) return `Loja ${code}`;
   const place = store.neighborhood ? titleCase(store.neighborhood) : `${code}`;
-  const street = store.address ? titleCase(store.address.replace(/,\s*$/, "")) : "";
+  // "Avenida AV. PERIMETRAL" no cadastro vira "Av. Perimetral" (sem o tipo repetido).
+  const street = store.address ? titleCase(store.address.replace(/,\s*$/, "")).replace(/^(Av\.|R\.|Rua)\s+(Av\.|R\.|Rua)\s+/i, "$2 ") : "";
   const number = store.addressNumber && !/^s\/?n$/i.test(store.addressNumber.trim()) && !street.includes(store.addressNumber.trim()) ? store.addressNumber.trim() : "";
   const city = store.city && !/^GOIANIA$/i.test(store.city.trim()) ? ` (${titleCase(store.city)})` : "";
   const address = [street, number].filter(Boolean).join(", ");
