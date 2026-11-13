@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, Coins, FileText, FlaskConical, Mic, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, FileText, FlaskConical, MessagesSquare, Mic, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
@@ -12,7 +11,7 @@ import type { AiUsageReport } from "@/lib/ai/store";
 import type { StockLog } from "@/lib/ai/stock";
 
 type Queue = { id: string; name: string };
-type Tab = "identidade" | "atuacao" | "conexao" | "consumo" | "teste";
+type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
 type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean };
@@ -47,12 +46,12 @@ const TRIGGER_LABELS: Record<AgentTrigger, string> = {
 };
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-const TABS: { id: Tab; label: string; icon: typeof Bot }[] = [
-  { id: "identidade", label: "Identidade e comportamento", icon: BookOpenText },
-  { id: "atuacao", label: "Atuação e transbordo", icon: UserRoundCheck },
-  { id: "conexao", label: "Conexão e parâmetros", icon: PlugZap },
-  { id: "consumo", label: "Consumo e créditos", icon: Wallet },
-  { id: "teste", label: "Testar a IA", icon: FlaskConical },
+const TABS: { id: Tab; label: string; short: string; icon: typeof Bot }[] = [
+  { id: "identidade", label: "Identidade e comportamento", short: "Identidade", icon: Bot },
+  { id: "conhecimento", label: "Base de conhecimento", short: "Conhecimento", icon: BookOpenText },
+  { id: "atuacao", label: "Regras e transbordo", short: "Regras", icon: UserRoundCheck },
+  { id: "conexao", label: "Conexão e modelo", short: "Conexão", icon: PlugZap },
+  { id: "teste", label: "Testar a IA", short: "Testar", icon: FlaskConical },
 ];
 
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
@@ -84,14 +83,67 @@ function Toggle({ label, description, checked, onChange }: { label: string; desc
   );
 }
 
-function Block({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+/** Só o switch (rótulo para leitores de tela), usado no cabeçalho. */
+function SwitchOnly({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/40">
-      <div>
-        <p className="text-xs font-bold text-slate-800 dark:text-white">{title}</p>
-        {hint && <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{hint}</p>}
+    <label className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center" title={label}>
+      <input type="checkbox" role="switch" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} className="peer sr-only" />
+      <span className="pointer-events-none absolute inset-0 rounded-full bg-slate-300 transition-colors peer-checked:bg-[#C4D600] peer-focus-visible:ring-2 peer-focus-visible:ring-[#002187] dark:bg-slate-600" />
+      <span className="pointer-events-none absolute left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
+    </label>
+  );
+}
+
+function Block({ title, hint, action, children }: { title: string; hint?: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="space-y-4 rounded-xl border border-slate-200/70 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900/40">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-[#051647] dark:text-white">{title}</h2>
+          {hint && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+        </div>
+        {action}
       </div>
       {children}
+    </section>
+  );
+}
+
+/** Bloco que pode ser recolhido (conteúdo de consulta, não de configuração frequente). */
+function Collapsible({ title, hint, defaultOpen = false, children }: { title: string; hint?: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="rounded-xl border border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left sm:px-5">
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-[#051647] dark:text-white">{title}</span>
+          {hint && <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden">{open && <div className="space-y-4 px-4 pb-4 sm:px-5 sm:pb-5">{children}</div>}</div>
+      </div>
+    </section>
+  );
+}
+
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-slate-200/70 dark:bg-white/10 ${className}`} />;
+}
+
+/** Cartão de KPI do topo: valor, detalhe e barra opcional. */
+function Kpi({ icon: Icon, label, value, detail, percent, tone = "default" }: { icon: typeof Bot; label: string; value: string; detail?: string; percent?: number; tone?: "default" | "warn" }) {
+  return (
+    <div className={`min-w-0 rounded-xl border p-4 ${tone === "warn" ? "border-[#F7915E]/60 bg-[#F7915E]/10" : "border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40"}`}>
+      <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400"><Icon className="h-3.5 w-3.5" />{label}</p>
+      <p className="mt-1 truncate text-xl font-semibold tabular-nums text-[#051647] dark:text-white">{value}</p>
+      {percent !== undefined && (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)}>
+          <div className={`h-full rounded-full ${tone === "warn" ? "bg-[#F7915E]" : "bg-[#C4D600]"}`} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+        </div>
+      )}
+      {detail && <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">{detail}</p>}
     </div>
   );
 }
@@ -284,6 +336,104 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
 }
 
 /** Página Inteligência Artificial (/ia): parâmetros definidos pelo administrador, consumo e teste. */
+type Topic = AiSettings["topics"][number];
+const newTopicId = () => `topico-${Date.now()}`;
+const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/**
+ * Base de conhecimento: cada assunto é um item recolhível (todos fechados ao abrir a página), com status,
+ * prévia de uma linha, ações rápidas e busca por título ou conteúdo.
+ */
+function KnowledgeBase({ topics, onChange }: { topics: Topic[]; onChange: (topics: Topic[]) => void }) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [query, setQuery] = useState("");
+  const visible = topics.map((topic, index) => ({ topic, index })).filter(({ topic }) => !query.trim() || plain(`${topic.title} ${topic.content}`).includes(plain(query.trim())));
+  const allOpen = visible.length > 0 && visible.every(({ topic }) => open.has(topic.id));
+  const toggle = (id: string) => setOpen((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const update = (index: number, patch: Partial<Topic>) => onChange(topics.map((topic, position) => (position === index ? { ...topic, ...patch } : topic)));
+  const add = () => {
+    const id = newTopicId();
+    onChange([...topics, { id, title: "Novo assunto", enabled: true, content: "" }]);
+    setQuery("");
+    setOpen((current) => new Set(current).add(id));
+  };
+  const duplicate = (index: number) => {
+    const id = newTopicId();
+    const copy = { ...topics[index], id, title: `${topics[index].title} (cópia)` };
+    onChange([...topics.slice(0, index + 1), copy, ...topics.slice(index + 1)]);
+    setOpen((current) => new Set(current).add(id));
+  };
+  const filled = topics.filter((topic) => topic.content.trim()).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar assunto por título ou conteúdo" aria-label="Buscar assunto" className={`${input} pl-8`} />
+        </div>
+        <div className="flex gap-2">
+          <button type="button" disabled={!visible.length} onClick={() => setOpen(allOpen ? new Set() : new Set(visible.map(({ topic }) => topic.id)))} className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">
+            {allOpen ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}{allOpen ? "Recolher todos" : "Expandir todos"}
+          </button>
+          <button type="button" onClick={add} className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 sm:flex-none">
+            <Plus className="h-3.5 w-3.5" />Novo assunto
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{topics.length} assunto{topics.length === 1 ? "" : "s"} · {filled} preenchido{filled === 1 ? "" : "s"}{query.trim() ? ` · ${visible.length} encontrado${visible.length === 1 ? "" : "s"}` : ""}</p>
+
+      {visible.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">{topics.length ? "Nenhum assunto encontrado para essa busca." : "Nenhum assunto cadastrado. Use “Novo assunto”."}</p>
+      ) : (
+        <ul className="divide-y divide-slate-200/70 overflow-hidden rounded-xl border border-slate-200/70 dark:divide-slate-800 dark:border-slate-800">
+          {visible.map(({ topic, index }) => {
+            const expanded = open.has(topic.id);
+            const hasContent = !!topic.content.trim();
+            return (
+              <li key={topic.id} className="bg-white dark:bg-slate-900/40">
+                <div role="button" tabIndex={0} aria-expanded={expanded} aria-controls={`topic-${topic.id}`} onClick={() => toggle(topic.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(topic.id); } }} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-slate-50 sm:px-4 dark:hover:bg-white/5">
+                  <ChevronRight className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={`truncate text-sm font-medium ${topic.enabled ? "text-[#051647] dark:text-white" : "text-slate-400 line-through"}`}>{topic.title || "Sem título"}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${hasContent ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400"}`}>{hasContent ? "Preenchido" : "Vazio"}</span>
+                      {!topic.enabled && <span className="rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]">Desligado</span>}
+                    </div>
+                    {!expanded && <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{hasContent ? topic.content.replace(/\s+/g, " ") : "Sem conteúdo: a IA não usa este assunto."}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                    <button type="button" aria-label={`Duplicar ${topic.title}`} title="Duplicar assunto" onClick={() => duplicate(index)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><Copy className="h-4 w-4" /></button>
+                    <button type="button" aria-label={`Remover ${topic.title}`} title="Remover assunto" onClick={() => onChange(topics.filter((_, position) => position !== index))} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                </div>
+                <div id={`topic-${topic.id}`} className={`grid transition-[grid-template-rows] duration-200 ${expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                  <div className="overflow-hidden">
+                    {expanded && (
+                      <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-white/[0.03]">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <label className="flex-1 space-y-1 text-sm font-medium text-slate-700 dark:text-slate-200">Título
+                            <input aria-label="Título do assunto" value={topic.title} onChange={(event) => update(index, { title: event.target.value })} className={`${input} font-semibold`} />
+                          </label>
+                          <div className="sm:w-48 sm:pt-5"><Toggle label="Assunto ativo" checked={topic.enabled} onChange={(value) => update(index, { enabled: value })} /></div>
+                        </div>
+                        <label className="block space-y-1 text-sm font-medium text-slate-700 dark:text-slate-200">O que a IA deve responder
+                          <textarea aria-label={`Resposta sobre ${topic.title}`} rows={Math.min(14, Math.max(4, topic.content.split("\n").length + 1))} value={topic.content} onChange={(event) => update(index, { content: event.target.value })} className={`${area} resize-y`} />
+                          <span className="block text-right text-xs font-normal text-slate-400">{topic.content.length.toLocaleString("pt-BR")} caracteres</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function AiSettingsPanel() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("identidade");
@@ -326,9 +476,9 @@ export function AiSettingsPanel() {
     }
   }, []);
 
-  // Consumo e Conexão mostram o status da conta (créditos); carrega na primeira abertura.
+  // Os KPIs do topo (créditos, gasto, atendimentos) e a Conexão usam o consumo: carrega ao abrir e após salvar/testar.
   useEffect(() => {
-    if ((tab !== "consumo" && tab !== "conexao") || usage) return;
+    if (usage) return;
     let active = true;
     fetch("/api/ai/usage")
       .then(async (response) => {
@@ -339,10 +489,25 @@ export function AiSettingsPanel() {
       })
       .catch((cause: unknown) => { if (active) setUsageError(cause instanceof Error ? cause.message : "Não foi possível carregar o consumo."); });
     return () => { active = false; };
-  }, [tab, usage]);
+  }, [usage]);
 
-  if (error) return <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>;
-  if (!settings) return <div className="flex justify-center py-8"><LoadingSpinner label="Carregando configurações da IA..." size={32} /></div>;
+  const heading = (
+    <div className="min-w-0">
+      <h1 className="text-2xl font-bold tracking-tight text-[#051647] dark:text-white">Inteligência Artificial</h1>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Como a assistente fala, o que responde, quando passa para uma pessoa, quanto custa e um teste antes de colocar em produção.</p>
+    </div>
+  );
+  if (error) return <div className="space-y-6">{heading}<p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p></div>;
+  if (!settings) {
+    return (
+      <div className="space-y-6" aria-busy="true" aria-label="Carregando configurações da IA">
+        <div className="flex flex-wrap items-start justify-between gap-4">{heading}<Skeleton className="h-10 w-72" /></div>
+        <div className="grid gap-4 sm:grid-cols-3">{[0, 1, 2].map((item) => <Skeleton key={item} className="h-28" />)}</div>
+        <Skeleton className="h-11" />
+        <div className="space-y-4"><Skeleton className="h-40" /><Skeleton className="h-56" /></div>
+      </div>
+    );
+  }
 
   const set = <K extends keyof AiSettings>(key: K, value: AiSettings[K]) => setSettings((current) => (current ? { ...current, [key]: value } : current));
   const dirty = JSON.stringify(settings) !== saved;
@@ -390,45 +555,71 @@ export function AiSettingsPanel() {
     set("schedule", has ? settings.schedule.filter((slot) => slot.day !== day) : [...settings.schedule, { day, start: first?.start ?? "18:00", end: first?.end ?? "23:59" }].sort((a, b) => a.day - b.day));
   };
   const setSlotTime = (day: number, field: "start" | "end", value: string) => set("schedule", settings.schedule.map((slot) => (slot.day === day ? { ...slot, [field]: value } : slot)));
-  const updateTopic = (index: number, patch: Partial<AiSettings["topics"][number]>) => set("topics", settings.topics.map((topic, position) => (position === index ? { ...topic, ...patch } : topic)));
   const addKeyword = () => {
     const value = keywordDraft.trim();
     if (value && !settings.handoffKeywords.includes(value)) set("handoffKeywords", [...settings.handoffKeywords, value]);
     setKeywordDraft("");
   };
 
+  const activeTriggers = [settings.handoffKeywords.length > 0, settings.handoffOnComplaint, settings.handoffOnPurchaseIntent, settings.handoffWhenUnsure, settings.handoffOnMedia].filter(Boolean).length;
+  const counters: Partial<Record<Tab, number>> = { conhecimento: settings.topics.length, atuacao: activeTriggers };
+  const balanceTone = usage && (usage.balance.low || usage.status.creditExhausted) ? "warn" : "default";
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        {heading}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-white px-3 py-1.5 dark:border-slate-800 dark:bg-slate-900/40">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${settings.autonomousEnabled ? "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]" : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400"}`}>
+              <span className={`h-2 w-2 rounded-full ${settings.autonomousEnabled ? "bg-[#9aaa00] dark:bg-[#C4D600]" : "bg-slate-400"}`} />
+              {settings.autonomousEnabled ? "Ativa em produção" : "Pausada"}
+            </span>
+            <div className="w-auto"><SwitchOnly label="Atendimento autônomo" checked={settings.autonomousEnabled} onChange={(value) => set("autonomousEnabled", value)} /></div>
+          </div>
+          <button type="button" title="Restaurar parâmetros padrão (mantém os créditos informados)" onClick={() => setSettings({ ...DEFAULT_AI_SETTINGS, creditLoadedUsd: settings.creditLoadedUsd, creditLoadedAt: settings.creditLoadedAt })} className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">
+            <RotateCcw className="h-3.5 w-3.5" /><span className="hidden sm:inline">Restaurar padrões</span>
+          </button>
+          <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="relative inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-4 text-sm font-semibold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
+            {dirty && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-white bg-[#F7915E] dark:border-[#051647]" aria-hidden="true" />}
+            <Save className="h-4 w-4" />{saving ? "Salvando..." : "Salvar alterações"}
+          </button>
+        </div>
+      </div>
+
       {!configured && (
         <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />A chave da OpenAI não está configurada no servidor: a IA fica desligada até ela ser definida.
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900/40">
-        <div className="flex items-center gap-3">
-          <span className={`grid h-9 w-9 place-items-center rounded-lg ${settings.autonomousEnabled ? "bg-[#C4D600] text-[#051647]" : "bg-slate-100 text-slate-400 dark:bg-white/10"}`}><Bot className="h-5 w-5" /></span>
-          <div>
-            <p className="text-xs font-bold text-slate-800 dark:text-white">{settings.agentName}</p>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">{settings.autonomousEnabled ? "Atendimento autônomo ligado" : "Atendimento autônomo desligado: só o copiloto do atendente funciona"}</p>
-          </div>
-        </div>
-        <div className="w-56"><Toggle label="Atendimento autônomo" checked={settings.autonomousEnabled} onChange={(value) => set("autonomousEnabled", value)} /></div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {!usage ? (
+          usageError ? <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 sm:col-span-3 dark:bg-red-500/15 dark:text-red-300">{usageError}</p> : [0, 1, 2].map((item) => <Skeleton key={item} className="h-28" />)
+        ) : (
+          <>
+            <Kpi icon={Wallet} label={usage.balance.mode === "budget" ? "Disponível no orçamento" : "Créditos disponíveis"} value={usage.status.creditExhausted ? "Sem créditos" : usage.balance.mode === "none" ? "Não informado" : brl(usage.balance.remainingBrl)} percent={usage.balance.mode === "none" ? undefined : usage.balance.percentLeft} detail={usage.balance.mode === "none" ? "Informe o crédito em Conexão e modelo" : `${usage.balance.percentLeft.toLocaleString("pt-BR")}% restante${usage.balance.low ? " · recarregue em breve" : ""}`} tone={balanceTone} />
+            <Kpi icon={Coins} label="Gasto no mês" value={brl(usage.month.costBrl)} percent={usage.monthlyBudgetBrl > 0 ? (usage.month.costBrl / usage.monthlyBudgetBrl) * 100 : undefined} detail={`Hoje ${brl(usage.today.costBrl)} · total ${brl(usage.allTime.costBrl)}`} tone={usage.monthlyBudgetBrl > 0 && usage.month.costBrl >= usage.monthlyBudgetBrl ? "warn" : "default"} />
+            <Kpi icon={MessagesSquare} label="Atendimentos da IA no mês" value={int(usage.activity.conversations)} detail={`${int(usage.activity.messages)} mensagens · ${brl(usage.activity.avgCostPerConversationBrl)} por conversa`} />
+          </>
+        )}
       </div>
 
-      <div role="tablist" aria-label="Seções da IA" className="flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/5">
+      <div role="tablist" aria-label="Seções da IA" className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 [scrollbar-width:none] dark:bg-white/5">
         {TABS.map((item) => {
           const Icon = item.icon;
+          const count = counters[item.id];
           return (
-            <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)} className={`inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition ${tab === item.id ? "bg-white text-[#051647] shadow-sm dark:bg-[#051647] dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
-              <Icon className="h-3.5 w-3.5" />{item.label}
+            <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} title={item.label} onClick={() => setTab(item.id)} className={`inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition ${tab === item.id ? "bg-white text-[#051647] shadow-sm dark:bg-[#051647] dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+              <Icon className="h-3.5 w-3.5" /><span className="hidden md:inline">{item.label}</span><span className="md:hidden">{item.short}</span>
+              {count !== undefined && <span className={`rounded-full px-1.5 text-[10px] font-semibold tabular-nums ${tab === item.id ? "bg-[#C4D600]/30 text-[#051647] dark:text-[#C4D600]" : "bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-300"}`}>{count}</span>}
             </button>
           );
         })}
       </div>
 
       {tab === "identidade" && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <Block title="Identidade" hint="Como a IA se apresenta e fala com o cliente.">
             <label className={labelCls}>Nome com que a IA se apresenta
               <input value={settings.agentName} onChange={(event) => set("agentName", event.target.value)} className={input} maxLength={60} />
@@ -454,34 +645,21 @@ export function AiSettingsPanel() {
             <Toggle label="Pode citar preços" description="Usa o preço médio dos mais vendidos como referência “a partir de”. Desligado, a IA diz que a loja passa o orçamento." checked={settings.canQuotePrices} onChange={(value) => set("canQuotePrices", value)} />
           </Block>
 
-          <Block title="Base de conhecimento da ótica" hint="Escreva o que a IA deve dizer sobre cada assunto (lentes, armações, exame de vista, prazos...). Assunto desligado ou fora da lista vira transferência para uma pessoa.">
-            <div className="space-y-3">
-              {settings.topics.map((topic, index) => (
-                <div key={topic.id} className="space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-white/5">
-                  <div className="flex items-center gap-2">
-                    <input aria-label="Título do assunto" value={topic.title} onChange={(event) => updateTopic(index, { title: event.target.value })} className={`${input} flex-1 font-semibold`} />
-                    <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                      <input type="checkbox" checked={topic.enabled} onChange={(event) => updateTopic(index, { enabled: event.target.checked })} className="h-4 w-4 cursor-pointer accent-[#002187]" />Ativo
-                    </label>
-                    <button type="button" aria-label={`Remover ${topic.title}`} title="Remover assunto" onClick={() => set("topics", settings.topics.filter((_, position) => position !== index))} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                  <textarea aria-label={`Resposta sobre ${topic.title}`} rows={3} value={topic.content} onChange={(event) => updateTopic(index, { content: event.target.value })} className={area} />
-                </div>
-              ))}
-              <button type="button" onClick={() => set("topics", [...settings.topics, { id: `topico-${Date.now()}`, title: "Novo assunto", enabled: true, content: "" }])} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-[#002187]/40 px-3 py-2 text-xs font-semibold text-[#002187] hover:bg-[#002187]/5 dark:border-[#C4D600]/40 dark:text-[#C4D600]">
-                <Plus className="h-3.5 w-3.5" />Adicionar assunto
-              </button>
-            </div>
-          </Block>
-
-          <Block title="Instruções e restrições" hint="Regras de comportamento que valem para todas as respostas (ex.: o que nunca prometer).">
-            <textarea aria-label="Instruções adicionais" rows={5} value={settings.extraInstructions} onChange={(event) => set("extraInstructions", event.target.value)} className={area} />
+          <Block title="Instruções e restrições" hint="Regras de comportamento que valem para todas as respostas (ex.: o que nunca prometer). Segurança, estoque e imagens têm regras fixas no sistema que estas instruções não substituem.">
+            <textarea aria-label="Instruções adicionais" rows={Math.min(18, Math.max(6, settings.extraInstructions.split("\n").length + 1))} value={settings.extraInstructions} onChange={(event) => set("extraInstructions", event.target.value)} className={`${area} resize-y text-sm`} />
+            <p className="text-right text-xs text-slate-400">{settings.extraInstructions.length.toLocaleString("pt-BR")} caracteres</p>
           </Block>
         </div>
       )}
 
+      {tab === "conhecimento" && (
+        <Block title="Base de conhecimento da ótica" hint="O que a IA deve dizer sobre cada assunto (lentes, armações, exame de vista, prazos...). Assunto desligado ou fora da lista vira transferência para uma pessoa.">
+          <KnowledgeBase topics={settings.topics} onChange={(topics) => set("topics", topics)} />
+        </Block>
+      )}
+
       {tab === "atuacao" && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <Block title="Onde a IA atende" hint="A IA só responde conversas sem atendente. Assim que alguém assume, ela para.">
             <Toggle label="Na entrada, no lugar do menu automático" description="Toda conversa nova é recebida pela IA, que resolve ou transfere para a fila certa." checked={settings.attendAtEntry} onChange={(value) => set("attendAtEntry", value)} />
             <div>
@@ -553,10 +731,18 @@ export function AiSettingsPanel() {
                 <button type="button" onClick={addKeyword} className="cursor-pointer rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300">Adicionar</button>
               </div>
             </div>
-            <Toggle label="Reclamação ou cliente irritado" checked={settings.handoffOnComplaint} onChange={(value) => set("handoffOnComplaint", value)} />
-            <Toggle label="Intenção de compra ou orçamento" description="Fechar compra, orçamento com receita ou negociar condições." checked={settings.handoffOnPurchaseIntent} onChange={(value) => set("handoffOnPurchaseIntent", value)} />
-            <Toggle label="A IA não tiver certeza da resposta" description="Assunto fora do que está cadastrado." checked={settings.handoffWhenUnsure} onChange={(value) => set("handoffWhenUnsure", value)} />
-            <Toggle label="O cliente enviar documento ou áudio" description="Transfere na hora, sem a IA ler. Fotos não entram aqui: foto de produto é buscada no catálogo do ERP (sem resultado, transfere) e foto de receita vai sempre para a equipe." checked={settings.handoffOnMedia} onChange={(value) => set("handoffOnMedia", value)} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                { key: "handoffOnComplaint", label: "Reclamação ou cliente irritado", description: "Problema com pedido, produto ou atendimento." },
+                { key: "handoffOnPurchaseIntent", label: "Intenção de compra ou orçamento", description: "Fechar compra, orçamento com receita ou negociar condições." },
+                { key: "handoffWhenUnsure", label: "A IA não tiver certeza da resposta", description: "Assunto fora do que está cadastrado." },
+                { key: "handoffOnMedia", label: "O cliente enviar documento ou áudio", description: "Transfere na hora, sem a IA ler. Foto de produto é buscada no catálogo (sem resultado, transfere) e foto de receita vai sempre para a equipe." },
+              ] as const).map((item) => (
+                <div key={item.key} className={`rounded-lg border px-3 transition ${settings[item.key] ? "border-[#C4D600]/70 bg-[#C4D600]/5" : "border-slate-200/70 dark:border-slate-800"}`}>
+                  <Toggle label={item.label} description={item.description} checked={settings[item.key]} onChange={(value) => set(item.key, value)} />
+                </div>
+              ))}
+            </div>
             <label className={labelCls}>Máximo de respostas da IA por conversa
               <input type="number" min={1} max={50} value={settings.maxAiReplies} onChange={(event) => set("maxAiReplies", Number(event.target.value))} className={`${input} w-28`} />
             </label>
@@ -583,7 +769,7 @@ export function AiSettingsPanel() {
       )}
 
       {tab === "conexao" && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <Block title="Conexão" hint="A chave da API fica só no servidor (arquivo .env) e nunca aparece na tela.">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
@@ -637,6 +823,7 @@ export function AiSettingsPanel() {
                 {settings.temperature !== null && (
                   <label className={labelCls}>Criatividade: {settings.temperature.toFixed(1)} {settings.temperature <= 0.3 ? "(mais previsível)" : settings.temperature >= 0.8 ? "(mais variada)" : "(equilibrada)"}
                     <input type="range" min={0} max={1} step={0.1} value={settings.temperature} onChange={(event) => set("temperature", Number(event.target.value))} className="w-full cursor-pointer accent-[#002187] dark:accent-[#C4D600]" />
+                    <span className="flex justify-between text-xs font-normal text-slate-400"><span>Preciso</span><span>Equilibrado</span><span>Criativo</span></span>
                   </label>
                 )}
               </div>
@@ -657,17 +844,14 @@ export function AiSettingsPanel() {
             </div>
             <p className="flex items-center gap-1.5 text-[10px] text-slate-400"><Coins className="h-3 w-3" />Confira os preços do modelo em platform.openai.com/docs/pricing.</p>
           </Block>
-        </div>
-      )}
 
-      {tab === "consumo" && (
-        <div className="space-y-4">
+          <Collapsible title="Consumo detalhado" hint="Saldo, atendimentos, gasto por função e últimos 30 dias, registrados pelo CRM a cada uso da IA.">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">Gastos registrados pelo CRM a cada uso da IA, convertidos em R$ pela cotação de Conexão e parâmetros.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Valores convertidos em R$ pela cotação informada acima.</p>
             <button type="button" onClick={() => void loadUsage()} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RefreshCw className="h-3.5 w-3.5" />Atualizar</button>
           </div>
           {usageError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{usageError}</p>}
-          {!usage ? <div className="flex justify-center py-6"><LoadingSpinner label="Carregando consumo..." size={28} /></div> : (
+          {!usage ? <div className="space-y-3"><Skeleton className="h-24" /><Skeleton className="h-40" /></div> : (
             <>
               {usage.status.creditExhausted && (
                 <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]">
@@ -737,6 +921,7 @@ export function AiSettingsPanel() {
               </Block>
             </>
           )}
+          </Collapsible>
 
           <Block title="Créditos e orçamento" hint="A OpenAI não informa o saldo pela chave do projeto: informe o valor carregado e a data, e o CRM desconta o que foi gasto desde então.">
             <div className="grid gap-3 sm:grid-cols-3">
@@ -756,13 +941,15 @@ export function AiSettingsPanel() {
 
       {tab === "teste" && <Playground settings={settings} onUsed={() => setUsage(null)} />}
 
-      <div className="sticky bottom-0 flex items-center justify-end gap-2 rounded-xl border border-slate-200 bg-white/95 p-3 backdrop-blur dark:border-slate-800 dark:bg-[#051647]/95">
-        {dirty && <span className="text-[11px] text-slate-500 dark:text-slate-300">Alterações da IA não salvas</span>}
-        <button type="button" disabled={!dirty} onClick={() => setSettings(JSON.parse(saved) as AiSettings)} className="h-9 cursor-pointer rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10">Descartar</button>
-        <button type="button" onClick={() => setSettings({ ...DEFAULT_AI_SETTINGS, creditLoadedUsd: settings.creditLoadedUsd, creditLoadedAt: settings.creditLoadedAt })} className="h-9 cursor-pointer rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">Restaurar padrões</button>
-        <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
-          <Save className="h-4 w-4" />{saving ? "Salvando..." : "Salvar IA"}
-        </button>
+      {/* Barra fixa só com alterações pendentes (o botão do cabeçalho sai da tela ao rolar). */}
+      <div className={`sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F7915E]/50 bg-white/95 p-3 shadow-lg backdrop-blur transition-all duration-200 dark:border-[#F7915E]/40 dark:bg-[#051647]/95 ${dirty ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`} aria-hidden={!dirty}>
+        <span className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-200"><span className="h-2 w-2 rounded-full bg-[#F7915E]" />Alterações não salvas</span>
+        <div className="flex gap-2">
+          <button type="button" tabIndex={dirty ? 0 : -1} disabled={!dirty} onClick={() => setSettings(JSON.parse(saved) as AiSettings)} className="h-9 cursor-pointer rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-white/10">Descartar</button>
+          <button type="button" tabIndex={dirty ? 0 : -1} disabled={!dirty || saving} onClick={() => void save()} className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
+            <Save className="h-4 w-4" />{saving ? "Salvando..." : "Salvar alterações"}
+          </button>
+        </div>
       </div>
     </div>
   );
