@@ -49,4 +49,15 @@ describe("saudação natural no prompt", () => {
     expect(later).toContain("não cumprimente de novo");
     expect(later).not.toContain("primeira resposta nesta conversa");
   });
+
+  it('responde à gentileza ("tudo bem?") antes de conduzir o atendimento', () => {
+    const prompt = buildSystemPrompt({ settings, info: "", now: br("15:00"), firstReply: true });
+    expect(prompt).toContain(GREETING_RULES);
+    expect(prompt).toContain('"tudo bem?", "tudo bom?", "como vai?"');
+    expect(prompt).toContain('"blz?"');
+    expect(prompt).toContain('responda primeiro à gentileza de forma natural e leve (ex.: "Tudo ótimo por aqui, e com você?"');
+    expect(prompt).toContain('"Boa tarde! Tudo ótimo por aqui, e com você? Como posso te ajudar?"');
+    expect(prompt).toContain('Nunca ignore o "tudo bem?" pulando direto para "Como posso ajudar?"');
+    expect(prompt).toContain('(período: tarde -> use "Boa tarde")');
+  });
 });
