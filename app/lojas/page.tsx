@@ -25,6 +25,9 @@ interface StoreRecord {
   kind: string;
   startDate: string;
   radiusKm: number;
+  /** Pin exato usado pela IA: link do Google Maps colado ou coordenadas. */
+  mapsLink: string;
+  pinSource: string;
 }
 
 const BRAZIL_STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
@@ -41,6 +44,7 @@ const emptyForm = {
   neighborhoods: [] as string[],
   radiusKm: "20",
   active: true,
+  mapsLink: "",
 };
 const RADIUS_PRESETS = [5, 10, 20, 30, 50];
 const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#051647] dark:text-white";
@@ -180,6 +184,7 @@ export default function LojasPage() {
       neighborhoods: store.neighborhoods.slice(0, 1),
       radiusKm: String(store.radiusKm),
       active: store.active,
+      mapsLink: store.mapsLink ?? "",
     });
     setFormError("");
     setCities([]);
@@ -213,6 +218,7 @@ export default function LojasPage() {
           neighborhoods: form.neighborhoods,
           radiusKm: Number(form.radiusKm.replace(",", ".")) || 0,
           active: form.active,
+          mapsLink: form.mapsLink,
         }),
       });
       const result = await response.json().catch(() => ({})) as { data?: StoreRecord; error?: string };
@@ -319,6 +325,10 @@ export default function LojasPage() {
         <SearchableSelect label="Cidade" value={form.city} options={withCurrent(cities, form.city)} isLoading={citiesLoading} disabled={!form.state} placeholder={form.state ? "Selecione a cidade" : "Selecione a UF primeiro"} onChange={(city) => setForm({ ...form, city, neighborhoods: [] })} />
       </div>
       <SearchableSelect label="Bairro da loja" value={form.neighborhoods[0] ?? ""} options={withCurrent(neighborhoodOptions, form.neighborhoods[0] ?? "")} isLoading={neighborhoodsLoading} disabled={!form.city} placeholder={form.city ? "Selecione o bairro" : "Selecione a cidade primeiro"} onChange={(neighborhood) => setForm({ ...form, neighborhoods: [neighborhood] })} />
+      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Link do Google Maps ou coordenadas
+        <input value={form.mapsLink} onChange={(event) => setForm({ ...form, mapsLink: event.target.value })} placeholder="https://www.google.com/maps/place/... ou -16.8234, -49.2456" className={`${inputClass} mt-1`} />
+        <span className="mt-1 block text-[11px] font-normal text-slate-500 dark:text-slate-400">Opcional. É o pin exato enviado pela IA quando o cliente pede a localização. Abra a loja no Google Maps, copie o link e cole aqui; sem link, o endereço é localizado automaticamente.</span>
+      </label>
     </>
   );
 

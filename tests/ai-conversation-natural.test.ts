@@ -100,7 +100,7 @@ describe("enviarLocalizacaoLoja: pin nativo ou link do Google Maps", () => {
   it("sem coordenadas: link direto do Google Maps com o endereço (nunca só texto seco)", async () => {
     const location = storeLocation("34", marista);
     expect(location.pinNativo).toBe(false);
-    expect(location.mapsUrl).toBe(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent("Óticas Brasil RUA 27, 2106 - SETOR MARISTA - GOIANIA")}`);
+    expect(location.mapsUrl).toBe(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent("Óticas Brasil RUA 27, 2106 - SETOR MARISTA GOIANIA GO")}`);
     const sent: string[] = [];
     expect(await deliverLocation(location, { sendPin: async () => { sent.push("location"); }, sendText: async (text) => { sent.push(text); } })).toBe("link");
     expect(sent).toEqual([locationText(location)]);
@@ -110,8 +110,8 @@ describe("enviarLocalizacaoLoja: pin nativo ou link do Google Maps", () => {
   it("pin recusado pela Meta: cai no link do Maps", async () => {
     const sent: string[] = [];
     await deliverLocation(storeLocation("17", bueno), { sendPin: async () => { throw new Error("Meta 400"); }, sendText: async (text) => { sent.push(text); } });
-    expect(sent[0]).toContain("maps/search/?api=1&query=-16.7037%2C-49.2687");
-    expect(googleMapsUrl(bueno)).toContain("query=-16.7037%2C-49.2687");
+    expect(sent[0]).toContain("maps/search/?api=1&query=-16.7037,-49.2687");
+    expect(googleMapsUrl(bueno)).toContain("query=-16.7037,-49.2687");
   });
 
   it("acha a loja pelo bairro citado; ferramenta e regra no prompt", () => {

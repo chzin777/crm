@@ -76,7 +76,7 @@ export function isRetailUnit(name: string) {
 }
 
 /** Cadastro da loja usado para o nome comercial (tabela Store do CRM). */
-export type StoreInfo = { name: string; address: string | null; addressNumber: string | null; neighborhood: string | null; city: string | null; lat?: number | null; lng?: number | null };
+export type StoreInfo = { id?: string; state?: string | null; name: string; address: string | null; addressNumber: string | null; neighborhood: string | null; city: string | null; lat?: number | null; lng?: number | null };
 
 const ACCENTS: Record<string, string> = {
   GOIANIA: "Goiânia", AMAZONIA: "Amazônia", GOIAS: "Goiás", BRASILIA: "Brasília", ARAGUAINA: "Araguaína", AEROVIARIO: "Aeroviário",

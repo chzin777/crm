@@ -156,6 +156,12 @@ model Store {
   radiusKm      Float    @default(20)
   lat           Float?
   lng           Float?
+  /// Pin exato da loja (localização enviada pela IA): link do Google Maps colado ou endereço geocodificado em nível de rua.
+  pinLat        Float?
+  pinLng        Float?
+  /// manual | google | nominatim | unresolved
+  pinSource     String?
+  pinUrl        String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }

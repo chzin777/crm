@@ -40,16 +40,22 @@ function brandsOf(all: IndexedProduct[]) {
 const STORES_MS = 10 * 60 * 1000;
 let storesCache: { at: number; stores: Promise<Map<string, StoreInfo>> } | null = null;
 
+/** Recarrega o cadastro de lojas na próxima consulta (pin salvo ou editado). */
+export function clearStoreDirectory() {
+  storesCache = null;
+}
+
 /** Lojas ativas do cadastro do CRM pelo código do ERP ("LJ 36 ..." → "36"). */
 export function storeDirectory() {
   if (storesCache && Date.now() - storesCache.at < STORES_MS) return storesCache.stores;
   const load = prisma.store
-    .findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { name: true, address: true, addressNumber: true, neighborhoods: true, city: true, lat: true, lng: true } })
+    .findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { id: true, name: true, address: true, addressNumber: true, neighborhoods: true, city: true, state: true, pinLat: true, pinLng: true } })
     .then((rows) => {
       const map = new Map<string, StoreInfo>();
       for (const row of rows) {
         const code = storeErpCode(row.name);
-        if (code && !map.has(code)) map.set(code, { name: row.name, address: row.address, addressNumber: row.addressNumber, neighborhood: row.neighborhoods[0] ?? null, city: row.city, lat: row.lat, lng: row.lng });
+        // lat/lng = pin exato da loja (manual ou geocodificado por rua); o centro do bairro (Store.lat) é só para o raio de clientes.
+        if (code && !map.has(code)) map.set(code, { id: row.id, name: row.name, address: row.address, addressNumber: row.addressNumber, neighborhood: row.neighborhoods[0] ?? null, city: row.city, state: row.state, lat: row.pinLat, lng: row.pinLng });
       }
       return map;
     });

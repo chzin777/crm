@@ -23,7 +23,8 @@ import { allowsProductPhoto } from "@/lib/ai/stock-showcase";
 import { cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
 import { buildProductCard, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
-import { storeDirectory } from "@/lib/ai/stock-db";
+import { clearStoreDirectory, storeDirectory } from "@/lib/ai/stock-db";
+import { ensureStorePin } from "@/lib/store-pin";
 import { deliverLocation, findStores, resolveStoreMatch, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
@@ -421,7 +422,16 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       // Filiais no mesmo endereço viram uma; "essa loja" vale a unidade citada nas últimas mensagens da IA.
       const resolved = resolveStoreMatch(matches, { wanted, recentAiTexts: [wanted, ...(input.recentAiTexts ?? [])] });
       if (resolved.type === "found") {
-        location = storeLocation(resolved.match.code, resolved.match.store);
+        let store = resolved.match.store;
+        // Sem pin salvo: geocodifica o endereço em nível de rua agora (centro de cidade/bairro não vale) e guarda.
+        if ((store.lat == null || store.lng == null) && store.id) {
+          const pin = await ensureStorePin(store.id).catch(() => null);
+          if (pin) {
+            store = { ...store, lat: pin.lat, lng: pin.lng };
+            clearStoreDirectory();
+          }
+        }
+        location = storeLocation(resolved.match.code, store);
         return { enviado: true, loja: location.nome, endereco: location.endereco, tipo: location.pinNativo ? "pin no mapa do WhatsApp" : "link do Google Maps", orientacao: "A localização sai automaticamente logo depois da sua resposta: responda curto, sem repetir o endereço inteiro." };
       }
       if (resolved.type === "ambiguous") return { enviado: false, lojasPossiveis: resolved.options, orientacao: "Há mais de uma unidade real com esse nome: pergunte qual delas listando cada opção com o endereço exatamente como em lojasPossiveis (ex.: \"• *Loja Setor Sul* — Rua 95\")." };

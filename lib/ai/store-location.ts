@@ -1,3 +1,4 @@
+import { pinMapsUrl } from "@/lib/ai/store-geolocation";
 import { matchesRegion, storeLabel, titleCase, type StoreInfo } from "@/lib/ai/stock";
 
 /**
@@ -26,8 +27,10 @@ export function fullAddress(store: StoreInfo) {
 
 /** Link do Google Maps: pelas coordenadas quando houver; senão pelo endereço (busca). */
 export function googleMapsUrl(store: StoreInfo) {
-  const query = hasCoords(store) ? `${store.lat},${store.lng}` : `Óticas Brasil ${fullAddress(store)}`;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  // Com pin: ?query=lat,lng crava o pin vermelho; sem pin: busca pelo endereço completo com cidade e UF.
+  const number = store.addressNumber && !/^s\/?n$/i.test(store.addressNumber.trim()) ? store.addressNumber.trim() : "";
+  const address = [[store.address?.trim(), number].filter(Boolean).join(", "), store.neighborhood?.trim()].filter(Boolean).join(" - ");
+  return pinMapsUrl(hasCoords(store) ? { lat: store.lat!, lng: store.lng! } : null, { address, city: store.city, state: store.state || "GO" });
 }
 
 export function storeLocation(code: string, store: StoreInfo): StoreLocation {
