@@ -77,7 +77,7 @@ function cleanParts(text: string) {
  * pergunta de condução padrão como segunda mensagem. Nunca deixa o separador vazar.
  */
 export function splitAiResponseMessages(text: string | null | undefined, max = MAX_BUBBLES): string[] {
-  const parts = splitParts(text, max).map(tidyBubble).filter(Boolean);
+  const parts = splitParts(fixDoubleGreeting(text ?? ""), max).map(tidyBubble).filter(Boolean);
   // Pergunta das bolhas seguintes concorda com a quantidade de lojas listadas na 1ª (1 loja → singular).
   const stores = parts.length > 1 ? countStores(parts[0]) : 0;
   return stores === 1 ? [parts[0], ...parts.slice(1).map((part) => agreeStoreCount(part, 1))] : parts;
@@ -91,6 +91,23 @@ const OFFER_MAX = 300;
 export function isFollowUp(paragraph: string) {
   const value = paragraph.trim();
   return !!value && value.length <= OFFER_MAX && !LIST_ITEM.test(value) && (/\?\s*\S{0,3}$/.test(value) || OFFER_START.test(value.replace(/^[*_~]+/, "")));
+}
+
+const PERIOD_GREETING = "(bom dia|boa tarde|boa noite)";
+const INTERJECTION = "(oi+|ol[áa]|e a[íi])";
+
+/**
+ * Abertura única: corrige saudação dupla no início da resposta ("Boa tarde! Oi, Christofer 😊" → "Boa tarde,
+ * Christofer 😊"; "Boa tarde! Oi! Tudo bem?" → "Boa tarde! Tudo bem?"; "Olá! Bom dia, Maria!" → "Bom dia, Maria!").
+ */
+export function fixDoubleGreeting(text: string) {
+  // Fim de palavra sem \b (que não reconhece "á" de "Olá").
+  const end = "(?=[\\s!,.?]|$)";
+  const periodFirst = new RegExp(`^(\\s*)${PERIOD_GREETING}\\s*[!,.]?\\s+${INTERJECTION}${end}\\s*([!,.]?)\\s*`, "i");
+  const interjectionFirst = new RegExp(`^(\\s*)${INTERJECTION}\\s*[!,.]?\\s+${PERIOD_GREETING}${end}`, "i");
+  return text
+    .replace(periodFirst, (_match, lead: string, greeting: string, _hi: string, punct: string) => `${lead}${greeting}${punct === "!" || punct === "." ? "! " : ", "}`)
+    .replace(interjectionFirst, (_match, lead: string, _hi: string, greeting: string) => `${lead}${greeting.charAt(0).toUpperCase()}${greeting.slice(1)}`);
 }
 
 /**
