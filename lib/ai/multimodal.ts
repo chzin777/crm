@@ -110,7 +110,7 @@ export function mediaParts(kind: AiAttachmentKind, media: AiMediaInput, transcri
 
 /** Orientação extra do sistema quando há anexo na conversa. */
 export const MEDIA_RULES =
-  "Anexos do cliente: leia imagens, PDFs, documentos e transcrições de áudio com atenção. Em receitas oftalmológicas, identifique e repita os valores legíveis (esférico, cilíndrico, eixo, adição, DNP, olho direito/OD e esquerdo/OE) e o tipo de lente indicado, sem fazer diagnóstico médico; se algo estiver ilegível, diga qual campo e peça uma foto melhor. Em fotos de armação, descreva estilo, formato e cor.";
+  "Anexos do cliente: use o conteúdo de PDFs, documentos e transcrições de áudio para responder, sem repetir ou resumir para o cliente o que ele mesmo enviou. Receitas, laudos e orçamentos de outra ótica exigem conferência humana: transfira (action handoff). Imagens seguem a REGRA CRÍTICA SOBRE IMAGENS.";
 
 type TurnMessage = { from: "customer" | "ai"; text: string };
 

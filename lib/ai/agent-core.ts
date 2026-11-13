@@ -1,6 +1,7 @@
 import { formatBr } from "@/lib/br-time";
 import { fillVariables } from "@/lib/chat/text";
-import { asksForHuman, type AiSettings } from "@/lib/ai/settings";
+import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
+import { IMAGE_RULE } from "@/lib/ai/catalog-search";
 import type { CustomerHistory } from "@/lib/chat/types";
 
 /**
@@ -11,7 +12,8 @@ import type { CustomerHistory } from "@/lib/chat/types";
 export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "resolved"; reason?: string; queue?: string };
 
 /** O que disparou o resultado: regra antes da IA (keyword, media, limit) ou a própria IA. */
-export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply";
+/** catalog_miss: foto de produto sem resultado no catálogo; prescription: receita/documento em foto (conferência humana). */
+export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription";
 export type AgentOutcome = { action: "reply" | "handoff" | "resolved"; reply: string; reason: string; queue: string; trigger: AgentTrigger };
 
 const AUTHOR_LABEL = { customer: "Cliente", agent: "Atendente", bot: "Robô", system: "Sistema" } as const;
@@ -57,7 +59,7 @@ export function formatContext(input: { contactName: string | null; queueName: st
 export function preAgentOutcome(settings: AiSettings, input: { pendingText: string; hasMedia: boolean; aiReplies: number; ignoreMediaTrigger?: boolean }): AgentOutcome | null {
   const handoff = (reason: string, trigger: AgentTrigger): AgentOutcome => ({ action: "handoff", reply: "", reason, queue: "", trigger });
   if (asksForHuman(settings, input.pendingText)) return handoff("Cliente pediu para falar com uma pessoa", "keyword");
-  if (settings.handoffOnMedia && input.hasMedia && !input.ignoreMediaTrigger) return handoff("Cliente enviou foto, documento ou áudio (ex.: receita)", "media");
+  if (settings.handoffOnMedia && input.hasMedia && !input.ignoreMediaTrigger) return handoff("Cliente enviou documento ou áudio", "media");
   if (input.aiReplies >= settings.maxAiReplies) return handoff(`Limite de ${settings.maxAiReplies} respostas da IA atingido`, "limit");
   return null;
 }
@@ -78,6 +80,8 @@ export function interpretDecision(decision: AgentDecision): AgentOutcome {
  */
 export function customerMessages(outcome: AgentOutcome, settings: Pick<AiSettings, "handoffMessage">, vars: { customer?: string | null; queue?: string | null }, now = new Date()) {
   if (outcome.action !== "handoff") return outcome.reply ? [outcome.reply] : [];
+  // Foto sem resultado no catálogo ou receita: a resposta já avisa o encaminhamento (sem repetir a de transferência).
+  if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") return outcome.reply ? [outcome.reply] : [];
   const messages: string[] = [];
   if (outcome.trigger === "ai" && outcome.reply && !settings.handoffMessage.trim()) messages.push(outcome.reply);
   if (settings.handoffMessage.trim()) messages.push(fillVariables(settings.handoffMessage, { customer: vars.customer ?? undefined, queue: vars.queue ?? undefined }, now));
@@ -112,4 +116,37 @@ export function simulatedHistory(profile: SimulatedProfileId, now = new Date()):
     ],
     campaigns: [],
   };
+}
+
+export const BRAND_RULES = [
+  "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato, armações e exames de vista).",
+  "Escreva sempre em português do Brasil, tom cordial, próximo e profissional, frases curtas, adequadas ao WhatsApp.",
+  "Nunca invente preços, prazos, estoque, promoções, endereços ou políticas que não estejam no contexto. Se faltar informação, oriente a confirmar com a loja ou a pedir o dado ao cliente.",
+  "Nunca peça dados sensíveis como senha ou número de cartão.",
+].join("\n");
+
+/** Regras do agente (WhatsApp e teste da página /ia). A regra de imagens é fixa no código, logo após as da marca. */
+export function agentRules(settings: AiSettings, queueNames: string[]) {
+  const handoff = [
+    "Transfira para uma pessoa (action \"handoff\") quando:",
+    "- o cliente pedir para falar com uma pessoa;",
+    settings.handoffOnComplaint ? "- o cliente reclamar, estiver irritado ou relatar problema com pedido, produto ou atendimento;" : "",
+    settings.handoffOnPurchaseIntent ? "- o cliente quiser fechar uma compra, fazer orçamento com receita ou negociar condições;" : "",
+    settings.handoffWhenUnsure ? "- a resposta não estiver nas informações abaixo ou você não tiver certeza;" : "",
+  ].filter(Boolean);
+  return [
+    BRAND_RULES,
+    // Fixa no código: vale mesmo que as instruções da tela digam o contrário.
+    IMAGE_RULE,
+    `Você é ${settings.agentName}, assistente virtual que atende clientes pelo WhatsApp. Se for a primeira resposta da conversa, apresente-se brevemente como assistente virtual.`,
+    `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
+    "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",
+    settings.useCustomerOrders ? "Você pode informar ao cliente dados dos pedidos dele que aparecem no histórico do ERP (data, loja, situação)." : "Não comente pedidos ou compras anteriores do cliente.",
+    settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
+    handoff.join("\n"),
+    settings.closeWhenResolved ? "Use action \"resolved\" quando o cliente confirmar que a dúvida foi resolvida ou se despedir agradecendo; nesse caso a resposta deve ser uma despedida curta." : "",
+    settings.extraInstructions.trim() ? `Instruções da empresa:\n${settings.extraInstructions.trim()}` : "",
+    settings.aiChoosesQueue && queueNames.length ? `Filas disponíveis para transferência: ${queueNames.join(", ")}. Em "queue", indique a mais adequada (ou vazio).` : "",
+    `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved", "reason": "motivo curto para a equipe", "queue": "nome da fila ou vazio"}.`,
+  ].filter(Boolean).join("\n\n");
 }

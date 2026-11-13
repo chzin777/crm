@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/cache";
-import { formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
+import { BRAND_RULES, formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
 import { loadCustomerHistory } from "@/lib/chat/customer-history";
 import { aiJson } from "@/lib/ai/openai";
 
@@ -11,13 +11,7 @@ const CATALOG_DAYS = 180;
 
 export type ConversationRef = { id: string; contactId: string; phone: string; subject: string; queueId: string | null };
 
-
-export const BRAND_RULES = [
-  "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato, armações e exames de vista).",
-  "Escreva sempre em português do Brasil, tom cordial, próximo e profissional, frases curtas, adequadas ao WhatsApp.",
-  "Nunca invente preços, prazos, estoque, promoções, endereços ou políticas que não estejam no contexto. Se faltar informação, oriente a confirmar com a loja ou a pedir o dado ao cliente.",
-  "Nunca peça dados sensíveis como senha ou número de cartão.",
-].join("\n");
+export { BRAND_RULES };
 
 async function transcript(conversationId: string) {
   const rows = await prisma.chatMessage.findMany({
