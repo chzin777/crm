@@ -43,9 +43,13 @@ describe("foto de óculos sem resultado no catálogo", () => {
     expect(CATALOG_MISS_REPLY).toContain("atendente responsável");
   });
 
-  it("receita na foto vai para a equipe sem busca; outra imagem segue o atendimento normal", async () => {
+  it("receita na foto é lida (graus extraídos) sem busca; outra imagem segue o atendimento normal", async () => {
     const search = vi.fn(async () => rayBan);
-    expect(await productImageFlow({ identify: async () => ({ kind: "receita" }), search, withPrices: false })).toMatchObject({ type: "handoff", trigger: "prescription" });
+    const rx = { kind: "receita", documento: { tipo: "receita", receita: { od: { esferico: "-2,00", cilindrico: "-0,75", eixo: "180" }, oe: { esferico: "-1,50", adicao: "+2,00" }, medico: "Dra. Ana" } } };
+    expect(await productImageFlow({ identify: async () => rx, search, withPrices: false })).toEqual({
+      type: "document", kind: "receita", log: { kind: "receita", term: "", found: 0 },
+      summary: "Receita — OD: esf -2,00 | cil -0,75 | eixo 180; OE: esf -1,50 | adição +2,00; Médico: Dra. Ana",
+    });
     expect(await productImageFlow({ identify: async () => ({ kind: "selfie" }), search, withPrices: false })).toMatchObject({ type: "continue" });
     expect(search).not.toHaveBeenCalled();
   });
@@ -70,9 +74,9 @@ describe("gatilhos e prompt", () => {
     expect(prompt.indexOf(IMAGE_RULE)).toBeLessThan(prompt.indexOf("Instruções da empresa"));
   });
 
-  it("foto não dispara o gatilho de mídia (hasMedia só para áudio/documento)", () => {
+  it("mídia nunca transfere antes da leitura (nem com handoffOnMedia ligado)", () => {
     expect(preAgentOutcome({ ...settings, handoffOnMedia: true }, { pendingText: "", hasMedia: false, aiReplies: 0 })).toBeNull();
-    expect(preAgentOutcome({ ...settings, handoffOnMedia: true }, { pendingText: "", hasMedia: true, aiReplies: 0 })).toMatchObject({ trigger: "media", reason: "Cliente enviou documento ou áudio" });
+    expect(preAgentOutcome({ ...settings, handoffOnMedia: true }, { pendingText: "", hasMedia: true, aiReplies: 0 })).toBeNull();
   });
 });
 

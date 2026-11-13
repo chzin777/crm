@@ -1,4 +1,5 @@
 import { formatBrl } from "@/lib/ai/stock";
+import { documentKind, EXTRACTION_SCHEMA, formatExtraction, type DocumentExtraction, type DocumentKind } from "@/lib/ai/document-extract";
 /**
  * Foto de produto enviada pelo cliente: a IA identifica o produto em silêncio (JSON interno), o CRM busca
  * no histórico de vendas do ERP e a resposta sai só com o resultado da busca, ou a conversa vai para a equipe.
@@ -13,11 +14,12 @@ export const IMAGE_RULE =
 export const VISION_PROMPT = [
   "Você classifica a imagem enviada por um cliente de ótica para uma busca no sistema. Não converse, só extraia dados.",
   'Responda em json: {"kind": "produto" | "receita" | "documento" | "outro", "category": "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | "", "brand": "marca legível ou reconhecível com segurança, ou vazio", "reference": "código/referência legível na haste ou etiqueta, ou vazio", "material": "METAL" | "ACETATO" | "MISTO" | "TITANIO" | "NYLON" | "", "keywords": ["até 4 palavras em MAIÚSCULAS sem acento, ex.: DOURADO, AVIADOR, RETANGULAR, GATINHO"]}.',
-  '"produto": óculos de sol, armação, lente de contato ou acessório. "receita": prescrição/receita oftalmológica ou laudo. "documento": orçamento, nota, print de texto. "outro": qualquer outra imagem.',
+  '"produto": óculos de sol, armação, lente de contato ou acessório. "receita": prescrição/receita oftalmológica ou laudo. "documento": comprovante de pagamento, orçamento, nota, print de texto. "outro": qualquer outra imagem.',
   "Marca só se tiver certeza (logotipo ou nome legível). Nunca invente referência.",
+  `Se kind for "receita" ou "documento", inclua também ${EXTRACTION_SCHEMA}`,
 ].join("\n");
 
-export type VisionResult = { kind?: string; category?: string; brand?: string; reference?: string; material?: string; keywords?: unknown };
+export type VisionResult = { kind?: string; category?: string; brand?: string; reference?: string; material?: string; keywords?: unknown; documento?: DocumentExtraction };
 export type CatalogQuery = { category: "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | ""; brand: string; reference: string; material: string; keywords: string[] };
 
 /** Maiúsculas, sem acento e só letras/números: "Ray-Ban" e "RAY BAN" viram RAYBAN, como no SQL da busca. */
@@ -89,6 +91,8 @@ export const CATALOG_FOUND_RULE =
 
 export type ImageFlowResult =
   | { type: "handoff"; reason: string; reply: string; trigger: "catalog_miss" | "prescription"; log: SearchLog }
+  /** Receita, comprovante ou outro documento: lido e resumido (quem decide o transbordo é o agente). */
+  | { type: "document"; kind: DocumentKind; summary: string; log: SearchLog }
   | { type: "found"; context: string; log: SearchLog }
   | { type: "continue"; log: SearchLog | null };
 
@@ -101,10 +105,11 @@ export async function productImageFlow(deps: {
   search: (steps: SearchStep[]) => Promise<CatalogSearch | null>;
   withPrices: boolean;
 }): Promise<ImageFlowResult> {
-  const { kind, query } = readVision(await deps.identify());
-  if (kind === "receita" || kind === "documento") {
-    return { type: "handoff", trigger: "prescription", reply: PRESCRIPTION_REPLY, reason: kind === "receita" ? "Cliente enviou receita: precisa de conferência humana" : "Cliente enviou documento: precisa de conferência humana", log: { kind, term: "", found: 0 } };
-  }
+  const vision = await deps.identify();
+  const { kind, query } = readVision(vision);
+  // Receita/comprovante: a mesma chamada de visão já extraiu os dados (graus, valor, data) para o atendente.
+  const docKind = kind === "receita" || kind === "documento" ? documentKind(kind, vision.documento) : null;
+  if (docKind) return { type: "document", kind: docKind, summary: formatExtraction(docKind, vision.documento), log: { kind, term: "", found: 0 } };
   if (kind !== "produto") return { type: "continue", log: { kind, term: "", found: 0 } };
   const steps = searchSteps(query);
   const result = steps.length ? await deps.search(steps) : null;

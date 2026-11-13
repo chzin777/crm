@@ -7,7 +7,8 @@ const settings = { ...DEFAULT_AI_SETTINGS, aiChoosesQueue: false, handoffKeyword
 describe("regras antes da IA (mesmas no WhatsApp e no teste)", () => {
   it("pedido de atendente, mídia e limite de respostas transferem na ordem do atendimento real", () => {
     expect(preAgentOutcome(settings, { pendingText: "quero um atendente", hasMedia: true, aiReplies: 9 })).toMatchObject({ action: "handoff", trigger: "keyword" });
-    expect(preAgentOutcome(settings, { pendingText: "olha a receita", hasMedia: true, aiReplies: 9 })).toMatchObject({ action: "handoff", trigger: "media" });
+    // Mídia não transfere antes da leitura: só o limite de respostas vale aqui.
+    expect(preAgentOutcome(settings, { pendingText: "olha a receita", hasMedia: true, aiReplies: 9 })).toMatchObject({ action: "handoff", trigger: "limit" });
     expect(preAgentOutcome(settings, { pendingText: "oi", hasMedia: false, aiReplies: 3 })).toMatchObject({ action: "handoff", trigger: "limit" });
     expect(preAgentOutcome(settings, { pendingText: "oi", hasMedia: false, aiReplies: 2 })).toBeNull();
   });

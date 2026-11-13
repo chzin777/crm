@@ -12,8 +12,9 @@ import { ChatRuleError, sendAutomaticImage, sendAutomaticMessage } from "@/lib/c
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables } from "@/lib/chat/text";
 import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
-import { AI_ATTACHMENT_MAX_BYTES, aiAttachmentKind, type AiAttachmentKind } from "@/lib/ai/attachments";
-import { attachSummary, MEDIA_RULES, mediaParts, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
+import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, baseType, extensionOf, TRANSCRIBABLE_VIDEO, unsupportedReason, type AiAttachmentKind } from "@/lib/ai/attachments";
+import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
+import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
 import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
@@ -232,7 +233,11 @@ export async function prepareMedia(media: AiMediaInput, meta: Omit<AiCallMeta, "
   const kind = aiAttachmentKind(media.mime, media.name);
   if (!kind) throw new AiError("Formato de anexo não suportado pela IA.", 422);
   if (media.data.byteLength > AI_ATTACHMENT_MAX_BYTES) throw new AiError("Anexo acima de 10 MB.", 422);
-  const transcript = kind === "audio" ? await transcribeAudio(media, meta) : undefined;
+  // Vídeo: só a faixa de áudio (a transcrição aceita MP4/WEBM; 3GP/MOV não).
+  if (kind === "video" && !TRANSCRIBABLE_VIDEO.includes(extensionOf(media.name)) && !/mp4|webm/.test(baseType(media.mime))) throw new AiError("formato de vídeo não suportado para ouvir o áudio", 422);
+  const transcript = kind === "audio" || kind === "video"
+    ? await transcribeAudio(kind === "video" ? { ...media, name: /\.(mp4|webm)$/i.test(media.name) ? media.name : `${media.name.replace(/\.[^.]*$/, "") || "video"}.mp4` } : media, meta)
+    : undefined;
   try {
     return mediaParts(kind, media, transcript);
   } catch (error) {
@@ -241,16 +246,45 @@ export async function prepareMedia(media: AiMediaInput, meta: Omit<AiCallMeta, "
   }
 }
 
-/** Atendimento real: lê o anexo mais recente do cliente (baixado da Meta e guardado no MinIO pelo webhook). Falha segue só com o texto. */
-async function customerMedia(attachments: (ChatAttachment | null)[], meta: Omit<AiCallMeta, "maxTokens">) {
-  const latest = attachments.filter((item): item is ChatAttachment => !!item?.key && !!aiAttachmentKind(item.mime, item.name) && item.size <= AI_ATTACHMENT_MAX_BYTES).at(-1);
-  if (!latest) return null;
+/** Anexo lido sem derrubar a resposta: erro (tempo da transcrição, arquivo ilegível, formato) vira aviso ao cliente. */
+export async function prepareMediaSafe(media: AiMediaInput, meta: Omit<AiCallMeta, "maxTokens">): Promise<PreparedMedia> {
+  const kind = aiAttachmentKind(media.mime, media.name);
+  if (!kind) return failedMedia("document", media.name, unsupportedReason(media.mime, media.name));
+  if (media.data.byteLength > AI_ATTACHMENT_MAX_BYTES) return failedMedia(kind, media.name, `arquivo acima de 10 MB (${(media.data.byteLength / 1024 / 1024).toFixed(1)} MB)`);
   try {
-    return await prepareMedia({ name: latest.name, mime: latest.mime, data: await readFile(latest.key) }, meta);
+    return await prepareMedia(media, meta);
   } catch (error) {
-    console.error(`[ai] ${meta.conversationId ?? "teste"}: anexo ignorado:`, error instanceof Error ? error.message : error);
-    return null;
+    // Sem crédito ou chave inválida: o erro sobe (o atendimento vai para a equipe, como em qualquer falha da IA).
+    if (error instanceof AiError && (error.creditExhausted || error.status === 401 || error.status === 503)) throw error;
+    const reason = error instanceof Error ? error.message : "erro desconhecido";
+    console.error(`[ai] ${meta.conversationId ?? "teste"}: falha ao ler ${kind} "${media.name}": ${reason}`);
+    return failedMedia(kind, media.name, /demorou|tempo/i.test(reason) ? "o áudio demorou demais para transcrever" : reason.slice(0, 120));
   }
+}
+
+type PendingMedia = { attachment: unknown; metaMedia: unknown };
+
+/**
+ * Atendimento real: lê TODOS os anexos do lote (até 4), baixados da Meta e guardados no MinIO pelo webhook.
+ * Download que falhou no webhook, arquivo grande ou formato antigo viram marcador de falha (a IA avisa o cliente);
+ * figurinha é reação informal (sem visão nem catálogo).
+ */
+async function customerMedia(items: PendingMedia[], meta: Omit<AiCallMeta, "maxTokens">): Promise<PreparedMedia[]> {
+  const withMedia = items.filter((item) => item.attachment || item.metaMedia).slice(-AI_ATTACHMENTS_PER_BATCH);
+  return Promise.all(withMedia.map(async (item) => {
+    const attachment = item.attachment as ChatAttachment | null;
+    const saved = item.metaMedia as { kind?: string; filename?: string; error?: string } | null;
+    if (!attachment?.key) return failedMedia(saved?.kind ?? "document", saved?.filename ?? saved?.kind ?? "arquivo", saved?.error ?? "falha ao baixar o arquivo do WhatsApp");
+    if (attachment.kind === "sticker") return stickerMedia(attachment.name);
+    if (attachment.size > AI_ATTACHMENT_MAX_BYTES) return failedMedia(aiAttachmentKind(attachment.mime, attachment.name) ?? attachment.kind, attachment.name, `arquivo acima de 10 MB (${(attachment.size / 1024 / 1024).toFixed(1)} MB)`);
+    try {
+      return await prepareMediaSafe({ name: attachment.name, mime: attachment.mime, data: await readFile(attachment.key) }, meta);
+    } catch (error) {
+      if (error instanceof AiError) throw error;
+      console.error(`[ai] ${meta.conversationId}: arquivo do chat ilegível (${attachment.key}):`, error instanceof Error ? error.message : error);
+      return failedMedia(attachment.kind, attachment.name, "falha ao abrir o arquivo guardado");
+    }
+  }));
 }
 
 export type AgentRunInput = {
@@ -264,7 +298,7 @@ export type AgentRunInput = {
   /** Contexto do cliente montado por formatContext (cadastro, fila, ERP e conversa). */
   buildContext: (media: PreparedMedia | null) => Promise<string> | string;
   /** Anexo da última mensagem do cliente, carregado só se a IA for de fato responder. */
-  loadMedia: () => Promise<PreparedMedia | null>;
+  loadMedia: () => Promise<PreparedMedia[]>;
   meta: Omit<AiCallMeta, "maxTokens">;
   /** Só no teste: lê o anexo mesmo com o gatilho de mídia ligado, para ver como a IA o interpretaria. */
   ignoreMediaTrigger?: boolean;
@@ -283,7 +317,7 @@ export type AgentRunInput = {
   /** Vitrine numerada mostrada nesta sessão (ordem exibida). */
   listedProducts?: ListedProduct[];
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[] };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
@@ -295,16 +329,19 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const { settings } = input;
   const early = preAgentOutcome(settings, input);
   if (early) return { outcome: early, media: null, mediaTriggerSkipped: false, search: null, injection: NO_INJECTION };
-  const mediaTriggerSkipped = !!input.ignoreMediaTrigger && settings.handoffOnMedia && input.hasMedia;
+  // Mídia não transfere mais antes da leitura: nada a pular no teste.
+  const mediaTriggerSkipped = false;
 
-  const media = await input.loadMedia();
+  // Todos os anexos do lote (até 4): áudio transcrito, documentos lidos, falhas viram aviso ao cliente.
+  const mediaList = await input.loadMedia();
+  const media = mergeMedia(mediaList);
   // Áudio pedindo atendente: a palavra de transferência vale também na transcrição.
   if (!input.queued && media?.transcript && asksForHuman(settings, media.transcript)) {
     return { outcome: { action: "handoff", reply: "", reason: "Cliente pediu para falar com uma pessoa (áudio)", queue: "", trigger: "keyword" }, media, mediaTriggerSkipped, search: null, injection: NO_INJECTION };
   }
 
   // Prompt injection: texto, transcrição e documento do cliente passam pelo detector (dados nunca viram regra).
-  const documentText = media && (media.kind === "text" || media.kind === "docx") ? media.parts.map((part) => (part.type === "text" ? part.text : "")) : [];
+  const documentText = mediaList.filter((item) => item.kind === "text" || item.kind === "docx" || item.kind === "sheet").flatMap((item) => item.parts.map((part) => (part.type === "text" ? part.text : "")));
   const untrusted = [input.pendingText, media?.transcript ?? "", ...documentText].join("\n");
   const injection = detectPromptInjection(untrusted);
   if (injection.risk !== "none") {
@@ -315,24 +352,51 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     }
   }
 
-  // Foto: identificação silenciosa → busca no catálogo do ERP → resultado ou transbordo (a foto não é narrada).
+  // Foto: identificação silenciosa → busca no catálogo do ERP (a foto não é narrada); receita/comprovante em foto ou
+  // PDF: leitura estruturada (graus, valor, data) → confirmação ao cliente + transbordo com o resumo para o atendente.
   let search: SearchLog | null = null;
-  let catalogContext = "";
-  let sendMedia = !!media;
-  if (media?.kind === "image") {
-    const flow = await productImageFlow({
-      identify: () => aiJson<VisionResult>([{ role: "system", content: VISION_PROMPT }, { role: "user", content: media.parts.filter((part) => part.type === "image_url") }], { ...input.meta, maxTokens: 300 }),
-      search: searchErpCatalog,
-      withPrices: settings.canQuotePrices,
-    });
-    search = flow.log;
-    if (flow.type === "handoff") return { outcome: { action: "handoff", reply: flow.reply, reason: flow.reason, queue: "", trigger: flow.trigger }, media, mediaTriggerSkipped, search, injection };
-    if (flow.type === "found") {
-      catalogContext = `${CATALOG_FOUND_RULE}\n\n${flow.context}`;
-      // A resposta usa só o resultado da busca: sem a imagem, não há o que narrar.
-      sendMedia = false;
+  const catalogContexts: string[] = [];
+  const documents: ReadDocument[] = [];
+  const consumed = new Set<PreparedMedia>();
+  for (const item of mediaList) {
+    if (item.failed || item.sticker) continue;
+    if (item.kind === "image") {
+      const flow = await productImageFlow({
+        identify: () => aiJson<VisionResult>([{ role: "system", content: VISION_PROMPT }, { role: "user", content: item.parts.filter((part) => part.type === "image_url") }], { ...input.meta, maxTokens: 700 }),
+        search: searchErpCatalog,
+        withPrices: settings.canQuotePrices,
+      });
+      search = flow.log ?? search;
+      if (flow.type === "document") {
+        documents.push({ kind: flow.kind, summary: flow.summary });
+        consumed.add(item);
+      } else if (flow.type === "found") {
+        catalogContexts.push(flow.context);
+        // A resposta usa só o resultado da busca: sem a imagem, não há o que narrar.
+        consumed.add(item);
+      } else if (flow.type === "handoff" && mediaList.length === 1) {
+        return { outcome: { action: "handoff", reply: flow.reply, reason: flow.reason, queue: "", trigger: flow.trigger }, media, mediaTriggerSkipped, search, injection };
+      } else if (flow.type === "handoff") {
+        // Lote com outros anexos: o modelo sem correspondência vira contexto e a IA responde ao resto.
+        catalogContexts.push(`Uma das fotos é de um produto sem correspondência no catálogo (${flow.log.term}): ofereça um atendente para verificar esse modelo.`);
+        consumed.add(item);
+      }
+    } else if (item.kind === "pdf") {
+      const read = await aiJson<{ kind?: string; documento?: DocumentExtraction }>([{ role: "system", content: DOCUMENT_EXTRACT_PROMPT }, { role: "user", content: item.parts }], { ...input.meta, maxTokens: 700 }).catch(() => null);
+      const kind = read ? documentKind(read.kind ?? "", read.documento) : null;
+      if (kind) documents.push({ kind, summary: formatExtraction(kind, read?.documento) });
     }
   }
+  const catalogContext = catalogContexts.length ? `${CATALOG_FOUND_RULE}\n\n${catalogContexts.join("\n\n")}` : "";
+  // Receita/comprovante lidos: com a regra de documentos ligada, confirma ao cliente e transfere com o resumo.
+  if (documents.length && settings.handoffOnMedia) {
+    const kinds = documents.map((doc) => doc.kind);
+    const queueNames = (await prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }).catch(() => [])).map((queue) => queue.name);
+    return { outcome: { action: "handoff", reply: documentReply(kinds), reason: documentHandoffReason(documents), queue: documentQueue(queueNames, kinds), trigger: "prescription" }, media, mediaTriggerSkipped, search, injection, documents };
+  }
+  const documentContext = documents.length ? `Dados extraídos dos documentos do cliente (use para responder; não repita tudo para ele):\n${documents.map((doc) => `- ${doc.summary}`).join("\n")}` : "";
+  // Partes que vão ao modelo: anexos ainda não resolvidos no código (falhas e figurinhas vão como texto).
+  const sendParts = mediaList.filter((item) => !consumed.has(item)).flatMap((item) => item.parts);
 
   const [context, info, queues] = await Promise.all([
     input.buildContext(media),
@@ -359,7 +423,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
+    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -520,7 +584,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const decision = await aiJson<AgentDecision>(
     [
       { role: "system", content: system },
-      { role: "user", content: sendMedia && media ? [{ type: "text", text: context }, ...media.parts] : context },
+      { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
     { ...input.meta, maxTokens: 700, tools: [stockTool, detailsTool, locationTool, closeTool] },
   );
@@ -620,12 +684,13 @@ async function respond(conversationId: string, messageId: string) {
     // "digitando..." no WhatsApp do cliente antes de mídia, estoque e modelo (renova uma vez após 20 s).
     run = await withTyping(() => sendTypingIndicator(latest.externalId), () => runAiAgent({
       settings,
-      pendingText: pending.map((item) => item.text).join("\n"),
-      // Foto não dispara o gatilho de mídia: passa pela busca no catálogo. Áudio e documento disparam.
-      hasMedia: pending.some((item) => (item.attachment || item.metaMedia) && mediaKind(item) !== "image"),
+      // Figurinha sozinha vale como reação ("👍"): depois da despedida, o protocolo de silêncio se aplica.
+      pendingText: pending.map((item) => item.text || (mediaKind(item) === "sticker" ? "👍" : "")).join("\n"),
+      // Mídia que a IA precisa ler (áudio, vídeo, documento); foto e figurinha não contam.
+      hasMedia: pending.some((item) => (item.attachment || item.metaMedia) && mediaKind(item) !== "image" && mediaKind(item) !== "sticker"),
       aiReplies,
       meta,
-      loadMedia: () => customerMedia(pending.map((item) => item.attachment as ChatAttachment | null), meta),
+      loadMedia: () => customerMedia(pending, meta),
       earlierCustomerTexts: earlier.map((item) => item.text),
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders, sessionOnly: true })).text,
       queued,
@@ -648,7 +713,8 @@ async function respond(conversationId: string, messageId: string) {
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
     if (isWindowOpen(conversation.lastInboundAt)) await sendAiReply(conversation, outcome.reply, null, latest.externalId);
-    return handoff(conversation, settings, outcome.reason, undefined, false);
+    // Receita/comprovante: fila comercial (ou financeiro) quando a IA escolhe a fila; o resumo vai na nota interna.
+    return handoff(conversation, settings, outcome.reason, outcome.queue || undefined, false);
   }
   if (outcome.trigger !== "ai") return handoff(conversation, settings, outcome.reason);
 
@@ -751,6 +817,8 @@ export type PlaygroundResult = AgentOutcome & {
   details?: DetailsLog[];
   /** Localização que sairia logo depois da resposta (pin ou link do Google Maps). */
   location?: StoreLocation;
+  /** Receitas/comprovantes lidos antes do transbordo (resumo que vai na nota do atendente). */
+  documents?: ReadDocument[];
   /** Sessão de teste que gerou esta resposta (a tela descarta respostas de uma sessão já limpa). */
   sessionId?: string;
   /** Produto e loja fixados nesta sessão de teste. */
@@ -784,7 +852,8 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     anchor: extractSessionAnchor(messages.filter((message) => message.from === "ai").map((message) => ({ text: message.text, imageSku: message.imageSku ?? null, imageUrl: message.imageUrl ?? null }))),
     listedProducts: extractListedProducts(messages.filter((message) => message.from === "ai").map((message) => message.text)),
     queued: options.queued ? { queueName: "Vendas" } : null,
-    loadMedia: async () => (attachment ? prepareMedia(attachment, meta) : null),
+    // Mesmas regras do WhatsApp: falha de leitura vira aviso ao cliente (não erro na tela).
+    loadMedia: async () => (attachment ? [await prepareMediaSafe(attachment, meta)] : []),
     buildContext: (media) => {
       const history = media ? attachSummary(messages, media.summary) : messages;
       // Mesmo formato de linha do WhatsApp (IA aparece como "Robô"), um minuto entre mensagens.
@@ -814,6 +883,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     image: run.image ? { url: run.image.url, source: run.image.source, query: run.image.query, sku: run.image.sku } : undefined,
     details: run.details?.length ? run.details : undefined,
     location: run.location ?? undefined,
+    documents: run.documents?.length ? run.documents : undefined,
     sessionId: options.sessionId,
     anchor: run.anchor,
   };

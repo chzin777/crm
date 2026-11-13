@@ -21,7 +21,10 @@ describe("tipos de anexo aceitos pela IA", () => {
     expect(aiAttachmentKind("application/vnd.ms-excel", "lista.csv")).toBe("text");
     expect(aiAttachmentKind("", "anotacao.txt")).toBe("text");
     expect(aiAttachmentKind("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "carta.docx")).toBe("docx");
-    expect(aiAttachmentKind("video/mp4", "video.mov")).toBeNull();
+    expect(aiAttachmentKind("video/mp4", "video.mov")).toBe("video");
+    expect(aiAttachmentKind("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "precos.xlsx")).toBe("sheet");
+    expect(aiAttachmentKind("application/octet-stream", "antiga.xls")).toBe("sheet");
+    expect(aiAttachmentKind("application/msword", "receita.doc")).toBeNull();
   });
 
   it("barra formato desconhecido, arquivo vazio e acima de 10 MB", () => {

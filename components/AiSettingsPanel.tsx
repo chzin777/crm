@@ -27,6 +27,7 @@ type PlaygroundResult = AgentOutcome & {
   closeBlocked?: string;
   media?: { kind: AiAttachmentKind; summary: string; transcript?: string };
   mediaHandoff?: boolean;
+  documents?: { kind: string; summary: string }[];
   search?: { kind: string; term: string; found: number };
   injection?: { risk: "suspect" | "high"; matches: string[] };
   stock?: StockLog[];
@@ -186,7 +187,7 @@ function MediaPreview({ media, compact = false }: { media: PlaygroundMedia; comp
   if (media.kind === "audio") return <audio controls src={media.url} className={`${compact ? "h-8 w-52" : "h-9 w-60 max-w-full"}`} />;
   return (
     <span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold ${compact ? "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200" : "bg-white/15"}`}>
-      <FileText className="h-4 w-4 shrink-0" /><span className="truncate">{media.name}</span><span className="shrink-0 opacity-70">{media.kind === "pdf" ? "PDF" : media.kind === "docx" ? "DOCX" : "TXT/CSV"}</span>
+      <FileText className="h-4 w-4 shrink-0" /><span className="truncate">{media.name}</span><span className="shrink-0 opacity-70">{media.kind === "pdf" ? "PDF" : media.kind === "docx" ? "DOCX" : media.kind === "sheet" ? "PLANILHA" : media.kind === "video" ? "VÍDEO" : "TXT/CSV"}</span>
     </span>
   );
 }
@@ -199,7 +200,6 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<SimulatedProfileId>("novo");
-  const [readMedia, setReadMedia] = useState(true);
   const [queuedTest, setQueuedTest] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -249,7 +249,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
       const session = sessionRef.current;
-      const payload = { settings, profile, ignoreMediaTrigger: readMedia, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}) })) };
+      const payload = { settings, profile, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}) })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -266,7 +266,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         ? { ...customer, historyText: [text, data.media.summary].filter(Boolean).join("\n"), media: customer.media && { ...customer.media, transcript: data.media.transcript } }
         : customer;
       const notes = [
-        data.mediaHandoff ? "No atendimento real, o gatilho \"cliente enviou foto, documento ou áudio\" transferiria esta conversa para a equipe antes da IA responder (aqui a leitura do anexo foi mostrada mesmo assim)." : "",
+        data.documents?.length ? `Leitura do documento antes do transbordo (igual ao WhatsApp): ${data.documents.map((doc) => doc.summary).join(" | ")}` : "",
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.closeBlocked ? `A IA quis encerrar, mas não encerra porque ${data.closeBlocked}.` : "",
@@ -330,12 +330,6 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
           </select>
         </label>
         <span className="text-[11px] text-slate-400">{SIMULATED_PROFILES.find((item) => item.id === profile)?.hint}{profile === "recorrente" && !settings.useCustomerOrders ? " (a IA só vê os pedidos com \"usar pedidos do cliente\" ligado)" : ""}</span>
-        {settings.handoffOnMedia && (
-          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
-            <input type="checkbox" checked={readMedia} onChange={(event) => setReadMedia(event.target.checked)} className="cursor-pointer accent-[#002187]" />
-            Mostrar a leitura de áudio/documento mesmo com o gatilho de mídia ligado
-          </label>
-        )}
         <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300" title="A IA responde como na espera assistida: mesma consulta de estoque, ficha e foto do produto">
           <input type="checkbox" checked={queuedTest} onChange={(event) => setQueuedTest(event.target.checked)} className="cursor-pointer accent-[#002187]" />
           Cliente já na fila (aguardando atendente)
@@ -821,7 +815,7 @@ export function AiSettingsPanel() {
                 { key: "handoffOnComplaint", label: "Reclamação ou cliente irritado", description: "Problema com pedido, produto ou atendimento." },
                 { key: "handoffOnPurchaseIntent", label: "Intenção de compra ou orçamento", description: "Fechar compra, orçamento com receita ou negociar condições." },
                 { key: "handoffWhenUnsure", label: "A IA não tiver certeza da resposta", description: "Assunto fora do que está cadastrado." },
-                { key: "handoffOnMedia", label: "O cliente enviar documento ou áudio", description: "Transfere na hora, sem a IA ler. Foto de produto é buscada no catálogo (sem resultado, transfere) e foto de receita vai sempre para a equipe." },
+                { key: "handoffOnMedia", label: "O cliente enviar receita ou comprovante", description: "A IA lê primeiro (foto ou PDF), extrai graus/valor/data, confirma o recebimento e transfere para a fila comercial com o resumo na nota interna. Áudio, vídeo, documentos, planilhas, fotos de produto e figurinhas nunca transferem: a IA ouve/lê e responde." },
               ] as const).map((item) => (
                 <div key={item.key} className={`rounded-lg border px-3 transition ${settings[item.key] ? "border-[#C4D600]/70 bg-[#C4D600]/5" : "border-slate-200/70 dark:border-slate-800"}`}>
                   <Toggle label={item.label} description={item.description} checked={settings[item.key]} onChange={(value) => set(item.key, value)} />

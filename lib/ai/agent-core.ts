@@ -77,7 +77,8 @@ export function preAgentOutcome(settings: AiSettings, input: { pendingText: stri
   // Pedido de pessoa: com a IA escolhendo a fila, ela faz a triagem ou roteia (runAiAgent); sem isso, transfere direto.
   // Já na fila (espera assistida): pedir atendente não transfere de novo; a IA tranquiliza o cliente.
   if (!input.queued && humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) }) === "direct") return handoff("Cliente pediu para falar com uma pessoa", "keyword");
-  if (settings.handoffOnMedia && input.hasMedia && !input.ignoreMediaTrigger) return handoff("Cliente enviou documento ou áudio", "media");
+  // Mídia nunca transfere às cegas: áudio é transcrito, documento e foto são lidos antes (receita/comprovante
+  // transferem depois da leitura, com o resumo para o atendente; ver runAiAgent).
   if (input.aiReplies >= settings.maxAiReplies) return handoff(`Limite de ${settings.maxAiReplies} respostas da IA atingido`, "limit");
   return null;
 }

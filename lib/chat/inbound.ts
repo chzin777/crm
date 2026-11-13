@@ -11,7 +11,7 @@ import { absorbPostCloseCourtesy } from "@/lib/chat/post-close";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
 
-import { isCustomerMessage, MEDIA_LABELS, readContent, type MetaInboundMessage, type MetaMedia } from "@/lib/chat/inbound-content";
+import { isCustomerMessage, MEDIA_LABELS, mediaFailureReason, readContent, type MetaInboundMessage, type MetaMedia } from "@/lib/chat/inbound-content";
 
 export { isCustomerMessage, type MetaInboundMessage };
 
@@ -51,7 +51,7 @@ async function findOrCreateContact(waId: string, profileName: string | undefined
 let bucketReady = false;
 
 /** O arquivo nunca derruba a mensagem: se o download falhar, ela entra com o rótulo do tipo. */
-async function storeMedia(media: MetaMedia & { kind: AttachmentKind }): Promise<ChatAttachment | null> {
+async function storeMedia(media: MetaMedia & { kind: AttachmentKind }, onError?: (reason: string) => void): Promise<ChatAttachment | null> {
   try {
     if (!bucketReady) {
       await ensureBucket();
@@ -63,12 +63,15 @@ async function storeMedia(media: MetaMedia & { kind: AttachmentKind }): Promise<
     const { key } = await uploadFile(buffer, name, type, "chat");
     return { kind: media.kind, name, mime: type, size: buffer.length, key };
   } catch (error) {
-    console.error("[chat] falha ao guardar mídia recebida:", error);
+    // Log detalhado (status HTTP da Meta, token expirado, limite) e motivo curto para a IA avisar o cliente.
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`[chat] falha ao guardar mídia recebida (${media.kind}, id ${media.id}, ${media.mime_type ?? "sem mime"}): ${detail}`, error);
+    onError?.(mediaFailureReason(detail));
     return null;
   }
 }
 
-type SavedMetaMedia = Pick<MetaMedia, "id" | "mime_type" | "filename"> & { kind: AttachmentKind };
+type SavedMetaMedia = Pick<MetaMedia, "id" | "mime_type" | "filename"> & { kind: AttachmentKind; error?: string };
 
 /** Nova tentativa de download: a Meta mantém o arquivo por tempo limitado. */
 export async function retryInboundMedia(message: Pick<ChatMessage, "id" | "text" | "metaMedia">) {
@@ -128,11 +131,13 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
 
   const contact = await findOrCreateContact(message.from, profileName);
   const { conversation, created } = await openConversationFor(contact.id, message.from);
-  const attachment = content.media ? await storeMedia(content.media) : null;
+  let mediaError: string | undefined;
+  const attachment = content.media ? await storeMedia(content.media, (reason) => { mediaError = reason; }) : null;
   const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
   const replyTo = await findQuoted(message.context?.id);
+  // error: motivo da falha no download (a IA avisa o cliente em vez de ignorar o arquivo).
   const metaMedia: SavedMetaMedia | null = content.media
-    ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind }
+    ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind, ...(mediaError ? { error: mediaError } : {}) }
     : null;
   const choiceId = message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
   // Ausência/saudação automática do WhatsApp Business do contato: fica no histórico, mas não abre menu nem conta como resposta.

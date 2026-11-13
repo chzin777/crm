@@ -47,6 +47,14 @@ function describeContacts(contacts: NonNullable<MetaInboundMessage["contacts"]>)
 const CUSTOMER_TYPES = new Set(["text", "image", "video", "audio", "document", "sticker", "location", "contacts", "button", "interactive", "order", "unsupported"]);
 export const isCustomerMessage = (type: string | undefined) => CUSTOMER_TYPES.has(type ?? "");
 
+/** Motivo curto e sem dado sensível da falha no download da mídia (o detalhe fica só no log do servidor). */
+export function mediaFailureReason(detail: string) {
+  if (/limite|too large|maxBytes/i.test(detail)) return "arquivo acima de 16 MB";
+  if (/\b(401|403)\b|token|OAuth|expired|expirad/i.test(detail)) return "falha de autorização ao baixar do WhatsApp";
+  if (/\b404\b|not found/i.test(detail)) return "arquivo não está mais disponível no WhatsApp";
+  return "falha ao baixar o arquivo do WhatsApp";
+}
+
 export function readContent(message: MetaInboundMessage): { text: string; media: (MetaMedia & { kind: AttachmentKind }) | null } {
   switch (message.type) {
     case "text":
