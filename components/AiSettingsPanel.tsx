@@ -463,6 +463,7 @@ export function AiSettingsPanel() {
   const [queues, setQueues] = useState<Queue[]>([]);
   const [configured, setConfigured] = useState(true);
   const [imageSearch, setImageSearch] = useState<string | null>(null);
+  const [imageSearchFree, setImageSearchFree] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [usage, setUsage] = useState<AiUsageReport | null>(null);
@@ -474,7 +475,7 @@ export function AiSettingsPanel() {
     let active = true;
     fetch("/api/ai/settings")
       .then(async (response) => {
-        const data = (await response.json()) as { settings?: AiSettings; queues?: Queue[]; configured?: boolean; imageSearch?: string | null; error?: string };
+        const data = (await response.json()) as { settings?: AiSettings; queues?: Queue[]; configured?: boolean; imageSearch?: string | null; imageSearchFree?: boolean; error?: string };
         if (!active) return;
         if (!response.ok || !data.settings) throw new Error(data.error ?? "Não foi possível carregar as configurações da IA.");
         setSettings(data.settings);
@@ -482,6 +483,7 @@ export function AiSettingsPanel() {
         setQueues(data.queues ?? []);
         setConfigured(data.configured !== false);
         setImageSearch(data.imageSearch ?? null);
+        setImageSearchFree(data.imageSearchFree !== false);
       })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar as configurações da IA."); });
     return () => { active = false; };
@@ -867,10 +869,12 @@ export function AiSettingsPanel() {
             <Toggle label="Enviar foto do produto encontrada na web junto com as informações" description="Só quando o modelo é confirmado no estoque. Se a foto falhar, a resposta segue em texto." checked={settings.sendProductImage} onChange={(value) => set("sendProductImage", value)} />
             <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Busca de imagens</p>
-              <p className={`mt-1 flex items-center gap-1.5 text-sm font-bold ${imageSearch ? "text-emerald-700 dark:text-emerald-400" : "text-slate-500"}`}>
-                {imageSearch ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}{imageSearch ? `${imageSearch} configurado` : "Sem chave de busca configurada"}
+              <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />Ativa ({imageSearch ?? "Busca Web Gratuita"})
               </p>
-              {!imageSearch && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Para ativar, configure SERPER_API_KEY (ou GOOGLE_CSE_API_KEY e GOOGLE_CSE_CX) no .env do servidor. Sem a chave, a IA responde só em texto.</p>}
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {imageSearchFree ? "Funciona sem chave. SERPER_API_KEY (ou GOOGLE_CSE_API_KEY e GOOGLE_CSE_CX) no .env do servidor é opcional, para usar uma chave dedicada." : "Usando a chave dedicada do .env; se ela falhar, a busca web gratuita entra no lugar."}
+              </p>
             </div>
           </Block>
           <Block title="Modelo e criatividade">

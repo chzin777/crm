@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { createProductImageService, imageSearchConfig, searchWebImage, type ImageCache } from "@/lib/ai/product-image";
+import { createProductImageService, imageSearchConfig, isUsableImage, searchWebImages, type ImageCache } from "@/lib/ai/product-image";
 
 /** Cache da foto por código do produto no banco do CRM (reaproveitado por todas as conversas). */
 const cache: ImageCache = {
@@ -18,7 +18,8 @@ export const imageSearchStatus = () => imageSearchConfig(process.env);
 
 export const searchAndCacheProductImage = createProductImageService({
   cache,
-  search: (query) => searchWebImage(query, imageSearchConfig(process.env)),
+  search: (query) => searchWebImages(query, imageSearchConfig(process.env)),
+  validate: (url) => isUsableImage(url),
 });
 
 export const invalidateProductImage = (sku: string) => cache.invalidate(sku).catch(() => undefined);

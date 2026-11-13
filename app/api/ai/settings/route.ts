@@ -15,7 +15,7 @@ export async function GET() {
     prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true, description: true } }),
   ]);
   const imageSearch = imageSearchStatus();
-  return NextResponse.json({ settings, queues, configured: aiConfigured(), imageSearch: imageSearch ? IMAGE_PROVIDER_LABELS[imageSearch.provider] : null });
+  return NextResponse.json({ settings, queues, configured: aiConfigured(), imageSearch: IMAGE_PROVIDER_LABELS[imageSearch.provider], imageSearchFree: imageSearch.provider === "free" });
 }
 
 export async function PUT(request: Request) {
