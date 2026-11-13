@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildSystemPrompt, carriesProductExtras } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
-import { splitBubbles } from "@/lib/ai/bubbles";
 import { STOCK_RULES } from "@/lib/ai/stock";
-import { asksForPhoto, buildDetailsResult, cardGuidance, createProductDetailsService, DETAILS_RULES, parseSheet, PRODUCT_CARD_RULES, ratingLabel, shortLine, shouldSendProductPhoto, type DetailsCacheRow } from "@/lib/ai/product-details";
+import { asksForPhoto, buildDetailsResult, createProductDetailsService, DETAILS_RULES, parseSheet, PRODUCT_CARD_RULES, ratingLabel, shortLine, shouldSendProductPhoto, type DetailsCacheRow } from "@/lib/ai/product-details";
 
 const WEB = JSON.stringify({
   miniDescricao: "Armação leve em acetato com design oval feminino",
@@ -50,33 +49,11 @@ describe("ficha resumida na 1ª consulta e descrição detalhada em \"mais detal
     const service = createProductDetailsService({ cache: { get: async (key) => rows.get(key) ?? null, set: async (row) => { rows.set(row.key, { ...row, updatedAt: new Date() }); } }, search: async () => { calls += 1; return `Aqui está:\n${WEB}`; } });
     const first = await service("MIU MIU|0MU 01XV", "p");
     const second = await service("MIU MIU|0MU 01XV", "p");
-    expect(first.sheet).toEqual({ miniDescricao: "Armação leve em acetato com design oval feminino", descricaoDetalhada: "- Material: acetato\n- Formato: oval, aro fechado\n- Público: feminino\n- Lentes: pronta para grau", avaliacaoWeb: { nota: "4,8", contagem: 120, fonte: "designeroptics.com" } });
+    expect(first.sheet).toMatchObject({ miniDescricao: "Armação leve em acetato com design oval feminino", descricaoDetalhada: "- Material: acetato\n- Formato: oval, aro fechado\n- Público: feminino\n- Lentes: pronta para grau", avaliacaoWeb: { nota: "4,8", contagem: 120, fonte: "designeroptics.com" } });
     expect(second).toMatchObject({ source: "cache", sheet: first.sheet });
     expect(calls).toBe(1);
     expect(ratingLabel(first.sheet?.avaliacaoWeb)).toBe("⭐ 4,8 (120 avaliações)");
     expect(shortLine("x".repeat(200))!.length).toBeLessThanOrEqual(120);
-  });
-
-  it("primeira consulta: regra da ficha (nome, mini-descrição, preço, quantidade, avaliação, lojas) + 2ª bolha com ---SPLIT---", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
-    expect(prompt).toContain(PRODUCT_CARD_RULES);
-    for (const piece of ["Nome humanizado", "miniDescricao em 1 linha", "precoVenda em R$", "unidades disponíveis na rede", "avaliacaoWeb", "agrupadas por cidade/região", "---SPLIT---"]) expect(PRODUCT_CARD_RULES).toContain(piece);
-    // A resposta no formato da ficha vira 2 bolhas: ficha (legenda da foto) e pergunta de continuação.
-    const reply = "*Armação Miu Miu (ref. 0MU 01XV)*\nArmação leve em acetato com design oval feminino\n💰 *R$ 1.290,00* · 3 unidades disponíveis na rede · ⭐ 4,8\n\n📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8, 235\n\n---SPLIT---\n\nQuer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização dessa loja?";
-    const parts = splitBubbles(reply);
-    expect(parts).toHaveLength(2);
-    expect(parts[0]).toContain("R$ 1.290,00");
-    expect(parts[1]).toMatch(/detalhes técnicos completos/);
-  });
-
-  it("orientação da ficha no resultado de estoque: preço, quantidade, mini-descrição e avaliação só se existir", () => {
-    const withRating = cardGuidance({ nomeProduto: "Óculos de sol Ray-Ban (ref. RB4165 Justin)", miniDescricao: "Óculos quadrado em nylon com lentes UV400", precoVenda: "R$ 1.000,00", totalDisponivelRede: 2, avaliacaoWeb: "⭐ 4,8" });
-    expect(withRating).toContain("*Óculos de sol Ray-Ban (ref. RB4165 Justin)*\nÓculos quadrado em nylon com lentes UV400\n💰 *R$ 1.000,00* · 2 unidades disponíveis na rede · ⭐ 4,8");
-    expect(withRating).toContain("---SPLIT---");
-    const noRating = cardGuidance({ nomeProduto: "X", miniDescricao: null, precoVenda: "R$ 500,00", totalDisponivelRede: 1, avaliacaoWeb: null });
-    expect(noRating).toContain("💰 *R$ 500,00* · 1 unidade disponível na rede");
-    expect(noRating).not.toContain("⭐");
-    expect(noRating).toContain("Não mencione avaliação nem nota");
   });
 
   it("\"mais detalhes\": entrega a descrição detalhada sem repetir a ficha nem as lojas", () => {
@@ -97,6 +74,5 @@ describe("ficha resumida na 1ª consulta e descrição detalhada em \"mais detal
     const result = buildDetailsResult({ nomeProduto: "X", referencia: null, found: true, details: { text: "- a", sheet: { miniDescricao: "x", descricaoDetalhada: "- a", avaliacaoWeb: null }, source: "web" }, variations: [], stock: "ok" });
     expect(result.avaliacaoWeb).toBeNull();
     expect(ratingLabel(null)).toBeNull();
-    expect(PRODUCT_CARD_RULES).toContain("avaliacaoWeb null = não fale de nota nem de avaliação");
   });
 });

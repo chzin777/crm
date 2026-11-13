@@ -42,7 +42,7 @@ export function productSheet(product: CatalogItem, colorCodes: string[] = []): P
 /** Resumo para a ficha da 1ª consulta (vai junto do resultado de estoque). */
 export async function productSummary(product: CatalogItem) {
   const details = await productSheet(product).catch(() => null);
-  return { miniDescricao: details?.sheet?.miniDescricao ?? null, avaliacaoWeb: ratingLabel(details?.sheet?.avaliacaoWeb), source: details?.source ?? "none" };
+  return { miniDescricao: details?.sheet?.miniDescricao ?? null, avaliacaoWeb: ratingLabel(details?.sheet?.avaliacaoWeb), formato: details?.sheet?.formato ?? null, acabamento: details?.sheet?.acabamento ?? null, source: details?.source ?? "none" };
 }
 
 /**

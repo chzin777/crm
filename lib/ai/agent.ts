@@ -20,6 +20,7 @@ import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
 import { cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
+import { buildProductCard, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { storeDirectory } from "@/lib/ai/stock-db";
 import { deliverLocation, findStores, LOCATION_TOOL, locationText, storeLocation, type StoreLocation } from "@/lib/ai/store-location";
@@ -364,7 +365,17 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       log.rating = summary.avaliacaoWeb;
       inStock.miniDescricao = summary.miniDescricao;
       inStock.avaliacaoWeb = summary.avaliacaoWeb;
-      const card = { ...result, orientacao: `${result.orientacao}\n${cardGuidance(inStock)}` };
+      // Campos estruturados da ficha e o card no template visual do negócio, montado no código (a IA só copia).
+      const naming = commercialName(inStock.produto, inStock.marca);
+      const fields: ProductCardFields = {
+        ...naming,
+        formatoArmacao: summary.formato,
+        acabamentoOuMaterial: summary.acabamento,
+        valorFormatado: inStock.precoVenda,
+        totalUnidades: inStock.lojasComEstoque.reduce((sum, store) => sum + store.quantidade, 0),
+        lojasDisponiveis: inStock.lojasComEstoque.map(cardStore),
+      };
+      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields), orientacao: `${result.orientacao}\n${cardGuidance()}` };
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };

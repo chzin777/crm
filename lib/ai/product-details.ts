@@ -4,6 +4,8 @@
  * (cache, busca e estoque) entram por parâmetro para os testes.
  */
 
+import { CARD_QUESTION, PRODUCT_CARD_TEMPLATE } from "@/lib/ai/product-card";
+
 export const DETAILS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Modelo sem nada útil na web: tenta de novo no dia seguinte. */
 export const DETAILS_MISS_TTL_MS = 24 * 60 * 60 * 1000;
@@ -17,7 +19,16 @@ export type DetailsCache = { get: (key: string) => Promise<DetailsCacheRow | nul
 /** Avaliação média na web: só quando a página mostra a nota de forma explícita (nunca estimada). */
 export type WebRating = { nota: string; contagem: number | null; fonte: string | null };
 /** Ficha do modelo guardada no cache (JSON na coluna details). */
-export type ProductSheet = { miniDescricao: string | null; descricaoDetalhada: string | null; avaliacaoWeb: WebRating | null };
+/** formato/acabamento: atributos curtos para a ficha ("Quadrada", "Acetato"); null = sem dado confiável. */
+export type ProductSheet = { miniDescricao: string | null; descricaoDetalhada: string | null; avaliacaoWeb: WebRating | null; formato?: string | null; acabamento?: string | null };
+
+/** Atributo curto da ficha: 1 a 3 palavras, primeira letra maiúscula; "não informado"/vazio vira null. */
+export function shortAttribute(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[*_[\]()]/g, "").replace(/\.$/, "").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 30 || text.split(" ").length > 4 || /^(n\/?a|null|nenhum|desconhecid|n[ãa]o (informad|encontrad|se aplica)|sem informa)/i.test(text)) return null;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 /** text = descrição detalhada (compatível com o uso anterior). */
 export type ProductDetails = { text: string | null; sheet: ProductSheet | null; source: "cache" | "web" | "none" };
 
@@ -44,7 +55,7 @@ export function parseSheet(raw: string | null | undefined): ProductSheet | null 
   const block = raw.match(/\{[\s\S]*\}/)?.[0];
   if (block) {
     try {
-      const data = JSON.parse(block) as { miniDescricao?: unknown; descricaoDetalhada?: unknown; avaliacao?: { nota?: unknown; contagem?: unknown; fonte?: unknown } | null; avaliacaoWeb?: WebRating | null };
+      const data = JSON.parse(block) as { formato?: unknown; acabamento?: unknown; miniDescricao?: unknown; descricaoDetalhada?: unknown; avaliacao?: { nota?: unknown; contagem?: unknown; fonte?: unknown } | null; avaliacaoWeb?: WebRating | null };
       const rating = data.avaliacao ?? data.avaliacaoWeb ?? null;
       const nota = rating ? formatRating(rating.nota) : null;
       const fonte = rating && typeof rating.fonte === "string" && rating.fonte.trim() ? rating.fonte.trim().slice(0, 60) : null;
@@ -54,6 +65,8 @@ export function parseSheet(raw: string | null | undefined): ProductSheet | null 
         miniDescricao: shortLine(data.miniDescricao),
         descricaoDetalhada: typeof detailed === "string" ? cleanDetails(detailed) : null,
         avaliacaoWeb: nota && fonte ? { nota, contagem, fonte } : null,
+        formato: shortAttribute(data.formato),
+        acabamento: shortAttribute(data.acabamento),
       };
       return sheet.miniDescricao || sheet.descricaoDetalhada ? sheet : null;
     } catch {
@@ -61,7 +74,7 @@ export function parseSheet(raw: string | null | undefined): ProductSheet | null 
     }
   }
   const text = cleanDetails(raw);
-  return text ? { miniDescricao: null, descricaoDetalhada: text, avaliacaoWeb: null } : null;
+  return text ? { miniDescricao: null, descricaoDetalhada: text, avaliacaoWeb: null, formato: null, acabamento: null } : null;
 }
 
 /** Ficha guardada no cache (JSON); linha antiga só com texto conta como desatualizada (pesquisa de novo). */
@@ -69,6 +82,8 @@ function cachedSheet(details: string): ProductSheet | null {
   if (!details.trim().startsWith("{")) return null;
   try {
     const data = JSON.parse(details) as ProductSheet;
+    // Ficha gravada antes dos campos formato/acabamento: pesquisa de novo para completar o card.
+    if (!("formato" in data)) return null;
     return data.miniDescricao || data.descricaoDetalhada ? data : null;
   } catch {
     return null;
@@ -119,6 +134,8 @@ export function detailsPrompt(product: string, colorCodes: string[] = []) {
     "Pesquise na web as características reais deste produto de ótica. Responda SOMENTE com um JSON, em português do Brasil:",
     "{\"miniDescricao\": \"1 frase objetiva de até 120 caracteres com o principal atributo (ex.: Armação leve em acetato com design gatinho moderno)\",",
     "\"descricaoDetalhada\": \"até 6 tópicos curtos, um por linha começando com '- ': material da armação/lentes, formato e estilo, público, lentes e proteção (UV, polarizada, grau), tecnologias/diferenciais (ex.: câmera e áudio nos Ray-Ban Meta), conforto/peso/medidas\",",
+    "\"formato\": \"formato da armação em 1 palavra (Quadrada, Redonda, Gatinho, Aviador, Retangular, Oval, Hexagonal, Wayfarer...) ou null se não se aplicar\",",
+    "\"acabamento\": \"material/acabamento principal em 1 a 3 palavras (Acetato, Metal leve, Titânio, Emborrachado, Nylon...) ou null\",",
     "\"avaliacao\": {\"nota\": 4.8, \"contagem\": 120, \"fonte\": \"nome do site\"} ou null}",
     "A avaliação só entra se uma página mostrar explicitamente a nota média deste modelo (escala de 1 a 5); se não achar com certeza, use null. Nunca estime nota.",
     colorCodes.length ? `Se encontrar, inclua na descricaoDetalhada o nome da cor destes códigos do fabricante: ${colorCodes.slice(0, 6).join(", ")}.` : "",
@@ -220,16 +237,9 @@ export const DETAILS_RULES = [
   "Proibido responder pedido de detalhes com frase vazia (\"Posso te ajudar com disponibilidade e lojas\") ou repetir só a loja e o estoque.",
 ].join("\n");
 
-/** Regra fixa do prompt: ficha padrão na 1ª consulta do modelo e descrição técnica quando pedirem mais detalhes. */
+/** Regra fixa do prompt: ficha no template visual na 1ª consulta do modelo e descrição técnica em "mais detalhes". */
 export const PRODUCT_CARD_RULES = [
-  "APRESENTAÇÃO DE PRODUTO (regra fixa, vale antes e depois de o cliente entrar na fila):",
-  "Na PRIMEIRA consulta de um modelo com estoque (resultado de consultarEstoqueProduto), a 1ª bolha (que vai como legenda da foto) segue esta ficha:",
-  "1. Nome humanizado do modelo em negrito (campo nomeProduto, nunca o código bruto do ERP).",
-  "2. A miniDescricao em 1 linha (se vier null, omita; nunca invente material ou função).",
-  "3. Preço (precoVenda em R$), quantidade disponível (ex.: \"3 unidades disponíveis na rede\" com totalDisponivelRede, ou a quantidade da loja pedida) e a avaliacaoWeb (ex.: \"⭐ 4,8\") SOMENTE se ela vier preenchida; avaliacaoWeb null = não fale de nota nem de avaliação.",
-  "4. As lojas com estoque agrupadas por cidade/região (formatação das listas de lojas).",
-  "Depois, obrigatoriamente ---SPLIT--- e uma pergunta natural de continuação na 2ª bolha (ex.: \"Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?\").",
-  "Exemplo:\n*Armação Miu Miu (ref. 0MU 01XV)*\nArmação leve em acetato com design oval feminino\n💰 *R$ 1.290,00* · 3 unidades disponíveis na rede · ⭐ 4,8\n\n📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8, 235\n\n---SPLIT---\n\nQuer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização dessa loja?",
+  PRODUCT_CARD_TEMPLATE,
   "Quando o cliente pedir \"mais detalhes\", \"mais informações\" ou \"como é\": NÃO repita a ficha nem a lista de lojas; chame buscarDetalhesProdutoWeb e entregue a descricaoDetalhada (materiais, diferenciais técnicos, conforto e cores em estoque) em texto natural, terminando com um próximo passo.",
 ].join("\n");
 
@@ -249,19 +259,13 @@ export function shouldSendProductPhoto(input: { sku: string; sentSkus: Iterable<
 }
 
 /**
- * Orientação da ficha resumida que vai no próprio resultado de estoque (o modelo segue melhor o que vem junto dos
- * dados): nome, mini-descrição, preço · quantidade · avaliação (só se houver), lojas e a pergunta na 2ª bolha.
+ * Orientação que vai no próprio resultado de estoque (o modelo segue melhor o que vem junto dos dados):
+ * copiar a fichaFormatada montada no código como 1ª bolha, depois ---SPLIT--- e a pergunta de condução.
  */
-export function cardGuidance(product: { nomeProduto: string; miniDescricao?: string | null; precoVenda?: string | null; totalDisponivelRede: number; avaliacaoWeb?: string | null }) {
-  const units = `${product.totalDisponivelRede} ${product.totalDisponivelRede === 1 ? "unidade disponível" : "unidades disponíveis"} na rede`;
-  const line = [product.precoVenda ? `💰 *${product.precoVenda}*` : "", units, product.avaliacaoWeb ?? ""].filter(Boolean).join(" · ");
+export function cardGuidance() {
   return [
-    "FICHA DO PRODUTO (1ª consulta deste modelo): monte a 1ª bolha exatamente nesta ordem:",
-    `*${product.nomeProduto}*`,
-    product.miniDescricao ? product.miniDescricao : "(sem mini-descrição: pule esta linha)",
-    line,
-    "e depois as lojas agrupadas por cidade. Em seguida ---SPLIT--- e a pergunta: \"Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?\".",
-    product.avaliacaoWeb ? "" : "Não mencione avaliação nem nota (não encontrada).",
-    "Se a ficha já foi enviada antes nesta conversa, não repita: responda só o que o cliente perguntou agora.",
-  ].filter(Boolean).join("\n");
+    "FICHA DO PRODUTO: use o campo fichaFormatada exatamente como veio (sem reescrever, sem acrescentar ou tirar linhas) como 1ª bolha.",
+    `Depois escreva ---SPLIT--- e a pergunta de condução (ex.: "${CARD_QUESTION}").`,
+    "Se a ficha deste modelo já foi enviada antes nesta conversa, não repita: responda só o que o cliente perguntou agora.",
+  ].join("\n");
 }
