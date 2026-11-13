@@ -7,7 +7,7 @@ export async function GET() {
   // Sempre na hora do pedido: a versão vem das variáveis do container, não do build.
   await connection();
   return NextResponse.json(
-    { ok: true, version: process.env.APP_VERSION ?? "dev", commit: process.env.GIT_COMMIT ?? "dev", startedAt: STARTED_AT },
+    { ok: true, service: "crm", version: process.env.APP_VERSION ?? "dev", commit: process.env.GIT_COMMIT ?? "dev", startedAt: STARTED_AT },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
