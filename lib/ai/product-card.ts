@@ -1,4 +1,4 @@
-import { parseErpName } from "@/lib/ai/product-names";
+import { modelNickname, parseErpName } from "@/lib/ai/product-names";
 import type { StockStore } from "@/lib/ai/stock";
 
 /**
@@ -24,8 +24,12 @@ const CATEGORY: Record<string, string> = { "Armação": "Armação de grau", "Ó
 export function commercialName(description: string, brand?: string | null) {
   const parsed = parseErpName(description, brand);
   const tokens = (parsed.referencia ?? "").split(" ").filter(Boolean);
-  const nickname = tokens.filter((token) => !/\d/.test(token) && token.length > 2);
-  const codes = tokens.filter((token) => /\d/.test(token) || token.length <= 2);
+  // Prefixo interno da Luxottica ("0RB4165L" → "RB4165L").
+  const codes = tokens.filter((token) => /\d/.test(token) || token.length <= 2).map((token) => token.replace(/^0(?=[A-Z]{2})/, ""));
+  const fromErp = tokens.filter((token) => !/\d/.test(token) && token.length > 2);
+  // Sem apelido no cadastro: nome comercial conhecido pela referência ("RB4165" → "Justin").
+  const known = fromErp.length ? null : modelNickname(parsed.marca, codes.join(" "));
+  const nickname = known ? [known] : fromErp;
   const name = [parsed.marca, ...nickname].filter(Boolean).join(" ").trim();
   return {
     nomeComercial: name || description.trim(),

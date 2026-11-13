@@ -100,7 +100,8 @@ export function isFollowUp(paragraph: string) {
 export function tidyBubble(text: string) {
   const value = text.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   const lines = value.split("\n");
-  const hasList = value.includes("📍") || lines.some((line) => LIST_ITEM.test(line) || /^\s*\d+[.)]\s/.test(line));
+  // Lista: lojas (📍), itens, numeração ou linhas da vitrine de modelos (🕶️/👓/👁️).
+  const hasList = value.includes("📍") || lines.some((line) => LIST_ITEM.test(line) || /^\s*\d+[.)]\s/.test(line) || /^\s*(🕶|👓|👁)/u.test(line));
   const sentences = value.split(/(?<=[.!?…])\s+/).filter((part) => part.trim()).length;
   return !hasList && sentences <= 2 ? value.replace(/\s*\n\s*\n\s*/g, " ") : value;
 }

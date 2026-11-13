@@ -19,6 +19,7 @@ import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, ty
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { allowsProductPhoto } from "@/lib/ai/stock-showcase";
 import { cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
 import { buildProductCard, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
@@ -356,6 +357,8 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     run: async (args: Record<string, unknown>) => {
       const { result, log } = await consultarEstoqueProduto(args, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
+      // Busca ampla (só marca/categoria): vitrine com nome e preço, sem foto nem ficha nesta etapa.
+      if (result.tipoBusca === "marca_ampla" || !allowsProductPhoto(result)) return result;
       const inStock = result.produtos.find((product) => product.lojasComEstoque.length > 0);
       if (!inStock) return result;
       // Ficha resumida (mini-descrição + avaliação, cache 30 dias) e foto em paralelo.

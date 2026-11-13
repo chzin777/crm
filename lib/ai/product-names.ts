@@ -70,3 +70,45 @@ export const NATURAL_RULES = [
   "- Nunca ofereça algo que você já entregou na conversa: se já disse o nome ou o endereço da loja, NÃO ofereça \"te passar o nome da loja certinho\" nem repita o endereço sem necessidade. Ofereça o próximo passo lógico: enviar a localização no mapa, ver outras cores/variações, detalhes do modelo ou reservar na loja.",
   "- Sem frases vazias como \"Posso te ajudar com disponibilidade e lojas\": responda com conteúdo real ou faça uma pergunta específica.",
 ].join("\n");
+
+/** Marcas conhecidas (chaves do cadastro do ERP), usadas para reconhecer busca só por marca. */
+export const KNOWN_BRANDS = Object.keys(BRANDS);
+
+/**
+ * Nome comercial dos modelos mais conhecidos (o ERP só traz a referência: "0RB4165L"). Chave: marca|número do modelo.
+ * Usado na vitrine/ficha ("Ray-Ban Justin") e na busca ("Ray-Ban Justin" → RB4165).
+ */
+const MODEL_NAMES: Record<string, string> = {
+  "RAYBAN|4165": "Justin", "RAYBAN|3025": "Aviator Classic", "RAYBAN|3026": "Aviator Large Metal II", "RAYBAN|2140": "Original Wayfarer",
+  "RAYBAN|2132": "New Wayfarer", "RAYBAN|4105": "Wayfarer Folding", "RAYBAN|4171": "Erika", "RAYBAN|3447": "Round Metal", "RAYBAN|3016": "Clubmaster",
+  "RAYBAN|3548": "Hexagonal", "RAYBAN|4187": "Chris", "RAYBAN|3136": "Caravan", "RAYBAN|3029": "Outdoorsman II", "RAYBAN|4202": "Andy",
+  "OAKLEY|9102": "Holbrook", "OAKLEY|9417": "Holbrook XL", "OAKLEY|9013": "Frogskins", "OAKLEY|9208": "Radar EV Path", "OAKLEY|9406": "Sutro",
+  "OAKLEY|9188": "Flak 2.0 XL", "OAKLEY|9263": "Turbine", "OAKLEY|9014": "Gascan",
+};
+/** Prefixos de óculos de sol das referências (RB, OO); armação de grau (RX, OX) tem outros modelos. */
+const SUN_PREFIX: Record<string, string> = { RAYBAN: "RB", OAKLEY: "OO" };
+const brandKey = (marca: string | null) => (marca ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** "Ray-Ban" + "RB4165L" → "Justin"; referência de armação (RX) ou modelo desconhecido → null. */
+export function modelNickname(marca: string | null, referencia: string | null) {
+  const brand = brandKey(marca);
+  const match = (referencia ?? "").toUpperCase().match(/\b0?([A-Z]{2})?(\d{4})/);
+  if (!match || !SUN_PREFIX[brand]) return null;
+  if (match[1] && match[1] !== SUN_PREFIX[brand]) return null;
+  return MODEL_NAMES[`${brand}|${match[2]}`] ?? null;
+}
+
+/** "Ray-Ban Justin" → "Ray-Ban RB4165" (para casar com a referência do ERP); sem apelido conhecido, o termo volta igual. */
+export function expandModelNicknames(term: string) {
+  const text = norm(term).replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ");
+  for (const [key, name] of Object.entries(MODEL_NAMES).sort((a, b) => b[1].length - a[1].length)) {
+    const [brand, number] = key.split("|");
+    const nick = norm(name);
+    if (!new RegExp(`(^| )${nick.replace(/[.]/g, "\.")}( |$)`).test(text)) continue;
+    // Apelido sem marca ("o Justin") vale para a marca dona do apelido; com outra marca no termo, não mexe.
+    const hasOtherBrand = Object.keys(SUN_PREFIX).some((other) => other !== brand && text.replace(/ /g, "").includes(other));
+    if (hasOtherBrand) continue;
+    return `${term.replace(new RegExp(name.replace(/[.]/g, "\."), "i"), "").trim()} ${SUN_PREFIX[brand]}${number}`.replace(/\s+/g, " ").trim();
+  }
+  return term;
+}

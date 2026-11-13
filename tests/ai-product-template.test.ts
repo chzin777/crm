@@ -17,7 +17,11 @@ const justin: ProductCardFields = {
 describe("ficha de produto no template visual do negócio", () => {
   it("campos estruturados: nome comercial limpo, referência e categoria (sem prefixo do ERP)", () => {
     expect(commercialName("OCS RAY BAN REF-RB4165 JUSTIN 622/8G", "RAY BAN")).toEqual({ nomeComercial: "Ray-Ban Justin", referencia: "RB4165", categoriaModelo: "Óculos de sol" });
-    expect(commercialName("ARM MIUMIU REF 0MU 01XV 19P1O150", "MIUMIU")).toEqual({ nomeComercial: "Miu Miu", referencia: "0MU 01XV", categoriaModelo: "Armação de grau" });
+    expect(commercialName("ARM MIUMIU REF 0MU 01XV 19P1O150", "MIUMIU")).toEqual({ nomeComercial: "Miu Miu", referencia: "MU 01XV", categoriaModelo: "Armação de grau" });
+    // Cadastro real do ERP (sem apelido): nome comercial conhecido pela referência, sem o "0" interno.
+    expect(commercialName("OCS RAY BAN REF 0RB4165L 622/T357", "RAY BAN")).toEqual({ nomeComercial: "Ray-Ban Justin", referencia: "RB4165L", categoriaModelo: "Óculos de sol" });
+    expect(commercialName("ARM RAY BAN REF 0RX5429 2012  51", "RAY BAN")).toEqual({ nomeComercial: "Ray-Ban", referencia: "RX5429", categoriaModelo: "Armação de grau" });
+    expect(commercialName("OCS OAKLEY REF 0OO9102 9102D555", "OAKLEY").nomeComercial).toBe("Oakley Holbrook");
     expect(cardStore({ loja: "Loja Taguatinga Centro (Taguatinga) — C 9", quantidade: 2, cidade: "Taguatinga (DF)" })).toEqual({ loja: "Loja Taguatinga Centro", cidade: "Taguatinga (DF)", endereco: "C 9", quantidade: 2 });
   });
 

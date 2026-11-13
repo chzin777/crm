@@ -154,7 +154,7 @@ export type StockToolProduct = StockProduct & {
   /** "⭐ 4,8 (120 avaliações)"; null = sem nota confiável (nunca mencionar avaliação). */
   avaliacaoWeb?: string | null;
 };
-export type StockToolResult = { cenario: StockScenario; termoBusca: string; regiao: string; regiaoReconhecida: boolean; produtos: StockToolProduct[]; orientacao: string };
+export type StockToolResult = { tipoBusca?: "modelo_especifico"; cenario: StockScenario; termoBusca: string; regiao: string; regiaoReconhecida: boolean; produtos: StockToolProduct[]; orientacao: string };
 
 const MAX_STORES_PER_PRODUCT = 6;
 
@@ -203,7 +203,7 @@ export function buildStockResult(input: {
   withPrices: boolean;
 }): StockToolResult {
   const region = input.region?.trim() ?? "";
-  const base = { termoBusca: input.term, regiao: region };
+  const base = { tipoBusca: "modelo_especifico" as const, termoBusca: input.term, regiao: region };
   if (!input.products.length) return { ...base, cenario: "produto_nao_encontrado", regiaoReconhecida: false, produtos: [], orientacao: GUIDANCE.produto_nao_encontrado };
   if (!input.lookup || input.lookup.stockStatus === "unavailable_api") {
     return { ...base, cenario: "unavailable_api", regiaoReconhecida: false, produtos: [], orientacao: GUIDANCE.unavailable_api };
@@ -277,6 +277,7 @@ export const STOCK_TOOL = {
       properties: {
         termoBusca: { type: "string", description: "Marca, modelo ou referência do produto, ex.: \"Ray-Ban RB3025\", \"Oakley Holbrook\"." },
         regiaoOuLoja: { type: "string", description: "Bairro, cidade ou loja citada pelo cliente, ex.: \"Parque Amazônia\", \"Aparecida\", \"LJ 36\". Opcional." },
+        tipoBusca: { type: "string", enum: ["marca_ampla", "modelo_especifico"], description: "marca_ampla: o cliente pediu só a marca ou um tipo (\"tem Ray-Ban?\", \"armações femininas\") → vitrine de modelos com preço, sem foto. modelo_especifico: qualquer nome de modelo ou referência junto ou sem a marca (\"Ray-Ban Justin\", \"RB4165\") → estoque por loja, foto e ficha." },
       },
       required: ["termoBusca"],
       additionalProperties: false,
@@ -285,7 +286,7 @@ export const STOCK_TOOL = {
 };
 
 /** Registro da consulta mostrado no teste da página /ia. */
-export type StockLog = { term: string; region: string; scenario: StockScenario; products: number; stores: number; ms: number; cached: boolean; /** Foto do produto: do cache, da web, não achada ou já enviada nesta etapa. */ image?: "cache" | "web" | "none" | "sent"; /** Ficha resumida (mini-descrição/avaliação). */ sheet?: "cache" | "web" | "none"; rating?: string | null };
+export type StockLog = { term: string; region: string; scenario: StockScenario; products: number; stores: number; ms: number; cached: boolean; /** Foto do produto: do cache, da web, não achada ou já enviada nesta etapa. */ image?: "cache" | "web" | "none" | "sent"; /** Ficha resumida (mini-descrição/avaliação). */ sheet?: "cache" | "web" | "none"; rating?: string | null; /** Busca ampla (vitrine por marca/categoria) ou específica (modelo). */ kind?: "marca_ampla" | "modelo_especifico" };
 
 /** Passos da busca textual: todas as palavras; depois sem a última, até sobrar uma (marca). */
 export function stockSearchTerms(term: string) {
