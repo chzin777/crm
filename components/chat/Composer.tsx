@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { CalendarClock, Check, FileText, Image as ImageIcon, Loader2, Lock, Mic, Paperclip, Search, Send, Smile, Sparkles, StickyNote, Trash2, X, Zap } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ComposerPopover } from "@/components/chat/ComposerPopover";
@@ -10,6 +10,9 @@ import { TemplatePicker, type TemplateChoice } from "@/components/chat/TemplateP
 import { fillVariables } from "@/lib/chat/text";
 import type { ChatMessageItem, ConversationDetail } from "@/lib/chat/types";
 import { useRecorder } from "@/lib/chat/use-recorder";
+import { extractClipboardImages } from "@/lib/clipboard";
+import { MAX_IMAGE_BYTES } from "@/lib/chat/media-rules";
+import { useToast } from "@/components/ToastProvider";
 
 // A biblioteca e a base de emojis só são baixadas quando o seletor abre.
 const EmojiPanel = dynamic(() => import("@/components/chat/EmojiPanel").then((module) => module.EmojiPanel), {
@@ -57,6 +60,9 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   const [internal, setInternal] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const [sending, setSending] = useState(false);
+  /** Imagem colada (Ctrl+V): fica em prévia até o Enviar, com o texto do campo como legenda. */
+  const [pasted, setPasted] = useState<{ file: File; url: string } | null>(null);
+  const toast = useToast();
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const emojiButton = useRef<HTMLButtonElement>(null);
@@ -76,6 +82,30 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
       if (caption) setText("");
     }
     setSending(false);
+  };
+
+  const clearPasted = useCallback(() => {
+    setPasted((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return null;
+    });
+  }, []);
+  useEffect(() => clearPasted, [clearPasted]);
+
+  /** Ctrl+V com imagem (print, foto copiada): abre a prévia. Só texto: o colar normal segue. */
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (internal) return;
+    const images = extractClipboardImages(event.clipboardData);
+    if (!images.length) return;
+    event.preventDefault();
+    const image = images[0];
+    if (image.size > MAX_IMAGE_BYTES) {
+      toast.error(`A imagem colada tem ${(image.size / 1024 / 1024).toFixed(1)} MB; o WhatsApp aceita imagens até 5 MB.`);
+      return;
+    }
+    if (images.length > 1) toast.success("Imagem colada", "Só a primeira imagem foi anexada.");
+    clearPasted();
+    setPasted({ file: image, url: URL.createObjectURL(image) });
   };
 
   const pickFile = (accept: string) => {
@@ -165,6 +195,13 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   };
 
   const submit = async () => {
+    if (pasted && !internal) {
+      if (sending) return;
+      const file = pasted.file;
+      clearPasted();
+      await attach(file);
+      return;
+    }
     const value = text.trim();
     if (!value || sending) return;
     setSending(true);
@@ -190,6 +227,16 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
         <div className="mb-2 flex items-start gap-2 rounded-lg border-l-4 border-[#002187] bg-slate-100 px-3 py-2 dark:border-[#C4D600] dark:bg-slate-800">
           <p className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300">{replyTo.text || "Anexo"}</p>
           <button type="button" onClick={onCancelReply} aria-label="Cancelar citação" title="Cancelar citação" className="cursor-pointer text-slate-500 hover:text-slate-800 dark:hover:text-white"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+      {pasted && !internal && typing && (
+        <div className="mb-2 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+          <img src={pasted.url} alt="Imagem colada" className="h-14 w-14 shrink-0 rounded-md object-cover" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">{pasted.file.name}</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">{(pasted.file.size / 1024).toFixed(0)} KB · o texto do campo vai como legenda</p>
+          </div>
+          <button type="button" onClick={clearPasted} aria-label="Remover imagem colada" title="Remover imagem" className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full text-slate-500 hover:bg-slate-200 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
         </div>
       )}
       {showEmojis && typing && (
@@ -285,13 +332,14 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
             rows={1}
             value={text}
             onChange={(event) => setText(event.target.value)}
+            onPaste={onPaste}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void submit();
               }
             }}
-            placeholder={internal ? "Nota interna, o cliente não vê..." : "Digite uma mensagem..."}
+            placeholder={internal ? "Nota interna, o cliente não vê..." : pasted ? "Legenda da imagem (opcional) e Enter..." : "Digite uma mensagem ou cole uma imagem (Ctrl+V)..."}
             className={`max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-y-auto scroll-smooth rounded-2xl px-4 py-[11px] text-sm leading-5 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-1 focus:ring-[#002187]/30 dark:text-white dark:focus:ring-[#C4D600]/40 ${internal ? "bg-[#F7915E]/15!" : "bg-slate-100 dark:bg-slate-800/80!"}`}
           />
           {text.trim() && !internal && onScheduled && (
@@ -299,8 +347,8 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
               <CalendarClock className="h-5 w-5" />
             </button>
           )}
-          {text.trim() || internal ? (
-            <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={!text.trim() || sending} className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}>
+          {text.trim() || internal || pasted ? (
+            <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={(!text.trim() && !(pasted && !internal)) || sending} className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}>
               <Send className="h-5 w-5" />
             </button>
           ) : (

@@ -1,11 +1,12 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, Coins, FileText, FlaskConical, Mic, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
+import { extractClipboardImages } from "@/lib/clipboard";
 import { SIMULATED_PROFILES, type AgentOutcome, type AgentTrigger, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { AiUsageReport } from "@/lib/ai/store";
 
@@ -116,6 +117,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const ended = messages.some((message) => message.handoff);
   const urls = useRef<string[]>([]);
   const recorder = useRecorder(setError);
+  const toast = useToast();
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages, busy]);
   useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
@@ -173,6 +175,20 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
       setBusy(false);
       onUsed();
     }
+  };
+
+  /** Ctrl+V com imagem (print, receita, armação): vira o anexo em prévia. Só texto: o colar normal segue. */
+  const onPaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    const images = extractClipboardImages(event.clipboardData);
+    if (!images.length) return;
+    event.preventDefault();
+    const check = validateAiAttachment(images[0]);
+    if (!check.ok) {
+      toast.error("Imagem colada não aceita", check.error);
+      return;
+    }
+    const picked = pick(images[0]);
+    if (picked) setAttachment(picked);
   };
 
   /** Gravação: o ✓ encerra e envia na hora, como o áudio do cliente no WhatsApp. */
@@ -240,7 +256,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         <div className="flex gap-2">
           <button type="button" disabled={busy || ended} onClick={() => fileRef.current?.click()} title="Anexar imagem, áudio ou documento" aria-label="Anexar arquivo" className={ghost}><Paperclip className="h-4 w-4" /></button>
           <button type="button" disabled={busy || ended || !!attachment} onClick={() => void recorder.start()} title="Gravar áudio" aria-label="Gravar áudio" className={ghost}><Mic className="h-4 w-4" /></button>
-          <input aria-label="Mensagem do cliente" value={draft} placeholder={attachment ? "Texto opcional junto do anexo e Enter" : "Mensagem do cliente e Enter"} onChange={(event) => setDraft(event.target.value)} onPaste={(event) => { const picked = pick(event.clipboardData.files?.[0]); if (picked) { event.preventDefault(); setAttachment(picked); } }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void send(); } }} className={input} />
+          <input aria-label="Mensagem do cliente" value={draft} placeholder={attachment ? "Texto opcional junto do anexo e Enter" : "Mensagem do cliente ou cole uma imagem (Ctrl+V)"} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void send(); } }} className={input} />
           <button type="button" disabled={busy || ended || (!draft.trim() && !attachment)} onClick={() => void send()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" />Enviar</button>
           <button type="button" disabled={busy || messages.length === 0} onClick={() => { setMessages([]); setError(""); }} title="Começar outra conversa" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RotateCcw className="h-3.5 w-3.5" />Limpar</button>
         </div>
