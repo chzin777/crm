@@ -67,6 +67,9 @@ services:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         APP_VERSION: ${APP_VERSION:-unknown}
     container_name: crm-app
+    # API de estoque do VMSet roda no host (scripts/vmset-stock-api.py).
+    extra_hosts:
+    - host.docker.internal:host-gateway
     restart: unless-stopped
     depends_on:
       pgbouncer:

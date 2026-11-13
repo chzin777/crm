@@ -63,16 +63,20 @@ const CATEGORY_LABEL: Record<Exclude<CatalogQuery["category"], "">, string> = { 
 export const CATEGORY_FILTER: Record<Exclude<CatalogQuery["category"], "">, string> = { SOLAR: "OCULOSSOLAR", ARMACAO: "ARMACAO", LENTE_CONTATO: "LENTESDECONTATO" };
 
 export type CatalogProduct = { description: string; brand: string | null; category: string | null; sales: number; price: number | null; stores: string[] };
-export type CatalogSearch = { term: string; results: CatalogProduct[] };
+/** stock "ok": stores são as lojas de varejo com saldo agora (API do VMSet); sem isso, lojas onde o modelo foi vendido. */
+export type CatalogSearch = { term: string; results: CatalogProduct[]; stock?: "ok" | "unavailable_api" };
 /** Registro da busca mostrado no teste da página /ia. */
 export type SearchLog = { kind: string; term: string; found: number };
 
 export function formatCatalogResults(search: CatalogSearch, withPrices: boolean) {
+  const live = search.stock === "ok";
   const lines = search.results.map((product) => {
     const price = withPrices && product.price ? ` · preço médio R$ ${product.price.toFixed(2)}` : "";
-    return `- ${product.description}${product.brand ? ` (${product.brand})` : ""}${price} · vendido recentemente em: ${product.stores.join("; ") || "lojas não informadas"}`;
+    const where = live ? (product.stores.length ? `com estoque agora em: ${product.stores.join("; ")}` : "sem estoque nas lojas no momento") : `vendido recentemente em: ${product.stores.join("; ") || "lojas não informadas"}`;
+    return `- ${product.description}${product.brand ? ` (${product.brand})` : ""}${price} · ${where}`;
   });
-  return `Resultado da busca no catálogo do ERP para "${search.term}" (vendas dos últimos 2 anos; disponibilidade a confirmar na loja):\n${lines.join("\n")}`;
+  const source = live ? "saldo em tempo real por loja de varejo" : "o estoque não pôde ser verificado agora: lojas onde o modelo foi vendido nos últimos 2 anos";
+  return `Resultado da busca no catálogo do ERP para "${search.term}" (${source}):\n${lines.join("\n")}`;
 }
 
 export const CATALOG_MISS_REPLY = "Não localizei esse modelo exato no nosso sistema agora. Vou encaminhar para o atendente responsável verificar a disponibilidade nas lojas e já te retorna, tudo bem?";
@@ -80,7 +84,7 @@ export const PRESCRIPTION_REPLY = "Recebi! Vou encaminhar para o atendente respo
 
 /** Instrução da resposta quando a busca achou produtos (a imagem não vai junto: só o resultado). */
 export const CATALOG_FOUND_RULE =
-  "O cliente enviou a foto de um produto e a busca no catálogo encontrou os modelos abaixo. Responda direto, como vendedora: apresente até 3 modelos encontrados e as lojas onde ele pode ver/experimentar, e convide a confirmar a disponibilidade na loja. Não descreva a foto.";
+  "O cliente enviou a foto de um produto e a busca no catálogo encontrou os modelos abaixo. Responda direto, como vendedora: apresente até 3 modelos encontrados e as lojas com estoque agora, seguindo as REGRAS DE ESTOQUE. Se o resultado disser que o estoque não pôde ser verificado, cite as lojas onde o modelo é vendido e ofereça um atendente para confirmar. Não descreva a foto.";
 
 export type ImageFlowResult =
   | { type: "handoff"; reason: string; reply: string; trigger: "catalog_miss" | "prescription"; log: SearchLog }
@@ -111,10 +115,10 @@ export async function productImageFlow(deps: {
 }
 
 /** Produto distinto do histórico de vendas, com o texto já normalizado para a busca. */
-export type IndexedProduct = { description: string; brand: string | null; category: string | null; sales: number; price: number | null; text: string; categoryKey: string };
+export type IndexedProduct = { code?: string | null; description: string; brand: string | null; category: string | null; sales: number; price: number | null; text: string; categoryKey: string };
 
-export function indexProduct(row: { description: string; brand: string | null; category: string | null; subcategory: string | null; sales: number; price: number | null }): IndexedProduct {
-  return { description: row.description, brand: row.brand, category: row.category, sales: row.sales, price: row.price, text: normalizeTerm(`${row.brand ?? ""} ${row.description} ${row.subcategory ?? ""}`), categoryKey: normalizeTerm(row.category ?? "") };
+export function indexProduct(row: { code?: string | null; description: string; brand: string | null; category: string | null; subcategory: string | null; sales: number; price: number | null }): IndexedProduct {
+  return { code: row.code ?? null, description: row.description, brand: row.brand, category: row.category, sales: row.sales, price: row.price, text: normalizeTerm(`${row.brand ?? ""} ${row.description} ${row.subcategory ?? ""}`), categoryKey: normalizeTerm(row.category ?? "") };
 }
 
 /** Produtos que têm todos os termos do passo (e a categoria, se houver), mais vendidos primeiro. */

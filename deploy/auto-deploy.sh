@@ -68,6 +68,8 @@ main() {
     say "ERRO: container subiu mas /api/health não confirmou $GIT_COMMIT (resposta: ${health:-nenhuma})"
     return 1
   fi
+  # API de estoque do VMSet (host): recarrega o script versionado, se o serviço estiver instalado.
+  systemctl try-restart crm-vmset-stock.service >> "$log" 2>&1 || true
   docker image prune -f >> "$log" 2>&1 || true
   return 0
 }

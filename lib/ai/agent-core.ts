@@ -2,6 +2,7 @@ import { formatBr } from "@/lib/br-time";
 import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE } from "@/lib/ai/catalog-search";
+import { STOCK_RULES } from "@/lib/ai/stock";
 import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
 
@@ -123,7 +124,7 @@ export function simulatedHistory(profile: SimulatedProfileId, now = new Date()):
 export const BRAND_RULES = [
   "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato, armações e exames de vista).",
   "Escreva sempre em português do Brasil, tom cordial, próximo e profissional, frases curtas, adequadas ao WhatsApp.",
-  "Nunca invente preços, prazos, estoque, promoções, endereços ou políticas que não estejam no contexto. Se faltar informação, oriente a confirmar com a loja ou a pedir o dado ao cliente.",
+  "Nunca invente preços, prazos, estoque, promoções, endereços ou políticas que não estejam no contexto. Estoque só pela ferramenta consultarEstoqueProduto. Se faltar outra informação, oriente a pedir o dado ao cliente ou transfira.",
   "Nunca peça dados sensíveis como senha ou número de cartão.",
 ].join("\n");
 
@@ -141,6 +142,7 @@ export function agentRules(settings: AiSettings, queueNames: string[]) {
     SECURITY_RULES,
     BRAND_RULES,
     IMAGE_RULE,
+    STOCK_RULES,
     `Você é ${settings.agentName}, assistente virtual que atende clientes pelo WhatsApp. Se for a primeira resposta da conversa, apresente-se brevemente como assistente virtual.`,
     `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
     "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",

@@ -12,7 +12,9 @@ import { AI_ATTACHMENT_MAX_BYTES, aiAttachmentKind, type AiAttachmentKind } from
 import { attachSummary, MEDIA_RULES, mediaParts, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { readFile } from "@/lib/minio";
 import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
-import { searchErpCatalog } from "@/lib/ai/catalog-db";
+import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
+import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
+import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
 import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext } from "@/lib/ai/assist";
@@ -165,7 +167,7 @@ export type AgentRunInput = {
   /** Mensagens anteriores do cliente nesta conversa (insistência em tentativa de manipulação). */
   earlierCustomerTexts?: string[];
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[] };
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
 
 /**
@@ -228,14 +230,24 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     info,
     extra: [media ? MEDIA_RULES : "", catalogContext, injection.risk === "high" ? INJECTION_ALERT : ""],
   });
+  // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
+  const stock: StockLog[] = [];
+  const stockTool = {
+    definition: STOCK_TOOL,
+    run: async (args: Record<string, unknown>) => {
+      const { result, log } = await consultarEstoqueProduto(args, { products: catalogProducts, withPrices: settings.canQuotePrices });
+      stock.push(log);
+      return result;
+    },
+  };
   const decision = await aiJson<AgentDecision>(
     [
       { role: "system", content: system },
       { role: "user", content: sendMedia && media ? [{ type: "text", text: context }, ...media.parts] : context },
     ],
-    { ...input.meta, maxTokens: 700 },
+    { ...input.meta, maxTokens: 700, tools: [stockTool] },
   );
-  return { outcome: interpretDecision(decision), media, mediaTriggerSkipped, search, injection };
+  return { outcome: interpretDecision(decision), media, mediaTriggerSkipped, search, injection, stock };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -314,6 +326,8 @@ export type PlaygroundResult = AgentOutcome & {
   search?: SearchLog;
   /** Tentativa de manipulação detectada (o teste mostra; o WhatsApp registra no log de segurança). */
   injection?: InjectionCheck;
+  /** Consultas de estoque feitas pela tool (termo, região, cenário, lojas e tempo). */
+  stock?: StockLog[];
 };
 
 /**
@@ -359,5 +373,6 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     mediaHandoff: run.mediaTriggerSkipped || undefined,
     search: run.search ?? undefined,
     injection: run.injection.risk === "none" ? undefined : run.injection,
+    stock: run.stock?.length ? run.stock : undefined,
   };
 }

@@ -1,0 +1,17 @@
+[Unit]
+Description=CRM - API de saldo de estoque do VMSet para a IA (Oracle, somente leitura)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/crm
+EnvironmentFile=/etc/crm-vmset-sync.env
+EnvironmentFile=/etc/crm-vmset-stock.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/crm/scripts/vmset-stock-api.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
