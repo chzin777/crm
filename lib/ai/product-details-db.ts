@@ -49,14 +49,15 @@ export async function productSummary(product: CatalogItem) {
  * Tool buscarDetalhesProdutoWeb: acha o produto no catálogo do CRM, junta as cores do mesmo modelo com saldo no
  * VMSet e a ficha técnica da web (cache de 30 dias por modelo). Nunca lança erro.
  */
-export async function buscarDetalhesProduto(args: { nomeProduto?: unknown; marca?: unknown; referencia?: unknown }, deps: { products: () => Promise<IndexedProduct[]> }): Promise<{ result: DetailsToolResult; log: DetailsLog; product: { codigo: string; produto: string; marca: string | null } | null }> {
+export async function buscarDetalhesProduto(args: { nomeProduto?: unknown; marca?: unknown; referencia?: unknown; codigo?: unknown }, deps: { products: () => Promise<IndexedProduct[]> }): Promise<{ result: DetailsToolResult; log: DetailsLog; product: { codigo: string; produto: string; marca: string | null } | null }> {
   const started = Date.now();
   const asked = [args.marca, args.nomeProduto, args.referencia].filter((value) => typeof value === "string" && value.trim()).join(" ").slice(0, 120);
   const term = asked.replace(/\b(arma[cç][aã]o|[oó]culos( de sol| de grau)?|ref\.?)\b|[()]/gi, " ").replace(/\s+/g, " ").trim();
   const all = await deps.products().catch(() => [] as IndexedProduct[]);
 
-  let found: IndexedProduct | null = null;
-  for (const terms of stockSearchTerms(term)) {
+  // Produto fixado na sessão (activeProduct): o código do ERP decide, sem busca aproximada.
+  let found: IndexedProduct | null = typeof args.codigo === "string" && args.codigo ? all.find((product) => product.code === args.codigo) ?? null : null;
+  for (const terms of found ? [] : stockSearchTerms(term)) {
     found = matchProducts(all, { label: term, category: "", terms }, 1)[0] ?? null;
     if (found) break;
   }

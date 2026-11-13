@@ -4,6 +4,7 @@ import { cached } from "@/lib/cache";
 import { BRAND_RULES, formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
 import { loadCustomerHistory } from "@/lib/chat/customer-history";
 import { aiJson } from "@/lib/ai/openai";
+import { sessionRows } from "@/lib/ai/session-anchor";
 
 const MESSAGES_LIMIT = 40;
 const CATALOG_LIMIT = 60;
@@ -13,14 +14,24 @@ export type ConversationRef = { id: string; contactId: string; phone: string; su
 
 export { BRAND_RULES };
 
-async function transcript(conversationId: string) {
+/**
+ * Início do atendimento atual: cliente que volta depois do encerramento abre conversa nova; conversa reaberta
+ * começa na reabertura. Mensagens anteriores (sessão encerrada) nunca vão para a IA. null = conversa inteira.
+ */
+export async function sessionStartedAt(conversationId: string): Promise<Date | null> {
+  const reopen = await prisma.chatAudit.findFirst({ where: { targetId: conversationId, action: "conversation.reopen" }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  return reopen?.createdAt ?? null;
+}
+
+async function transcript(conversationId: string, sessionOnly: boolean) {
+  const since = sessionOnly ? await sessionStartedAt(conversationId) : null;
   const rows = await prisma.chatMessage.findMany({
-    where: { conversationId },
+    where: { conversationId, ...(since ? { createdAt: { gt: since } } : {}) },
     orderBy: { createdAt: "desc" },
     take: MESSAGES_LIMIT,
     select: { author: true, authorName: true, text: true, internal: true, attachment: true, createdAt: true },
   });
-  return rows
+  return sessionRows(rows, since)
     .reverse()
     .map((row) => transcriptLine({ ...row, attachment: row.attachment as TranscriptRow["attachment"] }))
     .filter(Boolean)
@@ -28,12 +39,13 @@ async function transcript(conversationId: string) {
 }
 
 /** Contexto do cliente (mesmo formato do teste da página /ia, ver formatContext). */
-export async function conversationContext(conversation: ConversationRef, options: { includeHistory?: boolean } = {}) {
+/** sessionOnly: só o atendimento atual (agente autônomo); resumo e sugestão para a equipe veem a conversa inteira. */
+export async function conversationContext(conversation: ConversationRef, options: { includeHistory?: boolean; sessionOnly?: boolean } = {}) {
   const includeHistory = options.includeHistory ?? true;
   const [contact, queue, messages, history] = await Promise.all([
     prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } }),
     conversation.queueId ? prisma.chatQueue.findUnique({ where: { id: conversation.queueId }, select: { name: true } }) : null,
-    transcript(conversation.id),
+    transcript(conversation.id, !!options.sessionOnly),
     includeHistory ? loadCustomerHistory(conversation) : null,
   ]);
   return {

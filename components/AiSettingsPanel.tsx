@@ -206,6 +206,15 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   // Depois do transbordo a IA não volta a responder (igual ao WhatsApp): só recomeçando.
   const ended = messages.some((message) => message.handoff);
   const urls = useRef<string[]>([]);
+  // Sessão de teste: cada "Limpar" começa outra (sem produto/loja fixados) e respostas da sessão anterior são descartadas.
+  const newSessionId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+  const sessionRef = useRef<string>("");
+  if (!sessionRef.current) sessionRef.current = newSessionId();
+  const resetSession = () => {
+    sessionRef.current = newSessionId();
+    setMessages([]);
+    setError("");
+  };
   const recorder = useRecorder(setError);
   const toast = useToast();
 
@@ -239,7 +248,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     setBusy(true);
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
-      const payload = { settings, profile, ignoreMediaTrigger: readMedia, queued: queuedTest, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku } : {}) })) };
+      const session = sessionRef.current;
+      const payload = { settings, profile, ignoreMediaTrigger: readMedia, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}) })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -249,6 +259,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
       }
       const response = await fetch("/api/ai/playground", request);
       const data = (await response.json().catch(() => ({ error: response.status === 413 ? "Arquivo grande demais para o envio." : undefined }))) as PlaygroundResult & { error?: string };
+      // A conversa foi limpa enquanto a IA respondia: a resposta pertence à sessão anterior.
+      if (sessionRef.current !== session) return;
       if (!response.ok) throw new Error(data.error ?? "Não foi possível testar a IA.");
       const sent: PlaygroundMessage = data.media
         ? { ...customer, historyText: [text, data.media.summary].filter(Boolean).join("\n"), media: customer.media && { ...customer.media, transcript: data.media.transcript } }
@@ -394,7 +406,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
           <button type="button" disabled={busy || ended || !!attachment} onClick={() => void recorder.start()} title="Gravar áudio" aria-label="Gravar áudio" className={ghost}><Mic className="h-4 w-4" /></button>
           <input aria-label="Mensagem do cliente" value={draft} placeholder={attachment ? "Texto opcional junto do anexo e Enter" : "Mensagem do cliente ou cole uma imagem (Ctrl+V)"} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void send(); } }} className={input} />
           <button type="button" disabled={busy || ended || (!draft.trim() && !attachment)} onClick={() => void send()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-3.5 w-3.5" />Enviar</button>
-          <button type="button" disabled={busy || messages.length === 0} onClick={() => { setMessages([]); setError(""); }} title="Começar outra conversa" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RotateCcw className="h-3.5 w-3.5" />Limpar</button>
+          <button type="button" disabled={busy || messages.length === 0} onClick={resetSession} title="Começar outra conversa (nova sessão, sem produto ou loja fixados)" className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RotateCcw className="h-3.5 w-3.5" />Limpar</button>
         </div>
       )}
     </Block>

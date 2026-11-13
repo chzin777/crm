@@ -165,6 +165,33 @@ export function citesStreet(text: string, store: StoreInfo) {
   return false;
 }
 
+/** Rua e número da loja em sequência no texto ("Rua 9, 2106", "Rua 9 nº 2106"); sem número no cadastro vale só a rua. */
+export function citesAddress(text: string, store: StoreInfo) {
+  const street = tokens(titleCase(store.address ?? ""));
+  if (street.length < 2) return false;
+  const number = store.addressNumber && !/^s\/?n$/i.test(store.addressNumber.trim()) ? tokens(store.addressNumber) : [];
+  const hay = tokens(text);
+  for (let index = 0; index + street.length <= hay.length; index += 1) {
+    if (!street.every((word, offset) => hay[index + offset] === word)) continue;
+    if (!number.length) return true;
+    const next = hay.slice(index + street.length, index + street.length + number.length);
+    if (number.every((word, offset) => next[offset] === word)) return true;
+  }
+  return false;
+}
+
+/**
+ * Loja fixada na sessão (activeStore) dentro do cadastro: unidade cujo endereço (rua + número) é o informado.
+ * Com wantedMatches (lojas que o pedido nomeou) sem essa unidade, o cliente quer outra loja: null.
+ */
+export function anchoredStoreMatch<T extends { code: string; store: StoreInfo }>(directory: T[], anchorText: string, wantedMatches: T[] = []): T | null {
+  const exact = dedupeStores(directory.filter((item) => citesAddress(anchorText, item.store)));
+  const unique = exact.length ? exact : dedupeStores(directory.filter((item) => citesStreet(anchorText, item.store)));
+  if (unique.length !== 1) return null;
+  if (wantedMatches.length && !wantedMatches.some((item) => sameStorePlace(item.store, unique[0].store))) return null;
+  return unique[0];
+}
+
 /**
  * Loja pedida pelo cliente, já resolvida: filiais no mesmo endereço mescladas; com mais de uma unidade real, vale a
  * que acabou de ser citada (endereço presente na última mensagem da IA, ex.: "essa loja do setor sul" depois da ficha);
@@ -180,7 +207,12 @@ export function resolveStoreMatch<T extends { code: string; store: StoreInfo }>(
   for (const text of options.recentAiTexts ?? []) {
     const cited = unique.filter((item) => citesStreet(text, item.store));
     if (cited.length === 1) return { type: "found", match: cited[0] };
-    if (cited.length > 1) break;
+    if (cited.length > 1) {
+      // Mesma rua com números diferentes (Rua 9, 2106 x Rua 9, 1855): o número citado decide.
+      const exact = cited.filter((item) => citesAddress(text, item.store));
+      if (exact.length === 1) return { type: "found", match: exact[0] };
+      break;
+    }
   }
   const labels = unique.slice(0, 5).map((item) => {
     const label = storeLabel(item.code, item.store);
