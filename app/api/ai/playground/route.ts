@@ -7,7 +7,7 @@ import { validateAiAttachment } from "@/lib/ai/attachments";
 import { sanitizeImageAnalysis } from "@/lib/ai/catalog-search";
 import type { AiMediaInput } from "@/lib/ai/multimodal";
 
-type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown; queued?: unknown; sessionId?: unknown } | null;
+type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown; queued?: unknown; sessionId?: unknown; contactName?: unknown } | null;
 
 /**
  * Teste da IA com os parâmetros da tela (ainda não salvos). Nada é enviado ao cliente.
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     .slice(-20);
   if (!messages.some((item) => item.from === "customer")) return NextResponse.json({ error: "Escreva a mensagem do cliente ou anexe um arquivo." }, { status: 400 });
   try {
-    return NextResponse.json(await simulateAgent(sanitizeAiSettings(body?.settings), messages, guard.user.id, media, { profile: body?.profile === "recorrente" ? "recorrente" : "novo", ignoreMediaTrigger: body?.ignoreMediaTrigger !== false, queued: body?.queued === true, sessionId: typeof body?.sessionId === "string" && /^[\w-]{8,64}$/.test(body.sessionId) ? body.sessionId : undefined }));
+    return NextResponse.json(await simulateAgent(sanitizeAiSettings(body?.settings), messages, guard.user.id, media, { profile: body?.profile === "recorrente" ? "recorrente" : "novo", ignoreMediaTrigger: body?.ignoreMediaTrigger !== false, queued: body?.queued === true, sessionId: typeof body?.sessionId === "string" && /^[\w-]{8,64}$/.test(body.sessionId) ? body.sessionId : undefined, contactName: typeof body?.contactName === "string" ? body.contactName.replace(/[\r\n]+/g, " ").trim().slice(0, 60) || undefined : undefined }));
   } catch (error) {
     if (error instanceof AiError) return NextResponse.json({ error: error.message }, { status: error.status === 502 ? 422 : error.status });
     console.error("[ai/playground]", error);

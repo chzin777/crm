@@ -1,7 +1,9 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
-import { closeConversation } from "@/lib/chat/actions";
+import { assertCanReceive, closeConversation } from "@/lib/chat/actions";
+import { bareNameHint, detectStaffRequest, defaultHandoffNotice, staffConfirmation } from "@/lib/ai/staff-request";
+import { activeStaff } from "@/lib/ai/staff-db";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
 import { withTyping } from "@/lib/chat/typing";
@@ -194,9 +196,12 @@ async function knowledge(settings: AiSettings) {
 
 
 /** Fila de destino da transferência: a fixa da configuração, a escolhida pela IA ou a atual. Mesma regra no teste. */
-async function handoffQueue(settings: AiSettings, currentQueueId: string | null, chosen?: string) {
+async function handoffQueue(settings: AiSettings, currentQueueId: string | null, chosen?: string, staffQueueId?: string): Promise<{ id: string; name: string; source: QueueSource } | null> {
   // Validação no servidor: a fila escolhida pela IA precisa existir e estar ativa; senão fila padrão / Atendimento Geral.
   const queues = await prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true }, orderBy: { order: "asc" } });
+  // Pedido de pessoa pelo nome: a fila principal dela, se ativa.
+  const staffQueue = staffQueueId ? queues.find((item) => item.id === staffQueueId) : undefined;
+  if (staffQueue) return { ...staffQueue, source: "staff" };
   const choice = resolveHandoffQueue(queues, { fixedQueueId: settings.handoffQueueId, aiChooses: settings.aiChoosesQueue, chosen, currentQueueId });
   const queue = queues.find((item) => item.id === choice.queueId) ?? null;
   if (chosen && choice.source !== "ai") console.warn(`[ai] fila escolhida pela IA inválida ("${chosen.slice(0, 60)}"): usando ${queue?.name ?? "nenhuma"} (${choice.source})`);
@@ -210,12 +215,16 @@ const hasMediaPayload = (item: { attachment?: unknown; metaMedia?: unknown }) =>
   return !!item.attachment || !!meta?.id || !!meta?.kind;
 };
 
-async function handoff(conversation: ChatConversation, settings: AiSettings, reason: string, queueName?: string, sendHandoffMessage = true) {
-  const contact = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } });
-  const target = await handoffQueue(settings, conversation.queueId, queueName);
+type QueueSource = "fixed" | "ai" | "fallback" | "current" | "none" | "staff";
 
-  if (sendHandoffMessage && settings.handoffMessage.trim() && isWindowOpen(conversation.lastInboundAt)) {
-    await sendAutomaticMessage(conversation, fillVariables(settings.handoffMessage, { customer: contact?.name, queue: target?.name }), undefined, undefined, AI_AUTHOR);
+async function handoff(conversation: ChatConversation, settings: AiSettings, reason: string, queueName?: string, sendHandoffMessage = true, staffQueueId?: string) {
+  const contact = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } });
+  const target = await handoffQueue(settings, conversation.queueId, queueName, staffQueueId);
+
+  // Nunca transferência silenciosa: sem mensagem configurada, vai o aviso padrão ("Claro, Vivi! Vou te transferir...").
+  if (sendHandoffMessage && isWindowOpen(conversation.lastInboundAt)) {
+    const notice = settings.handoffMessage.trim() ? fillVariables(settings.handoffMessage, { customer: contact?.name, queue: target?.name }) : defaultHandoffNotice(contact?.name);
+    await sendAutomaticMessage(conversation, notice, undefined, undefined, AI_AUTHOR);
   }
   // Só agora a conversa entra na fila humana (posição contada a partir do transbordo).
   const state = readMenuState(conversation.menuState);
@@ -228,9 +237,32 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
     data: { ...handoffPatch(target?.id ?? conversation.queueId, new Date()), menuState: state as unknown as Prisma.InputJsonValue },
   });
   // Nota para o atendente: fila, como foi escolhida e o resumo do que o cliente precisa.
-  const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : "";
+  const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : target?.source === "staff" ? " (fila do atendente pedido)" : "";
   await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}${how}` : ""}: ${reason}`);
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
+}
+
+/**
+ * Cliente pediu uma pessoa pelo nome ("Leandro", "Preciso falar com Leandro"): confirmação acolhedora primeiro,
+ * depois a fila da pessoa (nota "Cliente solicitou atendimento direto com Leandro.") e, se ela puder receber
+ * agora, atribuição direta. Sem cadastro ou indisponível: a conversa fica na fila com a nota.
+ */
+async function handoffToStaff(conversation: ChatConversation, settings: AiSettings, outcome: AgentOutcome, replyTo: string | null) {
+  if (isWindowOpen(conversation.lastInboundAt)) await sendAiReply(conversation, outcome.reply, null, replyTo);
+  await handoff(conversation, settings, outcome.reason, undefined, false, outcome.staffQueueId);
+  if (!outcome.assigneeId) return;
+  const name = outcome.assigneeName ?? "o atendente pedido";
+  try {
+    await assertCanReceive(outcome.assigneeId);
+  } catch (error) {
+    if (!(error instanceof ChatRuleError)) throw error;
+    await addSystemMessage(conversation.id, `${name} não pode receber agora (${error.message}). A conversa ficou na fila.`);
+    return;
+  }
+  const assigned = await prisma.chatConversation.updateMany({ where: { id: conversation.id, closedAt: null, assigneeId: null }, data: { assigneeId: outcome.assigneeId, status: "in_progress", waitingSince: null } });
+  if (!assigned.count) return;
+  await addSystemMessage(conversation.id, `IA atribuiu a ${name}: o cliente pediu para falar com essa pessoa.`);
+  await prisma.chatNotification.create({ data: { userId: outcome.assigneeId, conversationId: conversation.id, type: "transfer", title: "Cliente pediu para falar com você", detail: "Transferência da IA", href: `/chat?c=${conversation.id}` } }).catch(() => null);
 }
 
 
@@ -326,6 +358,8 @@ export type AgentRunInput = {
   selectedProductRef?: string | null;
   /** Análise da última foto de produto deste atendimento (aiContext.lastAnalyzedImage): "qual o nome desse modelo?". */
   lastAnalyzedImage?: ImageAnalysis | null;
+  /** Nome do contato no cadastro ("Vivi"): nunca é trocado por um nome que o cliente citar. */
+  contactName?: string | null;
 };
 export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null };
 
@@ -345,6 +379,22 @@ const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
  */
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const { settings } = input;
+  // Pedido de pessoa pelo nome ("Leandro", "Preciso falar com Leandro"): confirma e transfere para ela (fora da fila).
+  if (!input.queued) {
+    const staff = await activeStaff().catch(() => []);
+    const request = detectStaffRequest(input.pendingText, staff, input.contactName);
+    if (request) {
+      const outcome: AgentOutcome = {
+        action: "handoff",
+        reply: staffConfirmation(input.contactName, request.name),
+        reason: `Cliente solicitou atendimento direto com ${request.staff?.name ?? request.name}.`,
+        queue: request.staff?.queueName ?? "",
+        trigger: "staff",
+        ...(request.staff ? { assigneeId: request.staff.id, assigneeName: request.staff.name, ...(request.staff.queueId ? { staffQueueId: request.staff.queueId } : {}) } : {}),
+      };
+      return { outcome, media: null, mediaTriggerSkipped: false, search: null, injection: NO_INJECTION };
+    }
+  }
   const early = preAgentOutcome(settings, input);
   if (early) return { outcome: early, media: null, mediaTriggerSkipped: false, search: null, injection: NO_INJECTION };
   // Mídia não transfere mais antes da leitura: nada a pular no teste.
@@ -458,7 +508,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
+    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -747,6 +797,8 @@ async function respond(conversationId: string, messageId: string) {
     imageUrl: (item.attachment as { url?: string } | null)?.url ?? null,
   })));
 
+  // Nome do contato no cadastro: confirmações de transferência usam ele (nunca o nome citado pelo cliente).
+  const contactName = (await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } }).catch(() => null))?.name ?? null;
   // aiContext.lastAnalyzedImage: análise da última foto de produto deste atendimento (guardada na mensagem da foto).
   const analyzed = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inSession }, orderBy: { createdAt: "desc" }, take: 20, select: { metaMedia: true } }).catch(() => []);
   const lastAnalyzedImage = sanitizeImageAnalysis(analyzed.map((item) => (item.metaMedia as { analysis?: unknown } | null)?.analysis).find(Boolean));
@@ -773,6 +825,7 @@ async function respond(conversationId: string, messageId: string) {
       listedProducts: extractListedProducts(aiSession.slice().reverse().map((item) => item.text ?? "")),
       selectedProductRef: pending.map((item) => (item.metaMedia as { selectedProductRef?: string } | null)?.selectedProductRef).filter(Boolean).at(-1) ?? null,
       lastAnalyzedImage,
+      contactName,
     }));
   } catch (error) {
     // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
@@ -796,6 +849,8 @@ async function respond(conversationId: string, messageId: string) {
     // Receita/comprovante: fila comercial (ou financeiro) quando a IA escolhe a fila; o resumo vai na nota interna.
     return handoff(conversation, settings, outcome.reason, outcome.queue || undefined, false);
   }
+  // Pessoa pedida pelo nome: confirmação → fila dela → atribuição direta (se ela puder receber agora).
+  if (outcome.trigger === "staff") return handoffToStaff(conversation, settings, outcome, latest.externalId);
   if (outcome.trigger !== "ai") return handoff(conversation, settings, outcome.reason);
 
   // Pode ter sido assumida enquanto a IA pensava.
@@ -803,8 +858,10 @@ async function respond(conversationId: string, messageId: string) {
   if (!fresh || (await conversationMode(fresh)).mode === "paused") return;
 
   if (outcome.action === "handoff") {
-    if (outcome.reply && !settings.handoffMessage.trim()) await sendAiReply(fresh, outcome.reply, null, latest.externalId);
-    return handoff(fresh, settings, outcome.reason, outcome.queue);
+    // A resposta da IA é o aviso de transferência (sem mensagem configurada); sem resposta, handoff manda o padrão.
+    const replied = !!outcome.reply && !settings.handoffMessage.trim();
+    if (replied) await sendAiReply(fresh, outcome.reply, null, latest.externalId);
+    return handoff(fresh, settings, outcome.reason, outcome.queue, !replied);
   }
   // Encerramento pela IA (só atendimento exclusivo dela): despedida → encerramento oficial → pesquisa de satisfação,
   // a mesma sequência do botão "Encerrar" do /chat.
@@ -874,14 +931,16 @@ async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, i
 /** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string; imageUrl?: string; /** Item tocado na lista interativa simulada. */ selectedProductRef?: string; /** Análise da foto de produto desta mensagem do cliente (como no metaMedia do WhatsApp). */ imageAnalysis?: ImageAnalysis };
 /** queued: simula o cliente já na fila (espera assistida), com o mesmo pipeline de produto. sessionId: sessão de teste (nova a cada "Limpar"). */
-export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string };
+export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string; /** Nome do contato simulado (ex.: "Vivi"); sem ele, o do perfil. */ contactName?: string };
 export type PlaygroundResult = AgentOutcome & {
   /** O que o cliente receberia no WhatsApp (resposta e/ou mensagem de transferência). */
   messages: string[];
   /** Fila para onde a conversa iria na transferência. */
   handoffQueue: string;
   /** Como a fila foi definida: escolha da IA validada, fila padrão (fallback), fixa ou a atual. */
-  handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none";
+  handoffQueueSource?: QueueSource;
+  /** Pessoa pedida pelo nome a quem a conversa seria atribuída direto. */
+  assignee?: string;
   /** A IA fez a pergunta de triagem do setor em vez de transferir. */
   triage?: boolean;
   /** Encerraria a conversa (resolvido com a opção ligada). */
@@ -924,6 +983,7 @@ export type PlaygroundResult = AgentOutcome & {
 export async function simulateAgent(settings: AiSettings, messages: PlaygroundMessage[], userId: string, attachment?: AiMediaInput, options: PlaygroundOptions = {}): Promise<PlaygroundResult> {
   const meta = { feature: "playground", userId, settings };
   const profile = SIMULATED_PROFILES.find((item) => item.id === options.profile) ?? SIMULATED_PROFILES[0];
+  const contactName = options.contactName?.trim() || profile.name;
   const lastAi = messages.map((message) => message.from).lastIndexOf("ai");
   const pendingText = messages.slice(lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).join("\n");
   const now = Date.now();
@@ -944,6 +1004,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     listedProducts: extractListedProducts(messages.filter((message) => message.from === "ai").map((message) => message.text)),
     selectedProductRef: messages.slice(lastAi + 1).map((message) => message.selectedProductRef).filter(Boolean).at(-1) ?? null,
     lastAnalyzedImage: messages.map((message) => message.imageAnalysis).filter((item): item is ImageAnalysis => !!item).at(-1) ?? null,
+    contactName,
     queued: options.queued ? { queueName: "Vendas" } : null,
     // Mesmas regras do WhatsApp: falha de leitura vira aviso ao cliente (não erro na tela).
     loadMedia: async () => (attachment ? [await prepareMediaSafe(attachment, meta)] : []),
@@ -954,15 +1015,16 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
         .map((message, index) => transcriptLine({ author: message.from === "customer" ? "customer" : "bot", authorName: message.from === "ai" ? AI_AUTHOR : null, text: message.text, internal: false, attachment: null, createdAt: new Date(now - (history.length - index) * 60_000) }))
         .filter(Boolean)
         .join("\n");
-      return formatContext({ contactName: profile.name, queueName: null, subject: "", includeHistory: settings.useCustomerOrders, history: simulatedHistory(profile.id), conversation });
+      return formatContext({ contactName, queueName: null, subject: "", includeHistory: settings.useCustomerOrders, history: simulatedHistory(profile.id), conversation });
     },
   });
 
   const { outcome, media } = run;
-  const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue) : null;
+  const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue, outcome.staffQueueId) : null;
   return {
     ...outcome,
-    messages: customerMessages(outcome, settings, { customer: profile.name, queue: target?.name }),
+    messages: customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
+    assignee: outcome.assigneeName,
     handoffQueue: target?.name ?? "",
     handoffQueueSource: target?.source,
     triage: run.humanMode === "triage" || undefined,

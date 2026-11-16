@@ -47,7 +47,8 @@ function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveS
 type PlaygroundResult = AgentOutcome & {
   messages: string[];
   handoffQueue: string;
-  handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none";
+  handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none" | "staff";
+  assignee?: string;
   triage?: boolean;
   wouldClose: boolean;
   closeBlocked?: string;
@@ -76,6 +77,7 @@ const QUEUE_SOURCE_LABELS: Record<NonNullable<PlaygroundResult["handoffQueueSour
   fallback: " (fila padrão: assunto não identificado ou fila inválida)",
   fixed: " (fila fixa da configuração)",
   current: " (fila atual da conversa)",
+  staff: " (fila do atendente pedido)",
   none: "",
 };
 const TRIGGER_LABELS: Record<AgentTrigger, string> = {
@@ -88,6 +90,7 @@ const TRIGGER_LABELS: Record<AgentTrigger, string> = {
   prescription: "receita ou documento para conferência",
   security: "tentativas repetidas de manipular a IA",
   closing: "cliente só agradeceu depois da despedida",
+  staff: "cliente pediu um atendente pelo nome",
 };
 const DETAILS_SOURCE_LABELS = { web: "pesquisada na web", cache: "do cache (30 dias)", none: "não encontrada na web" } as const;
 
@@ -229,6 +232,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<SimulatedProfileId>("novo");
   const [queuedTest, setQueuedTest] = useState(false);
+  // Nome do contato simulado (ex.: "Vivi"): a IA nunca troca pelo nome que o cliente citar.
+  const [contactName, setContactName] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Depois do transbordo a IA não volta a responder (igual ao WhatsApp): só recomeçando.
@@ -281,7 +286,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
       const session = sessionRef.current;
-      const payload = { settings, profile, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}), ...(message.selectedProductRef ? { selectedProductRef: message.selectedProductRef } : {}), ...(message.imageAnalysis ? { imageAnalysis: message.imageAnalysis } : {}) })) };
+      const payload = { settings, profile, queued: queuedTest, sessionId: session, ...(contactName.trim() ? { contactName: contactName.trim() } : {}), messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}), ...(message.selectedProductRef ? { selectedProductRef: message.selectedProductRef } : {}), ...(message.imageAnalysis ? { imageAnalysis: message.imageAnalysis } : {}) })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -302,6 +307,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
       const notes = [
         data.documents?.length ? `Leitura do documento antes do transbordo (igual ao WhatsApp): ${data.documents.map((doc) => doc.summary).join(" | ")}` : "",
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
+        data.assignee ? `No WhatsApp a conversa seria atribuída direto a ${data.assignee} (se puder receber agora; senão fica na fila).` : "",
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.closeBlocked ? `A IA quis encerrar, mas não encerra porque ${data.closeBlocked}.` : "",
         data.action === "resolved" ? (data.wouldClose ? `Encerraria o atendimento logo após a despedida e enviaria a pesquisa de satisfação (se estiver ativa): ${data.reason || "resolvido"}` : `Considerou resolvido (${data.reason || "sem motivo"}), mas a opção de encerrar está desligada.`) : "",
@@ -364,6 +370,9 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
           <select value={profile} onChange={(event) => setProfile(event.target.value as SimulatedProfileId)} className="h-8 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
             {SIMULATED_PROFILES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
+        </label>
+        <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">Nome do contato
+          <input value={contactName} onChange={(event) => setContactName(event.target.value.slice(0, 60))} placeholder={SIMULATED_PROFILES.find((item) => item.id === profile)?.name} className="h-8 w-32 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
         </label>
         <span className="text-[11px] text-slate-400">{SIMULATED_PROFILES.find((item) => item.id === profile)?.hint}{profile === "recorrente" && !settings.useCustomerOrders ? " (a IA só vê os pedidos com \"usar pedidos do cliente\" ligado)" : ""}</span>
         <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300" title="A IA responde como na espera assistida: mesma consulta de estoque, ficha e foto do produto">

@@ -2,6 +2,7 @@ import { formatBr } from "@/lib/br-time";
 import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE, PRODUCT_INFO_RULE } from "@/lib/ai/catalog-search";
+import { defaultHandoffNotice, STAFF_NAME_RULES } from "@/lib/ai/staff-request";
 import { STOCK_RULES } from "@/lib/ai/stock";
 import { BROAD_SEARCH_RULES } from "@/lib/ai/stock-showcase";
 import { BRAND_TYPO_RULES } from "@/lib/ai/brand-resolve";
@@ -25,9 +26,9 @@ export type AgentDecision = { reply?: string; action?: "reply" | "handoff" | "re
 /** O que disparou o resultado: regra antes da IA (keyword, media, limit) ou a própria IA. */
 /** catalog_miss: foto de produto sem resultado no catálogo; prescription: receita/documento em foto (conferência humana). */
 /** closing: a IA já se despediu e o cliente só mandou mais um fechamento de cortesia (silêncio, sem transferir). */
-export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription" | "security" | "closing";
+export type AgentTrigger = "keyword" | "media" | "limit" | "ai" | "no_reply" | "catalog_miss" | "prescription" | "security" | "closing" | "staff";
 /** no_reply: encerramento silencioso, nada é enviado ao cliente. */
-export type AgentOutcome = { action: "reply" | "handoff" | "resolved" | "no_reply"; reply: string; reason: string; queue: string; trigger: AgentTrigger };
+export type AgentOutcome = { action: "reply" | "handoff" | "resolved" | "no_reply"; reply: string; reason: string; queue: string; trigger: AgentTrigger; /** Pedido de pessoa pelo nome: colaborador do CRM e a fila dele. */ assigneeId?: string; assigneeName?: string; staffQueueId?: string };
 
 const AUTHOR_LABEL = { customer: "Cliente", agent: "Atendente", bot: "Robô", system: "Sistema" } as const;
 export type TranscriptRow = { author: keyof typeof AUTHOR_LABEL; authorName: string | null; text: string; internal: boolean; attachment: { kind?: string; name?: string } | null; createdAt: Date };
@@ -112,10 +113,13 @@ export function customerMessages(outcome: AgentOutcome, settings: Pick<AiSetting
   if (outcome.action === "no_reply") return [];
   if (outcome.action !== "handoff") return splitBubbles(outcome.reply);
   // Foto sem resultado no catálogo ou receita: a resposta já avisa o encaminhamento (sem repetir a de transferência).
-  if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") return splitBubbles(outcome.reply);
+  // Pedido de pessoa pelo nome: só a confirmação ("Claro, Vivi! Vou te transferir... com o Leandro").
+  if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription" || outcome.trigger === "staff") return splitBubbles(outcome.reply);
   const messages: string[] = [];
   if (outcome.trigger === "ai" && outcome.reply && !settings.handoffMessage.trim()) messages.push(...splitBubbles(outcome.reply));
   if (settings.handoffMessage.trim()) messages.push(fillVariables(settings.handoffMessage, { customer: vars.customer ?? undefined, queue: vars.queue ?? undefined }, now));
+  // Nunca transferência silenciosa: sem mensagem configurada nem resposta da IA, vai o aviso padrão.
+  if (!messages.length) messages.push(defaultHandoffNotice(vars.customer));
   return messages;
 }
 
@@ -171,6 +175,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     BRAND_RULES,
     IMAGE_RULE,
     PRODUCT_INFO_RULE,
+    STAFF_NAME_RULES,
     STOCK_RULES,
     BROAD_SEARCH_RULES,
     BRAND_TYPO_RULES,

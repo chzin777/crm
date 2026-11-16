@@ -9,7 +9,7 @@ import { fillVariables } from "@/lib/chat/text";
 
 export const openCount = (userId: string) => prisma.chatConversation.count({ where: { assigneeId: userId, closedAt: null } });
 
-async function assertCanReceive(userId: string) {
+export async function assertCanReceive(userId: string) {
   const agent = await prisma.chatAgent.findUnique({ where: { userId } });
   if (agent?.paused) throw new ChatRuleError("Esta pessoa está pausada e não recebe conversas novas.", 409);
   if (agent && agent.capacity === 0) throw new ChatRuleError("Esta pessoa está fora do atendimento (capacidade 0).", 409);

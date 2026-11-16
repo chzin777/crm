@@ -42,7 +42,8 @@ vi.mock("@/lib/chat/nps", () => ({ sendSatisfactionSurvey: vi.fn() }));
 vi.mock("@/lib/ai/assist", () => ({ catalog: vi.fn(async () => ""), conversationContext: vi.fn(), sessionStartedAt: vi.fn(async () => null) }));
 vi.mock("@/lib/ai/store", () => ({ readAiSettings: vi.fn(), readAiStatus: vi.fn() }));
 vi.mock("@/lib/store-pin", () => ({ ensureStorePin: vi.fn(async () => null) }));
-vi.mock("@/lib/ai/catalog-db", () => ({ catalogProducts: vi.fn(async () => []), searchErpCatalog: vi.fn() }));
+vi.mock("@/lib/ai/staff-db", () => ({ activeStaff: vi.fn(async () => [{ id: "u-leandro", name: "Leandro Martins", queueId: "q-vendas", queueName: "Vendas" }]) }));
+vi.mock("@/lib/ai/catalog-db",() => ({ catalogProducts: vi.fn(async () => []), searchErpCatalog: vi.fn() }));
 vi.mock("@/lib/ai/product-image-db", () => ({
   imageSearchStatus: () => true,
   invalidateProductImage: vi.fn(),
@@ -524,5 +525,38 @@ describe("foto de óculos: cascata referência → marca/linha e pergunta inform
     expect(turn.messages[0]).toContain("Ref. PS 07RV");
     expect(turn.image?.sku).toBe("900701");
     expect(turn.interactiveList).toBeUndefined();
+  });
+});
+
+describe("cliente pede um atendente pelo nome", () => {
+  it("Vivi: \"Oi\" → saudação; \"Leandro\" → não vira o nome dela, confirma e transfere para o Leandro", async () => {
+    model.script = async () => ({ reply: "Boa noite, Vivi! 😊 Em que posso te ajudar?", action: "reply" });
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "Oi" }];
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-vivi", contactName: "Vivi" });
+    expect(turn1.messages).toEqual(["Boa noite, Vivi! 😊 Em que posso te ajudar?"]);
+    history.push({ from: "ai", text: turn1.messages[0] }, { from: "customer", text: "Leandro" });
+
+    // O modelo erraria como no print ("Leandro, em que posso te ajudar?"): o código decide antes dele.
+    model.script = async () => ({ reply: "Leandro, em que posso te ajudar?", action: "reply" });
+    const prompts = calls.prompts.length;
+    const turn2 = await simulateAgent({ ...settings, handoffMessage: "" }, history, "user-1", undefined, { sessionId: "sessao-vivi", contactName: "Vivi" });
+    expect(calls.prompts.length).toBe(prompts);
+    expect(turn2).toMatchObject({ action: "handoff", trigger: "staff", reason: "Cliente solicitou atendimento direto com Leandro Martins.", assignee: "Leandro Martins" });
+    expect(turn2.messages).toEqual(["Claro, Vivi! Vou te transferir agora mesmo para falar com o Leandro. Só um instante! 😊"]);
+    expect(turn2.messages.join(" ")).not.toMatch(/^Leandro,/);
+  });
+
+  it("\"Preciso falar com Leandro\" → confirmação ao cliente antes da fila (nunca transferência silenciosa)", async () => {
+    model.script = async () => ({ reply: "", action: "handoff", reason: "Cliente pediu o Leandro" });
+    const turn = await simulateAgent({ ...settings, handoffMessage: "" }, [{ from: "customer", text: "Preciso falar com Leandro" }], "user-1", undefined, { sessionId: "sessao-leandro", contactName: "Vivi" });
+    expect(turn.action).toBe("handoff");
+    expect(turn.messages).toEqual(["Claro, Vivi! Vou te transferir agora mesmo para falar com o Leandro. Só um instante! 😊"]);
+  });
+
+  it("transferência decidida pela IA sem texto e sem mensagem configurada: aviso padrão em vez de silêncio", async () => {
+    model.script = async () => ({ reply: "", action: "handoff", reason: "Reclamação" });
+    const turn = await simulateAgent({ ...settings, handoffMessage: "" }, [{ from: "customer", text: "Meu óculos quebrou e estou muito chateada" }], "user-1", undefined, { sessionId: "sessao-silencio", contactName: "Vivi" });
+    expect(turn.action).toBe("handoff");
+    expect(turn.messages).toEqual(["Claro, Vivi! Vou te transferir agora mesmo para um dos nossos atendentes. Só um instante! 😊"]);
   });
 });

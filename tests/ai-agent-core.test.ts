@@ -32,7 +32,8 @@ describe("resposta do modelo virando ação", () => {
     expect(customerMessages(ai, settings, { customer: "Maria Teste", queue: "Vendas" })).toEqual(["Oi Maria, vou te passar para a equipe."]);
     expect(customerMessages(ai, { handoffMessage: "" }, {})).toEqual(["Já te passo"]);
     const rule = preAgentOutcome(settings, { pendingText: "atendente", hasMedia: false, aiReplies: 0 })!;
-    expect(customerMessages(rule, { handoffMessage: "" }, {})).toEqual([]);
+    // Sem mensagem configurada: aviso padrão (nunca transferência silenciosa).
+    expect(customerMessages(rule, { handoffMessage: "" }, {})).toEqual(["Claro! Vou te transferir agora mesmo para um dos nossos atendentes. Só um instante! 😊"]);
     expect(customerMessages(interpretDecision({ reply: "Olá!" }), settings, {})).toEqual(["Olá!"]);
   });
 });
