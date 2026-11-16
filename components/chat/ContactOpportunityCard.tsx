@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, ExternalLink, Plus, Target } from "lucide-react";
+import { Bot, ExternalLink, FileText, MapPin, Plus, Target } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { CUSTOMER_TYPE_COLOR, CUSTOMER_TYPE_LABEL, type CustomerType, type PipelineCard } from "@/lib/sales-pipeline";
 
@@ -93,8 +93,8 @@ export function ContactOpportunityCard({ contactId, conversationId, canWrite, on
     <article aria-label="Oportunidade no funil de vendas" className="space-y-3 rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-bold">
         <span className={`whitespace-nowrap rounded-full px-2 py-0.5 ${card.customerType ? CUSTOMER_TYPE_COLOR[card.customerType] : card.tagColor}`}>{card.customerType ? CUSTOMER_TYPE_LABEL[card.customerType] : card.tag}</span>
-        {card.receitaAnexada && <span className="whitespace-nowrap rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white">📄 Receita anexada</span>}
-        {card.lojaInteresse && <span className="max-w-full truncate rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}>📍 {card.lojaInteresse}</span>}
+        {card.receitaAnexada && <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white"><FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Receita anexada</span>}
+        {card.lojaInteresse && <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}><MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{card.lojaInteresse}</span></span>}
         {card.autoMoveEnabled === false && <span className="whitespace-nowrap rounded-full bg-slate-200 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Automação pausada</span>}
       </div>
 

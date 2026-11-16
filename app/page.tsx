@@ -38,6 +38,9 @@ import {
   AlertCircle,
   Bell,
   CheckCircle2,
+  FileText,
+  MapPin,
+  MessageSquare,
   Pencil,
   Paperclip,
   Plus,
@@ -932,20 +935,20 @@ export default function Home() {
                             {(card.receitaAnexada || card.lojaInteresse || card.conversationId) && (
                               <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
                                 {card.receitaAnexada && (
-                                  <span className="whitespace-nowrap rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white">📄 Receita anexada</span>
+                                  <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white"><FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Receita anexada</span>
                                 )}
                                 {card.lojaInteresse && (
-                                  <span className="max-w-full truncate rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}>📍 {card.lojaInteresse}</span>
+                                  <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}><MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{card.lojaInteresse}</span></span>
                                 )}
                                 {card.conversationId && (
                                   <a
                                     href={`/chat?c=${card.conversationId}`}
                                     onClick={(event) => event.stopPropagation()}
                                     draggable={false}
-                                    className="pointer-events-auto cursor-pointer whitespace-nowrap rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[#051647] hover:underline dark:text-[#C4D600]"
+                                    className="pointer-events-auto inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[#051647] hover:underline dark:text-[#C4D600]"
                                     title="Abrir a conversa no Chat"
                                   >
-                                    💬 Abrir conversa
+                                    <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Abrir conversa
                                   </a>
                                 )}
                               </div>
