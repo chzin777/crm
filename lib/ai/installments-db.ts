@@ -16,8 +16,8 @@ export async function lookupInstallments(cpf: string, doFetch: typeof fetch = fe
     if (!response.ok) return { status: "unavailable" };
     const data = (await response.json()) as { found?: boolean; name?: string | null; items?: InstallmentItem[] };
     return { status: "ok", found: !!data.found, name: data.name ?? null, items: Array.isArray(data.items) ? data.items : [] };
-  } catch (error) {
-    console.warn("[ai][parcelas] consulta ao VMSet falhou", error instanceof Error ? error.message : error);
+  } catch {
+    console.warn("[ai][parcelas] consulta ao VMSet falhou");
     return { status: "unavailable" };
   }
 }

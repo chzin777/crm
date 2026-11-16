@@ -2,12 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Database, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
 import { CustomerPanel } from "@/components/chat/CustomerPanel";
+import { VmsetCopilotPanel } from "@/components/chat/VmsetCopilotPanel";
 import { AiSalesDialog, AiSummaryDialog } from "@/components/chat/AiPanels";
 import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
@@ -69,7 +70,8 @@ function ChatWorkspace() {
   const [followUpKey, setFollowUpKey] = useState(0);
   const [showSales, setShowSales] = useState(false);
   const [summaryTarget, setSummaryTarget] = useState<{ id: string; name: string } | null>(null);
-  const [composerDraft, setComposerDraft] = useState<{ text: string; nonce: number } | null>(null);
+  const [composerDraft, setComposerDraft] = useState<{ text: string; nonce: number; append?: boolean } | null>(null);
+  const [showCopilot, setShowCopilot] = useState(false);
   const [scheduled, setScheduled] = useState<ScheduledMessageItem[]>([]);
   const canWrite = capabilities["chat.assume"] === true;
   const listRequest = useRef(0);
@@ -93,6 +95,13 @@ function ChatWorkspace() {
       }
       return !current;
     });
+    setShowCopilot(false);
+  };
+
+  // Copiloto VMSet e painel do cliente dividem a lateral direita: abrir um recolhe o outro.
+  const toggleCopilot = () => {
+    setShowCopilot((current) => !current);
+    setShowPanel(false);
   };
 
   const loadScheduled = useCallback(async (id: string) => {
@@ -575,6 +584,17 @@ function ChatWorkspace() {
                   </button>
                   <button
                     type="button"
+                    onClick={toggleCopilot}
+                    title={showCopilot ? "Fechar Copiloto VMSet" : "Consultar VMSet: faturas, estoque, compras e receitas"}
+                    aria-label="Consultar VMSet"
+                    aria-pressed={showCopilot}
+                    className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors xl:h-9 ${showCopilot ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-200 text-[#002187] hover:bg-slate-100 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/10"}`}
+                  >
+                    <Database className="h-4 w-4" />
+                    <span className="hidden lg:inline">Consultar VMSet</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={togglePanel}
                     title={showPanel ? "Fechar painel do cliente" : "Painel do cliente: compras, receita, campanhas e retornos"}
                     aria-label="Painel do cliente"
@@ -648,6 +668,17 @@ function ChatWorkspace() {
             onNewFollowUp={() => setShowFollowUp(true)}
             onChanged={() => void loadList()}
             onClose={togglePanel}
+          />
+        )}
+
+        {showCopilot && open && (
+          <VmsetCopilotPanel
+            key={`${open.id}-copilot`}
+            conversationId={open.id}
+            tick={tick}
+            canInsert={canWrite && !open.closedAt}
+            onInsert={(text) => setComposerDraft({ text, nonce: Date.now(), append: true })}
+            onClose={() => setShowCopilot(false)}
           />
         )}
 

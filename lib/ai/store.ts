@@ -66,6 +66,7 @@ export async function recordAiUsage(entry: { feature: string; model: string; inp
 }
 
 export const AI_FEATURE_LABELS: Record<string, string> = {
+  "operator-copilot": "Copiloto VMSet (atendente)",
   reply: "Sugerir resposta",
   summary: "Resumo do atendimento",
   products: "Sugestões de venda",

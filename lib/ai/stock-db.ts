@@ -99,7 +99,7 @@ export async function consultarEstoqueProduto(
     const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;
     const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand });
     const log: StockLog = { term, region, scenario: result.cenario, products: result.modelos.length, stores: 0, ms: Date.now() - started, cached: !!lookup && lookup.requested === 0, kind };
-    console.log(`[ai][estoque] "${term}" (busca ampla): ${log.scenario}, ${log.products} modelos, ${log.ms} ms`);
+    console.log(`[ai][estoque] busca ampla: ${log.scenario}, ${log.products} modelos, ${log.ms} ms`);
     return { result, log };
   }
 
@@ -130,6 +130,6 @@ export async function consultarEstoqueProduto(
     cached: !!lookup && lookup.requested === 0,
     kind,
   };
-  console.log(`[ai][estoque] "${term}"${region ? ` (${region})` : ""}: ${log.scenario}, ${log.products} produtos, ${log.stores} lojas, ${log.ms} ms${log.cached ? " (cache)" : ""}`);
+  console.log(`[ai][estoque] consulta: ${log.scenario}, ${log.products} produtos, ${log.stores} lojas, ${log.ms} ms${log.cached ? " (cache)" : ""}`);
   return { result, log };
 }

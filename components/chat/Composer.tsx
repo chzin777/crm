@@ -40,7 +40,7 @@ type Props = {
   /** Com ele, aparece "Agendar envio" ao lado de Enviar; chamado depois de agendar. */
   onScheduled?: () => void;
   /** Texto vindo de fora (ex.: oferta sugerida pela IA no painel do cliente); nonce muda a cada pedido. */
-  draft?: { text: string; nonce: number } | null;
+  draft?: { text: string; nonce: number; append?: boolean } | null;
 };
 
 const MAX_FIELD_HEIGHT = 128;
@@ -146,7 +146,8 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   useEffect(() => {
     if (!draft?.text || draft.nonce === appliedDraft.current) return;
     appliedDraft.current = draft.nonce;
-    setText(draft.text);
+    // "Jogar na mensagem" do Copiloto VMSet anexa ao que já foi digitado; as outras ofertas substituem.
+    setText((current) => (draft.append && current.trim() ? `${current.trimEnd()}\n\n${draft.text}` : draft.text));
     requestAnimationFrame(() => field.current?.focus());
   }, [draft]);
 
