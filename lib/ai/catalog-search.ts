@@ -8,19 +8,25 @@ import { documentKind, EXTRACTION_SCHEMA, formatExtraction, type DocumentExtract
 
 /** Regra fixa no código (não editável na tela): a IA nunca narra a imagem do cliente. */
 export const IMAGE_RULE =
-  'REGRA CRÍTICA SOBRE IMAGENS: NUNCA descreva, narre ou explique o que está na imagem enviada pelo cliente (proibido dizer "Pela imagem, parece ser...", "Vejo que você mandou um óculos...", "Na foto aparece..." etc.). O cliente já sabe o que enviou. Use a análise visual apenas internamente para identificar marca, modelo, tipo, cor e material; responda só com o resultado da busca no catálogo (modelos encontrados e lojas) ou encaminhe para o atendente responsável caso não encontre.';
+  'REGRA CRÍTICA SOBRE IMAGENS: NUNCA narre a imagem enviada pelo cliente (proibido dizer "Pela imagem, parece ser...", "Vejo que você mandou um óculos...", "Na foto aparece..." etc.). O cliente já sabe o que enviou. Use a análise visual para identificar marca, linha, modelo, tipo, formato e cor e responda com o resultado da busca no catálogo (modelos encontrados e lojas). Pode nomear o modelo identificado ("Esse modelo é um *Prada Linea Rossa*...") quando o cliente perguntar o nome, a marca ou o tipo, ou quando a referência exata não estiver em estoque e você mostrar os modelos da mesma marca/linha. Nunca diga que a marca toda está sem estoque por causa de uma referência.';
 
 /** Pedido interno de identificação (nunca chega ao cliente). */
 export const VISION_PROMPT = [
   "Você classifica a imagem enviada por um cliente de ótica para uma busca no sistema. Não converse, só extraia dados.",
-  'Responda em json: {"kind": "produto" | "receita" | "documento" | "outro", "category": "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | "", "brand": "marca legível ou reconhecível com segurança, ou vazio", "reference": "código/referência legível na haste ou etiqueta, ou vazio", "material": "METAL" | "ACETATO" | "MISTO" | "TITANIO" | "NYLON" | "", "keywords": ["até 4 palavras em MAIÚSCULAS sem acento, ex.: DOURADO, AVIADOR, RETANGULAR, GATINHO"]}.',
+  'Responda em json: {"kind": "produto" | "receita" | "documento" | "outro", "category": "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | "", "marca": "marca legível ou reconhecível com segurança (ex.: Prada), ou vazio", "linha": "linha/submarca reconhecível (ex.: Linea Rossa), ou vazio", "modeloOuReferenciaProvavel": "código/referência LEGÍVEL na haste, lente ou etiqueta (ex.: PS 07RV), ou null", "caracteristicasVisuais": {"tipo": "Armação de grau" | "Óculos de sol" | "", "formato": "ex.: Retangular, Gatinho, Aviador, Redondo, Esportivo", "cor": "ex.: Preto fosco, Tartaruga, Metal dourado"}, "material": "METAL" | "ACETATO" | "MISTO" | "TITANIO" | "NYLON" | "", "keywords": ["até 4 palavras em MAIÚSCULAS sem acento, ex.: DOURADO, AVIADOR, RETANGULAR, GATINHO"]}.',
   '"produto": óculos de sol, armação, lente de contato ou acessório. "receita": prescrição/receita oftalmológica ou laudo. "documento": comprovante de pagamento, orçamento, nota, print de texto. "outro": qualquer outra imagem.',
-  "Marca só se tiver certeza (logotipo ou nome legível). Nunca invente referência.",
+  'Marca só se tiver certeza (logotipo ou nome legível); linha separada da marca ("Prada" + "Linea Rossa"). Referência só se estiver legível na foto; se não der para ler, null. Nunca chute nem invente código.',
   `Se kind for "receita" ou "documento", inclua também ${EXTRACTION_SCHEMA}`,
 ].join("\n");
 
-export type VisionResult = { kind?: string; category?: string; brand?: string; reference?: string; material?: string; keywords?: unknown; documento?: DocumentExtraction };
-export type CatalogQuery = { category: "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | ""; brand: string; reference: string; material: string; keywords: string[] };
+export type VisionResult = {
+  kind?: string; category?: string; brand?: string; reference?: string | null; material?: string; keywords?: unknown; documento?: DocumentExtraction;
+  marca?: string; linha?: string; modeloOuReferenciaProvavel?: string | null; caracteristicasVisuais?: { tipo?: string; formato?: string; cor?: string } | null;
+};
+export type CatalogQuery = { category: "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | ""; brand: string; reference: string; material: string; keywords: string[]; line?: string; shape?: string; color?: string };
+
+/** Análise da última foto de produto do cliente (fica na sessão para "qual o nome desse modelo?"). */
+export type ImageAnalysis = { marca: string; linha: string; modeloProvavel: string | null; tipo: string; formato: string; cor: string; descricaoVisual: string };
 
 /** Maiúsculas, sem acento e só letras/números: "Ray-Ban" e "RAY BAN" viram RAYBAN, como no SQL da busca. */
 export const normalizeTerm = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -30,11 +36,117 @@ export function readVision(raw: VisionResult): { kind: "produto" | "receita" | "
   const category = raw.category === "SOLAR" || raw.category === "ARMACAO" || raw.category === "LENTE_CONTATO" ? raw.category : "";
   const clean = (value: unknown) => (typeof value === "string" ? value.trim().slice(0, 40) : "");
   const keywords = Array.isArray(raw.keywords) ? raw.keywords.map(clean).filter((word) => normalizeTerm(word).length >= 3).slice(0, 4) : [];
-  return { kind, query: { category, brand: clean(raw.brand), reference: clean(raw.reference), material: clean(raw.material).toUpperCase(), keywords } };
+  const visual = raw.caracteristicasVisuais ?? {};
+  // "Armação de grau"/"Óculos de sol" também definem a categoria quando o modelo não a mandou.
+  const type = clean(visual.tipo);
+  const inferred: CatalogQuery["category"] = category || (/sol/i.test(type) ? "SOLAR" : /grau|arma/i.test(type) ? "ARMACAO" : "");
+  const reference = clean(raw.modeloOuReferenciaProvavel ?? raw.reference);
+  return {
+    kind,
+    query: {
+      category: inferred, brand: clean(raw.marca || raw.brand), line: clean(raw.linha),
+      reference: /^(null|n\/?a|nenhum|nenhuma|ilegivel|ilegível)$/i.test(reference) ? "" : reference,
+      material: clean(raw.material).toUpperCase(), keywords, shape: clean(visual.formato), color: clean(visual.cor),
+    },
+  };
+}
+
+/** Análise legível da foto (marca, linha, referência provável e características) para a sessão e as respostas. */
+export function imageAnalysis(query: CatalogQuery): ImageAnalysis {
+  const tipo = query.category === "SOLAR" ? "Óculos de sol" : query.category === "ARMACAO" ? "Armação de grau" : query.category === "LENTE_CONTATO" ? "Lente de contato" : "";
+  const formato = query.shape ?? "";
+  const cor = query.color ?? "";
+  const descricaoVisual = [tipo, formato && `formato ${formato.toLowerCase()}`, cor.toLowerCase()].filter(Boolean).join(", ");
+  return { marca: query.brand, linha: query.line ?? "", modeloProvavel: query.reference || null, tipo, formato, cor, descricaoVisual };
+}
+
+/** Nome do modelo identificado: "Prada Linea Rossa" (marca + linha, sem repetir). */
+export function analysisName(analysis: Pick<ImageAnalysis, "marca" | "linha">) {
+  const { marca, linha } = analysis;
+  if (!linha) return marca;
+  return normalizeTerm(marca).includes(normalizeTerm(linha)) ? marca : `${marca} ${linha}`.trim();
+}
+
+/** Análise recebida de fora (teste da página /ia): só campos de texto curtos. */
+export function sanitizeImageAnalysis(value: unknown): ImageAnalysis | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const text = (key: string) => (typeof raw[key] === "string" ? (raw[key] as string).replace(/[\r\n]+/g, " ").trim().slice(0, 60) : "");
+  const analysis: ImageAnalysis = { marca: text("marca"), linha: text("linha"), modeloProvavel: text("modeloProvavel") || null, tipo: text("tipo"), formato: text("formato"), cor: text("cor"), descricaoVisual: text("descricaoVisual") };
+  return analysis.marca || analysis.descricaoVisual ? analysis : null;
+}
+
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** Bloco do prompt: o que a IA sabe da última foto (responde nome/marca/tipo sem transferir). */
+export function analysisPromptBlock(analysis: ImageAnalysis | null) {
+  if (!analysis) return "";
+  return [
+    "ANÁLISE DA ÚLTIMA FOTO DE PRODUTO DO CLIENTE (interna, desta sessão):",
+    `- Marca/linha: ${analysisName(analysis) || "não identificada"}`,
+    `- Referência provável: ${analysis.modeloProvavel ?? "não legível na foto"}`,
+    analysis.descricaoVisual ? `- Características: ${analysis.descricaoVisual}` : "",
+    'Se o cliente perguntar o nome, a marca, o modelo ou se é de grau ou sol ("qual o nome desse modelo?", "que marca é essa?"), responda DIRETO com estes dados e ofereça os modelos em estoque. NUNCA transfira para um atendente por essa pergunta.',
+  ].filter(Boolean).join("\n");
+}
+
+/** Resposta direta a "qual o nome desse modelo?" com a análise da foto (sem transferir). */
+export function analysisAnswer(analysis: ImageAnalysis) {
+  const name = analysisName(analysis);
+  const style = analysis.descricaoVisual ? ` (${lowerFirst(analysis.descricaoVisual)})` : "";
+  const ref = analysis.modeloProvavel ? ` A referência que aparece é *${analysis.modeloProvavel}*.` : " A referência exata não dá para ler na foto.";
+  if (!name) return `É ${lowerFirst(analysis.descricaoVisual) || "um óculos"}, mas a marca não aparece com clareza.${ref} Se puder, me manda uma foto da parte de dentro da haste que eu confirmo pra você 😊`;
+  return `Esse modelo é um *${name}*${style} 😊${ref}\n---SPLIT---\nQuer que eu te mostre os modelos *${name}* que temos em estoque?`;
+}
+
+/** Regra fixa do prompt: pergunta informativa sobre produto é respondida, nunca transferida. */
+export const PRODUCT_INFO_RULE =
+  'PERGUNTAS INFORMATIVAS SOBRE PRODUTO (regra fixa): se o cliente perguntar o nome, a marca, o modelo, a referência, se é de grau ou sol ou quanto custa o óculos da foto ou de um produto ("Qual o nome desse modelo?", "Que marca é essa?", "É de grau ou sol?", "Quanto custa esse?"), responda DIRETO usando a análise da foto desta sessão e/ou consultarEstoqueProduto. NUNCA transfira para atendente por esse tipo de pergunta. Transbordo por indisponibilidade só quando o cliente pedir explicitamente para encomendar um modelo esgotado ou falar com um vendedor depois de ver as opções.';
+
+/** Resposta quando não há análise de foto nem produto em foco para responder a pergunta informativa. */
+export const PRODUCT_INFO_FALLBACK = "Me conta qual modelo você quer saber? Se puder, me manda uma foto da parte de dentro da haste ou a referência, que eu te digo o nome, o preço e onde tem 😊";
+
+const PRODUCT_INFO = /\b(qual|quais|que|q)\s+(e\s+|eh\s+|seria\s+)?(o\s+|a\s+)?(nome|marca|modelo|referencia|ref|linha|cor|material|formato|valor|preco)\b|\bcomo\s+(que\s+)?(se\s+)?chama\b|\b(e|eh)\s+(de\s+)?grau\s+ou\s+(de\s+)?sol\b|\b(de\s+)?grau\s+ou\s+(de\s+)?sol\b|\bquanto\s+(custa|e|eh|sai|fica|ta|esta)\b|\b(que|qual)\s+(oculos|armacao)\s+(e|eh)\b/;
+
+/** "Qual o nome desse modelo?", "Que marca é essa?", "É de grau ou sol?", "Quanto custa esse?". */
+export function asksProductInfo(text: string) {
+  const plain = text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return PRODUCT_INFO.test(plain);
+}
+
+/**
+ * Trava no código: o modelo quis transferir (ou ficou sem resposta) diante de uma pergunta informativa sobre o
+ * produto ou logo depois da foto, sem o cliente pedir uma pessoa → responde com a análise da foto em vez de transferir.
+ */
+export function informativeReply(outcome: { action: string; trigger: string }, input: { pendingText: string; askedHuman: boolean; queued: boolean; photoThisTurn: boolean; analysis: ImageAnalysis | null }) {
+  if (outcome.action !== "handoff" || (outcome.trigger !== "ai" && outcome.trigger !== "no_reply")) return null;
+  if (input.askedHuman || input.queued) return null;
+  if (!asksProductInfo(input.pendingText) && !input.photoThisTurn) return null;
+  return input.analysis ? analysisAnswer(input.analysis) : PRODUCT_INFO_FALLBACK;
+}
+
+/** Abertura da vitrine quando a referência exata da foto não está em estoque, mas a marca/linha está. */
+export function photoFallbackOpener(analysis: ImageAnalysis, family: string) {
+  const name = analysisName(analysis) || family;
+  const style = analysis.descricaoVisual ? ` (${lowerFirst(analysis.descricaoVisual)})` : "";
+  return `Esse modelo da foto é um *${name}*${style}! No momento não localizei essa referência exata em estoque, mas temos estes modelos *${family}* disponíveis na rede:`;
 }
 
 /** Um passo da cascata: todos os termos precisam aparecer (marca, descrição ou subcategoria). */
-export type SearchStep = { label: string; category: CatalogQuery["category"]; terms: string[] };
+export type SearchStep = {
+  label: string; category: CatalogQuery["category"]; terms: string[];
+  /** referencia: a referência da foto; marca: mesma marca/linha; caracteristicas: sem marca. */
+  kind?: "referencia" | "marca" | "caracteristicas";
+  /** Termos originais ("Prada Linea Rossa"), usados na consulta de estoque. */
+  query?: string;
+};
+
+/** Variantes da referência: "0PS 07RV" também vale "PS07RV" (prefixo 0 do ERP); espaços e hífens não contam. */
+export function referenceVariants(reference: string) {
+  const key = normalizeTerm(reference);
+  if (key.length < 4) return [];
+  return /^0[A-Z]/.test(key) ? [key, key.slice(1)] : [key];
+}
 
 /**
  * Cascata: marca + referência → referência → marca + material → marca → palavras-chave combinadas
@@ -42,21 +154,26 @@ export type SearchStep = { label: string; category: CatalogQuery["category"]; te
  */
 export function searchSteps(query: CatalogQuery): SearchStep[] {
   const steps: SearchStep[] = [];
-  const add = (terms: string[], category: CatalogQuery["category"] = query.category) => {
+  const add = (terms: string[], category: CatalogQuery["category"], kind: NonNullable<SearchStep["kind"]>, shown = terms) => {
     const clean = [...new Set(terms.map(normalizeTerm).filter((term) => term.length >= 2))];
     if (!clean.length) return;
-    const label = [category && CATEGORY_LABEL[category], ...terms.filter((term) => normalizeTerm(term).length >= 2)].filter(Boolean).join(" + ");
-    if (!steps.some((step) => step.category === category && step.terms.join() === clean.join())) steps.push({ label, category, terms: clean });
+    const words = shown.filter((term) => normalizeTerm(term).length >= 2);
+    const label = [category && CATEGORY_LABEL[category], ...words].filter(Boolean).join(" + ");
+    if (!steps.some((step) => step.category === category && step.terms.join() === clean.join())) steps.push({ label, category, terms: clean, kind, query: words.join(" ") });
   };
   const brand = query.brand;
-  const reference = normalizeTerm(query.reference).length >= 4 ? query.reference : "";
-  if (brand && reference) add([brand, reference], "");
-  if (reference) add([reference], "");
-  if (brand && query.material) add([brand, query.material]);
-  if (brand) add([brand]);
+  const line = query.line && !normalizeTerm(brand).includes(normalizeTerm(query.line)) ? query.line : "";
+  // Passo 1: referência legível na foto (com e sem o prefixo 0 do ERP), com e sem a marca.
+  const variants = referenceVariants(query.reference);
+  for (const variant of variants) if (brand) add([brand, variant], "", "referencia", [brand, query.reference]);
+  for (const variant of variants) add([variant], "", "referencia", [query.reference]);
+  // Passo 2: mesma marca/linha, no mesmo tipo (grau ou sol) quando identificado.
+  if (brand && line) add([brand, line], query.category, "marca");
+  if (brand && query.material && !line) add([brand, query.material], query.category, "marca");
+  if (brand) add([brand], query.category, "marca");
   if (!brand) {
     const words = [query.material, ...query.keywords].filter(Boolean);
-    for (let size = words.length; size >= 1; size -= 1) add(words.slice(0, size));
+    for (let size = words.length; size >= 1; size -= 1) add(words.slice(0, size), query.category, "caracteristicas");
   }
   return steps;
 }
@@ -67,7 +184,7 @@ export const CATEGORY_FILTER: Record<Exclude<CatalogQuery["category"], "">, stri
 
 export type CatalogProduct = { description: string; brand: string | null; category: string | null; sales: number; price: number | null; stores: string[] };
 /** stock "ok": stores são as lojas de varejo com saldo agora (API do VMSet); sem isso, lojas onde o modelo foi vendido. */
-export type CatalogSearch = { term: string; results: CatalogProduct[]; stock?: "ok" | "unavailable_api" };
+export type CatalogSearch = { term: string; results: CatalogProduct[]; stock?: "ok" | "unavailable_api"; /** Passo da cascata que encontrou (referência exata ou marca/linha). */ step?: SearchStep };
 /** Registro da busca mostrado no teste da página /ia. */
 export type SearchLog = { kind: string; term: string; found: number };
 
@@ -93,8 +210,23 @@ export type ImageFlowResult =
   | { type: "handoff"; reason: string; reply: string; trigger: "catalog_miss" | "prescription"; log: SearchLog }
   /** Receita, comprovante ou outro documento: lido e resumido (quem decide o transbordo é o agente). */
   | { type: "document"; kind: DocumentKind; summary: string; log: SearchLog }
-  | { type: "found"; context: string; log: SearchLog }
+  /**
+   * Produto com estoque: "exata" = a referência da foto (ficha completa); "linha" = referência fora de estoque ou
+   * ilegível, mas a mesma marca/linha tem modelos (vitrine com a abertura que identifica a foto); "similar" = sem marca.
+   */
+  | { type: "found"; match: "exata" | "linha" | "similar"; context: string; log: SearchLog; analysis: ImageAnalysis; searchTerm: string; opener?: string }
+  /** Marca identificada, mas nada dela com estoque agora: a IA informa e oferece opções (sem transferir sozinha). */
+  | { type: "identified"; context: string; log: SearchLog; analysis: ImageAnalysis }
   | { type: "continue"; log: SearchLog | null };
+
+/** Regra da resposta para cada resultado da foto (o código também garante a ficha/vitrine se o modelo não buscar). */
+function photoContext(match: "exata" | "linha", analysis: ImageAnalysis, term: string, opener: string) {
+  const known = [`marca/linha ${analysisName(analysis) || "não identificada"}`, `referência ${analysis.modeloProvavel ?? "não legível"}`, analysis.descricaoVisual].filter(Boolean).join("; ");
+  if (match === "exata") {
+    return `FOTO DE PRODUTO (análise interna: ${known}). A referência está em estoque: chame consultarEstoqueProduto com termoBusca "${term}" e tipoBusca "modelo_especifico" e envie a ficha completa (foto, preço e lojas).`;
+  }
+  return `FOTO DE PRODUTO (análise interna: ${known}). A referência exata da foto não está em estoque (ou não é legível), MAS há modelos ${term} em estoque na rede. Chame consultarEstoqueProduto com termoBusca "${term}" e tipoBusca "marca_ampla" e responda começando exatamente com: "${opener}" seguido da vitrine. NUNCA diga só que "o modelo está sem estoque" nem transfira para atendente.`;
+}
 
 /**
  * Fluxo da foto: identifica (modelo) → receita/documento vai para a equipe → produto busca no catálogo →
@@ -112,12 +244,28 @@ export async function productImageFlow(deps: {
   if (docKind) return { type: "document", kind: docKind, summary: formatExtraction(docKind, vision.documento), log: { kind, term: "", found: 0 } };
   if (kind !== "produto") return { type: "continue", log: { kind, term: "", found: 0 } };
   const steps = searchSteps(query);
+  const analysis = imageAnalysis(query);
   const result = steps.length ? await deps.search(steps) : null;
   const term = result?.term ?? steps[0]?.label ?? (query.category ? CATEGORY_LABEL[query.category] : "produto sem marca ou característica");
   if (!result?.results.length) {
+    // Marca reconhecida sem nada em estoque: a IA identifica o modelo e oferece opções (transfere só se o cliente pedir).
+    if (query.brand) {
+      const name = analysisName(analysis);
+      const context = `FOTO DE PRODUTO (análise interna: marca/linha ${name}; referência ${analysis.modeloProvavel ?? "não legível"}${analysis.descricaoVisual ? `; ${analysis.descricaoVisual}` : ""}). Nenhum modelo ${name} com estoque na rede agora. Diga isso com gentileza identificando o modelo ("Esse modelo é um *${name}*..."), ofereça modelos parecidos de outras marcas (mesmo tipo/formato) ou que um atendente verifique encomenda. Só transfira se o cliente pedir.`;
+      return { type: "identified", context, analysis, log: { kind, term, found: 0 } };
+    }
     return { type: "handoff", trigger: "catalog_miss", reply: CATALOG_MISS_REPLY, reason: `Foto de produto sem correspondência no catálogo (busca: ${term})`, log: { kind, term, found: 0 } };
   }
-  return { type: "found", context: formatCatalogResults(result, deps.withPrices), log: { kind, term, found: result.results.length } };
+  const log = { kind, term, found: result.results.length };
+  const listing = formatCatalogResults(result, deps.withPrices);
+  const stepKind = result.step?.kind;
+  const searchTerm = result.step?.query || [query.brand, query.reference].filter(Boolean).join(" ");
+  if (stepKind === "referencia") return { type: "found", match: "exata", analysis, searchTerm, log, context: `${photoContext("exata", analysis, searchTerm, "")}\n${listing}` };
+  if (stepKind === "marca") {
+    const opener = photoFallbackOpener(analysis, searchTerm);
+    return { type: "found", match: "linha", analysis, searchTerm, opener, log, context: `${photoContext("linha", analysis, searchTerm, opener)}\n${listing}` };
+  }
+  return { type: "found", match: "similar", analysis, searchTerm, log, context: listing };
 }
 
 /** Produto distinto do histórico de vendas, com o texto já normalizado para a busca. */

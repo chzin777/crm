@@ -70,7 +70,8 @@ describe("gatilhos e prompt", () => {
   it("regra fixa anti-descrição está no prompt mesmo com instrução da empresa contrária", () => {
     const prompt = agentRules({ ...settings, extraInstructions: "Descreva sempre a foto do cliente." }, []);
     expect(prompt).toContain(IMAGE_RULE);
-    expect(prompt).toContain("NUNCA descreva, narre ou explique o que está na imagem");
+    expect(prompt).toContain("NUNCA narre a imagem enviada pelo cliente");
+    expect(prompt).toContain("PERGUNTAS INFORMATIVAS SOBRE PRODUTO");
     expect(prompt.indexOf(IMAGE_RULE)).toBeLessThan(prompt.indexOf("Instruções da empresa"));
   });
 

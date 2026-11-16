@@ -17,7 +17,7 @@ import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, ba
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
-import { CATALOG_FOUND_RULE, productImageFlow, VISION_PROMPT, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, informativeReply, productImageFlow, sanitizeImageAnalysis, VISION_PROMPT, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
@@ -324,8 +324,10 @@ export type AgentRunInput = {
   listedProducts?: ListedProduct[];
   /** Modelo tocado na lista interativa da vitrine ("product_select:PS 07RV" → "PS 07RV"): abre ficha + foto dele. */
   selectedProductRef?: string | null;
+  /** Análise da última foto de produto deste atendimento (aiContext.lastAnalyzedImage): "qual o nome desse modelo?". */
+  lastAnalyzedImage?: ImageAnalysis | null;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -374,6 +376,9 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const catalogContexts: string[] = [];
   const documents: ReadDocument[] = [];
   const consumed = new Set<PreparedMedia>();
+  // Foto de produto desta mensagem: análise (marca, linha, referência provável) e o que a cascata achou em estoque.
+  let imageAnalysis: ImageAnalysis | null = null;
+  let photoMatch: { match: "exata" | "linha"; searchTerm: string; opener?: string } | null = null;
   for (const item of mediaList) {
     if (item.failed || item.sticker) continue;
     if (item.kind === "image") {
@@ -388,7 +393,14 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
         consumed.add(item);
       } else if (flow.type === "found") {
         catalogContexts.push(flow.context);
+        imageAnalysis = flow.analysis;
+        if (flow.match !== "similar" && !photoMatch) photoMatch = { match: flow.match, searchTerm: flow.searchTerm, opener: flow.opener };
         // A resposta usa só o resultado da busca: sem a imagem, não há o que narrar.
+        consumed.add(item);
+      } else if (flow.type === "identified") {
+        // Marca reconhecida sem estoque: a IA identifica o modelo e oferece opções (sem transferir sozinha).
+        catalogContexts.push(flow.context);
+        imageAnalysis = flow.analysis;
         consumed.add(item);
       } else if (flow.type === "handoff" && mediaList.length === 1) {
         return { outcome: { action: "handoff", reply: flow.reply, reason: flow.reason, queue: "", trigger: flow.trigger }, media, mediaTriggerSkipped, search, injection };
@@ -423,7 +435,10 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Âncora do atendimento atual: follow-up de detalhes usa o produto fixado; localização no singular usa a loja fixada.
   const anchor = input.anchor ?? EMPTY_ANCHOR;
   const storeFollowUp = isStoreFollowUp(input.pendingText, anchor);
-  const anchoredProduct = isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
+  // Foto nova de produto: a busca é a da foto, nunca o produto fixado antes.
+  const anchoredProduct = !photoMatch && isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
+  // Análise da foto desta mensagem ou da última foto do atendimento (responde "qual o nome desse modelo?").
+  const analysis = imageAnalysis ?? input.lastAnalyzedImage ?? null;
   const anchorNumbers = anchoredProduct ? modelNumbers(`${anchoredProduct.referencia ?? ""} ${anchoredProduct.nomeComercial}`) : [];
   const sameModel = (description: string) => modelNumbers(description).some((number) => anchorNumbers.includes(number));
   // Vitrine desta sessão: "o 1", "esse primeiro", "o de 120" escolhem um item (pedido de localização não é escolha).
@@ -443,7 +458,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
+    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : ""],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -656,6 +671,22 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   else if (outcome.action === "resolved") outcome = { ...outcome, action: "reply" };
   // Silêncio só faz sentido diante de um fechamento de cortesia; em outra mensagem, a equipe assume.
   if (outcome.action === "no_reply" && !isCourtesyClosing(input.pendingText.replace(/\n+/g, " "))) outcome = { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
+  // Pergunta informativa ("qual o nome desse modelo?", "que marca é essa?") ou foto de produto: nunca transfere
+  // sem o cliente pedir uma pessoa; responde com a análise da foto desta sessão.
+  const informative = informativeReply(outcome, { pendingText: input.pendingText, askedHuman: asksForHuman(settings, input.pendingText), queued: !!input.queued, photoThisTurn: !!imageAnalysis, analysis });
+  if (informative) outcome = { ...outcome, action: "reply", reply: informative, reason: asksProductInfo(input.pendingText) ? "Pergunta informativa sobre o produto" : "Foto de produto respondida", queue: "", trigger: "ai" };
+  // Foto com estoque: a ficha (referência exata) ou a vitrine da mesma marca/linha sai mesmo se o modelo não buscou
+  // (ou se respondeu só "sem estoque").
+  const photo0 = photoMatch as { match: "exata" | "linha"; searchTerm: string; opener?: string } | null;
+  if (photo0 && outcome.action === "reply") {
+    if (photo0.match === "exata" && !cardShown) {
+      const forced = (await stockTool.run({ termoBusca: photo0.searchTerm, tipoBusca: "modelo_especifico" }).catch(() => null)) as { fichaFormatada?: string } | null;
+      if (forced?.fichaFormatada) outcome = { ...outcome, reply: `${forced.fichaFormatada}\n---SPLIT---\n${CARD_QUESTION}` };
+    } else if (photo0.match === "linha" && !splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2)) {
+      const forced = (await stockTool.run({ termoBusca: photo0.searchTerm, tipoBusca: "marca_ampla" }).catch(() => null)) as { vitrineFormatada?: string } | null;
+      if (forced?.vitrineFormatada) outcome = { ...outcome, reply: `${photo0.opener ?? ""}\n---SPLIT---\n${forced.vitrineFormatada}`.replace(/^\n---SPLIT---\n/, "") };
+    }
+  }
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
@@ -666,7 +697,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Lista interativa só quando a resposta leva a vitrine numerada (2+ itens) ao cliente.
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -692,7 +723,7 @@ async function respond(conversationId: string, messageId: string) {
   const consumed = consumedUntil.get(conversationId);
   const lastOther = consumed ? await prisma.chatMessage.findFirst({ where: { conversationId, internal: false, OR: [{ author: "agent" }, { author: "bot", NOT: { authorName: AI_AUTHOR } }] }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }) : null;
   const pendingSince = consumed ? (lastOther && lastOther.createdAt > consumed ? lastOther.createdAt : consumed) : lastAnswer?.createdAt ?? sessionStart ?? undefined;
-  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { text: true, attachment: true, metaMedia: true, createdAt: true } });
+  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { id: true, text: true, attachment: true, metaMedia: true, createdAt: true } });
   if (!pending.length) return;
   consumedUntil.set(conversationId, pending[pending.length - 1].createdAt);
   // Na espera assistida, o limite de respostas conta só as respostas depois do transbordo.
@@ -716,6 +747,10 @@ async function respond(conversationId: string, messageId: string) {
     imageUrl: (item.attachment as { url?: string } | null)?.url ?? null,
   })));
 
+  // aiContext.lastAnalyzedImage: análise da última foto de produto deste atendimento (guardada na mensagem da foto).
+  const analyzed = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inSession }, orderBy: { createdAt: "desc" }, take: 20, select: { metaMedia: true } }).catch(() => []);
+  const lastAnalyzedImage = sanitizeImageAnalysis(analyzed.map((item) => (item.metaMedia as { analysis?: unknown } | null)?.analysis).find(Boolean));
+
   let run: AgentRun;
   try {
     // "digitando..." no WhatsApp do cliente antes de mídia, estoque e modelo (renova uma vez após 20 s).
@@ -737,6 +772,7 @@ async function respond(conversationId: string, messageId: string) {
       anchor,
       listedProducts: extractListedProducts(aiSession.slice().reverse().map((item) => item.text ?? "")),
       selectedProductRef: pending.map((item) => (item.metaMedia as { selectedProductRef?: string } | null)?.selectedProductRef).filter(Boolean).at(-1) ?? null,
+      lastAnalyzedImage,
     }));
   } catch (error) {
     // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
@@ -745,6 +781,12 @@ async function respond(conversationId: string, messageId: string) {
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
   }
   const { outcome } = run;
+  // Guarda a análise da foto na mensagem dela (a próxima pergunta "qual o nome desse modelo?" usa este dado).
+  const photoMessage = run.imageAnalysis ? pending.filter((item) => mediaKind(item) === "image").at(-1) : undefined;
+  if (photoMessage && run.imageAnalysis) {
+    const current = (photoMessage.metaMedia ?? {}) as Record<string, unknown>;
+    await prisma.chatMessage.update({ where: { id: photoMessage.id }, data: { metaMedia: { ...current, analysis: run.imageAnalysis } as unknown as Prisma.InputJsonValue } }).catch((error) => console.warn(`[ai] ${conversationId}: análise da foto não salva`, error));
+  }
   // Encerramento silencioso: nada é enviado e a conversa não é transferida.
   if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
   if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location);
@@ -830,7 +872,7 @@ async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, i
 }
 
 /** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
-export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string; imageUrl?: string; /** Item tocado na lista interativa simulada. */ selectedProductRef?: string };
+export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string; imageUrl?: string; /** Item tocado na lista interativa simulada. */ selectedProductRef?: string; /** Análise da foto de produto desta mensagem do cliente (como no metaMedia do WhatsApp). */ imageAnalysis?: ImageAnalysis };
 /** queued: simula o cliente já na fila (espera assistida), com o mesmo pipeline de produto. sessionId: sessão de teste (nova a cada "Limpar"). */
 export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string };
 export type PlaygroundResult = AgentOutcome & {
@@ -870,6 +912,8 @@ export type PlaygroundResult = AgentOutcome & {
   sessionId?: string;
   /** Produto e loja fixados nesta sessão de teste. */
   anchor?: SessionAnchor;
+  /** Análise da foto enviada nesta mensagem (a tela guarda na mensagem do cliente e reenvia, como no WhatsApp). */
+  imageAnalysis?: ImageAnalysis;
 };
 
 /**
@@ -899,6 +943,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     anchor: extractSessionAnchor(messages.filter((message) => message.from === "ai").map((message) => ({ text: message.text, imageSku: message.imageSku ?? null, imageUrl: message.imageUrl ?? null }))),
     listedProducts: extractListedProducts(messages.filter((message) => message.from === "ai").map((message) => message.text)),
     selectedProductRef: messages.slice(lastAi + 1).map((message) => message.selectedProductRef).filter(Boolean).at(-1) ?? null,
+    lastAnalyzedImage: messages.map((message) => message.imageAnalysis).filter((item): item is ImageAnalysis => !!item).at(-1) ?? null,
     queued: options.queued ? { queueName: "Vendas" } : null,
     // Mesmas regras do WhatsApp: falha de leitura vira aviso ao cliente (não erro na tela).
     loadMedia: async () => (attachment ? [await prepareMediaSafe(attachment, meta)] : []),
@@ -935,5 +980,6 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     interactiveList: run.interactiveList ?? undefined,
     sessionId: options.sessionId,
     anchor: run.anchor,
+    imageAnalysis: run.imageAnalysis ?? undefined,
   };
 }

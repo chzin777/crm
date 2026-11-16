@@ -30,7 +30,7 @@ const RADDA = [
 
 const calls = vi.hoisted(() => ({ stock: [] as Record<string, unknown>[], details: [] as Record<string, unknown>[], photos: [] as string[], prompts: [] as string[] }));
 type Tool = { definition: { function: { name: string } }; run: (args: Record<string, unknown>) => Promise<unknown> };
-const model = vi.hoisted(() => ({ script: null as null | ((tools: Record<string, Tool["run"]>) => Promise<Record<string, unknown>>) }));
+const model = vi.hoisted(() => ({ script: null as null | ((tools: Record<string, Tool["run"]>) => Promise<Record<string, unknown>>), vision: null as null | Record<string, unknown> }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/minio", () => ({ readFile: vi.fn() }));
@@ -102,6 +102,8 @@ vi.mock("@/lib/ai/openai", () => ({
   AiError: class extends Error {},
   transcribeAudio: vi.fn(),
   aiJson: vi.fn(async (messages: { role: string; content: unknown }[], meta: { tools?: Tool[] }) => {
+    // Chamada de visão (identificação da foto): devolve a análise roteirizada do teste.
+    if (String(messages[0].content).startsWith("Você classifica a imagem")) return model.vision ?? { kind: "outro" };
     calls.prompts.push(String(messages[0].content));
     const tools = Object.fromEntries((meta.tools ?? []).map((tool) => [tool.definition.function.name, tool.run]));
     return model.script ? model.script(tools) : { reply: "Oi!", action: "reply" };
@@ -109,6 +111,8 @@ vi.mock("@/lib/ai/openai", () => ({
 }));
 
 import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
+import { searchErpCatalog } from "@/lib/ai/catalog-db";
+import type { CatalogSearch, SearchStep } from "@/lib/ai/catalog-search";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { buildProductCard } from "@/lib/ai/product-card";
 import { extractSessionAnchor, isProductFollowUp, isStoreFollowUp, mentionsOtherProduct, sessionRows, storesIn } from "@/lib/ai/session-anchor";
@@ -124,6 +128,7 @@ beforeEach(() => {
   calls.photos.length = 0;
   calls.prompts.length = 0;
   model.script = null;
+  model.vision = null;
 });
 
 describe("isolamento de sessão", () => {
@@ -463,5 +468,61 @@ describe("vitrine como Lista Interativa nativa do WhatsApp", () => {
     expect(turn2.messages[0]).toContain("Ref. PS 07RV");
     expect(turn2.messages[0]).toContain("📍 *Loja Jardim Goiás* - Goiânia (Av. Deputado Jamel Cecilio, 3300) — 2 unidades");
     expect(turn2.interactiveList).toBeUndefined();
+  });
+});
+
+describe("foto de óculos: cascata referência → marca/linha e pergunta informativa sem transbordo", () => {
+  const PHOTO = { name: "oculos.jpg", mime: "image/jpeg", data: new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70]) };
+  // Busca da foto como no ERP: a referência chutada (PS 05YS) não existe; a linha Prada Linea Rossa tem estoque.
+  const pradaSearch = async (steps: SearchStep[]): Promise<CatalogSearch | null> => {
+    for (const step of steps) {
+      if (step.kind === "referencia") continue;
+      if (step.terms.includes("PRADA")) {
+        return { term: step.label, stock: "ok", step, results: [{ description: "ARM PRADA LINEA ROSSA REF PS 07RV 1AB 54", brand: "PRADA LINEA ROSSA", category: "OCULOS SOLAR", sales: 3, price: 1960, stores: ["LJ 39 · Jardim Goiás, Goiânia"] }] };
+      }
+    }
+    return null;
+  };
+
+  it("foto de Prada Linea Rossa sem a ref exata → identifica, avisa e mostra os modelos da linha; \"Qual o nome desse modelo?\" responde sem transferir", async () => {
+    vi.mocked(searchErpCatalog).mockImplementation(pradaSearch);
+    model.vision = { kind: "produto", marca: "Prada", linha: "Linea Rossa", modeloOuReferenciaProvavel: "PS 05YS", caracteristicasVisuais: { tipo: "Óculos de sol", formato: "Retangular", cor: "Preto fosco" } };
+    // O modelo erra como no caso real: diz só "sem estoque" e não busca.
+    model.script = async () => ({ reply: "No momento, esse modelo está sem estoque na rede.", action: "reply" });
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "" }];
+    const turn1 = await simulateAgent(settings, history, "user-1", PHOTO, { sessionId: "sessao-foto" });
+    expect(turn1.action).toBe("reply");
+    expect(turn1.messages[0]).toBe("Esse modelo da foto é um *Prada Linea Rossa* (óculos de sol, formato retangular, preto fosco)! No momento não localizei essa referência exata em estoque, mas temos estes modelos *Prada Linea Rossa* disponíveis na rede:");
+    expect(turn1.messages.join("\n")).not.toMatch(/sem estoque na rede/i);
+    expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Prada Linea Rossa", tipoBusca: "marca_ampla" });
+    expect(turn1.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:PS 07RV", "product_select:PS 02WV"]);
+    expect(turn1.imageAnalysis).toMatchObject({ marca: "Prada", linha: "Linea Rossa", modeloProvavel: "PS 05YS", tipo: "Óculos de sol" });
+    expect(calls.prompts.at(-1)).toContain("ANÁLISE DA ÚLTIMA FOTO DE PRODUTO DO CLIENTE");
+
+    // Turno 2: a análise fica na mensagem da foto (sessão); o modelo tenta transferir e o código responde.
+    history[0] = { ...history[0], imageAnalysis: turn1.imageAnalysis };
+    history.push(...turn1.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
+    history.push({ from: "customer", text: "Qual o nome desse modelo?" });
+    model.script = async () => ({ reply: "Vou te passar para um dos nossos atendentes, só um instante! 😊", action: "handoff", reason: "Cliente quer saber o nome do modelo" });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-foto" });
+    expect(turn2.action).toBe("reply");
+    expect(turn2.handoffQueue).toBe("");
+    expect(turn2.messages[0]).toContain("Esse modelo é um *Prada Linea Rossa*");
+    expect(turn2.messages.join("\n")).not.toMatch(/atendente/i);
+    expect(calls.prompts.at(-1)).toContain("Referência provável: PS 05YS");
+  });
+
+  it("referência legível e em estoque → ficha completa do modelo exato (sem vitrine)", async () => {
+    vi.mocked(searchErpCatalog).mockImplementation(async (steps) => {
+      const step = steps.find((item) => item.kind === "referencia" && item.terms.includes("PS07RV"));
+      return step ? { term: step.label, stock: "ok", step, results: [{ description: "ARM PRADA LINEA ROSSA REF PS 07RV 1AB 54", brand: "PRADA LINEA ROSSA", category: "ARMACAO", sales: 3, price: 1960, stores: ["LJ 39"] }] } : null;
+    });
+    model.vision = { kind: "produto", marca: "Prada", linha: "Linea Rossa", modeloOuReferenciaProvavel: "0PS 07RV", caracteristicasVisuais: { tipo: "Armação de grau" } };
+    model.script = async () => ({ reply: "Temos sim!", action: "reply" });
+    const turn = await simulateAgent(settings, [{ from: "customer", text: "Tem esse?" }], "user-1", PHOTO, { sessionId: "sessao-ref" });
+    expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Prada 0PS 07RV", tipoBusca: "modelo_especifico" });
+    expect(turn.messages[0]).toContain("Ref. PS 07RV");
+    expect(turn.image?.sku).toBe("900701");
+    expect(turn.interactiveList).toBeUndefined();
   });
 });

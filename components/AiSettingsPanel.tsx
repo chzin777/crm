@@ -9,6 +9,7 @@ import { extractClipboardImages } from "@/lib/clipboard";
 import { SIMULATED_PROFILES, type AgentOutcome, type AgentTrigger, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { AiUsageReport } from "@/lib/ai/store";
 import type { StockLog } from "@/lib/ai/stock";
+import type { ImageAnalysis } from "@/lib/ai/catalog-search";
 import { defaultQueueHint, isGeneralQueue } from "@/lib/ai/routing";
 import { productSelectRef, selectionText, type InteractiveShowcase, type ShowcaseListRow } from "@/lib/ai/interactive-showcase";
 
@@ -17,7 +18,7 @@ type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
 /** silent: turno sem resposta (encerramento silencioso), só aparece no teste e não entra no histórico. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string };
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string; imageAnalysis?: PlaygroundResult["imageAnalysis"] };
 
 /** Lista Interativa do WhatsApp simulada: botão "Ver modelos" abre a gaveta; tocar num modelo envia a escolha. */
 function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveShowcase; disabled: boolean; onPick: (row: ShowcaseListRow) => void }) {
@@ -60,6 +61,7 @@ type PlaygroundResult = AgentOutcome & {
   details?: { product: string; source: "cache" | "web" | "none"; variations: number; ms: number; rating?: string | null }[];
   location?: { nome: string; endereco: string; mapsUrl: string; pinNativo: boolean; latitude: number | null; longitude: number | null };
   interactiveList?: InteractiveShowcase;
+  imageAnalysis?: ImageAnalysis;
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   disponivel_na_regiao: "disponível na região",
@@ -279,7 +281,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
     try {
       // Anexos de mensagens anteriores vão como o resumo devolvido pelo servidor (ex.: transcrição).
       const session = sessionRef.current;
-      const payload = { settings, profile, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}), ...(message.selectedProductRef ? { selectedProductRef: message.selectedProductRef } : {}) })) };
+      const payload = { settings, profile, queued: queuedTest, sessionId: session, messages: next.filter((message) => !message.silent).map((message) => ({ from: message.from, text: message.historyText ?? message.text, ...(message.image?.sku ? { imageSku: message.image.sku, imageUrl: message.image.url } : {}), ...(message.selectedProductRef ? { selectedProductRef: message.selectedProductRef } : {}), ...(message.imageAnalysis ? { imageAnalysis: message.imageAnalysis } : {}) })) };
       let request: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
       if (media) {
         const form = new FormData();
@@ -292,9 +294,11 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
       // A conversa foi limpa enquanto a IA respondia: a resposta pertence à sessão anterior.
       if (sessionRef.current !== session) return;
       if (!response.ok) throw new Error(data.error ?? "Não foi possível testar a IA.");
-      const sent: PlaygroundMessage = data.media
+      const base: PlaygroundMessage = data.media
         ? { ...customer, historyText: [text, data.media.summary].filter(Boolean).join("\n"), media: customer.media && { ...customer.media, transcript: data.media.transcript } }
         : customer;
+      // Análise da foto fica na mensagem do cliente (como no WhatsApp) para "qual o nome desse modelo?" depois.
+      const sent: PlaygroundMessage = data.imageAnalysis ? { ...base, imageAnalysis: data.imageAnalysis } : base;
       const notes = [
         data.documents?.length ? `Leitura do documento antes do transbordo (igual ao WhatsApp): ${data.documents.map((doc) => doc.summary).join(" | ")}` : "",
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",

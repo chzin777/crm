@@ -6,6 +6,7 @@ import { getStockByProductCodes, storeDirectory } from "@/lib/ai/stock-db";
 
 const DAYS = 730;
 const MAX_PRODUCTS = 5;
+const MAX_CANDIDATES = 20;
 const MAX_STORES = 3;
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
@@ -65,7 +66,8 @@ async function soldAt(descriptions: string[]) {
 export async function searchErpCatalog(steps: SearchStep[]): Promise<CatalogSearch | null> {
   const all = await catalogProducts();
   for (const step of steps) {
-    const found = matchProducts(all, step, MAX_PRODUCTS);
+    // Mais candidatos que o exibido: os mais vendidos podem estar sem saldo e os seguintes, em estoque.
+    const found = matchProducts(all, step, MAX_CANDIDATES);
     if (!found.length) continue;
     const codes = found.map((product) => product.code).filter((code): code is string => !!code);
     const [lookup, stores] = await Promise.all([codes.length ? getStockByProductCodes(codes) : null, storeDirectory()]);
@@ -76,17 +78,21 @@ export async function searchErpCatalog(steps: SearchStep[]): Promise<CatalogSear
         const official = mainPrice(live);
         return {
           description: product.description, brand: product.brand, category: product.category, sales: product.sales,
-          price: official ? Number(official.replace(/[^d,]/g, "").replace(",", ".")) : null,
+          price: official ? Number(official.replace(/[^\d,]/g, "").replace(",", ".")) || null : null,
           stores: live.slice(0, MAX_STORES).map((store) => store.loja),
         };
       });
-      return { term: step.label, results, stock: "ok" };
+      // Só conta o que tem saldo agora: referência sem estoque segue para a mesma marca/linha (nunca "sem estoque" seco).
+      const inStock = results.filter((product) => product.stores.length).slice(0, MAX_PRODUCTS);
+      if (inStock.length) return { term: step.label, results: inStock, stock: "ok", step };
+      continue;
     }
     const sold = await soldAt(found.map((product) => product.description));
     const results = found
       .map((product) => ({ description: product.description, brand: product.brand, category: product.category, sales: product.sales, price: null, stores: sold.get(product.description) ?? [] }))
-      .filter((product) => product.stores.length);
-    if (results.length) return { term: step.label, results, stock: "unavailable_api" };
+      .filter((product) => product.stores.length)
+      .slice(0, MAX_PRODUCTS);
+    if (results.length) return { term: step.label, results, stock: "unavailable_api", step };
   }
   return null;
 }

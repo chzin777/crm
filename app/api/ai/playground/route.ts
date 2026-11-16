@@ -4,6 +4,7 @@ import { aiConfigured, AiError } from "@/lib/ai/openai";
 import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
 import { sanitizeAiSettings } from "@/lib/ai/settings";
 import { validateAiAttachment } from "@/lib/ai/attachments";
+import { sanitizeImageAnalysis } from "@/lib/ai/catalog-search";
 import type { AiMediaInput } from "@/lib/ai/multimodal";
 
 type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown; queued?: unknown; sessionId?: unknown } | null;
@@ -46,6 +47,8 @@ export async function POST(request: Request) {
       ...(typeof item?.imageUrl === "string" && /^(https?:\/\/|\/)\S{1,500}$/.test(item.imageUrl) ? { imageUrl: item.imageUrl } : {}),
       // Toque na lista interativa simulada (mesmo id do WhatsApp: "product_select:<ref>").
       ...(item?.from !== "ai" && typeof item?.selectedProductRef === "string" && /^[\w .#/-]{1,60}$/.test(item.selectedProductRef) ? { selectedProductRef: item.selectedProductRef } : {}),
+      // Análise da foto guardada na mensagem do cliente (aiContext.lastAnalyzedImage da sessão de teste).
+      ...(item?.from !== "ai" && sanitizeImageAnalysis(item?.imageAnalysis) ? { imageAnalysis: sanitizeImageAnalysis(item?.imageAnalysis) ?? undefined } : {}),
     }))
     // Mensagem só com anexo (sem texto) é a última do cliente.
     .filter((item, index, list) => item.text || (media && index === list.length - 1 && item.from === "customer"))
