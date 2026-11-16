@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
+import { ContactPrescriptionsTab } from "@/components/ContactPrescriptionsTab";
 import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { BirthdayDatePicker } from "@/components/BirthdayDatePicker";
@@ -92,12 +93,13 @@ const isValidBrazilianPhone = (value: string) => {
   return digits.length === 11 ? /^9\d{8}$/.test(subscriber) : /^[2-5]\d{7}$/.test(subscriber);
 };
 
-type ContactTab = "dados" | "perfil" | "historico" | "comunicacoes";
+type ContactTab = "dados" | "perfil" | "historico" | "receituario" | "comunicacoes";
 
 const contactTabs: { key: ContactTab; label: string }[] = [
   { key: "dados", label: "Dados" },
   { key: "perfil", label: "Perfil" },
   { key: "historico", label: "Histórico" },
+  { key: "receituario", label: "Receituário" },
   { key: "comunicacoes", label: "Comunicações" },
 ];
 
@@ -365,6 +367,8 @@ function ContactEditTabs({
             )}
           </div>
         )}
+
+        {activeTab === "receituario" && <ContactPrescriptionsTab contactId={selectedContact.id} />}
 
         {activeTab === "comunicacoes" && (
           <div className="space-y-4">

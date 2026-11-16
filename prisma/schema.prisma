@@ -86,8 +86,8 @@ model Verification {
 }
 
 model Contact {
-  id                        String             @id @default(cuid())
-  sourceKey                 String             @unique
+  id                        String                 @id @default(cuid())
+  sourceKey                 String                 @unique
   name                      String
   cpf                       String?
   phone                     String?
@@ -100,25 +100,26 @@ model Contact {
   state                     String?
   store                     String?
   segment                   String?
-  category                  String             @default("cliente")
+  category                  String                 @default("cliente")
   lastPurchaseDate          String?
   prescriptionExpiry        String?
-  purchases                 Int                @default(0)
-  totalSpent                Decimal            @default(0) @db.Decimal(14, 2)
-  ecommerceCustomerId       String?            @unique
+  purchases                 Int                    @default(0)
+  totalSpent                Decimal                @default(0) @db.Decimal(14, 2)
+  ecommerceCustomerId       String?                @unique
   ecommerceUpdatedAt        DateTime?
-  ecommercePurchases        Int                @default(0)
-  ecommerceTotalSpent       Decimal            @default(0) @db.Decimal(14, 2)
+  ecommercePurchases        Int                    @default(0)
+  ecommerceTotalSpent       Decimal                @default(0) @db.Decimal(14, 2)
   ecommerceLastPurchaseDate String?
   avatarUrl                 String?
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
   importedSales             ImportedSale[]
   npsResponses              NpsResponse[]
   chatConversations         ChatConversation[]
   notes                     ContactNote[]
   npsFeedbacks              NpsFeedback[]
   followUps                 FollowUp[]
+  prescriptions             CustomerPrescription[]
 
   @@index([cpf])
   @@index([phone])
@@ -619,4 +620,38 @@ model ProductImageCache {
   imageUrl  String?
   source    String   @default("web")
   updatedAt DateTime @updatedAt
+}
+
+/// Receita oftalmológica do cliente: extraída pela IA (foto/PDF no WhatsApp) ou lançada pelo atendente.
+model CustomerPrescription {
+  id                 String    @id @default(cuid())
+  contactId          String
+  contact            Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  conversationId     String?
+  /// Mensagem com o arquivo original (uma receita por mensagem: reprocessar não duplica).
+  messageId          String?   @unique
+  attachmentUrl      String?
+  odEsferico         String?
+  odCilindrico       String?
+  odEixo             String?
+  odAdicao           String?
+  odDnp              String?
+  oeEsferico         String?
+  oeCilindrico       String?
+  oeEixo             String?
+  oeAdicao           String?
+  oeDnp              String?
+  dpTotal            String?
+  tipoLenteSugerido  String?
+  observacoes        String?
+  medicoNome         String?
+  medicoCrm          String?
+  dataReceita        DateTime?
+  /// "ia_extracao" | "manual"
+  origem             String    @default("manual")
+  conferidoPorHumano Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([contactId, createdAt])
 }

@@ -7,16 +7,19 @@ export type EyeRx = { esferico?: string; cilindrico?: string; eixo?: string; adi
 export type DocumentKind = "receita" | "comprovante" | "documento";
 export type DocumentExtraction = {
   tipo?: string;
-  receita?: { od?: EyeRx; oe?: EyeRx; dnp?: string; medico?: string; crm?: string; data?: string; observacoes?: string };
+  receita?: { od?: EyeRx; oe?: EyeRx; dnp?: string; dp?: string; tipoLente?: string; medico?: string; crm?: string; data?: string; observacoes?: string };
   comprovante?: { valor?: string; data?: string; pagador?: string; recebedor?: string; forma?: string; identificador?: string };
   resumo?: string;
 };
-export type ReadDocument = { kind: DocumentKind; summary: string };
+/** extraction e source: dados estruturados e a mensagem do arquivo (receita vai para o receituário do cliente). */
+export type ReadDocument = { kind: DocumentKind; summary: string; extraction?: DocumentExtraction; source?: MediaSource };
+/** Mensagem do cliente de onde veio o arquivo. */
+export type MediaSource = { messageId: string };
 
 /** Campos pedidos ao modelo (mesmo formato na visão da foto e na leitura do PDF). */
 export const EXTRACTION_SCHEMA = [
   '"documento": {"tipo": "receita" | "comprovante" | "orcamento" | "laudo" | "outro",',
-  '"receita": {"od": {"esferico": "", "cilindrico": "", "eixo": "", "adicao": "", "dnp": "", "prisma": ""}, "oe": {mesmos campos}, "dnp": "", "medico": "", "crm": "", "data": "", "observacoes": ""},',
+  '"receita": {"od": {"esferico": "", "cilindrico": "", "eixo": "", "adicao": "", "dnp": "", "prisma": ""}, "oe": {mesmos campos}, "dnp": "", "dp": "DP total, se houver", "tipoLente": "Visão simples | Multifocal | Bifocal | Ocupacional | vazio", "medico": "", "crm": "só o número", "data": "dd/mm/aaaa", "observacoes": "antirreflexo, fotossensível, prismas e outras notas"},',
   '"comprovante": {"valor": "R$ ...", "data": "", "pagador": "", "recebedor": "", "forma": "PIX | cartão | boleto | dinheiro | ...", "identificador": ""},',
   '"resumo": "1 frase sobre o documento"}',
   "Copie números exatamente como escritos (sinal +/-, vírgula, eixo em graus). Campo ilegível ou ausente: string vazia. Nunca invente valores.",

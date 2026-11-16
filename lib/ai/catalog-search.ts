@@ -209,7 +209,7 @@ export const CATALOG_FOUND_RULE =
 export type ImageFlowResult =
   | { type: "handoff"; reason: string; reply: string; trigger: "catalog_miss" | "prescription"; log: SearchLog }
   /** Receita, comprovante ou outro documento: lido e resumido (quem decide o transbordo é o agente). */
-  | { type: "document"; kind: DocumentKind; summary: string; log: SearchLog }
+  | { type: "document"; kind: DocumentKind; summary: string; log: SearchLog; extraction?: DocumentExtraction }
   /**
    * Produto com estoque: "exata" = a referência da foto (ficha completa); "linha" = referência fora de estoque ou
    * ilegível, mas a mesma marca/linha tem modelos (vitrine com a abertura que identifica a foto); "similar" = sem marca.
@@ -241,7 +241,7 @@ export async function productImageFlow(deps: {
   const { kind, query } = readVision(vision);
   // Receita/comprovante: a mesma chamada de visão já extraiu os dados (graus, valor, data) para o atendente.
   const docKind = kind === "receita" || kind === "documento" ? documentKind(kind, vision.documento) : null;
-  if (docKind) return { type: "document", kind: docKind, summary: formatExtraction(docKind, vision.documento), log: { kind, term: "", found: 0 } };
+  if (docKind) return { type: "document", kind: docKind, summary: formatExtraction(docKind, vision.documento), extraction: vision.documento, log: { kind, term: "", found: 0 } };
   if (kind !== "produto") return { type: "continue", log: { kind, term: "", found: 0 } };
   const steps = searchSteps(query);
   const analysis = imageAnalysis(query);

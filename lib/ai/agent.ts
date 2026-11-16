@@ -4,6 +4,7 @@ import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conver
 import { assertCanReceive, closeConversation } from "@/lib/chat/actions";
 import { bareNameHint, detectStaffRequest, defaultHandoffNotice, staffConfirmation } from "@/lib/ai/staff-request";
 import { activeStaff } from "@/lib/ai/staff-db";
+import { savePrescriptionFromAi } from "@/lib/prescriptions-db";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
 import { withTyping } from "@/lib/chat/typing";
@@ -300,7 +301,19 @@ export async function prepareMediaSafe(media: AiMediaInput, meta: Omit<AiCallMet
   }
 }
 
-type PendingMedia = { attachment: unknown; metaMedia: unknown };
+type PendingMedia = { id?: string; attachment: unknown; metaMedia: unknown };
+
+/** Receitas lidas pela IA → CustomerPrescription (falha no banco não trava a resposta ao cliente). */
+export async function saveReadPrescriptions(documents: ReadDocument[] | undefined, target: { contactId: string; conversationId: string }) {
+  for (const doc of documents ?? []) {
+    if (doc.kind !== "receita" || !doc.source?.messageId) continue;
+    const result = await savePrescriptionFromAi({ ...target, messageId: doc.source.messageId, extraction: doc.extraction }).catch((error) => {
+      console.warn(`[ai] ${target.conversationId}: receita não salva no receituário`, error);
+      return null;
+    });
+    if (result?.saved) console.log(`[ai] ${target.conversationId}: receita salva no receituário (${result.id})`);
+  }
+}
 
 /**
  * Atendimento real: lê TODOS os anexos do lote (até 4), baixados da Meta e guardados no MinIO pelo webhook.
@@ -316,7 +329,9 @@ async function customerMedia(items: PendingMedia[], meta: Omit<AiCallMeta, "maxT
     if (attachment.kind === "sticker") return stickerMedia(attachment.name);
     if (attachment.size > AI_ATTACHMENT_MAX_BYTES) return failedMedia(aiAttachmentKind(attachment.mime, attachment.name) ?? attachment.kind, attachment.name, `arquivo acima de 10 MB (${(attachment.size / 1024 / 1024).toFixed(1)} MB)`);
     try {
-      return await prepareMediaSafe({ name: attachment.name, mime: attachment.mime, data: await readFile(attachment.key) }, meta);
+      const prepared = await prepareMediaSafe({ name: attachment.name, mime: attachment.mime, data: await readFile(attachment.key) }, meta);
+      // Mensagem de origem: a receita lida vai para o receituário com o arquivo original.
+      return item.id ? { ...prepared, source: { messageId: item.id } } : prepared;
     } catch (error) {
       if (error instanceof AiError) throw error;
       console.error(`[ai] ${meta.conversationId}: arquivo do chat ilegível (${attachment.key}):`, error instanceof Error ? error.message : error);
@@ -439,7 +454,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       });
       search = flow.log ?? search;
       if (flow.type === "document") {
-        documents.push({ kind: flow.kind, summary: flow.summary });
+        documents.push({ kind: flow.kind, summary: flow.summary, extraction: flow.extraction, source: item.source });
         consumed.add(item);
       } else if (flow.type === "found") {
         catalogContexts.push(flow.context);
@@ -462,7 +477,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     } else if (item.kind === "pdf") {
       const read = await aiJson<{ kind?: string; documento?: DocumentExtraction }>([{ role: "system", content: DOCUMENT_EXTRACT_PROMPT }, { role: "user", content: item.parts }], { ...input.meta, maxTokens: 700 }).catch(() => null);
       const kind = read ? documentKind(read.kind ?? "", read.documento) : null;
-      if (kind) documents.push({ kind, summary: formatExtraction(kind, read?.documento) });
+      if (kind) documents.push({ kind, summary: formatExtraction(kind, read?.documento), extraction: read?.documento, source: item.source });
     }
   }
   const catalogContext = catalogContexts.length ? `${CATALOG_FOUND_RULE}\n\n${catalogContexts.join("\n\n")}` : "";
@@ -747,7 +762,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Lista interativa só quando a resposta leva a vitrine numerada (2+ itens) ao cliente.
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis, documents };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -840,6 +855,8 @@ async function respond(conversationId: string, messageId: string) {
     const current = (photoMessage.metaMedia ?? {}) as Record<string, unknown>;
     await prisma.chatMessage.update({ where: { id: photoMessage.id }, data: { metaMedia: { ...current, analysis: run.imageAnalysis } as unknown as Prisma.InputJsonValue } }).catch((error) => console.warn(`[ai] ${conversationId}: análise da foto não salva`, error));
   }
+  // Receita lida (foto ou PDF): vai para o receituário do cliente, uma por mensagem (a nota do transbordo continua).
+  await saveReadPrescriptions(run.documents, { contactId: conversation.contactId, conversationId });
   // Encerramento silencioso: nada é enviado e a conversa não é transferida.
   if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
   if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location);

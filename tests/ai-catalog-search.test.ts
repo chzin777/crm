@@ -47,7 +47,7 @@ describe("foto de óculos sem resultado no catálogo", () => {
     const search = vi.fn(async () => rayBan);
     const rx = { kind: "receita", documento: { tipo: "receita", receita: { od: { esferico: "-2,00", cilindrico: "-0,75", eixo: "180" }, oe: { esferico: "-1,50", adicao: "+2,00" }, medico: "Dra. Ana" } } };
     expect(await productImageFlow({ identify: async () => rx, search, withPrices: false })).toEqual({
-      type: "document", kind: "receita", log: { kind: "receita", term: "", found: 0 },
+      type: "document", kind: "receita", log: { kind: "receita", term: "", found: 0 }, extraction: rx.documento,
       summary: "Receita — OD: esf -2,00 | cil -0,75 | eixo 180; OE: esf -1,50 | adição +2,00; Médico: Dra. Ana",
     });
     expect(await productImageFlow({ identify: async () => ({ kind: "selfie" }), search, withPrices: false })).toMatchObject({ type: "continue" });

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "r
 import Link from "next/link";
 import { ArrowRightLeft, Ban, CalendarClock, Camera, Check, Copy, Hourglass, ListOrdered, MessageSquarePlus, MessagesSquare, Send, type LucideIcon } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
+import { ContactPrescriptionsTab } from "@/components/ContactPrescriptionsTab";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { fieldClass } from "@/components/chat/MenuFormParts";
@@ -17,7 +18,7 @@ const FOOTER_NEUTRAL = `${FOOTER_BUTTON} border border-slate-200 text-slate-700 
 const FOOTER_PRIMARY = `${FOOTER_BUTTON} bg-[#C4D600] text-[#051647] hover:opacity-90`;
 const CATEGORY_LABELS: Record<string, string> = { cliente: "Cliente", lead: "Lead", nps: "NPS", inativo: "Inativo" };
 
-type Tab = "cadastro" | "atendimento" | "anotacoes";
+type Tab = "cadastro" | "atendimento" | "receituario" | "anotacoes";
 
 const dateTime = (value: string | null) =>
   value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }) : null;
@@ -142,6 +143,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
   const [failed, setFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [tagInput, setTagInput] = useState("");
+  const [prescriptionCount, setPrescriptionCount] = useState<number | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const { id, phone, email, tags } = conversation;
@@ -193,9 +195,10 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
     if (content.current) content.current.scrollTop = 0;
   };
 
-  const tabs: { id: Tab; label: string }[] = [
+  const tabs: { id: Tab; label: string; badge?: number | null }[] = [
     { id: "cadastro", label: "Cadastro" },
     { id: "atendimento", label: "Atendimento" },
+    { id: "receituario", label: "Receituário", badge: prescriptionCount },
     { id: "anotacoes", label: profile?.notes.length ? `Anotações (${profile.notes.length})` : "Anotações" },
   ];
 
@@ -243,6 +246,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
           return (
             <button key={item.id} type="button" role="tab" id={`contact-tab-${item.id}`} aria-selected={active} aria-controls={`contact-panel-${item.id}`} onClick={() => changeTab(item.id)} className={`-mb-px cursor-pointer whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition-colors duration-200 ${active ? "border-[#C4D600] text-[#051647] dark:text-white" : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}>
               {item.label}
+              {!!item.badge && <span className="ml-1.5 rounded-full bg-[#002187] px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">{item.badge}</span>}
             </button>
           );
         })}
@@ -329,6 +333,10 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
               </div>
             </Section>
           )}
+        </div>
+
+        <div role="tabpanel" id="contact-panel-receituario" aria-labelledby="contact-tab-receituario" hidden={tab !== "receituario"}>
+          <ContactPrescriptionsTab contactId={conversation.contactId} canWrite={canWrite} onCountChange={setPrescriptionCount} />
         </div>
 
         <div role="tabpanel" id="contact-panel-anotacoes" aria-labelledby="contact-tab-anotacoes" hidden={tab !== "anotacoes"}>

@@ -73,7 +73,7 @@ export type AiContentPart =
 
 export type AiMediaInput = { name: string; mime: string; data: Uint8Array };
 /** failed: motivo quando o arquivo não pôde ser lido (a IA avisa o cliente); sticker: figurinha (reação informal). */
-export type PreparedMedia = { kind: AiAttachmentKind; name: string; parts: AiContentPart[]; transcript?: string; summary: string; failed?: string; sticker?: boolean };
+export type PreparedMedia = { kind: AiAttachmentKind; name: string; parts: AiContentPart[]; transcript?: string; summary: string; failed?: string; sticker?: boolean; /** Mensagem do cliente com o arquivo (receita vai para o receituário). */ source?: { messageId: string } };
 
 /** Tipo do arquivo para o marcador de falha (áudio, vídeo, imagem ou documento). */
 const FAILURE_TYPE: Record<string, string> = { audio: "audio", video: "video", image: "imagem", sticker: "imagem" };
