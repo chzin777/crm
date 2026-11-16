@@ -59,6 +59,16 @@ vi.mock("@/lib/ai/stock-db", () => ({
   consultarEstoqueProduto: vi.fn(async (args: Record<string, unknown>) => {
     calls.stock.push(args);
     const term = String(args.termoBusca ?? "");
+    if (/miu miu/i.test(term)) {
+      const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
+      const models = [
+        { code: "111", description: "ARM MIU MIU REF MU12345 52", brand: "MIU MIU" },
+        { code: "222", description: "ARM MIU MIU REF MU54321 52", brand: "MIU MIU" },
+      ];
+      const unit = [{ unit: "36", name: "LJ 36", qty: 1, price: 899 }];
+      const result = buildShowcaseResult({ term, groups: showcaseCandidates(models), lookup: { stockStatus: "ok", fromCache: 0, requested: 2, byCode: { "111": unit, "222": unit } }, stores: STORES, withPrices: true, brand: "MIU MIU", city: typeof args.cidade === "string" ? args.cidade : undefined });
+      return { result, log: { term, region: "", scenario: result.cenario, products: result.modelos.length, stores: 0, ms: 1, cached: false, kind: "marca_ampla" } };
+    }
     // Radda: só a marca → vitrine (a do código, com o item sem REF do cadastro real); com referência → o modelo.
     if (/radda/i.test(term)) {
       const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
@@ -134,6 +144,29 @@ beforeEach(() => {
 });
 
 describe("isolamento de sessão", () => {
+  it("corrige a marca e envia novamente a lista ao receber a cidade", async () => {
+    const first = await simulateAgent(settings, [{ from: "customer", text: "Queria armação da miumiu para presentear minha esposa" }], "user-1", undefined, { contactName: "Michel" });
+    expect(first.reply).toContain("Que presente especial");
+    expect(first.reply).toContain("2.");
+    expect(first.interactiveList?.rows).toHaveLength(2);
+    expect(first.catalogContext).toMatchObject({ brand: "Miu Miu", category: "ARMACAO" });
+    const messages: PlaygroundMessage[] = [
+      { from: "customer", text: "Queria armação da miumiu para presentear minha esposa", catalogContext: first.catalogContext },
+      { from: "ai", text: first.reply },
+      { from: "customer", text: "vc errou, pedi armação miumiu" },
+    ];
+    const correction = await simulateAgent(settings, messages, "user-1");
+    expect(correction.reply).toContain("Desculpe");
+    expect(correction.interactiveList?.rows).toHaveLength(2);
+    expect(calls.stock.at(-1)).toMatchObject({ marca: "Miu Miu" });
+    messages.push({ from: "ai", text: correction.reply }, { from: "customer", text: "estou em Goiânia e Brasilia é muito longe", catalogContext: correction.catalogContext });
+    const city = await simulateAgent(settings, messages, "user-1");
+    expect(city.catalogContext?.preferredCity).toBe("Goiânia");
+    expect(calls.stock.at(-1)).toMatchObject({ marca: "Miu Miu", cidade: "Goiânia" });
+    expect(city.interactiveList?.rows).toHaveLength(2);
+    expect(city.reply).not.toMatch(/posso|se quiser|número ou referência/i);
+    expect(city.reply).toContain("Miu Miu");
+  });
   it("novo atendimento após encerramento: mensagens da sessão encerrada não entram no prompt, só o nome do cliente", () => {
     const closedAt = new Date("2026-11-10T15:00:00-03:00");
     const rows: TranscriptRow[] = [

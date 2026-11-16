@@ -1,8 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { storeErpCode } from "@/lib/stores";
-import { matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
-import { broadCatalogMatches, catalogBrands, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
+import { explicitBrand, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
+import { broadCatalogMatches, catalogBrands, isBrandFamily, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
 import { expandModelNicknames } from "@/lib/ai/product-names";
 import { buildStockResult, createStockClient, STOCK_MAX_CODES, stockSearchTerms, type StockLog, type StockLookup, type StockToolResult, type StoreInfo } from "@/lib/ai/stock";
 import { buildShowcaseResult, classifySearch, showcaseCandidates, type ShowcaseResult } from "@/lib/ai/stock-showcase";
@@ -83,18 +83,21 @@ export function storeDirectory() {
  * Nunca lança erro: falha ou lentidão da API vira o cenário "unavailable_api".
  */
 export async function consultarEstoqueProduto(
-  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown },
+  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown },
   deps: { products: () => Promise<IndexedProduct[]>; withPrices: boolean },
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
   const field = (value: unknown) => typeof value === "string" ? value.trim() : "";
-  const term = (field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80);
-  const region = typeof args.regiaoOuLoja === "string" ? args.regiaoOuLoja.slice(0, 60) : "";
+  const term = normalizeBrandQuery((field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80));
+  const city = field(args.cidade).slice(0, 60);
+  const region = typeof args.regiaoOuLoja === "string" ? args.regiaoOuLoja.slice(0, 60) : city;
   const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
 
   // Marca com erro de digitação ("rada" → RADDA, "okley" → OAKLEY): marca inteira normalizada ou com 1-2 erros.
   const brands = brandsOf(all);
-  const brandMatch = resolveBrandQuery(term, brands);
+  const requestedBrand = explicitBrand(field(args.marca) || term);
+  const resolvedBrand = resolveBrandQuery(term, brands);
+  const brandMatch = requestedBrand && resolvedBrand && !isBrandFamily(resolvedBrand.brand, requestedBrand) ? null : resolvedBrand;
   const identity = [term, field(args.nomeModelo), field(args.referenciaOuSku)].join(" ");
   const identityBrand = field(args.marca) || brandMatch?.brand;
   const iconic = matchIconicProducts(all, identity, identityBrand)
@@ -102,10 +105,10 @@ export async function consultarEstoqueProduto(
   // Busca ampla (só marca/categoria): vitrine de modelos distintos com estoque, sem lojas nem foto.
   const kind = iconic ? "modelo_especifico" : brandMatch && !brandMatch.rest.length ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
   if (kind === "marca_ampla") {
-    const broad = broadCatalogMatches(all, term, brands);
-    const groups = showcaseCandidates(broad.products.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })));
+    const broad = requestedBrand && !brandMatch ? { products: [], brand: requestedBrand } : broadCatalogMatches(all, term, brands, city ? all.length : undefined);
+    const groups = showcaseCandidates(broad.products.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), city ? { groups: broad.products.length, codesPerModel: broad.products.length } : undefined);
     const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;
-    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand });
+    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city });
     const log: StockLog = { term, region, scenario: result.cenario, products: result.modelos.length, stores: 0, ms: Date.now() - started, cached: !!lookup && lookup.requested === 0, kind };
     console.log(`[ai][estoque] busca ampla: ${log.scenario}, ${log.products} modelos, ${log.ms} ms`);
     return { result, log };
@@ -117,13 +120,15 @@ export async function consultarEstoqueProduto(
   // Apelido do modelo vira a referência do ERP ("Ray-Ban Justin" → "Ray-Ban RB4165").
   const sku = term.match(/(?:^|\s)#?(\d{5,})(?:\s|$)/)?.[1];
   const exactSku = sku ? all.find((product) => product.code === sku) : undefined;
-  if (exactSku) found = [exactSku];
+  if (requestedBrand && !brandMatch) found = [];
+  else if (exactSku && (!brandMatch || isBrandFamily(exactSku.brand, brandMatch.brand))) found = [exactSku];
+  else if (exactSku) found = [];
   else if (iconic) found = iconic.products;
   else {
     const expanded = expandModelNicknames(scope.term);
     for (const search of [...new Set([scope.term, expanded])]) {
       for (const terms of stockSearchTerms(search).slice(0, field(args.nomeModelo) || field(args.referenciaOuSku) || brandMatch?.rest.length ? 2 : undefined)) {
-        found = matchProducts(scope.pool, { label: term, category: "", terms }, STOCK_MAX_CODES).filter((product) => product.code);
+        found = matchProducts(scope.pool, { label: term, category: "", terms }, city ? scope.pool.length : STOCK_MAX_CODES).filter((product) => product.code);
         if (found.length) break;
       }
       if (found.length) break;
@@ -133,6 +138,7 @@ export async function consultarEstoqueProduto(
   const result = buildStockResult({
     term,
     region,
+    city,
     products: found.map((product) => ({ code: product.code!, description: product.description, brand: product.brand, price: product.price })),
     lookup,
     stores,

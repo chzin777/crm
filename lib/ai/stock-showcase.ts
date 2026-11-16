@@ -5,7 +5,7 @@
  */
 import { commercialName } from "@/lib/ai/product-card";
 import { expandModelNicknames, KNOWN_BRANDS } from "@/lib/ai/product-names";
-import { mainPrice, retailStock, type StockLookup, type StoreInfo } from "@/lib/ai/stock";
+import { mainPrice, stockInCity, type StockLookup, type StoreInfo } from "@/lib/ai/stock";
 import { modelFamilyKey } from "@/lib/ai/product-names";
 
 export type SearchKind = "marca_ampla" | "modelo_especifico";
@@ -71,7 +71,7 @@ export type ShowcaseCandidate = { code: string; description: string; brand: stri
 export type ShowcaseModel = { nomeComercial: string; referencia: string | null; categoriaModelo: string | null; precoVenda: string | null; /** Cores/lentes com preços diferentes: a vitrine mostra "a partir de" o menor. */ precoVaria?: boolean; totalDisponivelRede: number; codigos: string[] };
 export type ShowcaseResult = {
   tipoBusca: "marca_ampla";
-  cenario: "disponivel_em_lojas" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
+  cenario: "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
   termoBusca: string;
   regiao: string;
   regiaoReconhecida: false;
@@ -105,7 +105,7 @@ export function showcaseReference(description: string, brand: string | null, cod
 }
 
 /** Agrupa cores/tamanhos do mesmo modelo (mais vendidos primeiro) e escolhe os códigos a consultar no saldo. */
-export function showcaseCandidates<T extends ShowcaseCandidate>(products: T[]) {
+export function showcaseCandidates<T extends ShowcaseCandidate>(products: T[], limits = { groups: SHOWCASE_CANDIDATES, codesPerModel: SHOWCASE_CODES_PER_MODEL }) {
   const groups = new Map<string, T[]>();
   for (const product of products) {
     // Família pelo código-base da referência: "RB4165L" e "4165L" são o mesmo modelo na vitrine; sem "REF", a
@@ -114,9 +114,9 @@ export function showcaseCandidates<T extends ShowcaseCandidate>(products: T[]) {
     const key = modelFamilyKey(product.description, product.brand) ?? (fallback ? `${compact(product.brand ?? "")}|${compact(fallback)}` : compact(product.description));
     const group = groups.get(key);
     if (group) group.push(product);
-    else if (groups.size < SHOWCASE_CANDIDATES) groups.set(key, [product]);
+    else if (groups.size < limits.groups) groups.set(key, [product]);
   }
-  return [...groups.values()].map((group) => group.slice(0, SHOWCASE_CODES_PER_MODEL));
+  return [...groups.values()].map((group) => group.slice(0, limits.codesPerModel));
 }
 
 const SHOWCASE_QUESTION_MANY = "Gostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?";
@@ -168,24 +168,25 @@ export function buildShowcaseResult(input: {
   lookup: StockLookup | null;
   stores: Map<string, StoreInfo>;
   withPrices: boolean;
+  city?: string;
   /** Marca real reconhecida (com erro de digitação ou não). */
   brand?: string | null;
 }): ShowcaseResult {
   const base = { tipoBusca: "marca_ampla" as const, termoBusca: input.term, regiao: "", regiaoReconhecida: false as const, produtos: [] as [], ...(input.brand ? { marcaResolvida: input.brand } : {}) };
-  const brandMissing = input.brand ? `Não há modelos da marca ${input.brand} em estoque no momento: diga isso com clareza (sem listar produtos de outras marcas) e ofereça outras marcas ou um atendente para verificar encomenda.` : "";
+  const brandMissing = input.brand ? `Não há modelos da marca ${input.brand} em estoque${input.city ? ` em ${input.city}` : ""} no momento: diga isso com clareza, sem listar produtos de outras marcas.` : "";
   if (!input.groups.length) return { ...base, cenario: "produto_nao_encontrado", modelos: [], vitrineFormatada: null, orientacao: brandMissing || SHOWCASE_GUIDANCE.produto_nao_encontrado, ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
   if (!input.lookup || input.lookup.stockStatus === "unavailable_api") return { ...base, cenario: "unavailable_api", modelos: [], vitrineFormatada: null, orientacao: SHOWCASE_GUIDANCE.unavailable_api };
   const lookup = input.lookup;
   const models: ShowcaseModel[] = [];
   const fallbackOnly = new Set<ShowcaseModel>();
   for (const group of input.groups) {
-    const stores = group.flatMap((product) => retailStock(lookup.byCode[product.code] ?? [], input.stores));
+    const stores = group.flatMap((product) => stockInCity(lookup.byCode[product.code] ?? [], input.stores, input.city));
     const total = stores.reduce((sum, store) => sum + store.quantidade, 0);
     if (total <= 0) continue;
-    const withStock = group.filter((product) => retailStock(lookup.byCode[product.code] ?? [], input.stores).length);
+    const withStock = group.filter((product) => stockInCity(lookup.byCode[product.code] ?? [], input.stores, input.city).length);
     const naming = commercialName(withStock[0].description, withStock[0].brand);
     // Preço de cada variante com estoque (o mais comum entre as lojas dela); variação → "a partir de" o menor.
-    const prices = input.withPrices ? withStock.map((product) => mainPrice(retailStock(lookup.byCode[product.code] ?? [], input.stores))).filter((price): price is string => !!price) : [];
+    const prices = input.withPrices ? withStock.map((product) => mainPrice(stockInCity(lookup.byCode[product.code] ?? [], input.stores, input.city))).filter((price): price is string => !!price) : [];
     const toNumber = (text: string) => Number(text.replace(/[^\d,]/g, "").replace(",", "."));
     const distinct = [...new Set(prices)].sort((a, b) => toNumber(a) - toNumber(b));
     models.push({
@@ -203,7 +204,7 @@ export function buildShowcaseResult(input: {
   const rank = (model: ShowcaseModel) => (model.referencia?.startsWith("#") ? 2 : fallbackOnly.has(model) ? 1 : 0);
   models.sort((a, b) => rank(a) - rank(b));
   models.splice(SHOWCASE_MAX_MODELS);
-  if (!models.length) return { ...base, cenario: "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: brandMissing || SHOWCASE_GUIDANCE.sem_estoque_na_rede, ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
+  if (!models.length) return { ...base, cenario: input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: brandMissing || (input.city ? `Não há modelos disponíveis em ${input.city} no momento.` : SHOWCASE_GUIDANCE.sem_estoque_na_rede), ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
   return {
     ...base,
     cenario: "disponivel_em_lojas",

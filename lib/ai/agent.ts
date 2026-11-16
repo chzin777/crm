@@ -26,6 +26,7 @@ import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQ
 import { readFile } from "@/lib/minio";
 import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
+import { EMPTY_CATALOG_CONTEXT, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
@@ -402,10 +403,11 @@ export type AgentRunInput = {
   linkedCpf?: string | null;
   /** Já existe aprovação financeira pendente nesta conversa: não consulta de novo sem CPF novo. */
   hasPendingFinancial?: boolean;
+  catalogContext?: CatalogContext;
   /** Consulta de parcelas no VMSet (testes injetam a sua). */
   lookupInstallments?: (cpf: string) => Promise<InstallmentLookup>;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; catalogContext?: CatalogContext; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -550,13 +552,24 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     knowledge(settings),
     settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
   ]);
+  const customerText = [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n");
+  const directory = await storeDirectory();
+  const cities = [...directory.values()].map((store) => store.city ?? "");
+  const previousCatalog = input.catalogContext?.brand || input.catalogContext?.preferredCity
+    ? input.catalogContext
+    : [...(input.earlierCustomerTexts ?? [])].reverse().reduce((state, text) => updateCatalogContext(state, text, cities).context, { ...EMPTY_CATALOG_CONTEXT });
+  const intent = updateCatalogContext(previousCatalog, customerText, cities);
+  const catalogState = intent.context;
+  const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
+  const forceCatalog = !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
+    && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand));
   // Pedido de pessoa com a IA roteando: sem assunto → 1 pergunta de triagem; com assunto → transfere já para a fila certa.
   // Âncora do atendimento atual: follow-up de detalhes usa o produto fixado; localização no singular usa a loja fixada.
   const anchor = input.anchor ?? EMPTY_ANCHOR;
   const storeFollowUp = isStoreFollowUp(input.pendingText, anchor);
   // Foto nova de produto: a busca é a da foto, nunca o produto fixado antes.
   let photoQuery = photoQueries[0] ?? null;
-  const anchoredProduct = !photoQuery && isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
+  const anchoredProduct = !photoQuery && !forceCatalog && isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
   // Análise da foto desta mensagem ou da última foto do atendimento (responde "qual o nome desse modelo?").
   const analysis = imageAnalysis ?? input.lastAnalyzedImage ?? null;
   const anchorNumbers = anchoredProduct ? modelNumbers(`${anchoredProduct.referencia ?? ""} ${anchoredProduct.nomeComercial}`) : [];
@@ -564,7 +577,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Vitrine desta sessão: "o 1", "esse primeiro", "o de 120" escolhem um item (pedido de localização não é escolha).
   const listed = input.listedProducts ?? [];
   // Toque na lista interativa: escolha determinística (busca específica com foto + ficha + lojas).
-  const choice: ListedChoice = photoQuery ? null : input.selectedProductRef
+  const choice: ListedChoice = photoQuery || forceCatalog ? null : input.selectedProductRef
     ? { type: "item", item: selectedListedItem(input.selectedProductRef, listed) }
     : asksStoreLocation(input.pendingText) ? null : resolveListedChoice(input.pendingText, listed);
   let cardShown: string | null = null;
@@ -600,6 +613,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     return image;
   };
   const toolStores: SessionStore[] = [];
+  let currentCatalogFilterHash = "";
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
@@ -607,11 +621,13 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       if (choice?.type === "ambiguous") return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Não repita a vitrine. Responda exatamente: "${ambiguousChoiceQuestion(choice.items, choice.price)}"` };
       // Item escolhido na vitrine (número, posição, referência ou preço único): busca específica com a referência exata.
       const chosen = choice?.type === "item" ? choice.item : null;
-      const query = chosen
+      const baseQuery = chosen
         ? { ...args, termoBusca: listedSearchTerm(chosen), tipoBusca: "modelo_especifico" }
         : anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" } : args;
+      const query: Record<string, unknown> = { ...baseQuery, cidade: catalogState.preferredCity || args.cidade };
       const { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
+      if (result.tipoBusca === "marca_ampla") currentCatalogFilterHash = [String(query.termoBusca ?? ""), String(query.cidade ?? ""), catalogState.category].map(normalizeTerm).join("|");
       // Lojas da consulta, direto do objeto estruturado (o texto da conversa é só o fallback).
       for (const product of result.produtos ?? []) {
         for (const store of product.lojasComEstoque ?? []) {
@@ -620,7 +636,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
         }
       }
       // Trava anti-loop: a mesma vitrine já enviada nesta sessão não sai de novo; o cliente escolhe pelo número/referência.
-      if (result.tipoBusca === "marca_ampla" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(result.vitrineFormatada ?? "", listed)) {
+      if (!forceCatalog && !intent.changed && (!catalogState.lastCatalogFilterHash || catalogState.lastCatalogFilterHash === currentCatalogFilterHash) && result.tipoBusca === "marca_ampla" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(result.vitrineFormatada ?? "", listed)) {
         return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Essa vitrine já foi enviada: NÃO repita a lista. Responda: "${pickFromListQuestion(listed)}"` };
       }
       // Busca ampla (só marca/categoria): vitrine com nome e preço, sem foto nem ficha nesta etapa; no WhatsApp,
@@ -690,6 +706,25 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };
+  let proactiveReply: string | null = null;
+  let proactiveResult: Awaited<ReturnType<typeof stockTool.run>> | null = null;
+  if (forceCatalog) {
+    const category = catalogState.category === "ARMACAO" ? "armação" : catalogState.category === "SOLAR" ? "solar" : catalogState.category === "LENTE_CONTATO" ? "lentes de contato" : "";
+    const term = cityProduct ? [cityProduct.marca, cityProduct.referencia ?? cityProduct.nomeComercial].filter(Boolean).join(" ") : [catalogState.brand, category].filter(Boolean).join(" ");
+    const result = await stockTool.run({ termoBusca: term, marca: catalogState.brand, cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
+    proactiveResult = result;
+    const prefix = intent.correction ? "Desculpe pelo engano! " : /\b(presentear|presente)\b/i.test(customerText) ? "Que presente especial! 😊 " : "";
+    if ("fichaFormatada" in result && typeof result.fichaFormatada === "string") {
+      proactiveReply = `${prefix}${result.fichaFormatada}`;
+    } else if ("vitrineFormatada" in result && result.vitrineFormatada) {
+      const location = catalogState.preferredCity ? `Confira as opções em ${catalogState.preferredCity}:\n` : "";
+      proactiveReply = `${prefix}${location}${result.vitrineFormatada}`;
+    } else if ("cenario" in result && result.cenario === "unavailable_api") {
+      proactiveReply = `${prefix}Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.`;
+    } else {
+      proactiveReply = `${prefix}Não encontrei ${cityProduct ? "esse modelo disponível" : `modelos ${catalogState.brand} disponíveis`}${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
+    }
+  }
   const photoReplies: string[] = [];
   for (const currentPhoto of photoQueries) {
     photoQuery = currentPhoto;
@@ -709,10 +744,10 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       if (!photoReply && "cenario" in result) {
         if (result.cenario === "unavailable_api") {
           photoReply = "Não consegui consultar o estoque agora. Posso pedir a um atendente para confirmar a disponibilidade desse modelo?";
-        } else if (specific && (result.cenario === "sem_estoque_na_rede" || result.cenario === "produto_nao_encontrado") && photoQuery.brand) {
+        } else if (specific && (result.cenario === "sem_estoque_na_cidade" || result.cenario === "sem_estoque_na_rede" || result.cenario === "produto_nao_encontrado") && photoQuery.brand) {
           const family = [photoQuery.brand, photoQuery.line].filter(Boolean).join(" ");
           const alternative = await stockTool.run({ termoBusca: family, tipoBusca: "marca_ampla" });
-          const opening = `Esse modelo *${analysisName(imageAnalysis!)}* não está disponível no momento.`;
+          const opening = `Esse modelo *${analysisName(imageAnalysis!)}* não está disponível${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
           if ("vitrineFormatada" in alternative && alternative.vitrineFormatada) {
             photoReply = `${opening} Confira outras opções da mesma marca:\n${alternative.vitrineFormatada}`;
           } else if ("cenario" in alternative && alternative.cenario === "unavailable_api") {
@@ -830,7 +865,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       { role: "system", content: system },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [stockTool, detailsTool]), locationTool, closeTool] },
+    { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [forceCatalog && proactiveResult ? { ...stockTool, run: async () => proactiveResult } : stockTool, detailsTool]), locationTool, closeTool] },
   );
   let outcome = interpretDecision(decision);
   // Localização da loja fixada pedida no singular e o modelo não enviou (ou abriu lista de unidades): envia a da sessão.
@@ -847,7 +882,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   else if (outcome.action === "reply" && choice?.type === "item" && !cardShown) {
     const forced = (await stockTool.run({ termoBusca: listedSearchTerm(choice.item), tipoBusca: "modelo_especifico" }).catch(() => null)) as { fichaFormatada?: string } | null;
     if (forced?.fichaFormatada) outcome = { ...outcome, reply: `${forced.fichaFormatada}\n---SPLIT---\n${CARD_QUESTION}` };
-  } else if (outcome.action === "reply" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(outcome.reply, listed)) {
+  } else if (!forceCatalog && !intent.changed && outcome.action === "reply" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(outcome.reply, listed)) {
     outcome = { ...outcome, reply: pickFromListQuestion(listed) };
   }
   // Pediu a localização e o modelo não enviou (ou disse que não achou a loja): a cascata resolve pelo pedido do cliente.
@@ -861,7 +896,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Encerramento: tool encerrarAtendimento ou action "resolved", sempre pela trava fixa.
   const requestedClose = closeReason as string | null;
   if (requestedClose && outcome.trigger === "no_reply") outcome = { action: "resolved", reply: AI_FAREWELL, reason: requestedClose, queue: "", trigger: "ai" };
-  const close = aiCloseDecision({ requested: !!requestedClose || outcome.action === "resolved", enabled: settings.closeWhenResolved, queued: !!input.queued, assigned: false, asksHuman: asksForHuman(settings, input.pendingText), pendingText: input.pendingText });
+  const close = aiCloseDecision({ requested: !forceCatalog && (!!requestedClose || outcome.action === "resolved"), enabled: settings.closeWhenResolved, queued: !!input.queued, assigned: false, asksHuman: asksForHuman(settings, input.pendingText), pendingText: input.pendingText });
   if (close.close) outcome = { ...outcome, action: "resolved", reason: requestedClose ?? outcome.reason };
   else if (outcome.action === "resolved") outcome = { ...outcome, action: "reply" };
   // Silêncio só faz sentido diante de um fechamento de cortesia; em outra mensagem, a equipe assume.
@@ -873,6 +908,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Foto com estoque: a ficha (referência exata) ou a vitrine da mesma marca/linha sai mesmo se o modelo não buscou
   // (ou se respondeu só "sem estoque").
   if ((photoReply || modelVariantReply) && outcome.action === "reply") outcome = { ...outcome, reply: photoReply || modelVariantReply || outcome.reply };
+  if (proactiveReply && humanMode !== "route") outcome = { ...outcome, action: "reply", reply: proactiveReply, reason: "Busca de catálogo atualizada", queue: "", trigger: "ai" };
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
@@ -883,7 +919,8 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Lista interativa só quando a resposta leva a vitrine numerada (2+ itens) ao cliente.
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis, singleReply: !!photoQuery && outcome.action === "reply", documents, productInterest: productInterest as { name: string; price: number | null } | null };
+  if (outcome.action === "reply" && currentCatalogFilterHash && parseShowcase(outcome.reply).length) catalogState.lastCatalogFilterHash = currentCatalogFilterHash;
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList ? list : null, imageAnalysis, singleReply: (!!photoQuery || !!proactiveReply) && outcome.action === "reply", documents, productInterest: productInterest as { name: string; price: number | null } | null };
 }
 
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
@@ -954,6 +991,7 @@ async function respond(conversationId: string, messageId: string) {
   // aiContext.lastAnalyzedImage: análise da última foto de produto deste atendimento (guardada na mensagem da foto).
   const analyzed = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inSession }, orderBy: { createdAt: "desc" }, take: 20, select: { metaMedia: true } }).catch(() => []);
   const lastAnalyzedImage = sanitizeImageAnalysis(analyzed.map((item) => (item.metaMedia as { analysis?: unknown } | null)?.analysis).find(Boolean));
+  const catalogContext = sanitizeCatalogContext(analyzed.map((item) => (item.metaMedia as { aiContext?: unknown } | null)?.aiContext).find(Boolean));
 
   const [linkedCpf, hasPendingFinancial] = await Promise.all([linkedCpfForPhone(conversation.phone).catch(() => null), pendingApproval(conversationId).then(Boolean).catch(() => false)]);
   let run: AgentRun;
@@ -982,6 +1020,7 @@ async function respond(conversationId: string, messageId: string) {
       listedProducts: extractListedProducts(aiSession.slice().reverse().map((item) => item.text ?? "")),
       selectedProductRef: pending.map((item) => (item.metaMedia as { selectedProductRef?: string } | null)?.selectedProductRef).filter(Boolean).at(-1) ?? null,
       lastAnalyzedImage,
+      catalogContext,
       contactName,
       isReturningContact: !!previousConversation,
       // Parcelas: CPF só quando o telefone leva a um único cadastro do VMSet; aprovação pendente evita nova consulta.
@@ -1009,6 +1048,12 @@ async function respond(conversationId: string, messageId: string) {
   if (photoMessage && run.imageAnalysis) {
     const current = (photoMessage.metaMedia ?? {}) as Record<string, unknown>;
     await prisma.chatMessage.update({ where: { id: photoMessage.id }, data: { metaMedia: { ...current, analysis: run.imageAnalysis } as unknown as Prisma.InputJsonValue } }).catch((error) => console.warn(`[ai] ${conversationId}: análise da foto não salva`, error));
+  }
+  if (run.catalogContext && JSON.stringify(run.catalogContext) !== JSON.stringify(catalogContext)) {
+    const target = pending[pending.length - 1];
+    const current = await prisma.chatMessage.findUniqueOrThrow({ where: { id: target.id }, select: { metaMedia: true } });
+    const metadata = current.metaMedia && typeof current.metaMedia === "object" && !Array.isArray(current.metaMedia) ? current.metaMedia : {};
+    await prisma.chatMessage.update({ where: { id: target.id }, data: { metaMedia: { ...metadata, aiContext: run.catalogContext } } });
   }
   // Receita lida (foto ou PDF): vai para o receituário do cliente, uma por mensagem (a nota do transbordo continua).
   await saveReadPrescriptions(run.documents, { contactId: conversation.contactId, conversationId });
@@ -1118,7 +1163,7 @@ async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, i
 }
 
 /** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
-export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string; imageUrl?: string; /** Item tocado na lista interativa simulada. */ selectedProductRef?: string; /** Análise da foto de produto desta mensagem do cliente (como no metaMedia do WhatsApp). */ imageAnalysis?: ImageAnalysis };
+export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string; imageUrl?: string; catalogContext?: CatalogContext; /** Item tocado na lista interativa simulada. */ selectedProductRef?: string; /** Análise da foto de produto desta mensagem do cliente (como no metaMedia do WhatsApp). */ imageAnalysis?: ImageAnalysis };
 /** queued: simula o cliente já na fila (espera assistida), com o mesmo pipeline de produto. sessionId: sessão de teste (nova a cada "Limpar"). */
 export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string; /** Nome do contato simulado (ex.: "Vivi"); sem ele, o do perfil. */ contactName?: string };
 export type PlaygroundResult = AgentOutcome & {
@@ -1166,6 +1211,7 @@ export type PlaygroundResult = AgentOutcome & {
   anchor?: SessionAnchor;
   /** Análise da foto enviada nesta mensagem (a tela guarda na mensagem do cliente e reenvia, como no WhatsApp). */
   imageAnalysis?: ImageAnalysis;
+  catalogContext?: CatalogContext;
 };
 
 /**
@@ -1188,7 +1234,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     aiReplies: messages.filter((message) => message.from === "ai").length,
     meta,
     ignoreMediaTrigger: options.ignoreMediaTrigger,
-    earlierCustomerTexts: messages.slice(0, lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text),
+    earlierCustomerTexts: messages.slice(0, lastAi + 1).filter((message) => message.from === "customer").map((message) => message.text).reverse(),
     lastAiText: lastAi >= 0 ? messages[lastAi].text : null,
     recentAiTexts: messages.filter((message) => message.from === "ai").slice(-4).reverse().map((message) => message.text),
     sentImageSkus: messages.map((message) => message.imageSku).filter((sku): sku is string => !!sku),
@@ -1197,6 +1243,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     listedProducts: extractListedProducts(messages.filter((message) => message.from === "ai").map((message) => message.text)),
     selectedProductRef: messages.slice(lastAi + 1).map((message) => message.selectedProductRef).filter(Boolean).at(-1) ?? null,
     lastAnalyzedImage: messages.map((message) => message.imageAnalysis).filter((item): item is ImageAnalysis => !!item).at(-1) ?? null,
+    catalogContext: messages.map((message) => message.catalogContext).filter((item): item is CatalogContext => !!item).at(-1),
     contactName,
     isReturningContact: profile.id === "recorrente",
     queued: options.queued ? { queueName: "Vendas" } : null,
@@ -1237,6 +1284,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     sessionId: options.sessionId,
     anchor: run.anchor,
     imageAnalysis: run.imageAnalysis ?? undefined,
+    catalogContext: run.catalogContext,
     // Simulação: mostra o que iria para o funil de vendas (o teste não grava no pipeline).
     salesEvents: (() => { const events = turnSalesEvents(run, pendingText); return events.length ? events : undefined; })(),
     // Parcelas: o teste mostra o card que o operador veria no /chat (o CPF completo nunca sai do servidor).

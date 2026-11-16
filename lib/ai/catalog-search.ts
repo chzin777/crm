@@ -34,6 +34,41 @@ export type ImageAnalysis = { marca: string; linha: string; modeloProvavel: stri
 /** Maiúsculas, sem acento e só letras/números: "Ray-Ban" e "RAY BAN" viram RAYBAN, como no SQL da busca. */
 export const normalizeTerm = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
+const BRAND_ALIASES: [string, string][] = [
+  ["prada linea rossa", "Prada Linea Rossa"], ["prada linearossa", "Prada Linea Rossa"], ["linea rossa", "Prada Linea Rossa"],
+  ["dolce & gabbana", "Dolce & Gabbana"], ["dolce gabbana", "Dolce & Gabbana"], ["dg", "Dolce & Gabbana"],
+  ["emporio armani", "Emporio Armani"], ["carolina herrera", "Carolina Herrera"], ["carolinaherrera", "Carolina Herrera"],
+  ["miu miu", "Miu Miu"], ["miu-miu", "Miu Miu"], ["miumiu", "Miu Miu"], ["mew mew", "Miu Miu"],
+  ["ray ban", "Ray-Ban"], ["ray-ban", "Ray-Ban"], ["rayban", "Ray-Ban"], ["raiban", "Ray-Ban"],
+  ["tom ford", "Tom Ford"], ["tomford", "Tom Ford"], ["michael kors", "Michael Kors"], ["ana hickmann", "Ana Hickmann"],
+  ["bvlgari", "Bvlgari"], ["bulgari", "Bvlgari"], ["prada", "Prada"], ["vogue", "Vogue"], ["oakley", "Oakley"],
+  ["armani", "Armani"], ["versace", "Versace"], ["burberry", "Burberry"], ["gucci", "Gucci"], ["fendi", "Fendi"],
+  ["chanel", "Chanel"], ["dior", "Dior"], ["persol", "Persol"], ["tiffany", "Tiffany"], ["atitude", "Atitude"],
+  ["speedo", "Speedo"], ["mormaii", "Mormaii"], ["hb", "HB"],
+];
+
+/** Substitui apenas palavras inteiras; aceita espaços, hífens e acentos da transcrição. */
+export function normalizeBrandQuery(text: string): string {
+  const plain = text.replace(/[\u00c0-\u024f]/g, (char) => char.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  const aliases = [...BRAND_ALIASES].sort((a, b) => b[0].length - a[0].length);
+  for (const [alias, brand] of aliases) {
+    const pattern = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[\s-]+/g, "[\\s-]+");
+    const match = new RegExp(`(^|[^a-zA-Z0-9])(${pattern})(?=$|[^a-zA-Z0-9])`, "i").exec(plain);
+    if (match) return text.slice(0, match.index + match[1].length) + brand + text.slice(match.index + match[0].length);
+  }
+  return text;
+}
+
+export function explicitBrand(text: string): string | null {
+  const normalized = normalizeBrandQuery(text);
+  const plain = normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const [, brand] of [...BRAND_ALIASES].sort((a, b) => b[1].length - a[1].length)) {
+    const pattern = brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[\s-]+/g, "[\\s-]+");
+    if (new RegExp(`(^|[^a-zA-Z0-9])${pattern}(?=$|[^a-zA-Z0-9])`, "i").test(plain)) return brand;
+  }
+  return null;
+}
+
 export function readVision(raw: VisionResult): { kind: "produto" | "receita" | "documento" | "outro"; query: CatalogQuery } {
   const kind = raw.kind === "produto" || raw.kind === "receita" || raw.kind === "documento" ? raw.kind : "outro";
   const category = raw.category === "SOLAR" || raw.category === "ARMACAO" || raw.category === "LENTE_CONTATO" ? raw.category : "";

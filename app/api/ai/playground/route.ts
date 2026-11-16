@@ -5,6 +5,7 @@ import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
 import { sanitizeAiSettings } from "@/lib/ai/settings";
 import { validateAiAttachment } from "@/lib/ai/attachments";
 import { sanitizeImageAnalysis } from "@/lib/ai/catalog-search";
+import { sanitizeCatalogContext } from "@/lib/ai/catalog-context";
 import type { AiMediaInput } from "@/lib/ai/multimodal";
 
 type Payload = { settings?: unknown; messages?: unknown; profile?: unknown; ignoreMediaTrigger?: unknown; queued?: unknown; sessionId?: unknown; contactName?: unknown } | null;
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
       ...(item?.from !== "ai" && typeof item?.selectedProductRef === "string" && /^[\w .#/-]{1,60}$/.test(item.selectedProductRef) ? { selectedProductRef: item.selectedProductRef } : {}),
       // Análise da foto guardada na mensagem do cliente (aiContext.lastAnalyzedImage da sessão de teste).
       ...(item?.from !== "ai" && sanitizeImageAnalysis(item?.imageAnalysis) ? { imageAnalysis: sanitizeImageAnalysis(item?.imageAnalysis) ?? undefined } : {}),
+      ...(item?.from !== "ai" && item?.catalogContext ? { catalogContext: sanitizeCatalogContext(item.catalogContext) } : {}),
     }))
     // Mensagem só com anexo (sem texto) é a última do cliente.
     .filter((item, index, list) => item.text || (media && index === list.length - 1 && item.from === "customer"))

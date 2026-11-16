@@ -5,6 +5,7 @@
  */
 import { storeErpCode } from "@/lib/stores";
 import { humanizeProductName } from "@/lib/ai/product-names";
+import { canonicalCity } from "@/lib/ai/catalog-context";
 
 export const STOCK_CACHE_TTL_MS = 180_000;
 export const STOCK_TIMEOUT_MS = 3_000;
@@ -137,7 +138,7 @@ export function storeCity(store: StoreInfo | undefined) {
   return DF_PLACES.test(plain) && !/\(DF\)/.test(name) ? `${name} (DF)` : name;
 }
 export type StockProduct = { codigo: string; produto: string; marca: string | null; preco: number | null; lojasComEstoque: StockStore[] };
-export type StockScenario = "disponivel_na_regiao" | "esgotado_na_regiao_disponivel_em_outras" | "disponivel_em_lojas" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
+export type StockScenario = "disponivel_na_regiao" | "esgotado_na_regiao_disponivel_em_outras" | "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
 export type StockToolProduct = StockProduct & {
   lojasNaRegiao: StockStore[];
   nomeProduto: string;
@@ -184,11 +185,24 @@ export function retailStock(units: StockUnit[], stores: Map<string, StoreInfo>):
   return [...byCode.values()].sort((a, b) => b.quantidade - a.quantidade);
 }
 
+export function stockInCity(units: StockUnit[], stores: Map<string, StoreInfo>, city?: string): StockStore[] {
+  const stock = retailStock(units, stores);
+  if (!city) return stock;
+  const wanted = norm(canonicalCity(city));
+  return stock.filter((item) => {
+    const store = stores.get(item.code);
+    if (!store?.city || item.quantidade < 1) return false;
+    if (wanted === "DF") return norm(store.state ?? "") === "DF";
+    return norm(canonicalCity(store.city.replace(/\s*[-/]\s*(DF|GO)$/i, ""))) === wanted;
+  });
+}
+
 const GUIDANCE: Record<StockScenario, string> = {
   disponivel_na_regiao: "Confirme objetivamente que há unidades disponíveis na loja da região pedida e informe o endereço comercial dela.",
   esgotado_na_regiao_disponivel_em_outras: "Informe que na loja pedida está esgotado no momento e liste exatamente as outras lojas com estoque (nome e endereço).",
   disponivel_em_lojas: "Informe objetivamente em quais lojas há unidades disponíveis agora (nome e endereço) e pergunte qual fica melhor para o cliente.",
   sem_estoque_na_rede: "Informe que o modelo está sem estoque na rede no momento e ofereça transferir para um atendente verificar encomenda ou modelos similares (action handoff se o cliente aceitar ou insistir).",
+  sem_estoque_na_cidade: "Informe que o modelo não está disponível na cidade solicitada, sem afirmar que falta em toda a rede.",
   unavailable_api: "Informe que não foi possível verificar o estoque no sistema agora e transfira para um atendente confirmar (action handoff).",
   produto_nao_encontrado: "Nenhum produto com esse nome foi encontrado no catálogo. Peça marca/modelo/referência ao cliente ou transfira para um atendente (action handoff).",
 };
@@ -197,6 +211,7 @@ const GUIDANCE: Record<StockScenario, string> = {
 export function buildStockResult(input: {
   term: string;
   region?: string;
+  city?: string;
   products: { code: string; description: string; brand: string | null; price: number | null }[];
   lookup: StockLookup | null;
   stores: Map<string, StoreInfo>;
@@ -212,7 +227,7 @@ export function buildStockResult(input: {
   const regionCodes = region ? [...input.stores.keys()].filter((code) => matchesRegion(code, input.stores.get(code), region)) : [];
   const regionKnown = regionCodes.length > 0;
   const produtos = input.products.map((product) => {
-    const all = retailStock(lookup.byCode[product.code] ?? [], input.stores);
+    const all = stockInCity(lookup.byCode[product.code] ?? [], input.stores, input.city);
     const inRegion = all.filter((store) => regionCodes.includes(store.code));
     const others = all.filter((store) => !regionCodes.includes(store.code));
     // Preço oficial do ERP por loja (PRECO_VENDA); sem a opção "pode informar preços", nenhum valor vai para a IA.
@@ -237,16 +252,18 @@ export function buildStockResult(input: {
       lojasComEstoque: listed,
     };
   });
-  const anyStock = produtos.some((product) => product.lojasComEstoque.length);
+  const filtered = input.city ? produtos.filter((product) => product.lojasComEstoque.length) : produtos;
+  const anyStock = filtered.some((product) => product.lojasComEstoque.length);
   const anyRegion = produtos.some((product) => product.lojasNaRegiao.length);
-  const cenario: StockScenario = !anyStock ? "sem_estoque_na_rede" : !regionKnown ? "disponivel_em_lojas" : anyRegion ? "disponivel_na_regiao" : "esgotado_na_regiao_disponivel_em_outras";
+  const cenario: StockScenario = !anyStock ? (input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede") : !regionKnown ? "disponivel_em_lojas" : anyRegion ? "disponivel_na_regiao" : "esgotado_na_regiao_disponivel_em_outras";
   // Orientação de preço junto do cenário: valor direto quando existe; sem preço no ERP, oferecer confirmar o orçamento.
   const priceGuidance = !anyStock || !input.withPrices
     ? ""
     : produtos.some((product) => product.precoSobConsulta)
       ? " O preço não está cadastrado no sistema para este modelo (precoSobConsulta): informe a disponibilidade e as lojas normalmente e ofereça transferir para um atendente confirmar o valor/orçamento (action handoff se o cliente aceitar)."
       : " Informe o precoVenda exato e, se o cliente perguntou quantidade, quantas unidades há (quantidade por loja ou totalDisponivelRede). Liste as lojas completas (nome e endereço) antes de terminar; não transfira.";
-  return { ...base, cenario, regiaoReconhecida: regionKnown, produtos, orientacao: GUIDANCE[cenario] + priceGuidance };
+  const guidance = input.city && !anyStock ? `Não há estoque deste produto em ${input.city} no momento; não afirme que está esgotado em toda a rede.` : GUIDANCE[cenario];
+  return { ...base, cenario, regiaoReconhecida: regionKnown, produtos: filtered, orientacao: guidance + priceGuidance };
 }
 
 /** Regras fixas no código (não editáveis na tela) sobre estoque. */
@@ -257,6 +274,7 @@ export const STOCK_RULES = [
   "- esgotado_na_regiao_disponivel_em_outras: diga que naquela loja está esgotado no momento e liste exatamente as outras lojas com estoque;",
   "- disponivel_em_lojas: diga em quais lojas há unidades agora;",
   "- sem_estoque_na_rede: diga que o modelo está sem estoque na rede no momento e ofereça transferir para um atendente verificar encomenda ou similares;",
+  "- sem_estoque_na_cidade: informe falta apenas na cidade solicitada; não afirme indisponibilidade na rede inteira.",
   "- unavailable_api: diga que não foi possível verificar o estoque no sistema agora e transfira (action handoff) para um atendente confirmar.",
   "Use só as lojas e os endereços devolvidos pela ferramenta.",
   "PREÇO E QUANTIDADE (regra fixa): sempre que o cliente perguntar preço, valor, disponibilidade ou quantidade de um modelo, consulte consultarEstoqueProduto e informe diretamente:",
@@ -277,6 +295,7 @@ export const STOCK_TOOL = {
       properties: {
         termoBusca: { type: "string", description: "Marca, modelo ou referência do produto, ex.: \"Ray-Ban RB3025\", \"Oakley Holbrook\"." },
         regiaoOuLoja: { type: "string", description: "Bairro, cidade ou loja citada pelo cliente, ex.: \"Parque Amazônia\", \"Aparecida\", \"LJ 36\". Opcional." },
+        cidade: { type: "string", description: "Cidade onde o cliente quer comprar ou retirar; restringe os resultados a lojas dessa cidade." },
         tipoBusca: { type: "string", enum: ["marca_ampla", "modelo_especifico"], description: "marca_ampla: o cliente pediu só a marca ou um tipo (\"tem Ray-Ban?\", \"armações femininas\") → vitrine de modelos com preço, sem foto. modelo_especifico: qualquer nome de modelo ou referência junto ou sem a marca (\"Ray-Ban Justin\", \"RB4165\") → estoque por loja, foto e ficha." },
       },
       required: ["termoBusca"],

@@ -178,6 +178,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = []) {
     STAFF_NAME_RULES,
     STOCK_RULES,
     BROAD_SEARCH_RULES,
+    "PROATIVIDADE OBRIGATÓRIA: ao corrigir marca, modelo, tipo ou cidade, peça desculpas brevemente quando necessário, consulte imediatamente consultarEstoqueProduto com os filtros atuais e apresente o resultado nesta resposta. Nunca pergunte se pode buscar, corrigir ou mostrar opções. Nunca peça número ou referência de uma lista que não foi enviada nesta resposta. Reconheça com carinho, brevemente, o contexto de presente, ocasião ou uso informado pelo cliente.",
     BRAND_TYPO_RULES,
     PRODUCT_CARD_RULES,
     DETAILS_RULES,

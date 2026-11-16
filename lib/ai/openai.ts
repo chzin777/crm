@@ -131,6 +131,7 @@ export async function transcribeAudio(audio: { name: string; mime: string; data:
   form.append("file", new Blob([new Uint8Array(audio.data)], { type: audio.mime.split(";")[0] || "audio/ogg" }), audioFileName(audio.mime, audio.name || "audio"));
   form.append("model", TRANSCRIPTION_MODEL);
   form.append("language", "pt");
+  form.append("prompt", "Atendimento de ótica: Miu Miu, Ray-Ban, Prada, Prada Linea Rossa, Oakley, Vogue, Ana Hickmann, Dolce & Gabbana, Versace, Gucci, Tiffany, Carolina Herrera.");
   form.append("response_format", "verbose_json");
 
   type Body = { error?: { code?: string; type?: string; message?: string }; text?: string; duration?: number };

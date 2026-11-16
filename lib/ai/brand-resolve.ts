@@ -131,7 +131,7 @@ export const BRAND_TYPO_RULES = [
  * Produtos da busca ampla: com marca reconhecida, só a família dela (nunca substring em outro nome); sem marca,
  * só produtos em que cada palavra aparece inteira ("ada" não casa com "PRADA"). Mais vendidos primeiro.
  */
-export function broadCatalogMatches(all: IndexedProduct[], term: string, brands: BrandEntry[]) {
+export function broadCatalogMatches(all: IndexedProduct[], term: string, brands: BrandEntry[], limit = 400) {
   const brand = resolveBrandQuery(term, brands);
   const words = modelWords(term);
   const pool = brand
@@ -139,7 +139,7 @@ export function broadCatalogMatches(all: IndexedProduct[], term: string, brands:
     : words.length
       ? all.filter((product) => words.every((word) => hasWholeWord(`${product.brand ?? ""} ${product.description}`, word)))
       : all;
-  const found = matchProducts(pool, { label: term, category: termCategory(term), terms: [] }, 400).filter((product) => product.code);
+  const found = matchProducts(pool, { label: term, category: termCategory(term), terms: [] }, limit).filter((product) => product.code);
   const audience = termAudience(term);
   const narrowed = audience ? found.filter((product) => product.text.includes(audience)) : found;
   return { brand: brand?.brand ?? null, products: narrowed.length ? narrowed : found };

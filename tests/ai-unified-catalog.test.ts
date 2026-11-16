@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ requested: [] as string[], available: new Set<string>(), failed: new Set<string>() }));
+const state = vi.hoisted(() => ({ requested: [] as string[], available: new Set<string>(), failed: new Set<string>(), units: {} as Record<string, string[]> }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/prisma", () => ({ prisma: { store: { findMany: vi.fn(async () => [
   { id: "s1", name: "LJ 39", address: "Rua 1", addressNumber: "1", neighborhoods: [], city: "Goiânia", state: "GO", pinLat: null, pinLng: null },
+  { id: "s2", name: "LJ 40", address: "Rua 2", addressNumber: "1", neighborhoods: [], city: "Brasília", state: "DF", pinLat: null, pinLng: null },
+  { id: "s3", name: "LJ 41", address: "Rua 3", addressNumber: "1", neighborhoods: [], city: "Taguatinga", state: "DF", pinLat: null, pinLng: null },
+  { id: "s4", name: "LJ 42", address: "Rua 4", addressNumber: "1", neighborhoods: [], city: "Aparecida de Goiânia", state: "GO", pinLat: null, pinLng: null },
 ]) } } }));
 vi.mock("@/lib/ai/stock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ai/stock")>();
@@ -15,7 +18,7 @@ vi.mock("@/lib/ai/stock", async (importOriginal) => {
         const failed = codes.some((code) => state.failed.has(code));
         return {
           stockStatus: failed ? "unavailable_api" : "ok",
-          byCode: Object.fromEntries(codes.map((code) => [code, state.available.has(code) ? [{ unit: "39", name: "LJ 39", qty: 1, price: 899 }] : []])),
+          byCode: Object.fromEntries(codes.map((code) => [code, (state.units[code] ?? (state.available.has(code) ? ["39"] : [])).map((unit) => ({ unit, name: `LJ ${unit}`, qty: 1, price: 899 }))])),
           fromCache: 0, requested: codes.length,
         };
       },
@@ -23,7 +26,8 @@ vi.mock("@/lib/ai/stock", async (importOriginal) => {
   };
 });
 
-import { indexProduct, matchIconicProducts, readVision, VISION_PROMPT } from "@/lib/ai/catalog-search";
+import { explicitBrand, indexProduct, matchIconicProducts, normalizeBrandQuery, readVision, VISION_PROMPT } from "@/lib/ai/catalog-search";
+import { EMPTY_CATALOG_CONTEXT, extractPreferredCity, updateCatalogContext } from "@/lib/ai/catalog-context";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { iconicModel } from "@/lib/ai/product-names";
 import { welcomeReply } from "@/lib/ai/response-opening";
@@ -45,6 +49,65 @@ beforeEach(() => {
   state.requested = [];
   state.available = new Set(["900706"]);
   state.failed = new Set();
+  state.units = {};
+});
+
+describe("marca falada e cidade de estoque", () => {
+  const frames = [
+    indexProduct({ code: "111111", description: "ARM MIU MIU REF MU 01 52", brand: "MIU MIU", category: "ARMACAO", subcategory: "", sales: 3, price: 899 }),
+    indexProduct({ code: "222222", description: "ARM MIU MIU REF MU 02 52", brand: "MIU MIU", category: "ARMACAO", subcategory: "", sales: 2, price: 899 }),
+    indexProduct({ code: "333333", description: "ARM RAY BAN REF RB 01 52", brand: "RAYBAN", category: "ARMACAO", subcategory: "", sales: 4, price: 899 }),
+  ];
+  it.each([
+    ["miumiu", "Miu Miu"], ["miu-miu", "Miu Miu"], ["miú miú", "Miu Miu"], ["mew mew", "Miu Miu"],
+    ["rayban", "Ray-Ban"], ["raiban", "Ray-Ban"], ["prada linearossa", "Prada Linea Rossa"],
+    ["dolce & gabbana", "Dolce & Gabbana"], ["tomford", "Tom Ford"], ["carolinaherrera", "Carolina Herrera"],
+  ])("normaliza %s", (source, expected) => {
+    expect(normalizeBrandQuery(source)).toBe(expected);
+    expect(explicitBrand(`armação ${source}`)).toBe(expected);
+  });
+  it("não troca marca nem mostra produtos de fora da cidade na vitrine", async () => {
+    state.units = { "111111": ["39", "40"], "222222": ["40", "41", "42"], "333333": ["39"] };
+    const { result } = await consultarEstoqueProduto({ termoBusca: "armação miumiu", cidade: "gyn" }, { products: async () => frames, withPrices: true });
+    expect(result.tipoBusca).toBe("marca_ampla");
+    if (result.tipoBusca !== "marca_ampla") throw new Error("Busca deveria ser ampla");
+    expect(result.modelos.flatMap((model) => model.codigos)).toEqual(["111111"]);
+    expect(state.requested).not.toContain("333333");
+    expect(result.modelos[0].totalDisponivelRede).toBe(1);
+  });
+  it("marca sem saldo na cidade não é substituída por outra marca", async () => {
+    state.units = { "111111": ["40"], "222222": ["41"], "333333": ["39"] };
+    const { result } = await consultarEstoqueProduto({ termoBusca: "miumiu", cidade: "Goiânia" }, { products: async () => frames, withPrices: false });
+    expect(result.cenario).toBe("sem_estoque_na_cidade");
+    expect(result.orientacao).toContain("Goiânia");
+    expect(state.requested).not.toContain("333333");
+    if (result.tipoBusca !== "marca_ampla") throw new Error("Busca deveria ser ampla");
+    expect(result.modelos).toEqual([]);
+  });
+  it("ficha específica contém somente lojas locais e não inclui produto sem saldo local", async () => {
+    state.units = { "111111": ["39", "40"], "222222": ["41"] };
+    const first = await consultarEstoqueProduto({ termoBusca: "Miu Miu 111111", cidade: "goiania" }, { products: async () => frames, withPrices: true });
+    expect(first.result.produtos[0].lojasComEstoque.map((store) => store.code)).toEqual(["39"]);
+    const second = await consultarEstoqueProduto({ termoBusca: "Miu Miu 222222", cidade: "Goiânia" }, { products: async () => frames, withPrices: true });
+    expect(second.result.produtos).toEqual([]);
+    expect(second.result.orientacao).toContain("Goiânia");
+  });
+  it("não confunde Goiânia e Aparecida, nem cidade e DF", async () => {
+    state.units = { "111111": ["39", "40"], "222222": ["41", "42"] };
+    const find = (cidade: string) => consultarEstoqueProduto({ termoBusca: "Miu Miu", cidade }, { products: async () => frames, withPrices: false });
+    const aparecida = await find("aparecida de goiania");
+    const df = await find("df");
+    if (aparecida.result.tipoBusca !== "marca_ampla" || df.result.tipoBusca !== "marca_ampla") throw new Error("Busca deveria ser ampla");
+    expect(aparecida.result.modelos.flatMap((item) => item.codigos)).toEqual(["222222"]);
+    expect(df.result.modelos.flatMap((item) => item.codigos).sort()).toEqual(["111111", "222222"]);
+  });
+  it("guarda a cidade desejada e ignora cidade considerada distante", () => {
+    expect(extractPreferredCity("estou em Goiânia e Brasilia é muito longe", ["Goiânia", "Brasília"])).toBe("Goiânia");
+    const first = updateCatalogContext(EMPTY_CATALOG_CONTEXT, "Queria armação da miumiu para presentear minha esposa", []);
+    const second = updateCatalogContext(first.context, "preciso apenas de Goiânia", ["Goiânia"]);
+    expect(second.context).toMatchObject({ brand: "Miu Miu", category: "ARMACAO", preferredCity: "Goiânia" });
+    expect(second.changed).toBe(true);
+  });
 });
 
 describe("catálogo unificado de modelos", () => {
