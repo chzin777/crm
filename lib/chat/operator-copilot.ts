@@ -29,7 +29,7 @@ function formatAnswer(result: QuickQueryResult) {
   const lines = [
     result.title,
     result.subtitle,
-    ...result.lines.map((line) => `${line.label}: ${line.value}`),
+    ...result.lines.map((line) => `${line.label}: ${line.value}${line.amount ? ` · ${line.amount}` : ""}`),
     ...(result.candidates ?? []).map((candidate) => `${candidate.name} (CPF ${candidate.cpfMasked})`),
   ].filter(Boolean);
   return lines.slice(0, 9).join("\n");

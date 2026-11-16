@@ -16,7 +16,7 @@ import {
  */
 
 export type QuickQueryParams = { cpf?: string | null; name?: string | null; term?: string | null };
-export type QuickQueryLine = { label: string; value: string; tone?: "ok" | "warn" | "danger" | "muted"; link?: string };
+export type QuickQueryLine = { label: string; value: string; amount?: string; tone?: "ok" | "warn" | "danger" | "muted"; link?: string };
 export type QuickQueryResult = {
   kind: QuickQueryKind;
   ok: boolean;
@@ -74,7 +74,7 @@ export async function runQuickQuery(input: { kind: QuickQueryKind; params: Quick
     return {
       kind,
       ok: true,
-      title: `💳 Faturas de ${name ?? "cliente"}`,
+      title: `Faturas de ${name ?? "cliente"}`,
       subtitle: `CPF ${maskCpf(identity.cpf)}`,
       lines: [
         { label: "Em aberto", value: `${summary.abertas} parcela${summary.abertas === 1 ? "" : "s"}`, tone: summary.abertas ? "warn" : "ok" },
@@ -92,14 +92,14 @@ export async function runQuickQuery(input: { kind: QuickQueryKind; params: Quick
     if (!term || term.length < 2) return fail(kind, "Informe o produto", "Digite a referência, a marca ou o modelo.");
     const result = await deps.stock(term);
     if (result.status !== "ok") return fail(kind, "VMSet indisponível", "Não foi possível consultar o estoque agora.");
-    if (!result.products.length) return { kind, ok: true, title: `🕶️ ${term}`, subtitle: "Nada encontrado no catálogo", lines: [], reply: stockReply([]) };
+    if (!result.products.length) return { kind, ok: true, title: term, subtitle: "Nada encontrado no catálogo", lines: [], reply: stockReply([]) };
     return {
       kind,
       ok: true,
-      title: `🕶️ Estoque de ${term}`,
+      title: `Estoque de ${term}`,
       lines: result.products.slice(0, 3).flatMap((product) => [
         { label: product.produto, value: `${product.preco ?? "sem preço"} · ${product.total} un. na rede`, tone: product.total ? ("ok" as const) : ("warn" as const) },
-        ...product.lojas.slice(0, 6).map((store) => ({ label: `📍 ${store.loja}`, value: `${store.quantidade} un.`, tone: "muted" as const })),
+        ...product.lojas.slice(0, 6).map((store) => ({ label: store.loja, value: `${store.quantidade} un.`, tone: "muted" as const })),
       ]),
       reply: stockReply(result.products),
     };
@@ -113,9 +113,9 @@ export async function runQuickQuery(input: { kind: QuickQueryKind; params: Quick
     return {
       kind,
       ok: true,
-      title: `🧾 Compras e OS${name ? ` de ${name}` : ""}`,
+      title: `Compras e OS${name ? ` de ${name}` : ""}`,
       subtitle: purchases.length ? `${purchases.length} pedido${purchases.length > 1 ? "s" : ""} recente${purchases.length > 1 ? "s" : ""}` : "Nenhuma compra no espelho do VMSet",
-      lines: purchases.slice(0, 5).map((item) => ({ label: `${dayBr(item.data)}${item.loja ? ` · ${item.loja}` : ""}`, value: `${item.itens.slice(0, 2).join(", ")}${item.total ? ` · ${brl(item.total)}` : ""}`, tone: "muted" as const })),
+      lines: purchases.slice(0, 5).map((item) => ({ label: `${dayBr(item.data)}${item.pedido ? ` · Pedido ${item.pedido}` : ""}${item.loja ? ` · ${item.loja}` : ""}`, value: item.itens.join(", "), ...(item.total ? { amount: brl(item.total) } : {}), tone: "muted" as const })),
       reply: purchasesReply(name, purchases),
     };
   }
@@ -125,7 +125,7 @@ export async function runQuickQuery(input: { kind: QuickQueryKind; params: Quick
   return {
     kind,
     ok: true,
-    title: "👓 Receituário",
+    title: "Receituário",
     subtitle: items.length ? `${items.length} receita${items.length > 1 ? "s" : ""}` : "Nenhuma receita salva",
     lines: items.slice(0, 4).flatMap((item) => [
       { label: `${item.data ?? "Sem data"}${item.medico ? ` · ${item.medico}` : ""}`, value: "", tone: "ok" as const, ...(item.anexo ? { link: item.anexo } : {}) },

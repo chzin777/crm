@@ -118,10 +118,10 @@ export function suggestQuickQueries(context: ChatOperationalContext): QuickSugge
   const who = displayName(context.name);
   const identity = { ...(context.cpf ? { cpf: context.cpf } : {}), ...(context.name ? { name: context.name } : {}) };
   const byIntent: Partial<Record<OperationalIntent, QuickSuggestion | null>> = {
-    faturas_parcelas: context.cpf || context.name ? { kind: "faturas", label: `💳 Consultar faturas de ${who}${context.cpf ? ` (CPF ${maskCpf(context.cpf)})` : ""}`, params: identity } : null,
-    estoque_preco: context.product ? { kind: "estoque", label: `🕶️ Ver estoque e preço de ${context.product}`, params: { term: context.product } } : null,
-    historico_compras_os: context.cpf || context.name ? { kind: "compras", label: `🧾 Histórico de OS e compras de ${who}`, params: identity } : null,
-    receituario: { kind: "receitas", label: `👓 Receitas salvas de ${who}`, params: {} },
+    faturas_parcelas: context.cpf || context.name ? { kind: "faturas", label: `Consultar faturas de ${who}${context.cpf ? ` (CPF ${maskCpf(context.cpf)})` : ""}`, params: identity } : null,
+    estoque_preco: context.product ? { kind: "estoque", label: `Ver estoque e preço de ${context.product}`, params: { term: context.product } } : null,
+    historico_compras_os: context.cpf || context.name ? { kind: "compras", label: `Histórico de OS e compras de ${who}`, params: identity } : null,
+    receituario: { kind: "receitas", label: `Receitas salvas de ${who}`, params: {} },
   };
   return context.intents.map((intent) => byIntent[intent]).filter((item): item is QuickSuggestion => !!item);
 }

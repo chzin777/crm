@@ -31,7 +31,7 @@ describe("Copiloto VMSet: contexto da conversa", () => {
     expect(context).toMatchObject({ cpf: CPF, cpfSource: "chat", intent: "faturas_parcelas" });
     const [first] = suggestQuickQueries(context);
     expect(first.kind).toBe("faturas");
-    expect(first.label).toContain("💳 Consultar faturas de Maria da Silva");
+    expect(first.label).toContain("Consultar faturas de Maria da Silva");
     expect(first.label).toContain("CPF");
     expect(first.label).not.toContain(CPF);
     expect(first.params).toEqual({ cpf: CPF, name: "Maria da Silva" });
@@ -46,7 +46,7 @@ describe("Copiloto VMSet: contexto da conversa", () => {
   it("nome completo declarado no chat é usado quando não há nome cadastrado", () => {
     const context = extractChatOperationalContext({ contact: { name: null, cpf: null }, messages: [{ author: "customer", text: "Meu nome é Maria Aparecida da Silva, queria ver meu carnê" }] });
     expect(context.name).toBe("Maria Aparecida da Silva");
-    expect(suggestQuickQueries(context)[0].label).toBe("💳 Consultar faturas de Maria Aparecida da Silva");
+    expect(suggestQuickQueries(context)[0].label).toBe("Consultar faturas de Maria Aparecida da Silva");
   });
 
   it("referência do produto e sugestão de estoque", () => {
@@ -55,12 +55,12 @@ describe("Copiloto VMSet: contexto da conversa", () => {
     expect(extractProductReference([{ author: "customer", text: "quero ver os óculos da radda" }])).toBe("Radda");
     const context = extractChatOperationalContext({ contact: { name: "Ana", cpf: null }, messages: [{ author: "customer", text: "Qual loja tem o RB3025 e quanto custa?" }] });
     expect(context.intent).toBe("estoque_preco");
-    expect(suggestQuickQueries(context)[0]).toMatchObject({ kind: "estoque", label: "🕶️ Ver estoque e preço de RB3025", params: { term: "RB3025" } });
+    expect(suggestQuickQueries(context)[0]).toMatchObject({ kind: "estoque", label: "Ver estoque e preço de RB3025", params: { term: "RB3025" } });
   });
 
   it("garantia/OS sugere histórico de compras", () => {
     const context = extractChatOperationalContext({ contact: { name: "Carlos Souza", cpf: CPF }, messages: [{ author: "customer", text: "meu óculos quebrou, ainda está na garantia?" }] });
-    expect(suggestQuickQueries(context)[0]).toMatchObject({ kind: "compras", label: "🧾 Histórico de OS e compras de Carlos Souza" });
+    expect(suggestQuickQueries(context)[0]).toMatchObject({ kind: "compras", label: "Histórico de OS e compras de Carlos Souza" });
   });
 
   it("CPF mascarado no log", () => {
@@ -105,8 +105,17 @@ describe("Copiloto VMSet: consulta rápida de faturas", () => {
 
   it("estoque lista lojas e quantidade", async () => {
     const result = await runQuickQuery({ kind: "estoque", params: { term: "RB3025" } }, deps({ stock: vi.fn(async () => ({ status: "ok" as const, products: [{ produto: "Ray-Ban Aviator RB3025", preco: "R$ 899,00", total: 3, lojas: [{ loja: "Setor Marista", quantidade: 2 }, { loja: "Flamboyant", quantidade: 1 }] }] })) }));
-    expect(result.lines.map((line) => line.label)).toContain("📍 Setor Marista");
+    expect(result.lines.map((line) => line.label)).toContain("Setor Marista");
     expect(result.reply).toContain("📍 Setor Marista — 2 un.");
+  });
+
+  it("compras separa data, pedido, valor e descrição longa sem omitir itens", async () => {
+    const description = "PROG ZEISS GT2 1.59 INC FF SURF " + "TRATAMENTO".repeat(30);
+    const result = await runQuickQuery({ kind: "compras", params: { cpf: CPF } }, deps({
+      purchases: vi.fn(async () => [{ pedido: "123", data: "2026-11-16", loja: "Loja Centro", itens: [description, "Lente", "Armação"], total: 1300 }]),
+    }));
+    expect(result.title).toBe("Compras e OS");
+    expect(result.lines[0]).toMatchObject({ label: "16/11/2026 · Pedido 123 · Loja Centro", value: `${description}, Lente, Armação`, amount: expect.stringContaining("1.300,00") });
   });
 });
 
