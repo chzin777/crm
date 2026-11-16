@@ -1,13 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 
-const calls = vi.hoisted(() => ({ systems: [] as string[], users: [] as unknown[], transcribed: [] as string[], searches: 0 }));
+const calls = vi.hoisted(() => ({ systems: [] as string[], users: [] as unknown[], transcribed: [] as string[], searches: 0, stockQueries: [] as Record<string, unknown>[] }));
 const model = vi.hoisted(() => ({
   vision: [] as Record<string, unknown>[],
   pdf: null as Record<string, unknown> | null,
   reply: { reply: "Claro! O Ray-Ban Justin está saindo por R$ 899,00 😊", action: "reply" } as Record<string, unknown>,
   transcript: "oi, quanto custa o ray-ban justin? tem na loja do bueno?",
   transcribeError: null as Error | null,
+  stockProducts: [] as Record<string, unknown>[],
 }));
 
 vi.mock("server-only", () => ({}));
@@ -21,8 +22,20 @@ vi.mock("@/lib/ai/assist", () => ({ catalog: vi.fn(async () => ""), conversation
 vi.mock("@/lib/ai/store", () => ({ readAiSettings: vi.fn(), readAiStatus: vi.fn() }));
 vi.mock("@/lib/store-pin", () => ({ ensureStorePin: vi.fn(async () => null) }));
 vi.mock("@/lib/ai/product-image-db", () => ({ imageSearchStatus: () => false, invalidateProductImage: vi.fn(), searchAndCacheProductImage: vi.fn() }));
-vi.mock("@/lib/ai/stock-db", () => ({ storeDirectory: vi.fn(async () => new Map()), clearStoreDirectory: vi.fn(), erpUnitDirectory: vi.fn(() => new Map()), consultarEstoqueProduto: vi.fn() }));
-vi.mock("@/lib/ai/product-details-db", () => ({ productSummary: vi.fn(), buscarDetalhesProduto: vi.fn() }));
+vi.mock("@/lib/ai/stock-db", () => ({
+  storeDirectory: vi.fn(async () => new Map()), clearStoreDirectory: vi.fn(), erpUnitDirectory: vi.fn(() => new Map()),
+  consultarEstoqueProduto: vi.fn(async (query: Record<string, unknown>) => {
+    calls.searches += 1;
+    calls.stockQueries.push(query);
+    const term = String(query.termoBusca);
+    const broad = query.tipoBusca === "marca_ampla";
+    const result = broad
+      ? { tipoBusca: "marca_ampla", cenario: "disponivel_em_lojas", produtos: [], modelos: [], vitrineFormatada: `Temos *${term}* em estoque!`, orientacao: "" }
+      : { tipoBusca: "modelo_especifico", cenario: model.stockProducts.length ? "disponivel_em_lojas" : "sem_estoque_na_rede", produtos: model.stockProducts, orientacao: "" };
+    return { result, log: { term, region: "", scenario: result.cenario, products: model.stockProducts.length, stores: 1, ms: 1, cached: false } };
+  }),
+}));
+vi.mock("@/lib/ai/product-details-db", () => ({ productSummary: vi.fn(async () => ({ source: "none", avaliacaoWeb: null, miniDescricao: null, formato: null, acabamento: null })), buscarDetalhesProduto: vi.fn() }));
 vi.mock("@/lib/ai/catalog-db", () => ({
   catalogProducts: vi.fn(async () => []),
   searchErpCatalog: vi.fn(async (steps: { terms: string[] }[]) => {
@@ -77,10 +90,13 @@ beforeEach(() => {
   calls.users.length = 0;
   calls.transcribed.length = 0;
   calls.searches = 0;
+  calls.stockQueries.length = 0;
   model.vision = [];
+  model.stockProducts = [];
   model.pdf = null;
   model.transcribeError = null;
 });
+afterEach(() => vi.useRealTimers());
 
 describe("roteamento de mídia sem transbordo cego", () => {
   it("áudio com handoffOnMedia ligado: transcreve no Whisper e a IA responde direto", async () => {
@@ -124,9 +140,51 @@ describe("roteamento de mídia sem transbordo cego", () => {
     const result = await run([image("frente.jpg"), image("outro.jpg")]);
     expect(calls.searches).toBe(2);
     expect(result.outcome.action).toBe("reply");
-    const system = calls.systems.at(-1)!;
-    expect(system).toContain("RAYBAN");
-    expect(system).toContain("OAKLEY");
+    expect(calls.stockQueries.map((query) => query.termoBusca)).toEqual(["RAYBAN", "OAKLEY"]);
+  });
+
+  it("foto com legenda Justin usa estoque unificado e uma única lista acolhedora", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-16T11:00:00-03:00"));
+    model.vision = [{ kind: "produto", marca: "Ray-Ban", nomeModelo: "Justin", textoVisivelNaImagem: "Óculos de Sol Ray-Ban Justin Verde Escuro", corLenteEArmacao: "Verde escuro" }];
+    const store = { code: "39", loja: "Loja 39", cidade: "Goiânia", endereco: "Rua 1", quantidade: 1 };
+    model.stockProducts = ["622", "601"].map((color, index) => ({
+      codigo: String(900700 + index), produto: `OCS RAYBAN REF 0RB4165L ${color} 54`, marca: "RAYBAN",
+      precoVenda: "R$ 899,00", lojasComEstoque: [store], lojasNaRegiao: [], nomeProduto: "Ray-Ban Justin", referencia: "RB4165",
+    }));
+    const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "bom dia, vc tem esse óculos ?", aiReplies: 0, contactName: "Maria", isReturningContact: true });
+    expect(calls.stockQueries).toHaveLength(1);
+    expect(calls.stockQueries[0]).toMatchObject({ marca: "Ray-Ban", nomeModelo: "Justin", referenciaOuSku: "RB4165", textoVisivelNaImagem: "Óculos de Sol Ray-Ban Justin Verde Escuro", tipoBusca: "modelo_especifico" });
+    expect(result.outcome.reply).toMatch(/^Bom dia, Maria!/);
+    expect(result.outcome.reply).not.toMatch(/não localizei|não está disponível/i);
+    expect(result.interactiveList?.bodyText).toMatch(/Maria!.*de (novo|volta)|Maria!.*novamente/);
+    expect(result.interactiveList?.bodyText).toContain("Ray-Ban Justin");
+    expect(result.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:900700", "product_select:900701"]);
+    expect(result.outcome.reply.match(/Ray-Ban Justin/g)).toHaveLength(1);
+  });
+
+  it("uma variante em estoque produz ficha diretamente e sem falsa indisponibilidade", async () => {
+    model.vision = [{ kind: "produto", marca: "Ray-Ban", nomeModelo: "Justin", textoVisivelNaImagem: "Óculos de Sol Ray-Ban Justin Verde Escuro" }];
+    model.stockProducts = [{
+      codigo: "900706", produto: "OCS RAYBAN REF 0RB4165L 622 54", marca: "RAYBAN",
+      precoVenda: "R$ 899,00", lojasComEstoque: [{ code: "39", loja: "Loja 39", cidade: "Goiânia", endereco: "Rua 1", quantidade: 1 }],
+      lojasNaRegiao: [], nomeProduto: "Ray-Ban Justin", referencia: "RB4165",
+    }];
+    const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "bom dia, vc tem esse óculos ?", aiReplies: 0, contactName: "Maria" });
+    expect(result.outcome.reply).toMatch(/^(Bom dia|Boa tarde|Boa noite), Maria!/);
+    expect(result.outcome.reply).toContain("Ray-Ban Justin");
+    expect(result.outcome.reply).toContain("R$ 899,00");
+    expect(result.outcome.reply).not.toMatch(/não localizei|não está disponível/i);
+    expect(result.interactiveList).toBeNull();
+    expect(calls.stockQueries).toHaveLength(1);
+  });
+
+  it("só oferece alternativas da marca após confirmar que o modelo está sem estoque", async () => {
+    model.vision = [{ kind: "produto", marca: "Ray-Ban", nomeModelo: "Justin", textoVisivelNaImagem: "Ray-Ban Justin" }];
+    const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "tem esse?", aiReplies: 1 });
+    expect(calls.stockQueries.map((query) => query.tipoBusca)).toEqual(["modelo_especifico", "marca_ampla"]);
+    expect(result.outcome.reply).toContain("não está disponível");
+    expect(result.outcome.reply).toContain("outras opções");
   });
 
   it("lote com áudio + foto: transcrição e foto chegam juntas à IA", async () => {

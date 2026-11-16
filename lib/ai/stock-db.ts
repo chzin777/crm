@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { storeErpCode } from "@/lib/stores";
-import { matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
+import { matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
 import { broadCatalogMatches, catalogBrands, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
 import { expandModelNicknames } from "@/lib/ai/product-names";
 import { buildStockResult, createStockClient, STOCK_MAX_CODES, stockSearchTerms, type StockLog, type StockLookup, type StockToolResult, type StoreInfo } from "@/lib/ai/stock";
@@ -25,15 +25,18 @@ export function erpUnitDirectory(): Map<string, string> {
   return erpUnits;
 }
 
-/** Saldo de mais códigos que o limite por chamada (5): lotes em paralelo, resultado unido; falha só se todos falharem. */
+/** Saldo em lotes: uma falha parcial impede afirmar que o modelo está esgotado. */
 export async function getStockInBatches(codes: string[]): Promise<StockLookup> {
   const unique = [...new Set(codes)];
   const batches: string[][] = [];
   for (let index = 0; index < unique.length; index += STOCK_MAX_CODES) batches.push(unique.slice(index, index + STOCK_MAX_CODES));
-  const results = await Promise.all(batches.map((batch) => getStockByProductCodes(batch)));
+  const results: StockLookup[] = [];
+  for (let index = 0; index < batches.length; index += 4) {
+    results.push(...await Promise.all(batches.slice(index, index + 4).map((batch) => getStockByProductCodes(batch))));
+  }
   const ok = results.filter((result) => result.stockStatus === "ok");
   return {
-    stockStatus: ok.length ? "ok" : "unavailable_api",
+    stockStatus: ok.length === results.length && ok.length > 0 ? "ok" : "unavailable_api",
     byCode: Object.assign({}, ...results.map((result) => result.byCode)),
     fromCache: results.reduce((sum, result) => sum + result.fromCache, 0),
     requested: results.reduce((sum, result) => sum + result.requested, 0),
@@ -80,19 +83,24 @@ export function storeDirectory() {
  * Nunca lança erro: falha ou lentidão da API vira o cenário "unavailable_api".
  */
 export async function consultarEstoqueProduto(
-  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; tipoBusca?: unknown },
+  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown },
   deps: { products: () => Promise<IndexedProduct[]>; withPrices: boolean },
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
-  const term = typeof args.termoBusca === "string" ? args.termoBusca.slice(0, 80) : "";
+  const field = (value: unknown) => typeof value === "string" ? value.trim() : "";
+  const term = (field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80);
   const region = typeof args.regiaoOuLoja === "string" ? args.regiaoOuLoja.slice(0, 60) : "";
-  const [all, stores] = await Promise.all([deps.products().catch(() => [] as IndexedProduct[]), storeDirectory().catch(() => new Map<string, StoreInfo>())]);
+  const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
 
   // Marca com erro de digitação ("rada" → RADDA, "okley" → OAKLEY): marca inteira normalizada ou com 1-2 erros.
   const brands = brandsOf(all);
   const brandMatch = resolveBrandQuery(term, brands);
+  const identity = [term, field(args.nomeModelo), field(args.referenciaOuSku)].join(" ");
+  const identityBrand = field(args.marca) || brandMatch?.brand;
+  const iconic = matchIconicProducts(all, identity, identityBrand)
+    ?? matchIconicProducts(all, field(args.textoVisivelNaImagem).slice(0, 4000), identityBrand);
   // Busca ampla (só marca/categoria): vitrine de modelos distintos com estoque, sem lojas nem foto.
-  const kind = brandMatch && !brandMatch.rest.length ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
+  const kind = iconic ? "modelo_especifico" : brandMatch && !brandMatch.rest.length ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
   if (kind === "marca_ampla") {
     const broad = broadCatalogMatches(all, term, brands);
     const groups = showcaseCandidates(broad.products.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })));
@@ -107,11 +115,21 @@ export async function consultarEstoqueProduto(
   // Marca reconhecida: procura só na família dela, com o nome real ("okley holbrook" → "OAKLEY holbrook").
   const scope = specificSearchScope(all, term, brands);
   // Apelido do modelo vira a referência do ERP ("Ray-Ban Justin" → "Ray-Ban RB4165").
-  for (const terms of stockSearchTerms(expandModelNicknames(scope.term))) {
-    found = matchProducts(scope.pool, { label: term, category: "", terms }, STOCK_MAX_CODES).filter((product) => product.code);
-    if (found.length) break;
+  const sku = term.match(/(?:^|\s)#?(\d{5,})(?:\s|$)/)?.[1];
+  const exactSku = sku ? all.find((product) => product.code === sku) : undefined;
+  if (exactSku) found = [exactSku];
+  else if (iconic) found = iconic.products;
+  else {
+    const expanded = expandModelNicknames(scope.term);
+    for (const search of [...new Set([scope.term, expanded])]) {
+      for (const terms of stockSearchTerms(search).slice(0, field(args.nomeModelo) || field(args.referenciaOuSku) || brandMatch?.rest.length ? 2 : undefined)) {
+        found = matchProducts(scope.pool, { label: term, category: "", terms }, STOCK_MAX_CODES).filter((product) => product.code);
+        if (found.length) break;
+      }
+      if (found.length) break;
+    }
   }
-  const lookup = found.length ? await getStockByProductCodes(found.map((product) => product.code!)) : null;
+  const lookup = found.length ? await getStockInBatches(found.map((product) => product.code!)) : null;
   const result = buildStockResult({
     term,
     region,

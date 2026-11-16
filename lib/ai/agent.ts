@@ -24,8 +24,11 @@ import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, ba
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
-import { analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, informativeReply, productImageFlow, sanitizeImageAnalysis, VISION_PROMPT, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
-import { catalogProducts, searchErpCatalog } from "@/lib/ai/catalog-db";
+import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { catalogProducts } from "@/lib/ai/catalog-db";
+import { photoVariants } from "@/lib/ai/photo-response";
+import { iconicModel } from "@/lib/ai/product-names";
+import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, showcaseReference } from "@/lib/ai/stock-showcase";
@@ -394,6 +397,7 @@ export type AgentRunInput = {
   lastAnalyzedImage?: ImageAnalysis | null;
   /** Nome do contato no cadastro ("Vivi"): nunca é trocado por um nome que o cliente citar. */
   contactName?: string | null;
+  isReturningContact?: boolean;
   /** CPF do único cadastro do VMSet vinculado ao telefone (parcelas sem pedir o CPF, com nome completo). */
   linkedCpf?: string | null;
   /** Já existe aprovação financeira pendente nesta conversa: não consulta de novo sem CPF novo. */
@@ -401,7 +405,7 @@ export type AgentRunInput = {
   /** Consulta de parcelas no VMSet (testes injetam a sua). */
   lookupInstallments?: (cpf: string) => Promise<InstallmentLookup>;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -453,7 +457,7 @@ export async function financialFlow(input: AgentRunInput, text: string): Promise
  * Regras antes da IA → anexo (visão, transcrição, PDF, documento) → prompt com base de conhecimento e filas →
  * modelo → interpretação. Erro do modelo sobe para quem chamou (o WhatsApp transfere; o teste mostra o erro).
  */
-export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
+async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   const { settings } = input;
   // Pedido de pessoa pelo nome ("Leandro", "Preciso falar com Leandro"): confirma e transfere para ela (fora da fila).
   if (!input.queued) {
@@ -509,35 +513,19 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const consumed = new Set<PreparedMedia>();
   // Foto de produto desta mensagem: análise (marca, linha, referência provável) e o que a cascata achou em estoque.
   let imageAnalysis: ImageAnalysis | null = null;
-  let photoMatch: { match: "exata" | "linha"; searchTerm: string; opener?: string } | null = null;
+  const photoQueries: CatalogQuery[] = [];
   for (const item of mediaList) {
     if (item.failed || item.sticker) continue;
     if (item.kind === "image") {
-      const flow = await productImageFlow({
-        identify: () => aiJson<VisionResult>([{ role: "system", content: VISION_PROMPT }, { role: "user", content: item.parts.filter((part) => part.type === "image_url") }], { ...input.meta, maxTokens: 700 }),
-        search: searchErpCatalog,
-        withPrices: settings.canQuotePrices,
-      });
-      search = flow.log ?? search;
-      if (flow.type === "document") {
-        documents.push({ kind: flow.kind, summary: flow.summary, extraction: flow.extraction, source: item.source });
+      const vision = await aiJson<VisionResult>([{ role: "system", content: VISION_PROMPT }, { role: "user", content: item.parts.filter((part) => part.type === "image_url") }], { ...input.meta, maxTokens: 4096 });
+      const { kind, query } = readVision(vision);
+      const docKind = kind === "receita" || kind === "documento" ? documentKind(kind, vision.documento) : null;
+      if (docKind) {
+        documents.push({ kind: docKind, summary: formatExtraction(docKind, vision.documento), extraction: vision.documento, source: item.source });
         consumed.add(item);
-      } else if (flow.type === "found") {
-        catalogContexts.push(flow.context);
-        imageAnalysis = flow.analysis;
-        if (flow.match !== "similar" && !photoMatch) photoMatch = { match: flow.match, searchTerm: flow.searchTerm, opener: flow.opener };
-        // A resposta usa só o resultado da busca: sem a imagem, não há o que narrar.
-        consumed.add(item);
-      } else if (flow.type === "identified") {
-        // Marca reconhecida sem estoque: a IA identifica o modelo e oferece opções (sem transferir sozinha).
-        catalogContexts.push(flow.context);
-        imageAnalysis = flow.analysis;
-        consumed.add(item);
-      } else if (flow.type === "handoff" && mediaList.length === 1) {
-        return { outcome: { action: "handoff", reply: flow.reply, reason: flow.reason, queue: "", trigger: flow.trigger }, media, mediaTriggerSkipped, search, injection };
-      } else if (flow.type === "handoff") {
-        // Lote com outros anexos: o modelo sem correspondência vira contexto e a IA responde ao resto.
-        catalogContexts.push(`Uma das fotos é de um produto sem correspondência no catálogo (${flow.log.term}): ofereça um atendente para verificar esse modelo.`);
+      } else if (kind === "produto") {
+        imageAnalysis = makeImageAnalysis(query);
+        photoQueries.push(query);
         consumed.add(item);
       }
     } else if (item.kind === "pdf") {
@@ -567,7 +555,8 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const anchor = input.anchor ?? EMPTY_ANCHOR;
   const storeFollowUp = isStoreFollowUp(input.pendingText, anchor);
   // Foto nova de produto: a busca é a da foto, nunca o produto fixado antes.
-  const anchoredProduct = !photoMatch && isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
+  let photoQuery = photoQueries[0] ?? null;
+  const anchoredProduct = !photoQuery && isProductFollowUp(input.pendingText, anchor) ? anchor.activeProduct : null;
   // Análise da foto desta mensagem ou da última foto do atendimento (responde "qual o nome desse modelo?").
   const analysis = imageAnalysis ?? input.lastAnalyzedImage ?? null;
   const anchorNumbers = anchoredProduct ? modelNumbers(`${anchoredProduct.referencia ?? ""} ${anchoredProduct.nomeComercial}`) : [];
@@ -575,12 +564,14 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Vitrine desta sessão: "o 1", "esse primeiro", "o de 120" escolhem um item (pedido de localização não é escolha).
   const listed = input.listedProducts ?? [];
   // Toque na lista interativa: escolha determinística (busca específica com foto + ficha + lojas).
-  const choice: ListedChoice = input.selectedProductRef
+  const choice: ListedChoice = photoQuery ? null : input.selectedProductRef
     ? { type: "item", item: selectedListedItem(input.selectedProductRef, listed) }
     : asksStoreLocation(input.pendingText) ? null : resolveListedChoice(input.pendingText, listed);
   let cardShown: string | null = null;
   let productInterest: { name: string; price: number | null } | null = null;
   let interactiveList: InteractiveShowcase | null = null;
+  let photoReply: string | null = null;
+  let modelVariantReply: string | null = null;
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
   const system = buildSystemPrompt({
@@ -642,7 +633,28 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       if (!allowsProductPhoto(result)) return result;
       // Referência pedida (ou o produto fixado) primeiro: a ficha e a foto nunca saem de outro modelo da lista.
       const wantedNumbers = anchorNumbers.length ? anchorNumbers : modelNumbers(String(query.termoBusca ?? ""));
-      const available = result.produtos.filter((product) => product.lojasComEstoque.length > 0);
+      const iconic = iconicModel(String(query.termoBusca ?? ""));
+      const available = result.produtos.filter((product) => {
+        if (!product.lojasComEstoque.length) return false;
+        if (!iconic || chosen) return true;
+        const candidate = iconicModel(product.produto, product.marca);
+        return !!candidate && candidate.references.some((reference) => iconic.references.includes(reference));
+      });
+      if ((args._photo || (iconic && !chosen && !anchoredProduct)) && available.length > 1) {
+        const colorWords = (photoQuery?.color ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((word) => word.length >= 4 && !["LENTE", "LENTES", "ARMACAO", "COM"].includes(word));
+        const colorMatches = colorWords.length ? available.filter((product) => colorWords.every((word) => normalizeTerm(product.produto).includes(word))) : [];
+        if (colorMatches.length !== 1) {
+          const variants = photoVariants(available, args._photo && imageAnalysis ? analysisName(imageAnalysis) : `Ray-Ban ${iconic?.name ?? ""}`, !!args._photo);
+          if (variants) {
+            interactiveList = variants.list;
+            if (args._photo) photoReply = variants.text;
+            else modelVariantReply = variants.text;
+            return { ...result, vitrineFormatada: variants.text, orientacao: "Apresente as variações disponíveis usando vitrineFormatada, sem repetir a abertura em outra mensagem." };
+          }
+        } else {
+          available.splice(0, available.length, colorMatches[0]);
+        }
+      }
       const chosenRef = chosen?.referencia ? chosen.referencia.replace(/[^A-Za-z0-9]/g, "").toUpperCase() : "";
       const inStock = available.find((product) => !!chosen && (chosen.sku ? product.codigo === chosen.sku : showcaseReference(product.produto, product.marca, product.codigo).replace(/[^A-Za-z0-9]/g, "").toUpperCase() === chosenRef))
         ?? available.find((product) => !!anchoredProduct?.sku && product.codigo === anchoredProduct.sku)
@@ -668,12 +680,62 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
         totalUnidades: inStock.lojasComEstoque.reduce((sum, store) => sum + store.quantidade, 0),
         lojasDisponiveis: inStock.lojasComEstoque.map(cardStore),
       };
-      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, cardOpening(input.pendingText)), orientacao: `${result.orientacao}\n${cardGuidance()}` };
+      const opening = args._photo && imageAnalysis
+        ? `Esse modelo da foto é *${analysisName(imageAnalysis)}* e temos sim em estoque!`
+        : cardOpening(input.pendingText);
+      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, opening), orientacao: `${result.orientacao}\n${cardGuidance()}` };
       cardShown = card.fichaFormatada;
+      if (args._photo) photoReply = card.fichaFormatada;
       productInterest = { name: [fields.nomeComercial, fields.referencia].filter(Boolean).join(" ").slice(0, 80), price: parseBrl(fields.valorFormatado) };
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };
+  const photoReplies: string[] = [];
+  for (const currentPhoto of photoQueries) {
+    photoQuery = currentPhoto;
+    imageAnalysis = makeImageAnalysis(currentPhoto);
+    photoReply = null;
+    const term = [photoQuery.brand, photoQuery.model || (!photoQuery.reference ? photoQuery.line : ""), photoQuery.reference].filter(Boolean).join(" ");
+    const specific = !!(photoQuery.model || photoQuery.reference);
+    if (term) {
+      const equivalents = iconicModel(photoQuery.model ?? "", photoQuery.brand)?.references ?? [];
+      const result = await stockTool.run({
+        termoBusca: term, tipoBusca: specific ? "modelo_especifico" : "marca_ampla",
+        marca: photoQuery.brand, nomeModelo: photoQuery.model, referenciaOuSku: photoQuery.reference || (equivalents.length === 1 ? equivalents[0] : ""),
+        textoVisivelNaImagem: photoQuery.visibleText, _photo: true,
+      });
+      const last = stock[stock.length - 1];
+      if (last) search = { kind: "produto", term, found: last.products };
+      if (!photoReply && "cenario" in result) {
+        if (result.cenario === "unavailable_api") {
+          photoReply = "Não consegui consultar o estoque agora. Posso pedir a um atendente para confirmar a disponibilidade desse modelo?";
+        } else if (specific && (result.cenario === "sem_estoque_na_rede" || result.cenario === "produto_nao_encontrado") && photoQuery.brand) {
+          const family = [photoQuery.brand, photoQuery.line].filter(Boolean).join(" ");
+          const alternative = await stockTool.run({ termoBusca: family, tipoBusca: "marca_ampla" });
+          const opening = `Esse modelo *${analysisName(imageAnalysis!)}* não está disponível no momento.`;
+          if ("vitrineFormatada" in alternative && alternative.vitrineFormatada) {
+            photoReply = `${opening} Confira outras opções da mesma marca:\n${alternative.vitrineFormatada}`;
+          } else if ("cenario" in alternative && alternative.cenario === "unavailable_api") {
+            photoReply = `${opening} Não consegui consultar as outras opções agora; posso pedir a um atendente para verificar?`;
+          } else {
+            photoReply = `${opening} Posso pedir a um atendente para verificar opções semelhantes ou encomenda?`;
+          }
+        } else if ("vitrineFormatada" in result && result.vitrineFormatada) {
+          photoReply = result.vitrineFormatada;
+        } else {
+          photoReply = `Não encontrei esse modelo em estoque agora. Posso pedir a um atendente para verificar opções semelhantes?`;
+        }
+      }
+    } else {
+      photoReply = "Não consegui identificar esse modelo com segurança. Você pode me informar a marca ou a referência da haste?";
+    }
+    if (photoReply) photoReplies.push(photoReply);
+  }
+  if (photoQueries.length > 1) {
+    photoReply = photoReplies.join("\n\n");
+    interactiveList = null;
+    image = null;
+  }
   // Ficha do produto (web, cache 30 dias) + cores do mesmo modelo com saldo no ERP.
   const details: DetailsLog[] = [];
   const detailsTool = {
@@ -768,7 +830,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       { role: "system", content: system },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [stockTool, detailsTool, locationTool, closeTool] },
+    { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [stockTool, detailsTool]), locationTool, closeTool] },
   );
   let outcome = interpretDecision(decision);
   // Localização da loja fixada pedida no singular e o modelo não enviou (ou abriu lista de unidades): envia a da sessão.
@@ -810,16 +872,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   if (informative) outcome = { ...outcome, action: "reply", reply: informative, reason: asksProductInfo(input.pendingText) ? "Pergunta informativa sobre o produto" : "Foto de produto respondida", queue: "", trigger: "ai" };
   // Foto com estoque: a ficha (referência exata) ou a vitrine da mesma marca/linha sai mesmo se o modelo não buscou
   // (ou se respondeu só "sem estoque").
-  const photo0 = photoMatch as { match: "exata" | "linha"; searchTerm: string; opener?: string } | null;
-  if (photo0 && outcome.action === "reply") {
-    if (photo0.match === "exata" && !cardShown) {
-      const forced = (await stockTool.run({ termoBusca: photo0.searchTerm, tipoBusca: "modelo_especifico" }).catch(() => null)) as { fichaFormatada?: string } | null;
-      if (forced?.fichaFormatada) outcome = { ...outcome, reply: `${forced.fichaFormatada}\n---SPLIT---\n${CARD_QUESTION}` };
-    } else if (photo0.match === "linha" && !splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2)) {
-      const forced = (await stockTool.run({ termoBusca: photo0.searchTerm, tipoBusca: "marca_ampla" }).catch(() => null)) as { vitrineFormatada?: string } | null;
-      if (forced?.vitrineFormatada) outcome = { ...outcome, reply: `${photo0.opener ?? ""}\n---SPLIT---\n${forced.vitrineFormatada}`.replace(/^\n---SPLIT---\n/, "") };
-    }
-  }
+  if ((photoReply || modelVariantReply) && outcome.action === "reply") outcome = { ...outcome, reply: photoReply || modelVariantReply || outcome.reply };
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
@@ -830,7 +883,23 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Lista interativa só quando a resposta leva a vitrine numerada (2+ itens) ao cliente.
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis, documents, productInterest: productInterest as { name: string; price: number | null } | null };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis, singleReply: !!photoQuery && outcome.action === "reply", documents, productInterest: productInterest as { name: string; price: number | null } | null };
+}
+
+export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
+  const run = await runAiAgentInternal(input);
+  if (!run.outcome.reply || run.outcome.action === "no_reply") return run;
+  const reply = welcomeReply(run.outcome.reply, {
+    first: input.aiReplies === 0,
+    returning: input.isReturningContact,
+    customer: input.contactName,
+    pendingText: input.pendingText,
+  });
+  return {
+    ...run,
+    outcome: { ...run.outcome, reply },
+    interactiveList: run.interactiveList ? listWithOpening(run.interactiveList, reply) : run.interactiveList,
+  };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -889,6 +958,10 @@ async function respond(conversationId: string, messageId: string) {
   const [linkedCpf, hasPendingFinancial] = await Promise.all([linkedCpfForPhone(conversation.phone).catch(() => null), pendingApproval(conversationId).then(Boolean).catch(() => false)]);
   let run: AgentRun;
   try {
+    const previousConversation = aiReplies === 0 ? await prisma.chatConversation.findFirst({
+      where: { contactId: conversation.contactId, id: { not: conversation.id }, closedAt: { lt: new Date(Date.now() - 10 * 60_000) } },
+      select: { id: true },
+    }) : null;
     // "digitando..." no WhatsApp do cliente antes de mídia, estoque e modelo (renova uma vez após 20 s).
     run = await withTyping(() => sendTypingIndicator(latest.externalId), () => runAiAgent({
       settings,
@@ -910,6 +983,7 @@ async function respond(conversationId: string, messageId: string) {
       selectedProductRef: pending.map((item) => (item.metaMedia as { selectedProductRef?: string } | null)?.selectedProductRef).filter(Boolean).at(-1) ?? null,
       lastAnalyzedImage,
       contactName,
+      isReturningContact: !!previousConversation,
       // Parcelas: CPF só quando o telefone leva a um único cadastro do VMSet; aprovação pendente evita nova consulta.
       linkedCpf,
       hasPendingFinancial,
@@ -942,7 +1016,7 @@ async function respond(conversationId: string, messageId: string) {
   await recordSalesEvents({ contactId: conversation.contactId, conversationId, events: turnSalesEvents(run, pending.map((item) => item.text ?? "").join("\n")) });
   // Encerramento silencioso: nada é enviado e a conversa não é transferida.
   if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
-  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location);
+  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply);
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
     if (isWindowOpen(conversation.lastInboundAt)) await sendAiReply(conversation, outcome.reply, null, latest.externalId);
@@ -982,7 +1056,7 @@ async function respond(conversationId: string, messageId: string) {
     console.log(`[ai] ${conversationId}: encerramento pela IA (${steps.join(" → ")})`);
     return;
   }
-  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location, run.interactiveList);
+  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply);
 }
 
 /**
@@ -991,7 +1065,22 @@ async function respond(conversationId: string, messageId: string) {
  * Confere de novo antes de enviar: se um atendente assumiu ou escreveu enquanto a IA pensava, não responde.
  */
 /** Resposta da IA ao cliente: com foto do produto (legenda) quando houver; se a foto falhar, segue em texto. */
-async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null) {
+async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean) {
+  if (list) {
+    const sent = await sendAutomaticMessage(conversation, text, () => sendWhatsAppInteractiveList(conversation.phone, list).catch((error) => {
+      console.warn(`[ai] ${conversation.id}: lista interativa recusada, enviando em texto (${error instanceof Error ? error.message : error})`);
+      return sendText(conversation.phone, text.replace(/\s*---SPLIT---\s*/gi, "\n\n"));
+    }), toChatInteractive(list), AI_AUTHOR);
+    if (location) await sendStoreLocation(conversation, location);
+    return sent;
+  }
+  if (singleReply) {
+    const sent = image
+      ? await sendAutomaticImage(conversation, image.url, text, AI_AUTHOR, () => invalidateProductImage(image.sku), image.sku)
+      : await sendAutomaticMessage(conversation, text, undefined, undefined, AI_AUTHOR);
+    if (location) await sendStoreLocation(conversation, location);
+    return sent;
+  }
   // Vitrine numerada: sai como Lista Interativa nativa; se a Meta recusar, a mesma lista em texto (o histórico guarda o texto).
   const sendText_ = (part: string) => (list && parseShowcase(part).length >= 2
     ? sendAutomaticMessage(conversation, part, () => sendWhatsAppInteractiveList(conversation.phone, list).catch((error) => {
@@ -1021,11 +1110,11 @@ async function sendStoreLocation(conversation: ChatConversation, location: Store
   }).catch((error) => console.warn(`[ai] ${conversation.id}: localização não enviada (${error instanceof Error ? error.message : error})`));
 }
 
-async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null) {
+async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean) {
   const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
   if (!fresh || (await conversationMode(fresh)).mode !== "queued") return;
   if (!outcome.reply || !isWindowOpen(fresh.lastInboundAt)) return;
-  await sendAiReply(fresh, outcome.reply, image, typingMessageId, location);
+  await sendAiReply(fresh, outcome.reply, image, typingMessageId, location, list, singleReply);
 }
 
 /** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
@@ -1109,6 +1198,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     selectedProductRef: messages.slice(lastAi + 1).map((message) => message.selectedProductRef).filter(Boolean).at(-1) ?? null,
     lastAnalyzedImage: messages.map((message) => message.imageAnalysis).filter((item): item is ImageAnalysis => !!item).at(-1) ?? null,
     contactName,
+    isReturningContact: profile.id === "recorrente",
     queued: options.queued ? { queueName: "Vendas" } : null,
     // Mesmas regras do WhatsApp: falha de leitura vira aviso ao cliente (não erro na tela).
     loadMedia: async () => (attachment ? [await prepareMediaSafe(attachment, meta)] : []),
@@ -1127,7 +1217,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
   const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue, outcome.staffQueueId) : null;
   return {
     ...outcome,
-    messages: customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
+    messages: run.interactiveList || run.singleReply ? [outcome.reply] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
     assignee: outcome.assigneeName,
     handoffQueue: target?.name ?? "",
     handoffQueueSource: target?.source,

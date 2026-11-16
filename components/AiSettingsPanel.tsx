@@ -27,7 +27,7 @@ function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveS
   const [open, setOpen] = useState(false);
   return (
     <div className="space-y-1.5">
-      <p className="text-[10px] font-medium text-slate-500 dark:text-slate-300">No WhatsApp vai como lista interativa: <WhatsAppText text={list.bodyText} /></p>
+      <p className="whitespace-pre-wrap"><WhatsAppText text={list.bodyText} /></p>
       <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-[#002187]/30 py-1.5 text-[11px] font-semibold text-[#002187] hover:bg-[#002187]/5 dark:border-white/20 dark:text-[#C4D600] dark:hover:bg-white/5">
         <List className="h-3.5 w-3.5" />{list.buttonText}
       </button>
@@ -435,7 +435,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
                 </a>
               )}
               {message.media?.transcript !== undefined && <p className="rounded-md bg-white/15 px-2 py-1 text-[10px] italic">Transcrição: {message.media.transcript || "(sem fala reconhecida)"}</p>}
-              {message.text && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
+              {message.text && !message.list && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
               {message.list && <InteractiveListPreview list={message.list} disabled={busy || ended} onPick={(row) => void send(null, row)} />}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
               {message.financial?.approval && (

@@ -1,5 +1,6 @@
 import { formatBrl } from "@/lib/ai/stock";
 import { documentKind, EXTRACTION_SCHEMA, formatExtraction, type DocumentExtraction, type DocumentKind } from "@/lib/ai/document-extract";
+import { iconicModel } from "@/lib/ai/product-names";
 /**
  * Foto de produto enviada pelo cliente: a IA identifica o produto em silêncio (JSON interno), o CRM busca
  * no histórico de vendas do ERP e a resposta sai só com o resultado da busca, ou a conversa vai para a equipe.
@@ -13,17 +14,19 @@ export const IMAGE_RULE =
 /** Pedido interno de identificação (nunca chega ao cliente). */
 export const VISION_PROMPT = [
   "Você classifica a imagem enviada por um cliente de ótica para uma busca no sistema. Não converse, só extraia dados.",
+  'Transcreva todo texto visível, inclusive títulos, legendas de anúncios, prints, etiquetas e texto sobreposto, em "textoVisivelNaImagem". Um print de anúncio com óculos é "produto", não "documento". Extraia "marca", "nomeModelo" (nome comercial lido ou reconhecido com segurança pelo design), "referenciaOuSku" (somente código legível, ou null) e "corLenteEArmacao". Não invente referências nem modelos incertos.',
   'Responda em json: {"kind": "produto" | "receita" | "documento" | "outro", "category": "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | "", "marca": "marca legível ou reconhecível com segurança (ex.: Prada), ou vazio", "linha": "linha/submarca reconhecível (ex.: Linea Rossa), ou vazio", "modeloOuReferenciaProvavel": "código/referência LEGÍVEL na haste, lente ou etiqueta (ex.: PS 07RV), ou null", "caracteristicasVisuais": {"tipo": "Armação de grau" | "Óculos de sol" | "", "formato": "ex.: Retangular, Gatinho, Aviador, Redondo, Esportivo", "cor": "ex.: Preto fosco, Tartaruga, Metal dourado"}, "material": "METAL" | "ACETATO" | "MISTO" | "TITANIO" | "NYLON" | "", "keywords": ["até 4 palavras em MAIÚSCULAS sem acento, ex.: DOURADO, AVIADOR, RETANGULAR, GATINHO"]}.',
-  '"produto": óculos de sol, armação, lente de contato ou acessório. "receita": prescrição/receita oftalmológica ou laudo. "documento": comprovante de pagamento, orçamento, nota, print de texto. "outro": qualquer outra imagem.',
+  '"produto": óculos de sol, armação, lente de contato ou acessório, inclusive anúncios e prints que os apresentem. "receita": prescrição/receita oftalmológica ou laudo. "documento": comprovante de pagamento, orçamento, nota ou outro print sem produto. "outro": qualquer outra imagem.',
   'Marca só se tiver certeza (logotipo ou nome legível); linha separada da marca ("Prada" + "Linea Rossa"). Referência só se estiver legível na foto; se não der para ler, null. Nunca chute nem invente código.',
   `Se kind for "receita" ou "documento", inclua também ${EXTRACTION_SCHEMA}`,
 ].join("\n");
 
 export type VisionResult = {
   kind?: string; category?: string; brand?: string; reference?: string | null; material?: string; keywords?: unknown; documento?: DocumentExtraction;
+  textoVisivelNaImagem?: string; nomeModelo?: string; referenciaOuSku?: string | null; corLenteEArmacao?: string;
   marca?: string; linha?: string; modeloOuReferenciaProvavel?: string | null; caracteristicasVisuais?: { tipo?: string; formato?: string; cor?: string } | null;
 };
-export type CatalogQuery = { category: "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | ""; brand: string; reference: string; material: string; keywords: string[]; line?: string; shape?: string; color?: string };
+export type CatalogQuery = { category: "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | ""; brand: string; reference: string; material: string; keywords: string[]; line?: string; shape?: string; color?: string; model?: string; visibleText?: string };
 
 /** Análise da última foto de produto do cliente (fica na sessão para "qual o nome desse modelo?"). */
 export type ImageAnalysis = { marca: string; linha: string; modeloProvavel: string | null; tipo: string; formato: string; cor: string; descricaoVisual: string };
@@ -40,13 +43,17 @@ export function readVision(raw: VisionResult): { kind: "produto" | "receita" | "
   // "Armação de grau"/"Óculos de sol" também definem a categoria quando o modelo não a mandou.
   const type = clean(visual.tipo);
   const inferred: CatalogQuery["category"] = category || (/sol/i.test(type) ? "SOLAR" : /grau|arma/i.test(type) ? "ARMACAO" : "");
-  const reference = clean(raw.modeloOuReferenciaProvavel ?? raw.reference);
+  const visibleText = typeof raw.textoVisivelNaImagem === "string" ? raw.textoVisivelNaImagem.trim().slice(0, 4000) : "";
+  const brand = clean(raw.marca || raw.brand);
+  const iconic = iconicModel([raw.nomeModelo, raw.referenciaOuSku, visibleText].filter(Boolean).join(" "), brand);
+  const model = clean(raw.nomeModelo) || iconic?.name || "";
+  const reference = clean(raw.referenciaOuSku ?? raw.modeloOuReferenciaProvavel ?? raw.reference);
   return {
     kind,
     query: {
-      category: inferred, brand: clean(raw.marca || raw.brand), line: clean(raw.linha),
+      category: inferred, brand: brand || (iconic ? "Ray-Ban" : ""), line: clean(raw.linha), model, visibleText,
       reference: /^(null|n\/?a|nenhum|nenhuma|ilegivel|ilegível)$/i.test(reference) ? "" : reference,
-      material: clean(raw.material).toUpperCase(), keywords, shape: clean(visual.formato), color: clean(visual.cor),
+      material: clean(raw.material).toUpperCase(), keywords, shape: clean(visual.formato), color: clean(raw.corLenteEArmacao || visual.cor),
     },
   };
 }
@@ -57,7 +64,7 @@ export function imageAnalysis(query: CatalogQuery): ImageAnalysis {
   const formato = query.shape ?? "";
   const cor = query.color ?? "";
   const descricaoVisual = [tipo, formato && `formato ${formato.toLowerCase()}`, cor.toLowerCase()].filter(Boolean).join(", ");
-  return { marca: query.brand, linha: query.line ?? "", modeloProvavel: query.reference || null, tipo, formato, cor, descricaoVisual };
+  return { marca: query.brand, linha: [query.line, query.model].filter(Boolean).join(" "), modeloProvavel: query.reference || null, tipo, formato, cor, descricaoVisual };
 }
 
 /** Nome do modelo identificado: "Prada Linea Rossa" (marca + linha, sem repetir). */
@@ -282,4 +289,17 @@ export function matchProducts(products: IndexedProduct[], step: SearchStep, limi
     .filter((product) => (!category || product.categoryKey === category) && step.terms.every((term) => product.text.includes(term)))
     .sort((a, b) => b.sales - a.sales)
     .slice(0, limit);
+}
+
+/** Resultados de uma família comercial: nome no cadastro ou qualquer referência equivalente. */
+export function matchIconicProducts(products: IndexedProduct[], text: string, brand?: string | null) {
+  const model = iconicModel(text, brand);
+  if (!model) return null;
+  const name = normalizeTerm(model.name);
+  const matches = products.filter((product) => {
+    const productBrand = normalizeTerm(product.brand ?? "");
+    if (productBrand ? !productBrand.startsWith("RAYBAN") : !product.text.includes("RAYBAN")) return false;
+    return product.text.includes(name) || model.references.some((reference) => product.text.includes(reference));
+  }).filter((product) => !!product.code).sort((a, b) => b.sales - a.sales);
+  return { model, products: matches };
 }

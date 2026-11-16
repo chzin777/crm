@@ -80,6 +80,9 @@ vi.mock("@/lib/ai/stock-db", () => ({
         const result = buildShowcaseResult({ term, groups: showcaseCandidates(prada), lookup: { stockStatus: "ok", fromCache: 0, requested: 2, byCode: { "900701": unit(2), "900702": unit(1) } }, stores: STORES, withPrices: true, brand: "PRADA LINEA ROSSA" });
         return { result, log: { term, region: "", scenario: result.cenario, products: result.modelos.length, stores: 0, ms: 1, cached: false, kind: "marca_ampla" } };
       }
+      if (/05YS/i.test(term)) {
+        return { result: { tipoBusca: "modelo_especifico", cenario: "sem_estoque_na_rede", termoBusca: term, produtos: [], orientacao: "" }, log: { term, region: "", scenario: "sem_estoque_na_rede", products: 0, stores: 0, ms: 1, cached: false } };
+      }
       const chosen = /02WV/i.test(term) ? prada[1] : prada[0];
       const produtos = [{ codigo: chosen.code, produto: chosen.description, marca: chosen.brand, preco: 1960, precoVenda: "R$ 1.960,00", nomeProduto: chosen.description, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 3, lojasComEstoque: [{ code: "39", loja: "Loja Jardim Goiás — Av. Deputado Jamel Cecilio, 3300", quantidade: 2, cidade: "Goiânia" }, { code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
       return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 2, ms: 1, cached: false } };
@@ -112,8 +115,6 @@ vi.mock("@/lib/ai/openai", () => ({
 }));
 
 import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
-import { searchErpCatalog } from "@/lib/ai/catalog-db";
-import type { CatalogSearch, SearchStep } from "@/lib/ai/catalog-search";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { buildProductCard } from "@/lib/ai/product-card";
 import { extractSessionAnchor, isProductFollowUp, isStoreFollowUp, mentionsOtherProduct, sessionRows, storesIn } from "@/lib/ai/session-anchor";
@@ -474,26 +475,16 @@ describe("vitrine como Lista Interativa nativa do WhatsApp", () => {
 
 describe("foto de óculos: cascata referência → marca/linha e pergunta informativa sem transbordo", () => {
   const PHOTO = { name: "oculos.jpg", mime: "image/jpeg", data: new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70]) };
-  // Busca da foto como no ERP: a referência chutada (PS 05YS) não existe; a linha Prada Linea Rossa tem estoque.
-  const pradaSearch = async (steps: SearchStep[]): Promise<CatalogSearch | null> => {
-    for (const step of steps) {
-      if (step.kind === "referencia") continue;
-      if (step.terms.includes("PRADA")) {
-        return { term: step.label, stock: "ok", step, results: [{ description: "ARM PRADA LINEA ROSSA REF PS 07RV 1AB 54", brand: "PRADA LINEA ROSSA", category: "OCULOS SOLAR", sales: 3, price: 1960, stores: ["LJ 39 · Jardim Goiás, Goiânia"] }] };
-      }
-    }
-    return null;
-  };
-
   it("foto de Prada Linea Rossa sem a ref exata → identifica, avisa e mostra os modelos da linha; \"Qual o nome desse modelo?\" responde sem transferir", async () => {
-    vi.mocked(searchErpCatalog).mockImplementation(pradaSearch);
     model.vision = { kind: "produto", marca: "Prada", linha: "Linea Rossa", modeloOuReferenciaProvavel: "PS 05YS", caracteristicasVisuais: { tipo: "Óculos de sol", formato: "Retangular", cor: "Preto fosco" } };
     // O modelo erra como no caso real: diz só "sem estoque" e não busca.
     model.script = async () => ({ reply: "No momento, esse modelo está sem estoque na rede.", action: "reply" });
     const history: PlaygroundMessage[] = [{ from: "customer", text: "" }];
     const turn1 = await simulateAgent(settings, history, "user-1", PHOTO, { sessionId: "sessao-foto" });
     expect(turn1.action).toBe("reply");
-    expect(turn1.messages[0]).toBe("Esse modelo da foto é um *Prada Linea Rossa* (óculos de sol, formato retangular, preto fosco)! No momento não localizei essa referência exata em estoque, mas temos estes modelos *Prada Linea Rossa* disponíveis na rede:");
+    expect(turn1.messages).toHaveLength(1);
+    expect(turn1.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite)!/);
+    expect(turn1.messages[0]).toContain("Esse modelo *Prada Linea Rossa* não está disponível no momento.");
     expect(turn1.messages.join("\n")).not.toMatch(/sem estoque na rede/i);
     expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Prada Linea Rossa", tipoBusca: "marca_ampla" });
     expect(turn1.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:PS 07RV", "product_select:PS 02WV"]);
@@ -514,10 +505,6 @@ describe("foto de óculos: cascata referência → marca/linha e pergunta inform
   });
 
   it("referência legível e em estoque → ficha completa do modelo exato (sem vitrine)", async () => {
-    vi.mocked(searchErpCatalog).mockImplementation(async (steps) => {
-      const step = steps.find((item) => item.kind === "referencia" && item.terms.includes("PS07RV"));
-      return step ? { term: step.label, stock: "ok", step, results: [{ description: "ARM PRADA LINEA ROSSA REF PS 07RV 1AB 54", brand: "PRADA LINEA ROSSA", category: "ARMACAO", sales: 3, price: 1960, stores: ["LJ 39"] }] } : null;
-    });
     model.vision = { kind: "produto", marca: "Prada", linha: "Linea Rossa", modeloOuReferenciaProvavel: "0PS 07RV", caracteristicasVisuais: { tipo: "Armação de grau" } };
     model.script = async () => ({ reply: "Temos sim!", action: "reply" });
     const turn = await simulateAgent(settings, [{ from: "customer", text: "Tem esse?" }], "user-1", PHOTO, { sessionId: "sessao-ref" });
@@ -533,7 +520,7 @@ describe("cliente pede um atendente pelo nome", () => {
     model.script = async () => ({ reply: "Boa noite, Vivi! 😊 Em que posso te ajudar?", action: "reply" });
     const history: PlaygroundMessage[] = [{ from: "customer", text: "Oi" }];
     const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-vivi", contactName: "Vivi" });
-    expect(turn1.messages).toEqual(["Boa noite, Vivi! 😊 Em que posso te ajudar?"]);
+    expect(turn1.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite), Vivi! 😊 Em que posso te ajudar\?$/);
     history.push({ from: "ai", text: turn1.messages[0] }, { from: "customer", text: "Leandro" });
 
     // O modelo erraria como no print ("Leandro, em que posso te ajudar?"): o código decide antes dele.
@@ -550,7 +537,7 @@ describe("cliente pede um atendente pelo nome", () => {
     model.script = async () => ({ reply: "", action: "handoff", reason: "Cliente pediu o Leandro" });
     const turn = await simulateAgent({ ...settings, handoffMessage: "" }, [{ from: "customer", text: "Preciso falar com Leandro" }], "user-1", undefined, { sessionId: "sessao-leandro", contactName: "Vivi" });
     expect(turn.action).toBe("handoff");
-    expect(turn.messages).toEqual(["Claro, Vivi! Vou te transferir agora mesmo para falar com o Leandro. Só um instante! 😊"]);
+    expect(turn.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite), Vivi! 😊 Claro, Vivi! Vou te transferir/);
   });
 
   it("transferência decidida pela IA sem texto e sem mensagem configurada: aviso padrão em vez de silêncio", async () => {

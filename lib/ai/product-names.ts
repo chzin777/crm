@@ -89,6 +89,31 @@ const MODEL_NAMES: Record<string, string> = {
 const SUN_PREFIX: Record<string, string> = { RAYBAN: "RB", OAKLEY: "OO" };
 const brandKey = (marca: string | null) => (marca ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
+const ICONIC_ALIASES: { name: string; references: string[] }[] = [
+  { name: "Original Wayfarer", references: ["RB2140"] },
+  { name: "New Wayfarer", references: ["RB2132"] },
+  { name: "Wayfarer", references: ["RB2140", "RB2132"] },
+  { name: "Justin", references: ["RB4165"] },
+  { name: "Aviator", references: ["RB3025"] },
+  { name: "Erika", references: ["RB4171"] },
+  { name: "Clubmaster", references: ["RB3016"] },
+  { name: "Round", references: ["RB3447"] },
+  { name: "Hexagonal", references: ["RB3548"] },
+];
+
+/** Identifica a família comercial sem confundir referências de outra marca. */
+export function iconicModel(text: string, brand?: string | null) {
+  const normalized = norm(text).replace(/[^A-Z0-9]+/g, " ").trim();
+  const explicitBrand = brandKey(brand ?? null);
+  if (explicitBrand && !explicitBrand.startsWith("RAYBAN")) return null;
+  const compact = normalized.replace(/ /g, "");
+  if (Object.keys(SUN_PREFIX).some((other) => other !== "RAYBAN" && compact.includes(other))) return null;
+  return ICONIC_ALIASES.find((model) =>
+    new RegExp(`(^| )${norm(model.name)}( |$)`).test(normalized)
+    || model.references.some((ref) => new RegExp(`(?:^|[^A-Z0-9])0?${ref}\\d*[A-Z]?(?:$|[^A-Z0-9])`).test(normalized)),
+  ) ?? null;
+}
+
 /** "Ray-Ban" + "RB4165L" → "Justin"; referência de armação (RX) ou modelo desconhecido → null. */
 export function modelNickname(marca: string | null, referencia: string | null) {
   const brand = brandKey(marca);
