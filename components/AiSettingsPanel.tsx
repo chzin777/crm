@@ -86,6 +86,7 @@ const SALES_EVENT_LABELS: Record<SalesTrigger, string> = {
   visita_loja: "loja para comprar/reservar → Fechamento (Visita/Reserva)",
   venda_faturada: "venda no ERP → Ganho",
   venda_manual: "venda marcada → Ganho",
+  criacao_manual: "aberta pelo vendedor → Novo lead",
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   disponivel_na_regiao: "disponível na região",

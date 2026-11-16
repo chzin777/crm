@@ -89,7 +89,7 @@ async function backfillPrescriptions() {
 }
 
 // Ordem do funil: o produto abre o card (com o valor); receita e Vendas avançam para Orçamento.
-const ORDER: Record<SalesTrigger, number> = { interesse_produto: 0, orcamento_lentes: 1, receita_enviada: 2, transbordo_vendas: 3, visita_loja: 4, venda_faturada: 5, venda_manual: 6 };
+const ORDER: Record<SalesTrigger, number> = { interesse_produto: 0, orcamento_lentes: 1, receita_enviada: 2, transbordo_vendas: 3, visita_loja: 4, venda_faturada: 5, venda_manual: 6, criacao_manual: -1 };
 
 async function backfillDeals() {
   const since = new Date(Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000);

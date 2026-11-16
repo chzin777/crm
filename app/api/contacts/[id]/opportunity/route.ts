@@ -1,7 +1,7 @@
 import { requireApiSession } from "@/lib/api-auth";
 import { STAGE_DEFINITIONS, type StageId } from "@/lib/pipeline-stages";
 import { SALES_PIPELINE } from "@/lib/sales-pipeline";
-import { contactOpportunity, updateOpportunity } from "@/lib/sales-pipeline-db";
+import { contactOpportunity, createOpportunity, updateOpportunity } from "@/lib/sales-pipeline-db";
 
 type Context = RouteContext<"/api/contacts/[id]/opportunity">;
 
@@ -33,4 +33,16 @@ export async function PATCH(request: Request, context: Context) {
   });
   if (!card) return Response.json({ error: "Oportunidade não encontrada." }, { status: 404 });
   return Response.json({ card });
+}
+
+/** "+ Criar oportunidade": abre o card do contato no funil de vendas em 1 clique. */
+export async function POST(request: Request, context: Context) {
+  const user = await requireApiSession();
+  if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
+  const { id } = await context.params;
+  const body = (await request.json().catch(() => null)) as { conversationId?: unknown } | null;
+  const conversationId = typeof body?.conversationId === "string" ? body.conversationId : null;
+  const card = await createOpportunity({ contactId: id, conversationId, author: user.name || "Vendedor" });
+  if (!card) return Response.json({ error: "Contato não encontrado." }, { status: 404 });
+  return Response.json({ card }, { status: 201 });
 }

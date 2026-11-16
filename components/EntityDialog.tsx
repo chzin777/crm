@@ -61,7 +61,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
             </button>
           </div>
         </header>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+        <div className={`flex min-h-0 flex-1 flex-col overscroll-contain ${size === "panel" ? "overflow-hidden" : "overflow-y-auto"}`}>
           {children}
         </div>
       </section>

@@ -295,11 +295,11 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
 
   return (
     <EntityDialog titleId="contact-details-title" title={`Dados do cliente: ${displayName}`} description="" size="panel" onClose={onClose} header={header}>
-      <div role="tablist" aria-label="Seções dos dados do cliente" className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+      <div role="tablist" aria-label="Seções dos dados do cliente" className="flex shrink-0 flex-wrap gap-x-1 border-b border-slate-200 dark:border-slate-800">
         {tabs.map((item) => {
           const active = tab === item.id;
           return (
-            <button key={item.id} type="button" role="tab" id={`contact-tab-${item.id}`} aria-selected={active} aria-controls={`contact-panel-${item.id}`} onClick={() => changeTab(item.id)} className={`-mb-px cursor-pointer whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition-colors duration-200 ${active ? "border-[#C4D600] text-[#051647] dark:text-white" : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}>
+            <button key={item.id} type="button" role="tab" id={`contact-tab-${item.id}`} aria-selected={active} aria-controls={`contact-panel-${item.id}`} onClick={() => changeTab(item.id)} className={`-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition-colors duration-200 ${active ? "border-[#C4D600] text-[#051647] dark:text-white" : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"}`}>
               {item.label}
             </button>
           );
@@ -324,7 +324,7 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
           </Section>
 
           <Section title="Oportunidade no Pipeline">
-            <ContactOpportunityCard contactId={conversation.contactId} canWrite={canWrite} onRecurrence={setRecurrence} />
+            <ContactOpportunityCard contactId={conversation.contactId} conversationId={id} canWrite={canWrite} onRecurrence={setRecurrence} />
           </Section>
 
           <Section title={profile?.notes.length ? `Notas internas (${profile.notes.length})` : "Notas internas"}>

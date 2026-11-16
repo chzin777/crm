@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, ExternalLink, FileText, MapPin, Target } from "lucide-react";
+import { Bot, ExternalLink, Plus, Target } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
-import type { CustomerType, PipelineCard } from "@/lib/sales-pipeline";
+import { CUSTOMER_TYPE_COLOR, CUSTOMER_TYPE_LABEL, type CustomerType, type PipelineCard } from "@/lib/sales-pipeline";
 
 type Stage = { id: string; titulo: string };
 
 /**
- * Oportunidade ativa do cliente no funil de vendas: etapa em seletor inline (movimento manual registrado no card),
- * valor e atalho para o Pipeline. Devolve a classificação Novo/Recorrente para o cabeçalho do modal.
+ * Oportunidade do cliente no mesmo visual do card do Kanban do Pipeline (selos, título, valor e barra de progresso),
+ * com seletor rápido de etapa, atalho para o Pipeline e "+ Criar oportunidade" quando ainda não há card.
+ * Devolve a classificação Novo/Recorrente para o cabeçalho do modal.
  */
-export function ContactOpportunityCard({ contactId, canWrite, onRecurrence }: { contactId: string; canWrite: boolean; onRecurrence?: (type: CustomerType | null) => void }) {
+export function ContactOpportunityCard({ contactId, conversationId, canWrite, onRecurrence }: { contactId: string; conversationId?: string; canWrite: boolean; onRecurrence?: (type: CustomerType | null) => void }) {
   const toast = useToast();
   const [card, setCard] = useState<PipelineCard | null>(null);
   const [stages, setStages] = useState<Stage[]>([]);
@@ -54,55 +55,92 @@ export function ContactOpportunityCard({ contactId, canWrite, onRecurrence }: { 
     }
   };
 
-  if (loading) return <p className="rounded-xl border border-slate-200 p-3 text-xs text-slate-500 dark:border-slate-700">Carregando oportunidade...</p>;
+  const create = async () => {
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/contacts/${contactId}/opportunity`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId }) });
+      const data = (await response.json().catch(() => ({}))) as { card?: PipelineCard; error?: string };
+      if (!response.ok || !data.card) throw new Error(data.error ?? "Não foi possível criar a oportunidade.");
+      setCard(data.card);
+      if (data.card.customerType) onRecurrence?.(data.card.customerType);
+      toast.success("Oportunidade criada", `Card aberto em ${stages.find((stage) => stage.id === data.card!.coluna)?.titulo ?? "Novo lead"}.`);
+    } catch (error) {
+      toast.error("Erro", error instanceof Error ? error.message : "Falha ao criar.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="h-40 animate-pulse rounded-xl border border-slate-200/80 bg-slate-50 dark:border-slate-700/80 dark:bg-white/5" aria-label="Carregando oportunidade" />;
+
   if (!card) {
     return (
-      <div className="flex items-start gap-2 rounded-xl border border-dashed border-slate-300 p-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        <Target className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        Sem oportunidade no funil. Ela é criada sozinha quando o cliente envia receita, pede orçamento ou se interessa por um modelo.
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center dark:border-slate-700 dark:bg-[#07194f]">
+        <Target className="h-6 w-6 text-slate-300 dark:text-slate-600" aria-hidden />
+        <p className="max-w-sm text-xs text-slate-500 dark:text-slate-400">Este cliente ainda não tem oportunidade aberta no funil de vendas.</p>
+        {canWrite && (
+          <button type="button" disabled={saving} onClick={() => void create()} className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-semibold text-[#051647] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
+            <Plus className="h-3.5 w-3.5" />{saving ? "Criando..." : "Criar oportunidade"}
+          </button>
+        )}
       </div>
     );
   }
 
+  const progress = Math.max(0, Math.min(100, card.progresso ?? 0));
   const lastNote = card.observacoes?.find((note) => note.autor === "IA");
   return (
-    <section aria-label="Oportunidade no funil de vendas" className="space-y-2.5 rounded-xl border border-[#002187]/15 bg-[#f5f8ff] p-3 dark:border-slate-700 dark:bg-[#051647]/60">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <p className="min-w-0 truncate text-sm font-semibold text-[#051647] dark:text-white" title={card.titulo}>{card.titulo}</p>
-        <p className="shrink-0 text-right">
-          <span className="block text-sm font-extrabold text-[#051647] dark:text-white">{card.valor}</span>
-          {card.estimatedValue && !card.valorFaturado ? <span className="block text-[10px] text-slate-500">estimado</span> : null}
-        </p>
+    <article aria-label="Oportunidade no funil de vendas" className="space-y-3 rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-slate-700/80 dark:bg-[#07194f]">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-bold">
+        <span className={`whitespace-nowrap rounded-full px-2 py-0.5 ${card.customerType ? CUSTOMER_TYPE_COLOR[card.customerType] : card.tagColor}`}>{card.customerType ? CUSTOMER_TYPE_LABEL[card.customerType] : card.tag}</span>
+        {card.receitaAnexada && <span className="whitespace-nowrap rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white">📄 Receita anexada</span>}
+        {card.lojaInteresse && <span className="max-w-full truncate rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}>📍 {card.lojaInteresse}</span>}
+        {card.autoMoveEnabled === false && <span className="whitespace-nowrap rounded-full bg-slate-200 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Automação pausada</span>}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+
+      <div className="min-w-0">
+        <h3 className="line-clamp-2 break-words text-sm font-bold leading-tight text-slate-900 dark:text-white" title={card.titulo}>{card.titulo}</h3>
+        <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400" title={card.cliente}>{card.cliente}</p>
+      </div>
+
+      <div>
+        <div className="flex items-baseline justify-between">
+          <span className="min-w-0 truncate text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
+            {card.valor}
+            {card.estimatedValue && !card.valorFaturado ? <span className="ml-1 text-[10px] font-semibold text-slate-400">estimado</span> : null}
+          </span>
+          <span className="text-[11px] font-semibold text-slate-400">{progress}%</span>
+        </div>
+        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+          <div className={`h-1.5 rounded-full ${card.progressoCor || "bg-[#C4D600]"}`} style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+
+      {lastNote && <p className="flex items-start gap-1.5 text-[11px] text-slate-500 dark:text-slate-400"><Bot className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />{lastNote.texto.replace(/^🤖\s*/, "")}</p>}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800/80">
+        <label className="flex min-w-0 flex-1 items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
           Etapa
           <select
             value={card.coluna}
             disabled={!canWrite || saving}
             onChange={(event) => void save({ column: event.target.value })}
-            className="h-8 min-w-0 flex-1 cursor-pointer rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 disabled:cursor-not-allowed dark:border-slate-600 dark:bg-[#051647] dark:text-white"
+            className="h-8 min-w-0 max-w-[220px] flex-1 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 disabled:cursor-not-allowed dark:border-slate-600 dark:bg-[#051647] dark:text-white"
           >
             {stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.titulo}</option>)}
           </select>
         </label>
-        <Link href="/" target="_blank" className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">
-          Pipeline<ExternalLink className="h-3 w-3" aria-hidden />
-        </Link>
-      </div>
-      {(card.receitaAnexada || card.lojaInteresse || card.autoMoveEnabled === false) && (
-        <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
-          {card.receitaAnexada && <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[#002187] dark:bg-slate-800 dark:text-slate-200"><FileText className="h-3 w-3" aria-hidden />Receita anexada</span>}
-          {card.lojaInteresse && <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]"><MapPin className="h-3 w-3 shrink-0" aria-hidden />{card.lojaInteresse}</span>}
-          {card.autoMoveEnabled === false && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Automação pausada</span>}
+        <div className="flex shrink-0 items-center gap-3">
+          {canWrite && (
+            <button type="button" disabled={saving} onClick={() => void save({ autoMoveEnabled: card.autoMoveEnabled === false })} className="cursor-pointer text-[11px] font-semibold text-slate-500 hover:text-[#002187] hover:underline disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-[#C4D600]">
+              {card.autoMoveEnabled === false ? "Ligar automação" : "Pausar automação"}
+            </button>
+          )}
+          <Link href="/" target="_blank" className="inline-flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">
+            Abrir no Pipeline<ExternalLink className="h-3 w-3" aria-hidden />
+          </Link>
         </div>
-      )}
-      {lastNote && <p className="flex items-start gap-1.5 text-[11px] text-slate-500 dark:text-slate-400"><Bot className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />{lastNote.texto.replace(/^🤖\s*/, "")}</p>}
-      {canWrite && (
-        <button type="button" disabled={saving} onClick={() => void save({ autoMoveEnabled: card.autoMoveEnabled === false })} className="cursor-pointer text-[11px] font-semibold text-slate-500 hover:text-[#002187] hover:underline disabled:cursor-not-allowed dark:text-slate-400 dark:hover:text-[#C4D600]">
-          {card.autoMoveEnabled === false ? "Ligar movimentação automática" : "Pausar movimentação automática"}
-        </button>
-      )}
-    </section>
+      </div>
+    </article>
   );
 }

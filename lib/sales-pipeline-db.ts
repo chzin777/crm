@@ -111,6 +111,37 @@ export async function contactOpportunity(contactId: string) {
   return { card, stages, recurrence };
 }
 
+/**
+ * "+ Criar oportunidade" no Dados do cliente: abre o card do contato em Novo lead (independe da automação global).
+ * Já existindo uma aberta, devolve a existente.
+ */
+export async function createOpportunity(input: { contactId: string; conversationId?: string | null; author: string }) {
+  const card = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(PIPELINE_LOCK);
+    const { configs, cards } = await readPipeline(tx);
+    const open = openSalesCard(cards, input.contactId);
+    if (open) return open;
+    const contact = await tx.contact.findUnique({ where: { id: input.contactId }, select: { id: true, name: true, phone: true, email: true, birthDate: true } });
+    if (!contact) return null;
+    const [recurrence, prescriptions] = await Promise.all([
+      classifyCustomerRecurrence(contact.id, tx, cards),
+      tx.customerPrescription.count({ where: { contactId: contact.id } }),
+    ]);
+    const applied = applySalesEvent(cards, { contact, conversationId: input.conversationId, event: { type: "criacao_manual", summary: input.author }, recurrence, configs });
+    if (!applied.card) return null;
+    let created = applied.card;
+    let next = applied.cards;
+    if (prescriptions > 0) {
+      created = { ...created, receitaAnexada: true, titulo: `Lentes com receita - ${contact.name}`.slice(0, 120) };
+      next = next.map((item) => (item.id === created.id ? created : item));
+    }
+    await writePipeline(tx, next);
+    return created;
+  }, { maxWait: 10_000, timeout: 30_000 });
+  if (card) await invalidateCache("dashboard").catch(() => undefined);
+  return card;
+}
+
 /** Vendedor muda a etapa pelo atendimento (ou pausa a automação do card). */
 export async function updateOpportunity(input: { contactId: string; cardId: string; column?: StageId; autoMoveEnabled?: boolean; author: string }) {
   return prisma.$transaction(async (tx) => {

@@ -12,7 +12,7 @@ export const SALES_PIPELINE: PipelineId = "novos";
 export type SalesStage = "qualificacao" | "orcamento" | "visita" | "ganho";
 export const SALES_STAGE_COLUMN: Record<SalesStage, StageId> = { qualificacao: "novo-lead", orcamento: "em-atendimento", visita: "fechamento", ganho: "ganho" };
 
-export type SalesTrigger = "interesse_produto" | "receita_enviada" | "orcamento_lentes" | "transbordo_vendas" | "visita_loja" | "venda_faturada" | "venda_manual";
+export type SalesTrigger = "interesse_produto" | "receita_enviada" | "orcamento_lentes" | "transbordo_vendas" | "visita_loja" | "venda_faturada" | "venda_manual" | "criacao_manual";
 export type SalesEvent = {
   type: SalesTrigger;
   /** Modelo de interesse ("Ray-Ban Aviator RB3025"). */
@@ -33,6 +33,7 @@ const EVENT_STAGE: Record<SalesTrigger, SalesStage> = {
   visita_loja: "visita",
   venda_faturada: "ganho",
   venda_manual: "ganho",
+  criacao_manual: "qualificacao",
 };
 const EVENT_REASON: Record<SalesTrigger, string> = {
   interesse_produto: "Cliente demonstrou interesse em modelo específico",
@@ -42,6 +43,7 @@ const EVENT_REASON: Record<SalesTrigger, string> = {
   visita_loja: "Cliente pediu a loja para comprar/reservar",
   venda_faturada: "Venda faturada no ERP",
   venda_manual: "Venda marcada pelo vendedor",
+  criacao_manual: "Oportunidade aberta pelo vendedor",
 };
 
 export type CustomerType = "novo" | "recorrente";
@@ -198,9 +200,9 @@ export function applySalesEvent(cards: PipelineCard[], input: {
     note = `🤖 Movido automaticamente para '${title}' — ${EVENT_REASON[event.type]}${event.store ? ` (${event.store})` : ""}`;
     card = { ...card, coluna: target, progresso: STAGE_PROGRESS[target], diasNaEtapa: "Atualizado agora", entrouEmEtapaEm: nowIso };
   } else if (created) {
-    note = `🤖 Oportunidade criada automaticamente em '${input.configs[target]?.titulo ?? target}' — ${EVENT_REASON[event.type]} (${CUSTOMER_TYPE_LABEL[recurrence.type]})`;
+    note = event.type === "criacao_manual" ? `Oportunidade criada manualmente em '${input.configs[target]?.titulo ?? target}' por ${event.summary || "vendedor"} (${CUSTOMER_TYPE_LABEL[recurrence.type]})` : `🤖 Oportunidade criada automaticamente em '${input.configs[target]?.titulo ?? target}' — ${EVENT_REASON[event.type]} (${CUSTOMER_TYPE_LABEL[recurrence.type]})`;
   }
-  if (note) card = { ...card, observacoes: [{ id: newId(), texto: note, autor: "IA", criadoEm: nowIso }, ...(card.observacoes ?? [])] };
+  if (note) card = { ...card, observacoes: [{ id: newId(), texto: note, autor: event.type === "criacao_manual" ? event.summary || "Vendedor" : "IA", criadoEm: nowIso }, ...(card.observacoes ?? [])] };
 
   const next = created ? [card, ...cards] : cards.map((item) => (item.id === card.id ? card : item));
   return { cards: next, card, created, moved: canMove, note };
