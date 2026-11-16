@@ -13,13 +13,14 @@ import type { ImageAnalysis } from "@/lib/ai/catalog-search";
 import { defaultQueueHint, isGeneralQueue } from "@/lib/ai/routing";
 import { productSelectRef, selectionText, type InteractiveShowcase, type ShowcaseListRow } from "@/lib/ai/interactive-showcase";
 import type { SalesEvent, SalesTrigger } from "@/lib/sales-pipeline";
+import type { PlaygroundFinancial } from "@/lib/ai/installments";
 
 type Queue = { id: string; name: string; description?: string };
 type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
 /** silent: turno sem resposta (encerramento silencioso), só aparece no teste e não entra no histórico. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string; imageAnalysis?: PlaygroundResult["imageAnalysis"] };
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string; imageAnalysis?: PlaygroundResult["imageAnalysis"]; financial?: PlaygroundFinancial };
 
 /** Lista Interativa do WhatsApp simulada: botão "Ver modelos" abre a gaveta; tocar num modelo envia a escolha. */
 function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveShowcase; disabled: boolean; onPick: (row: ShowcaseListRow) => void }) {
@@ -65,6 +66,17 @@ type PlaygroundResult = AgentOutcome & {
   interactiveList?: InteractiveShowcase;
   imageAnalysis?: ImageAnalysis;
   salesEvents?: SalesEvent[];
+  financial?: PlaygroundFinancial;
+};
+const FINANCIAL_STEP_LABELS: Record<PlaygroundFinancial["step"], string> = {
+  ask_identity: "faltou nome completo e/ou CPF, a IA pediu antes de consultar",
+  invalid_cpf: "CPF com número errado (dígito verificador), a IA pediu para conferir",
+  not_found: "nenhum cadastro com esse CPF no VMSet, a IA pediu para conferir",
+  name_mismatch: "o nome informado não bate com o cadastro do CPF, a IA pediu para conferir sem revelar dados",
+  unavailable: "VMSet indisponível, transfere para um atendente",
+  still_waiting: "já existe aprovação pendente, a IA só pede um instante",
+  approval: "consultado no VMSet; no WhatsApp o cliente recebe só o aviso de aguardo e o card abaixo vai para o operador aprovar no /chat",
+  direct: "consultado no VMSet e enviado direto (aprovação do operador desligada)",
 };
 const SALES_EVENT_LABELS: Record<SalesTrigger, string> = {
   interesse_produto: "interesse em modelo → Novo lead",
@@ -318,6 +330,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
       const notes = [
         data.documents?.length ? `Leitura do documento antes do transbordo (igual ao WhatsApp): ${data.documents.map((doc) => doc.summary).join(" | ")}` : "",
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
+        data.financial ? `Parcelas/crediário: ${FINANCIAL_STEP_LABELS[data.financial.step]}${data.financial.cpfMasked ? ` (CPF ${data.financial.cpfMasked}${data.financial.source === "cadastro" ? ", do cadastro do telefone" : ""})` : ""}.` : "",
         data.salesEvents?.length || (data.action === "handoff" && /venda|comercial/i.test(data.handoffQueue ?? ""))
           ? `Funil de vendas (no WhatsApp): ${[...(data.salesEvents ?? []).map((event) => SALES_EVENT_LABELS[event.type] + (event.product ? ` (${event.product})` : "") + (event.value ? ` — R$ ${event.value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "") + (event.store ? ` — ${event.store}` : "")), ...(data.action === "handoff" && /venda|comercial/i.test(data.handoffQueue ?? "") ? [SALES_EVENT_LABELS.transbordo_vendas] : [])].join("; ")}. Cria a oportunidade (Novo/Recorrente pelo ERP) ou só avança a etapa, nunca volta.`
           : "",
@@ -339,7 +352,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         text: part || "(nenhuma mensagem ao cliente)",
         historyText: part,
         ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image, details: data.details } : {}),
-        ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff" } : {}),
+        ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff", ...(data.financial ? { financial: data.financial } : {}) } : {}),
         // A bolha da vitrine numerada é a que vira lista interativa no WhatsApp.
         ...(data.interactiveList && (part.match(/^\s*\d+\.\s/gm) ?? []).length >= 2 ? { list: data.interactiveList } : {}),
       }));
@@ -424,6 +437,14 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
               {message.text && <p className="whitespace-pre-wrap"><WhatsAppText text={message.text} /></p>}
               {message.list && <InteractiveListPreview list={message.list} disabled={busy || ended} onPick={(row) => void send(null, row)} />}
               {message.note && <p className="flex items-start gap-1 rounded-md bg-[#F7915E]/15 px-2 py-1 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]"><ArrowRightLeft className="mt-0.5 h-3 w-3 shrink-0" />{message.note}</p>}
+              {message.financial?.approval && (
+                <div className="space-y-1 rounded-md border border-[#F7915E]/40 bg-white px-2 py-1.5 text-[10px] text-slate-700 dark:bg-[#051647] dark:text-slate-200">
+                  <p className="font-bold text-[#9a4a1c] dark:text-[#F7915E]">⏳ Aprovação Financeira (como o operador veria no /chat)</p>
+                  <p><span className="font-semibold">Cadastro no VMSet:</span> {message.financial.approval.customerNameVmset ?? "sem nome"} · CPF {message.financial.approval.customerCpfMasked}</p>
+                  <p><span className="font-semibold">Parcelas:</span> {message.financial.approval.installmentsSummary.abertas} em aberto ({message.financial.approval.installmentsSummary.atrasadas} vencidas), {message.financial.approval.installmentsSummary.pagas} pagas</p>
+                  <p className="whitespace-pre-line rounded bg-slate-50 px-1.5 py-1 dark:bg-[#07194f]"><span className="font-semibold">Rascunho:</span> {message.financial.approval.draftMessage}</p>
+                </div>
+              )}
               {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
               {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {item.kind === "marca_ampla" ? `busca ampla (vitrine sem foto) · ${item.products} modelo${item.products === 1 ? "" : "s"} com estoque` : `${STOCK_SCENARIO_LABELS[item.scenario]} · ${item.products} produto${item.products === 1 ? "" : "s"}, ${item.stores} loja${item.stores === 1 ? "" : "s"}`} · {item.ms} ms{item.cached ? " (cache)" : ""}{item.sheet ? ` · ficha resumida ${DETAILS_SOURCE_LABELS[item.sheet]}` : ""}{item.sheet ? (item.rating ? ` · avaliação ${item.rating}` : " · sem avaliação confiável") : ""}{item.image === "sent" ? " · foto já enviada nesta etapa" : item.image === "none" ? " · foto não encontrada" : ""}</p>)}
               {message.details?.map((item, index) => <p key={`d${index}`} className="inline-flex items-center gap-1 rounded-md bg-[#002187]/10 px-2 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-slate-200" title="Só aparece no teste: ficha do produto"><BookOpenText className="h-3 w-3" />Ficha do produto: {item.product} · {DETAILS_SOURCE_LABELS[item.source]} · {item.variations} cor{item.variations === 1 ? "" : "es"} com saldo{item.rating ? ` · avaliação ${item.rating}` : ""} · {item.ms} ms</p>)}
@@ -779,6 +800,7 @@ export function AiSettingsPanel() {
             <Toggle label="Horário de atendimento" description="Usa os horários cadastrados em Filas › Horário de atendimento." checked={settings.useOperatingHours} onChange={(value) => set("useOperatingHours", value)} />
             <Toggle label="Pedidos do próprio cliente" description="Pode informar data, loja e situação dos pedidos do cliente no ERP." checked={settings.useCustomerOrders} onChange={(value) => set("useCustomerOrders", value)} />
             <Toggle label="Pode citar preços" description="Usa o preço médio dos mais vendidos como referência “a partir de”. Desligado, a IA diz que a loja passa o orçamento." checked={settings.canQuotePrices} onChange={(value) => set("canQuotePrices", value)} />
+            <Toggle label="Aprovação de parcelas/crediário" description="Exigir confirmação do operador antes de enviar dados de parcelas/crediário ao cliente. A IA pede nome completo e CPF, consulta o VMSet e deixa a resposta pronta no /chat para o operador conferir e enviar." checked={settings.requireApprovalForFinancialQueries} onChange={(value) => set("requireApprovalForFinancialQueries", value)} />
           </Block>
 
           <Block title="Instruções e restrições" hint="Regras de comportamento que valem para todas as respostas (ex.: o que nunca prometer). Segurança, estoque e imagens têm regras fixas no sistema que estas instruções não substituem.">

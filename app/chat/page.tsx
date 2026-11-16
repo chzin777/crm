@@ -12,6 +12,7 @@ import { AiSalesDialog, AiSummaryDialog } from "@/components/chat/AiPanels";
 import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
+import { FinancialApprovalCard } from "@/components/chat/FinancialApprovalCard";
 import { DeleteConversationDialog, deleteConversation, type DeleteReason } from "@/components/chat/DeleteConversationDialog";
 
 const UNDO_DELETE_MS = 7000;
@@ -602,6 +603,7 @@ function ChatWorkspace() {
                 scheduled={scheduled}
                 onCancelScheduled={canWrite ? (scheduledId) => void cancelScheduled(scheduledId) : undefined}
               />
+              <FinancialApprovalCard key={`${open.id}-approval`} conversationId={open.id} tick={tick} canWrite={canWrite && !open.closedAt} onChanged={refreshOpen} />
               <Composer
                 key={open.id}
                 conversation={open}

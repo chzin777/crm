@@ -56,6 +56,8 @@ export type ConversationItem = {
   priority: ChatPriority;
   subject: string;
   unreadCount: number;
+  /** Parcelas consultadas pela IA aguardando o operador conferir (selo na lista). */
+  financialApprovalPending?: boolean;
   waitingSince: string | null;
   lastMessageAt: string | null;
   closedAt: string | null;

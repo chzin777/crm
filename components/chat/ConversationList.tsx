@@ -46,9 +46,10 @@ function DeliveryIcon({ delivery }: { delivery: ChatDelivery }) {
 }
 
 /** Tag de origem com cor própria: campanha violeta, e-commerce verde, demais etiquetas neutras. */
-type OriginTone = "campaign" | "ecommerce" | "neutral" | "followup" | "overdue";
+type OriginTone = "campaign" | "ecommerce" | "neutral" | "followup" | "overdue" | "financial";
 
 const ORIGIN_TONES: Record<OriginTone, string> = {
+  financial: "border-[#F7915E]/50 bg-[#F7915E]/15 font-semibold text-[#9a3d12] dark:border-[#F7915E]/40 dark:bg-[#F7915E]/15 dark:text-[#F7915E]",
   followup: "border-[#002187]/20 bg-[#002187]/5 text-[#002187] dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600]",
   overdue: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300",
   neutral: "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
@@ -81,6 +82,11 @@ function cornerTime(item: ConversationItem, waiting: boolean) {
 }
 
 const dueLabel = (value: string) => new Date(value).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+
+/** Parcelas consultadas pela IA esperando o operador conferir: selo mais urgente da linha 3. */
+function financialOf(item: ConversationItem): Origin | null {
+  return item.financialApprovalPending ? { title: "A IA consultou as parcelas no VMSet e aguarda você conferir antes de enviar", text: "⏳ Aprovação Financeira", tone: "financial" } : null;
+}
 
 /** Lembrete de retorno pendente vira o selo da linha 3 (mais urgente que a origem). */
 function followUpOf(item: ConversationItem): Origin | null {
@@ -290,7 +296,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const selected = selectedId === item.id;
             const delivery = item.lastMessage && item.lastMessage.author !== "customer" ? item.lastMessage.delivery : null;
             const waiting = item.status === "waiting" && !!item.waitingSince;
-            const origin = followUpOf(item) ?? originOf(item);
+            const origin = financialOf(item) ?? followUpOf(item) ?? originOf(item);
             const corner = cornerTime(item, waiting);
             const priorityDot = PRIORITY_DOTS[item.priority];
             const operational = [item.queue?.name, item.store ? storeLabel(item.store) : null].filter((value): value is string => !!value);

@@ -7,6 +7,8 @@ import { activeStaff } from "@/lib/ai/staff-db";
 import { savePrescriptionFromAi } from "@/lib/prescriptions-db";
 import { detectSalesEvents, isSalesQueue, parseBrl, type SalesEvent } from "@/lib/sales-pipeline";
 import { recordSalesEvents } from "@/lib/sales-pipeline-db";
+import { awaitingIdentity, extractCpf, extractFullName, financialStep, FINANCIAL_ASK_IDENTITY, FINANCIAL_CHECK_CPF, FINANCIAL_INVALID_CPF, FINANCIAL_STILL_WAITING, FINANCIAL_UNAVAILABLE, FINANCIAL_WAIT, isFullName, isInstallmentQuestion, maskCpf, type InstallmentLookup, type PlaygroundFinancial } from "@/lib/ai/installments";
+import { buildApprovalDraft, createFinancialApproval, linkedCpfForPhone, lookupInstallments, pendingApproval, type FinancialApprovalDraft } from "@/lib/ai/installments-db";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
 import { withTyping } from "@/lib/chat/typing";
@@ -392,8 +394,14 @@ export type AgentRunInput = {
   lastAnalyzedImage?: ImageAnalysis | null;
   /** Nome do contato no cadastro ("Vivi"): nunca é trocado por um nome que o cliente citar. */
   contactName?: string | null;
+  /** CPF do único cadastro do VMSet vinculado ao telefone (parcelas sem pedir o CPF, com nome completo). */
+  linkedCpf?: string | null;
+  /** Já existe aprovação financeira pendente nesta conversa: não consulta de novo sem CPF novo. */
+  hasPendingFinancial?: boolean;
+  /** Consulta de parcelas no VMSet (testes injetam a sua). */
+  lookupInstallments?: (cpf: string) => Promise<InstallmentLookup>;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -403,6 +411,42 @@ export function selectedListedItem(ref: string, listed: ListedProduct[]): Listed
     ?? { index: 0, sku: /^\d+$/.test(ref) ? ref : null, referencia: /^\d+$/.test(ref) ? `#${ref}` : ref, nomeComercial: "", preco: null };
 }
 const NO_INJECTION: InjectionCheck = { risk: "none", matches: [] };
+
+/** Registro do passo financeiro (teste /ia e logs): o que a IA fez com o pedido de parcelas. */
+export type FinancialLog = { step: "ask_identity" | "invalid_cpf" | "not_found" | "name_mismatch" | "unavailable" | "still_waiting" | "approval" | "direct"; cpfMasked?: string; source?: "mensagem" | "cadastro" };
+
+/**
+ * Fluxo das parcelas do crediário. Devolve null quando a mensagem não é sobre parcelas (nem resposta ao pedido de
+ * identificação). Nunca expõe dados do cadastro antes de o CPF e o nome baterem; com aprovação ligada, o cliente só
+ * recebe o aviso de aguardo e o rascunho vai para o operador.
+ */
+export async function financialFlow(input: AgentRunInput, text: string): Promise<{ outcome: AgentOutcome; approval: FinancialApprovalDraft | null; log: FinancialLog } | null> {
+  const asks = isInstallmentQuestion(text);
+  const replyingIdentity = awaitingIdentity(input.lastAiText) || input.lastAiText === FINANCIAL_CHECK_CPF || input.lastAiText === FINANCIAL_INVALID_CPF;
+  const identity = extractCpf(text) ?? (extractFullName(text) ? { cpf: "", valid: false } : null);
+  // Respondendo ao pedido de identificação só conta se trouxe CPF ou nome; mudou de assunto → IA normal.
+  if (!asks && !(replyingIdentity && identity)) return null;
+  const reply = (message: string, log: FinancialLog, approval: FinancialApprovalDraft | null = null) => ({ outcome: { action: "reply" as const, reply: message, reason: "Consulta de parcelas/crediário", queue: "", trigger: "ai" as const }, approval, log });
+  if (input.hasPendingFinancial && !extractCpf(text)) return reply(FINANCIAL_STILL_WAITING, { step: "still_waiting" });
+
+  const step = financialStep({ text, linkedCpf: input.linkedCpf });
+  if (step.step === "ask_identity") return reply(FINANCIAL_ASK_IDENTITY, { step: "ask_identity" });
+  if (step.step === "invalid_cpf") return reply(FINANCIAL_INVALID_CPF, { step: "invalid_cpf" });
+  // Telefone vinculado ao VMSet só dispensa o CPF com o nome completo informado (homônimos, áudio mal transcrito).
+  if (step.source === "cadastro" && !isFullName(step.heardName)) return reply(FINANCIAL_ASK_IDENTITY, { step: "ask_identity" });
+
+  const lookup = await (input.lookupInstallments ?? lookupInstallments)(step.cpf);
+  const cpfMasked = maskCpf(step.cpf);
+  if (lookup.status !== "ok") {
+    return { outcome: { action: "handoff", reply: FINANCIAL_UNAVAILABLE, reason: "Consulta de parcelas: sistema do crediário (VMSet) indisponível", queue: "", trigger: "ai" }, approval: null, log: { step: "unavailable", cpfMasked, source: step.source } };
+  }
+  if (!lookup.found) return reply(FINANCIAL_CHECK_CPF, { step: "not_found", cpfMasked, source: step.source });
+  const draft = buildApprovalDraft({ cpf: step.cpf, lookup, transcribedText: text, heardName: step.heardName });
+  // CPF de outra pessoa (ou erro do áudio): pede para conferir sem revelar nada do cadastro encontrado.
+  if (!draft.nameMatches) return reply(FINANCIAL_CHECK_CPF, { step: "name_mismatch", cpfMasked, source: step.source });
+  if (input.settings.requireApprovalForFinancialQueries) return reply(FINANCIAL_WAIT, { step: "approval", cpfMasked, source: step.source }, draft);
+  return reply(draft.draftMessage, { step: "direct", cpfMasked, source: step.source });
+}
 
 /**
  * Motor único do agente de IA: o atendimento real (WhatsApp) e o teste da página /ia passam por aqui.
@@ -451,6 +495,11 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       return { outcome: { action: "handoff", reply: "", reason: "Tentativas repetidas de manipular a IA (pedido de regras internas ou mudança de papel)", queue: "", trigger: "security" }, media, mediaTriggerSkipped, search: null, injection };
     }
   }
+
+  // Parcelas/crediário (texto ou áudio): identidade (nome completo + CPF) antes de consultar o VMSet; o resultado
+  // só vai ao cliente depois da aprovação do operador no /chat (quando a opção estiver ligada).
+  const financial = await financialFlow(input, [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n"));
+  if (financial) return { outcome: financial.outcome, media, mediaTriggerSkipped, search: null, injection, financialApproval: financial.approval, financialLog: financial.log };
 
   // Foto: identificação silenciosa → busca no catálogo do ERP (a foto não é narrada); receita/comprovante em foto ou
   // PDF: leitura estruturada (graus, valor, data) → confirmação ao cliente + transbordo com o resumo para o atendente.
@@ -837,6 +886,7 @@ async function respond(conversationId: string, messageId: string) {
   const analyzed = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inSession }, orderBy: { createdAt: "desc" }, take: 20, select: { metaMedia: true } }).catch(() => []);
   const lastAnalyzedImage = sanitizeImageAnalysis(analyzed.map((item) => (item.metaMedia as { analysis?: unknown } | null)?.analysis).find(Boolean));
 
+  const [linkedCpf, hasPendingFinancial] = await Promise.all([linkedCpfForPhone(conversation.phone).catch(() => null), pendingApproval(conversationId).then(Boolean).catch(() => false)]);
   let run: AgentRun;
   try {
     // "digitando..." no WhatsApp do cliente antes de mídia, estoque e modelo (renova uma vez após 20 s).
@@ -860,6 +910,9 @@ async function respond(conversationId: string, messageId: string) {
       selectedProductRef: pending.map((item) => (item.metaMedia as { selectedProductRef?: string } | null)?.selectedProductRef).filter(Boolean).at(-1) ?? null,
       lastAnalyzedImage,
       contactName,
+      // Parcelas: CPF só quando o telefone leva a um único cadastro do VMSet; aprovação pendente evita nova consulta.
+      linkedCpf,
+      hasPendingFinancial,
     }));
   } catch (error) {
     // Já na fila: a equipe vai atender de qualquer forma, sem transferir de novo.
@@ -868,6 +921,15 @@ async function respond(conversationId: string, messageId: string) {
     return handoff(conversation, settings, error instanceof AiError ? `IA indisponível (${error.message})` : "IA indisponível");
   }
   const { outcome } = run;
+  // Parcelas/crediário: o resultado do VMSet fica pendente no /chat; o cliente recebe só o aviso de aguardo.
+  if (run.financialApproval) {
+    try {
+      await createFinancialApproval(conversationId, run.financialApproval);
+    } catch (error) {
+      console.warn(`[ai] ${conversationId}: aprovação financeira não gravada`, error);
+      return handoff(conversation, settings, "Consulta de parcelas: não foi possível preparar a aprovação do operador");
+    }
+  }
   // Guarda a análise da foto na mensagem dela (a próxima pergunta "qual o nome desse modelo?" usa este dado).
   const photoMessage = run.imageAnalysis ? pending.filter((item) => mediaKind(item) === "image").at(-1) : undefined;
   if (photoMessage && run.imageAnalysis) {
@@ -975,6 +1037,8 @@ export type PlaygroundResult = AgentOutcome & {
   messages: string[];
   /** Eventos que criariam/avançariam a oportunidade no funil de vendas (WhatsApp). */
   salesEvents?: SalesEvent[];
+  /** Passo do fluxo de parcelas e o card de aprovação que iria para o operador. */
+  financial?: PlaygroundFinancial;
   /** Fila para onde a conversa iria na transferência. */
   handoffQueue: string;
   /** Como a fila foi definida: escolha da IA validada, fila padrão (fallback), fixa ou a atual. */
@@ -1085,5 +1149,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     imageAnalysis: run.imageAnalysis ?? undefined,
     // Simulação: mostra o que iria para o funil de vendas (o teste não grava no pipeline).
     salesEvents: (() => { const events = turnSalesEvents(run, pendingText); return events.length ? events : undefined; })(),
+    // Parcelas: o teste mostra o card que o operador veria no /chat (o CPF completo nunca sai do servidor).
+    financial: run.financialLog ? { ...run.financialLog, ...(run.financialApproval ? { approval: { customerNameVmset: run.financialApproval.customerNameVmset, customerCpfMasked: run.financialApproval.customerCpfMasked, installmentsSummary: run.financialApproval.installmentsSummary, draftMessage: run.financialApproval.draftMessage, transcribedText: run.financialApproval.transcribedText, nameMatches: run.financialApproval.nameMatches } } : {}) } : undefined,
   };
 }

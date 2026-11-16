@@ -401,6 +401,7 @@ model ChatConversation {
   queue             ChatQueue?         @relation(fields: [queueId], references: [id], onDelete: SetNull)
   assignee          User?              @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   messages          ChatMessage[]
+  aiPendingActions  AiPendingAction[]
   npsFeedbacks      NpsFeedback[]
   followUps         FollowUp[]
   scheduledMessages ScheduledMessage[]
@@ -654,4 +655,33 @@ model CustomerPrescription {
   updatedAt          DateTime  @updatedAt
 
   @@index([contactId, createdAt])
+}
+
+/// Ação da IA aguardando o operador (ex.: parcelas do crediário): nada vai ao cliente antes da aprovação no /chat.
+model AiPendingAction {
+  id                  String           @id @default(cuid())
+  conversationId      String
+  conversation        ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// "financial_installments"
+  type                String
+  /// pending | approved | rejected | superseded
+  status              String           @default("pending")
+  customerNameVmset   String?
+  customerCpfMasked   String?
+  /// CPF consultado (só dígitos), para reconsulta; nunca vai para o cliente nem para o log.
+  cpf                 String?
+  installmentsSummary Json?
+  draftMessage        String
+  transcribedText     String?
+  heardName           String?
+  nameMatches         Boolean          @default(true)
+  decidedById         String?
+  decidedByName       String?
+  decidedAt           DateTime?
+  sentMessageId       String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([conversationId, status])
+  @@index([status, createdAt])
 }

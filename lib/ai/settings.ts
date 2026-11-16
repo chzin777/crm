@@ -36,6 +36,8 @@ export type AiSettings = {
   useOperatingHours: boolean;
   useCustomerOrders: boolean;
   canQuotePrices: boolean;
+  /** Exigir confirmação do operador antes de enviar dados de parcelas/crediário ao cliente. */
+  requireApprovalForFinancialQueries: boolean;
   /** Envia a foto do produto achada na web junto com as informações de estoque. */
   sendProductImage: boolean;
   /** Agrupa mensagens picadas do cliente e responde uma vez só (espera adaptativa, até 12 s). */
@@ -94,6 +96,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   useOperatingHours: true,
   useCustomerOrders: true,
   canQuotePrices: false,
+  requireApprovalForFinancialQueries: true,
   sendProductImage: true,
   groupMessages: true,
   topics: DEFAULT_AI_TOPICS,
@@ -163,6 +166,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     useOperatingHours: bool(raw.useOperatingHours, d.useOperatingHours),
     useCustomerOrders: bool(raw.useCustomerOrders, d.useCustomerOrders),
     canQuotePrices: bool(raw.canQuotePrices, d.canQuotePrices),
+    requireApprovalForFinancialQueries: bool(raw.requireApprovalForFinancialQueries, d.requireApprovalForFinancialQueries),
     sendProductImage: bool(raw.sendProductImage, d.sendProductImage),
     groupMessages: bool(raw.groupMessages, d.groupMessages),
     topics,

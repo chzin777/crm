@@ -15,6 +15,7 @@ export const conversationInclude = {
     take: 1,
     select: { text: true, author: true, delivery: true, attachment: true, createdAt: true },
   },
+  aiPendingActions: { where: { status: "pending" }, take: 1, select: { id: true } },
   followUps: {
     where: { status: "PENDING" as const },
     orderBy: { dueAt: "asc" as const },
@@ -51,6 +52,7 @@ export function serializeConversation(row: ConversationRow) {
     windowOpen: isWindowOpen(row.lastInboundAt),
     lastMessage: last ? { text: last.text, author: last.author, delivery: last.delivery, attachmentKind: attachment?.kind ?? null } : null,
     followUp: row.followUps[0] ? { dueAt: row.followUps[0].dueAt.toISOString(), note: row.followUps[0].note } : null,
+    financialApprovalPending: row.aiPendingActions.length > 0,
   };
 }
 

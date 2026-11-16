@@ -7,6 +7,8 @@ GET /stock?codes=146011,145644  (cabeçalho x-api-key)  ->  {"items": [{"code", 
   - no máximo 5 códigos por chamada (o CRM consulta só os produtos achados na busca local);
   - saldo disponível = quantidade - reserva de venda, só setores ativos que vendem (mesma regra da VIEW_OTCS_ESTOQUE);
   - unidades virtuais (100-199, 1000-2999) ficam de fora; o filtro de varejo (ADM, CD, fábrica) é feito no CRM.
+GET /installments?cpf=12345678901  (cabeçalho x-api-key)  ->  {"found", "name", "items": [{"numero", "parcela", "vencimento", "valor", "posicao", "pagamento", "valorPago", "tipo", "loja"}]}
+  - títulos a receber (carnê/boleto) do CPF, últimos 3 anos, sem cancelados;
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -91,6 +93,50 @@ def stock(codes):
         return items
 
 
+
+# Parcelas do crediário (carnê/boleto) de um CPF: títulos A RECEBER (FATURA.FTRA_TIPO = 'Recebimento'), ativos e não
+# cancelados, dos últimos 3 anos. Só leitura; o CRM decide o que mostrar (com aprovação do operador antes do cliente).
+INSTALLMENTS_SQL = """
+SELECT P.PRCR_NOME, T.TITL_NUMERO, T.TITL_PARCELA, T.TITL_DT_VENCTO, T.TITL_VALOR, T.TITL_POSICAO,
+       T.TITL_DT_PAGTO, T.TITL_VLR_PAGTO, D.TPDC_DESCRICAO, MAX(LJ.PRCR_NOME)
+FROM PARCEIRO P
+JOIN TITULO T ON T.PARCEIRO_ID = P.PARCEIRO_ID AND T.STATUS LIKE 'Ativo%' AND T.TITL_POSICAO <> 'Cancelado'
+JOIN FATURA F ON F.FATURA_ID = T.FATURA_ID AND F.FTRA_TIPO = 'Recebimento'
+LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = T.TIPO_DOCUMENTO_ID
+LEFT JOIN PARCEIRO LJ ON LJ.PARCEIRO_ID = T.UNIDADE_MANTENEDORA_ID
+WHERE P.PRCR_CGC_CPF = :cpf
+  AND T.TITL_DT_VENCTO >= ADD_MONTHS(TRUNC(SYSDATE), -36)
+GROUP BY P.PRCR_NOME, T.TITULO_ID, T.TITL_NUMERO, T.TITL_PARCELA, T.TITL_DT_VENCTO, T.TITL_VALOR, T.TITL_POSICAO,
+         T.TITL_DT_PAGTO, T.TITL_VLR_PAGTO, D.TPDC_DESCRICAO
+ORDER BY T.TITL_DT_VENCTO
+"""
+NAME_SQL = "SELECT MAX(PRCR_NOME) FROM PARCEIRO WHERE PRCR_CGC_CPF = :cpf"
+CPF = re.compile(r"^\d{11}$")
+
+
+def day(value):
+    return value.strftime("%Y-%m-%d") if value else None
+
+
+def installments(cpf):
+    with pool.acquire() as conn:
+        conn.call_timeout = CALL_TIMEOUT_MS * 2
+        cur = conn.cursor()
+        cur.execute(INSTALLMENTS_SQL, cpf=cpf)
+        rows = cur.fetchmany(200)
+        name = rows[0][0] if rows else None
+        if not rows:
+            cur.execute(NAME_SQL, cpf=cpf)
+            found = cur.fetchone()
+            name = found[0] if found else None
+        items = [{
+            "numero": str(numero or ""), "parcela": str(parcela or ""), "vencimento": day(venc),
+            "valor": round(float(valor or 0), 2), "posicao": (posicao or "").strip(), "pagamento": day(pagto),
+            "valorPago": round(float(pago), 2) if pago is not None else None, "tipo": (tipo or "").strip(), "loja": (loja or "").strip(),
+        } for _, numero, parcela, venc, valor, posicao, pagto, pago, tipo, loja in rows]
+        return {"found": bool(name), "name": (name or "").strip() or None, "items": items}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -104,10 +150,23 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path != "/stock":
+        if url.path not in ("/stock", "/installments"):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
+        if url.path == "/installments":
+            cpf = re.sub(r"\D", "", (parse_qs(url.query).get("cpf", [""])[0]))
+            if not CPF.match(cpf):
+                return self._send(400, {"error": "cpf inválido"})
+            started = time.monotonic()
+            try:
+                result = installments(cpf)
+            except Exception as error:
+                log(f"ERRO parcelas ***{cpf[3:6]}***: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+            # CPF nunca vai inteiro para o log.
+            log(f"parcelas ***{cpf[3:6]}***: {len(result['items'])} títulos em {time.monotonic() - started:.2f}s")
+            return self._send(200, result)
         raw = ",".join(parse_qs(url.query).get("codes", []))
         codes = list(dict.fromkeys(code.strip() for code in raw.split(",") if code.strip()))
         if not codes or len(codes) > MAX_CODES or not all(CODE.match(code) for code in codes):
