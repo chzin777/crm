@@ -98,11 +98,10 @@ function ChatWorkspace() {
     setShowCopilot(false);
   };
 
-  // Copiloto VMSet e painel do cliente dividem a lateral direita: abrir um recolhe o outro.
   const toggleCopilot = () => {
     setShowCopilot((current) => !current);
-    setShowPanel(false);
   };
+  const closeCopilot = useCallback(() => setShowCopilot(false), []);
 
   const loadScheduled = useCallback(async (id: string) => {
     const response = await fetch(`/api/chat/conversations/${id}/scheduled`, { cache: "no-store" }).catch(() => null);
@@ -671,14 +670,15 @@ function ChatWorkspace() {
           />
         )}
 
-        {showCopilot && open && (
+        {open && (
           <VmsetCopilotPanel
             key={`${open.id}-copilot`}
+            isOpen={showCopilot}
             conversationId={open.id}
             tick={tick}
             canInsert={canWrite && !open.closedAt}
             onInsert={(text) => setComposerDraft({ text, nonce: Date.now(), append: true })}
-            onClose={() => setShowCopilot(false)}
+            onClose={closeCopilot}
           />
         )}
 
