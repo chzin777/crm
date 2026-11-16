@@ -761,7 +761,7 @@ export default function Home() {
         </div>
 
         {/* Etapas do funil */}
-        <main className="flex-1 px-6 sm:px-8 pb-10">
+        <main className="min-w-0 flex-1 px-6 sm:px-8 pb-10">
           {cardsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{cardsError}</p>}
           {cardsSaving && <LoadingSpinner label="Salvando alterações no banco..." size={32} className="mb-4" />}
           {contactsError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{contactsError}</p>}
@@ -806,7 +806,7 @@ export default function Home() {
               </div>
             )
           ) : (
-            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3 xl:gap-5">
+            <div className="flex w-full flex-nowrap items-start gap-4 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pt-1 pb-4">
               {activePipeline.stages.map((coluna, stageIndex) => {
                 const cardsDaColuna = cardsByStage[coluna.id];
                 const pageCount = Math.max(1, Math.ceil(cardsDaColuna.length / cardsPerPage));
@@ -819,7 +819,7 @@ export default function Home() {
                     key={coluna.id}
                     onDragOver={(e) => handleDragOver(e, coluna.id)}
                     onDrop={(e) => handleDrop(e, coluna.id)}
-                    className={`relative flex flex-col rounded-2xl p-3 transition-all duration-200 ${cardsDaColuna.length === 0 ? "min-h-[309px]" : ""} ${coluna.bgColuna} ${isOver ? "ring-2 ring-[#002187] dark:ring-[#C4D600] bg-blue-50/50 dark:bg-blue-950/40" : ""
+                    className={`relative flex min-w-[232px] max-w-[340px] flex-1 basis-0 shrink-0 flex-col rounded-2xl p-3 transition-all duration-200 ${cardsDaColuna.length === 0 ? "min-h-[309px]" : ""} ${coluna.bgColuna} ${isOver ? "ring-2 ring-[#002187] dark:ring-[#C4D600] bg-blue-50/50 dark:bg-blue-950/40" : ""
                       }`}
                   >
                     {stageIndex < activePipeline.stages.length - 1 && (
@@ -828,7 +828,7 @@ export default function Home() {
                         initial={{ opacity: 0, scale: 0.75, x: -4 }}
                         animate={{ opacity: 1, scale: 1, x: 0 }}
                         transition={{ type: "spring", stiffness: 450, damping: 26, delay: stageIndex * 0.08 }}
-                        className="pointer-events-none absolute -right-[18px] top-[3.25rem] z-30 hidden h-9 w-9 items-center justify-center rounded-full border-4 border-[#f4f5f8] bg-[#051647] text-[#C4D600] shadow-md dark:border-[#030d29] dark:bg-[#C4D600] dark:text-[#051647] xl:flex"
+                        className="pointer-events-none absolute -right-[26px] top-[3.25rem] z-30 flex h-9 w-9 items-center justify-center rounded-full border-4 border-[#f4f5f8] bg-[#051647] text-[#C4D600] shadow-md dark:border-[#030d29] dark:bg-[#C4D600] dark:text-[#051647]"
                       >
                         <ArrowRight className="h-4 w-4" strokeWidth={2.75} />
                       </motion.span>
@@ -913,25 +913,26 @@ export default function Home() {
                           />
                           <div className="relative z-10 pointer-events-none space-y-3">
                             {/* Título e Tag */}
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <h3 className="font-bold text-sm text-slate-900 dark:text-white leading-tight">
+                            {/* Selo em cima do título: cabe inteiro na coluna compacta (~240px) sem espremer o nome */}
+                            <div className="flex min-w-0 flex-col items-start gap-1.5">
+                              <span className={`max-w-full truncate whitespace-nowrap text-[10px] font-bold px-2 py-0.5 rounded-full ${card.customerType ? CUSTOMER_TYPE_COLOR[card.customerType] : card.tagColor}`} title={card.customerType ? CUSTOMER_TYPE_LABEL[card.customerType] : card.tag}>
+                                {card.customerType ? CUSTOMER_TYPE_LABEL[card.customerType] : card.tag}
+                              </span>
+                              <div className="w-full min-w-0">
+                                <h3 className="line-clamp-2 break-words font-bold text-sm text-slate-900 dark:text-white leading-tight" title={card.titulo}>
                                   {card.titulo}
                                 </h3>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                <p className="truncate text-xs text-slate-500 dark:text-slate-400 mt-0.5" title={card.cliente}>
                                   {card.cliente}
                                 </p>
                               </div>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${card.customerType ? CUSTOMER_TYPE_COLOR[card.customerType] : card.tagColor}`}>
-                                {card.customerType ? CUSTOMER_TYPE_LABEL[card.customerType] : card.tag}
-                              </span>
                             </div>
 
                             {/* Oportunidade automática: receita, loja e atalho para a conversa */}
                             {(card.receitaAnexada || card.lojaInteresse || card.conversationId) && (
                               <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
                                 {card.receitaAnexada && (
-                                  <span className="rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white">📄 Receita anexada</span>
+                                  <span className="whitespace-nowrap rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white">📄 Receita anexada</span>
                                 )}
                                 {card.lojaInteresse && (
                                   <span className="max-w-full truncate rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}>📍 {card.lojaInteresse}</span>
@@ -941,7 +942,7 @@ export default function Home() {
                                     href={`/chat?c=${card.conversationId}`}
                                     onClick={(event) => event.stopPropagation()}
                                     draggable={false}
-                                    className="pointer-events-auto cursor-pointer rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[#051647] hover:underline dark:text-[#C4D600]"
+                                    className="pointer-events-auto cursor-pointer whitespace-nowrap rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[#051647] hover:underline dark:text-[#C4D600]"
                                     title="Abrir a conversa no Chat"
                                   >
                                     💬 Abrir conversa
@@ -953,7 +954,7 @@ export default function Home() {
                             {/* Valor e Porcentagem */}
                             <div>
                               <div className="flex items-baseline justify-between">
-                                <span className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+                                <span className="min-w-0 truncate text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
                                   {card.valor}
                                   {card.estimatedValue && !card.valorFaturado ? <span className="ml-1 text-[10px] font-semibold text-slate-400">estimado</span> : null}
                                 </span>
@@ -971,8 +972,8 @@ export default function Home() {
                             </div>
 
                             {/* Rodapé do Card com Avatar, Tempo e Botão WhatsApp Oficial */}
-                            <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80">
-                              <div className="flex items-center gap-2">
+                            <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800/80">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
                                 <div className="w-6 h-6 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold flex items-center justify-center">
                                   {card.iniciais}
                                 </div>
@@ -993,7 +994,7 @@ export default function Home() {
                                   event.stopPropagation();
                                   setMessageCard(card);
                                 }}
-                                className="relative z-20 pointer-events-auto flex items-center gap-1.5 rounded-md bg-[#25D366] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
+                                className="relative z-20 pointer-events-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-[#25D366] px-2.5 py-1 text-[11px] font-bold text-white shadow-xs transition-colors hover:bg-[#20ba5a] cursor-pointer hover:cursor-pointer"
                                 title="Enviar mensagem"
                               >
                                 <WhatsAppIcon className="w-3.5 h-3.5 fill-white" />
