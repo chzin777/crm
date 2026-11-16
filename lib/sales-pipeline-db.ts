@@ -106,7 +106,9 @@ export async function contactOpportunity(contactId: string) {
   const { configs, cards } = await readPipeline(prisma);
   const card = openSalesCard(cards, contactId) ?? cards.find((item) => item.pipelineId === SALES_PIPELINE && item.contactId === contactId) ?? null;
   const stages = orderedStages(SALES_PIPELINE, configs).map((stage) => ({ id: stage.id, titulo: configs[stage.id].titulo }));
-  return { card, stages };
+  // Selo Novo/Recorrente do cabeçalho do "Dados do cliente": o do card, ou o ERP quando ainda não há oportunidade.
+  const recurrence = card?.customerType ? card.customerType : (await classifyCustomerRecurrence(contactId, prisma, cards).catch(() => null))?.type ?? null;
+  return { card, stages, recurrence };
 }
 
 /** Vendedor muda a etapa pelo atendimento (ou pausa a automação do card). */

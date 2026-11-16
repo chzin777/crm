@@ -81,6 +81,10 @@ export type ContactNoteItem = { id: string; text: string; authorName: string; cr
 
 /** Dados da ficha, buscados só ao abrir o modal para não pesar no pulso da conversa. */
 export type ContactProfile = {
+  name: string;
+  email: string | null;
+  birthDate: string | null;
+  city: string | null;
   cpf: string | null;
   avatarUrl: string | null;
   createdAt: string;

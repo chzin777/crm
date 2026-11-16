@@ -683,14 +683,10 @@ function ChatWorkspace() {
             key={open.id}
             conversation={open}
             canWrite={canWrite}
-            canTransfer={capabilities["chat.transfer"] === true}
-            canBlock={capabilities["chat.queues"] === true}
             onClose={() => setShowDetails(false)}
             onTagsChange={(tags) => void updateConversation({ tags })}
-            onToggleBlock={() => void toggleBlock(open.phone, open.blocked)}
             onOpenConversation={(id) => { setShowDetails(false); select(id); }}
-            onTransfer={() => { setShowDetails(false); setShowTransfer(true); }}
-            onNewConversation={() => { setShowDetails(false); setNewSearch(open.phone.replace(/^55/, "")); setShowNew(true); }}
+            onSaved={refreshOpen}
           />
         )}
 

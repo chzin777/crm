@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { AlertTriangle, BadgeCheck, Bot, ExternalLink, FileText, Pencil, Plus, Trash2 } from "lucide-react";
-import { EntityDialog } from "@/components/EntityDialog";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { AlertTriangle, BadgeCheck, ChevronDown, Clock, FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { doctorLine, isPrescriptionExpired, type PrescriptionItem, type PrescriptionTextField } from "@/lib/prescriptions";
 
@@ -42,20 +41,20 @@ function toForm(item: PrescriptionItem): FormState {
 function EyeTable({ item }: { item: PrescriptionItem }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[420px] text-left text-xs">
+      <table className="w-full min-w-[380px] table-fixed text-xs">
         <thead>
           <tr className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <th className="py-1.5 pr-2 font-semibold">Olho</th>
-            {EYE_COLUMNS.map((column) => <th key={column.key} className="px-2 py-1.5 font-semibold">{column.label}</th>)}
+            <th className="w-12 py-1.5 pr-2 text-left font-semibold">Olho</th>
+            {EYE_COLUMNS.map((column) => <th key={column.key} className="px-2 py-1.5 text-center font-semibold">{column.label}</th>)}
           </tr>
         </thead>
         <tbody>
           {(["od", "oe"] as const).map((eye) => (
-            <tr key={eye} className="border-t border-slate-100 dark:border-slate-800">
-              <td className="py-1.5 pr-2 font-bold text-[#051647] dark:text-[#C4D600]">{eye.toUpperCase()}</td>
+            <tr key={eye} className="border-t border-slate-200/70 dark:border-slate-800">
+              <td className="py-2 pr-2 text-left font-bold text-[#051647] dark:text-[#C4D600]">{eye.toUpperCase()}</td>
               {EYE_COLUMNS.map((column) => {
                 const value = item[`${eye}${column.key}` as PrescriptionTextField];
-                return <td key={column.key} className="px-2 py-1.5 font-mono text-slate-900 dark:text-white">{value ?? <span className="text-slate-300 dark:text-slate-600">—</span>}</td>;
+                return <td key={column.key} className="px-2 py-2 text-center font-mono text-sm text-slate-900 dark:text-white">{value ?? <span className="text-slate-300 dark:text-slate-600">—</span>}</td>;
               })}
             </tr>
           ))}
@@ -65,54 +64,72 @@ function EyeTable({ item }: { item: PrescriptionItem }) {
   );
 }
 
-function PrescriptionCard({ item, highlight, busy, canWrite, onConfirm, onEdit, onDelete }: { item: PrescriptionItem; highlight: boolean; busy: boolean; canWrite: boolean; onConfirm: () => void; onEdit: () => void; onDelete: () => void }) {
+function StatusBadge({ item }: { item: PrescriptionItem }) {
+  return item.conferidoPorHumano ? (
+    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"><BadgeCheck className="h-3 w-3" />Conferido ✓</span>
+  ) : (
+    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"><Clock className="h-3 w-3" />Aguardando conferência</span>
+  );
+}
+
+const ACTION = "inline-flex h-8 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-white hover:text-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-[#C4D600]";
+
+/** Receita em destaque: data/médico/status no topo, tabela OD x OE e barra de ações dentro do card. */
+function PrescriptionCard({ item, busy, canWrite, onConfirm, onEdit, onDelete }: { item: PrescriptionItem; busy: boolean; canWrite: boolean; onConfirm: () => void; onEdit: () => void; onDelete: () => void }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const expired = isPrescriptionExpired(item.dataReceita);
   const doctor = doctorLine(item);
+  const extras = [item.dpTotal && `DP total ${item.dpTotal}`, item.tipoLenteSugerido && `Lente: ${item.tipoLenteSugerido}`].filter(Boolean).join(" · ");
   return (
-    <article className={`space-y-3 rounded-xl border p-3 ${highlight ? "border-[#C4D600] bg-[#C4D600]/5 dark:border-[#C4D600]/60" : "border-slate-200 dark:border-slate-800"}`}>
-      <header className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm font-bold text-slate-900 dark:text-white">
-            {highlight ? "Receita mais recente" : "Receita"} · {day(item.dataReceita) ?? `lançada em ${dateTime(item.createdAt)}`}
-          </p>
-          <p className="truncate text-xs text-slate-600 dark:text-slate-300" title={doctor}>{doctor || "Médico não informado"}</p>
+    <article className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-white/[0.03]">
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{day(item.dataReceita) ?? `Lançada em ${dateTime(item.createdAt)}`}</p>
+          <p className="truncate text-xs text-slate-500 dark:text-slate-400" title={doctor}>{doctor || "Médico não informado"}</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {expired && <span className="inline-flex items-center gap-1 rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[10px] font-semibold text-[#c25a26] dark:text-[#F7915E]"><AlertTriangle className="h-3 w-3" />Mais de 1 ano</span>}
-          {item.conferidoPorHumano ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[10px] font-semibold text-[#051647] dark:text-[#C4D600]"><BadgeCheck className="h-3 w-3" />Conferido ✓</span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#002187]/10 px-2 py-0.5 text-[10px] font-semibold text-[#002187] dark:bg-white/10 dark:text-slate-200"><Bot className="h-3 w-3" />{item.origem === "ia_extracao" ? "Extraído pela IA (Conferir)" : "A conferir"}</span>
-          )}
+          {expired && <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[10px] font-bold text-[#c25a26] dark:text-[#F7915E]"><AlertTriangle className="h-3 w-3" />Mais de 1 ano</span>}
+          <StatusBadge item={item} />
         </div>
       </header>
 
-      <EyeTable item={item} />
-
-      <dl className="grid gap-2 text-xs sm:grid-cols-3">
-        {item.dpTotal && <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">DP total</dt><dd className="font-mono text-slate-900 dark:text-white">{item.dpTotal}</dd></div>}
-        {item.tipoLenteSugerido && <div><dt className="text-[10px] text-slate-500 dark:text-slate-400">Lente sugerida</dt><dd className="text-slate-900 dark:text-white">{item.tipoLenteSugerido}</dd></div>}
-        {item.observacoes && <div className="sm:col-span-3"><dt className="text-[10px] text-slate-500 dark:text-slate-400">Observações</dt><dd className="text-slate-900 dark:text-white">{item.observacoes}</dd></div>}
-      </dl>
-
-      <footer className="flex flex-wrap items-center gap-2">
-        {item.attachmentUrl && (
-          <a href={item.attachmentUrl} target="_blank" rel="noopener noreferrer" className={NEUTRAL}><FileText className="h-3.5 w-3.5" />Ver arquivo original<ExternalLink className="h-3 w-3" /></a>
+      <div className="space-y-2 px-4 py-3">
+        <EyeTable item={item} />
+        {(extras || item.observacoes) && (
+          <p className="text-xs text-slate-600 dark:text-slate-300">{[extras, item.observacoes].filter(Boolean).join(" · ")}</p>
         )}
-        {canWrite && !item.conferidoPorHumano && <button type="button" disabled={busy} onClick={onConfirm} className={PRIMARY}><BadgeCheck className="h-3.5 w-3.5" />Marcar como conferido</button>}
-        {canWrite && <button type="button" disabled={busy} onClick={onEdit} className={NEUTRAL}><Pencil className="h-3.5 w-3.5" />Editar</button>}
+      </div>
+
+      <footer className="flex flex-wrap items-center gap-1 border-t border-slate-100 bg-slate-50 px-2 py-1.5 dark:border-slate-800 dark:bg-white/5">
+        {item.attachmentUrl && <a href={item.attachmentUrl} target="_blank" rel="noopener noreferrer" className={ACTION}><FileText className="h-3.5 w-3.5" />Ver anexo</a>}
+        {canWrite && !item.conferidoPorHumano && <button type="button" disabled={busy} onClick={onConfirm} className={ACTION}><BadgeCheck className="h-3.5 w-3.5" />Conferir</button>}
+        {canWrite && <button type="button" disabled={busy} onClick={onEdit} className={ACTION}><Pencil className="h-3.5 w-3.5" />Editar</button>}
         {canWrite && (confirmDelete ? (
-          <span className="inline-flex items-center gap-1.5">
+          <span className="ml-auto inline-flex items-center gap-1">
             <button type="button" disabled={busy} onClick={onDelete} className={`${BUTTON} bg-red-600 text-white hover:bg-red-700`}>Confirmar exclusão</button>
-            <button type="button" onClick={() => setConfirmDelete(false)} className={NEUTRAL}>Cancelar</button>
+            <button type="button" onClick={() => setConfirmDelete(false)} className={ACTION}>Cancelar</button>
           </span>
         ) : (
-          <button type="button" disabled={busy} onClick={() => setConfirmDelete(true)} className={`${BUTTON} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}><Trash2 className="h-3.5 w-3.5" />Excluir</button>
+          <button type="button" disabled={busy} onClick={() => setConfirmDelete(true)} aria-label="Excluir receita" title="Excluir receita" className={`${ACTION} ml-auto hover:text-red-600 dark:hover:text-red-300`}><Trash2 className="h-3.5 w-3.5" /></button>
         ))}
-        <span className="ml-auto text-[10px] text-slate-400">{item.origem === "ia_extracao" ? "Lida pela IA do WhatsApp" : "Lançada manualmente"} em {dateTime(item.createdAt)}</span>
       </footer>
+      <p className="px-4 pb-2 pt-1 text-[10px] text-slate-400 dark:text-slate-500">{item.origem === "ia_extracao" ? "Lida pela IA do WhatsApp" : "Lançada manualmente"} em {dateTime(item.createdAt)}</p>
     </article>
+  );
+}
+
+/** Linha compacta do histórico: expande para o card completo. */
+function HistoryRow({ item, open, onToggle, children }: { item: PrescriptionItem; open: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <li className="rounded-lg border border-slate-200 dark:border-slate-800">
+      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-white/5">
+        <span className="w-20 shrink-0 text-xs font-semibold text-slate-900 dark:text-white">{day(item.dataReceita) ?? dateTime(item.createdAt)}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-slate-400">{doctorLine(item) || "Médico não informado"}</span>
+        <StatusBadge item={item} />
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && <div className="border-t border-slate-100 p-2 dark:border-slate-800">{children}</div>}
+    </li>
   );
 }
 
@@ -126,8 +143,8 @@ function PrescriptionForm({ initial, saving, onCancel, onSave }: { initial: Form
     onSave(form);
   };
   return (
-    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+    <form onSubmit={submit} className="flex flex-col">
+      <div className="space-y-4 pb-4">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] text-left text-xs">
             <thead>
@@ -162,7 +179,7 @@ function PrescriptionForm({ initial, saving, onCancel, onSave }: { initial: Form
           <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300 sm:col-span-2">Observações<textarea value={form.observacoes} onChange={(event) => set("observacoes", event.target.value)} rows={2} placeholder="Antirreflexo, fotossensível, prismas..." className={`${INPUT} h-auto py-2`} /></label>
         </div>
       </div>
-      <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <footer className="sticky bottom-0 -mb-4 flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white py-3 dark:border-slate-800 dark:bg-[#07194f]">
         <button type="button" onClick={onCancel} className={NEUTRAL}>Cancelar</button>
         <button type="submit" disabled={saving} className={PRIMARY}>{saving ? "Salvando..." : "Salvar receita"}</button>
       </footer>
@@ -181,6 +198,8 @@ export function ContactPrescriptionsTab({ contactId, canWrite = true, onCountCha
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ item: PrescriptionItem | null } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const base = `/api/contacts/${encodeURIComponent(contactId)}/prescriptions`;
 
   const update = useCallback((next: PrescriptionItem[]) => {
@@ -255,10 +274,23 @@ export function ContactPrescriptionsTab({ contactId, canWrite = true, onCountCha
     }
   };
 
+  // Sub-formulário de criação/edição ocupa a aba inteira; o único rodapé é Cancelar + Salvar receita.
+  if (editing) {
+    return (
+      <div className="space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white">{editing.item ? "Editar receita" : "Nova receita"}</h3>
+        <PrescriptionForm initial={editing.item ? toForm(editing.item) : EMPTY_FORM} saving={saving} onCancel={() => setEditing(null)} onSave={(form) => void save(form)} />
+      </div>
+    );
+  }
+
+  const [current, ...history] = items ?? [];
+  const cardProps = (item: PrescriptionItem) => ({ item, busy: busyId === item.id, canWrite, onConfirm: () => void confirm(item), onEdit: () => setEditing({ item }), onDelete: () => void remove(item) });
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-slate-500 dark:text-slate-400">Receitas lidas pela IA no WhatsApp ou lançadas pela equipe.</p>
+        <h3 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Receita atual</h3>
         {canWrite && <button type="button" onClick={() => setEditing({ item: null })} className={PRIMARY}><Plus className="h-3.5 w-3.5" />Nova receita</button>}
       </div>
 
@@ -266,23 +298,29 @@ export function ContactPrescriptionsTab({ contactId, canWrite = true, onCountCha
         <p className="text-sm text-slate-500 dark:text-slate-400">Não foi possível carregar o receituário.</p>
       ) : !items ? (
         <p className="text-sm text-slate-500 dark:text-slate-400">Carregando...</p>
-      ) : items.length === 0 ? (
+      ) : !current ? (
         <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">Nenhuma receita registrada. Quando o cliente enviar a foto ou o PDF da receita, a IA preenche aqui.</p>
       ) : (
-        <div className="space-y-3">
-          {items.map((item, index) => (
-            <div key={item.id}>
-              {index === 1 && <h3 className="mb-2 mt-1 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Histórico</h3>}
-              <PrescriptionCard item={item} highlight={index === 0} busy={busyId === item.id} canWrite={canWrite} onConfirm={() => void confirm(item)} onEdit={() => setEditing({ item })} onDelete={() => void remove(item)} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {editing && (
-        <EntityDialog titleId="prescription-form-title" title={editing.item ? "Editar receita" : "Nova receita"} description="Graus por olho, médico e data da receita" size="lg" onClose={() => setEditing(null)}>
-          <PrescriptionForm initial={editing.item ? toForm(editing.item) : EMPTY_FORM} saving={saving} onCancel={() => setEditing(null)} onSave={(form) => void save(form)} />
-        </EntityDialog>
+        <>
+          <PrescriptionCard {...cardProps(current)} />
+          {history.length > 0 && (
+            <section>
+              <button type="button" onClick={() => setShowHistory((open) => !open)} aria-expanded={showHistory} className="flex w-full cursor-pointer items-center justify-between gap-2 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">
+                Histórico ({history.length})
+                <ChevronDown className={`h-4 w-4 transition-transform ${showHistory ? "rotate-180" : ""}`} />
+              </button>
+              {showHistory && (
+                <ul className="mt-2 space-y-1.5">
+                  {history.map((item) => (
+                    <HistoryRow key={item.id} item={item} open={expandedId === item.id} onToggle={() => setExpandedId((id) => (id === item.id ? null : item.id))}>
+                      <PrescriptionCard {...cardProps(item)} />
+                    </HistoryRow>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </>
       )}
     </div>
   );

@@ -9,11 +9,13 @@ interface EntityDialogProps {
   description: string;
   onClose: () => void;
   children: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "wizard" | "tabs" | "xl" | "2xl";
+  size?: "sm" | "md" | "lg" | "wizard" | "tabs" | "panel" | "xl" | "2xl";
   fixedHeight?: boolean;
+  /** Cabeçalho próprio no lugar de título + descrição (o título continua para leitores de tela). */
+  header?: React.ReactNode;
 }
 
-export function EntityDialog({ titleId, title, description, onClose, children, size = "md", fixedHeight = false }: EntityDialogProps) {
+export function EntityDialog({ titleId, title, description, onClose, children, size = "md", fixedHeight = false, header }: EntityDialogProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -31,14 +33,21 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] 2xl:p-6 ${size === "sm" ? "max-w-md" : size === "wizard" ? "h-[560px] max-w-4xl" : size === "tabs" ? "h-[740px] max-w-2xl" : size === "xl" ? "h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl" : size === "2xl" ? "h-[88vh] max-h-[88vh] w-[95vw] max-w-[1400px]" : `h-[min(640px,90vh)] ${size === "lg" ? "max-w-5xl" : "max-w-xl"}`}`}
+        className={`flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] 2xl:p-6 ${size === "sm" ? "max-w-md" : size === "wizard" ? "h-[560px] max-w-4xl" : size === "tabs" ? "h-[740px] max-w-2xl" : size === "panel" ? "h-[85vh] max-h-[85vh] max-w-3xl" : size === "xl" ? "h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl" : size === "2xl" ? "h-[88vh] max-h-[88vh] w-[95vw] max-w-[1400px]" : `h-[min(640px,90vh)] ${size === "lg" ? "max-w-5xl" : "max-w-xl"}`}`}
       >
         <header className="mb-4 shrink-0 2xl:mb-5">
           <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 id={titleId} className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{description}</p>
-            </div>
+            {header ? (
+              <div className="min-w-0 flex-1">
+                <h2 id={titleId} className="sr-only">{title}</h2>
+                {header}
+              </div>
+            ) : (
+              <div>
+                <h2 id={titleId} className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{description}</p>
+              </div>
+            )}
             <button
               type="button"
               onClick={onClose}
