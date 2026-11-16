@@ -5,6 +5,8 @@ import { assertCanReceive, closeConversation } from "@/lib/chat/actions";
 import { bareNameHint, detectStaffRequest, defaultHandoffNotice, staffConfirmation } from "@/lib/ai/staff-request";
 import { activeStaff } from "@/lib/ai/staff-db";
 import { savePrescriptionFromAi } from "@/lib/prescriptions-db";
+import { detectSalesEvents, isSalesQueue, parseBrl, type SalesEvent } from "@/lib/sales-pipeline";
+import { recordSalesEvents } from "@/lib/sales-pipeline-db";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
 import { withTyping } from "@/lib/chat/typing";
@@ -240,6 +242,8 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   // Nota para o atendente: fila, como foi escolhida e o resumo do que o cliente precisa.
   const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : target?.source === "staff" ? " (fila do atendente pedido)" : "";
   await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}${how}` : ""}: ${reason}`);
+  // Transbordo para Vendas/Comercial: a oportunidade do contato vai para Orçamento com o resumo.
+  if (isSalesQueue(target?.name)) await recordSalesEvents({ contactId: conversation.contactId, conversationId: conversation.id, events: [{ type: "transbordo_vendas", summary: reason.slice(0, 200) }] });
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
 }
 
@@ -302,6 +306,19 @@ export async function prepareMediaSafe(media: AiMediaInput, meta: Omit<AiCallMet
 }
 
 type PendingMedia = { id?: string; attachment: unknown; metaMedia: unknown };
+
+/** Eventos comerciais do turno (WhatsApp e teste /ia): receita lida, ficha de modelo com preço, orçamento, loja para comprar. */
+export function turnSalesEvents(run: Pick<AgentRun, "documents" | "productInterest" | "anchor" | "location" | "outcome">, pendingText: string): SalesEvent[] {
+  // Transferência por pedido de pessoa/limite não é intenção comercial por si (o transbordo para Vendas é tratado no handoff).
+  if (run.outcome.action === "no_reply") return [];
+  return detectSalesEvents({
+    pendingText,
+    prescriptions: (run.documents ?? []).filter((doc) => doc.kind === "receita").map((doc) => doc.summary),
+    product: run.productInterest ?? null,
+    anchoredProduct: run.anchor?.activeProduct ? [run.anchor.activeProduct.nomeComercial, run.anchor.activeProduct.referencia].filter(Boolean).join(" ") : null,
+    locationStore: run.location?.nome?.replace(/^Óticas Brasil - /, "") ?? null,
+  });
+}
 
 /** Receitas lidas pela IA → CustomerPrescription (falha no banco não trava a resposta ao cliente). */
 export async function saveReadPrescriptions(documents: ReadDocument[] | undefined, target: { contactId: string; conversationId: string }) {
@@ -376,7 +393,7 @@ export type AgentRunInput = {
   /** Nome do contato no cadastro ("Vivi"): nunca é trocado por um nome que o cliente citar. */
   contactName?: string | null;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -513,6 +530,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     ? { type: "item", item: selectedListedItem(input.selectedProductRef, listed) }
     : asksStoreLocation(input.pendingText) ? null : resolveListedChoice(input.pendingText, listed);
   let cardShown: string | null = null;
+  let productInterest: { name: string; price: number | null } | null = null;
   let interactiveList: InteractiveShowcase | null = null;
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
@@ -603,6 +621,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
       };
       const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, cardOpening(input.pendingText)), orientacao: `${result.orientacao}\n${cardGuidance()}` };
       cardShown = card.fichaFormatada;
+      productInterest = { name: [fields.nomeComercial, fields.referencia].filter(Boolean).join(" ").slice(0, 80), price: parseBrl(fields.valorFormatado) };
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };
@@ -762,7 +781,7 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   // Lista interativa só quando a resposta leva a vitrine numerada (2+ itens) ao cliente.
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis, documents };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, interactiveList: showsList ? list : null, imageAnalysis, documents, productInterest: productInterest as { name: string; price: number | null } | null };
 }
 
 async function respond(conversationId: string, messageId: string) {
@@ -857,6 +876,8 @@ async function respond(conversationId: string, messageId: string) {
   }
   // Receita lida (foto ou PDF): vai para o receituário do cliente, uma por mensagem (a nota do transbordo continua).
   await saveReadPrescriptions(run.documents, { contactId: conversation.contactId, conversationId });
+  // Funil de vendas: receita, modelo consultado, orçamento ou loja para comprar criam/avançam a oportunidade do contato.
+  await recordSalesEvents({ contactId: conversation.contactId, conversationId, events: turnSalesEvents(run, pending.map((item) => item.text ?? "").join("\n")) });
   // Encerramento silencioso: nada é enviado e a conversa não é transferida.
   if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
   if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location);
@@ -952,6 +973,8 @@ export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigg
 export type PlaygroundResult = AgentOutcome & {
   /** O que o cliente receberia no WhatsApp (resposta e/ou mensagem de transferência). */
   messages: string[];
+  /** Eventos que criariam/avançariam a oportunidade no funil de vendas (WhatsApp). */
+  salesEvents?: SalesEvent[];
   /** Fila para onde a conversa iria na transferência. */
   handoffQueue: string;
   /** Como a fila foi definida: escolha da IA validada, fila padrão (fallback), fixa ou a atual. */
@@ -1060,5 +1083,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     sessionId: options.sessionId,
     anchor: run.anchor,
     imageAnalysis: run.imageAnalysis ?? undefined,
+    // Simulação: mostra o que iria para o funil de vendas (o teste não grava no pipeline).
+    salesEvents: (() => { const events = turnSalesEvents(run, pendingText); return events.length ? events : undefined; })(),
   };
 }

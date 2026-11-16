@@ -12,6 +12,7 @@ import type { StockLog } from "@/lib/ai/stock";
 import type { ImageAnalysis } from "@/lib/ai/catalog-search";
 import { defaultQueueHint, isGeneralQueue } from "@/lib/ai/routing";
 import { productSelectRef, selectionText, type InteractiveShowcase, type ShowcaseListRow } from "@/lib/ai/interactive-showcase";
+import type { SalesEvent, SalesTrigger } from "@/lib/sales-pipeline";
 
 type Queue = { id: string; name: string; description?: string };
 type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
@@ -63,6 +64,16 @@ type PlaygroundResult = AgentOutcome & {
   location?: { nome: string; endereco: string; mapsUrl: string; pinNativo: boolean; latitude: number | null; longitude: number | null };
   interactiveList?: InteractiveShowcase;
   imageAnalysis?: ImageAnalysis;
+  salesEvents?: SalesEvent[];
+};
+const SALES_EVENT_LABELS: Record<SalesTrigger, string> = {
+  interesse_produto: "interesse em modelo → Novo lead",
+  receita_enviada: "receita enviada → Em atendimento (Orçamento)",
+  orcamento_lentes: "orçamento de lentes → Em atendimento (Orçamento)",
+  transbordo_vendas: "transbordo para Vendas → Em atendimento (Orçamento)",
+  visita_loja: "loja para comprar/reservar → Fechamento (Visita/Reserva)",
+  venda_faturada: "venda no ERP → Ganho",
+  venda_manual: "venda marcada → Ganho",
 };
 const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   disponivel_na_regiao: "disponível na região",
@@ -307,6 +318,9 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
       const notes = [
         data.documents?.length ? `Leitura do documento antes do transbordo (igual ao WhatsApp): ${data.documents.map((doc) => doc.summary).join(" | ")}` : "",
         data.action === "handoff" ? `Transbordo para humano (${TRIGGER_LABELS[data.trigger]})${data.handoffQueue ? ` na fila ${data.handoffQueue}${QUEUE_SOURCE_LABELS[data.handoffQueueSource ?? "none"]}` : ""}. Nota para o atendente: ${data.reason || "sem motivo"}. A IA não responde mais nesta conversa.` : "",
+        data.salesEvents?.length || (data.action === "handoff" && /venda|comercial/i.test(data.handoffQueue ?? ""))
+          ? `Funil de vendas (no WhatsApp): ${[...(data.salesEvents ?? []).map((event) => SALES_EVENT_LABELS[event.type] + (event.product ? ` (${event.product})` : "") + (event.value ? ` — R$ ${event.value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "") + (event.store ? ` — ${event.store}` : "")), ...(data.action === "handoff" && /venda|comercial/i.test(data.handoffQueue ?? "") ? [SALES_EVENT_LABELS.transbordo_vendas] : [])].join("; ")}. Cria a oportunidade (Novo/Recorrente pelo ERP) ou só avança a etapa, nunca volta.`
+          : "",
         data.assignee ? `No WhatsApp a conversa seria atribuída direto a ${data.assignee} (se puder receber agora; senão fica na fila).` : "",
         data.triage ? "Triagem: o cliente pediu um atendente sem dizer o assunto, então a IA perguntou o setor antes de transferir." : "",
         data.closeBlocked ? `A IA quis encerrar, mas não encerra porque ${data.closeBlocked}.` : "",

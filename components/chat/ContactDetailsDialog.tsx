@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRightLeft, Ban, CalendarClock, Camera, Check, Copy, Hourglass, ListOrdered, MessageSquarePlus, MessagesSquare, Send, type LucideIcon } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ContactPrescriptionsTab } from "@/components/ContactPrescriptionsTab";
+import { ContactOpportunityCard } from "@/components/chat/ContactOpportunityCard";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { fieldClass } from "@/components/chat/MenuFormParts";
@@ -277,6 +278,7 @@ export function ContactDetailsDialog({ conversation, canWrite, canTransfer, canB
         </div>
 
         <div role="tabpanel" id="contact-panel-atendimento" aria-labelledby="contact-tab-atendimento" hidden={tab !== "atendimento"} className="space-y-4">
+          {tab === "atendimento" && <ContactOpportunityCard contactId={conversation.contactId} canWrite={canWrite} />}
           <div className="grid gap-3 sm:grid-cols-2">
             <Metric icon={ListOrdered} label="Fila atual" value={conversation.queue?.name ?? "Sem fila"} detail={attendance} />
             <Metric icon={MessagesSquare} label="Mensagens" value={profile ? profile.messageCount.toLocaleString("pt-BR") : "..."} detail={profile ? `${profile.conversationCount} ${profile.conversationCount === 1 ? "atendimento" : "atendimentos"}` : "Carregando..."} />

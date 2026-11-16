@@ -13,6 +13,7 @@ import { silenceFarewell } from "@/lib/chat/settings";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
+import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -211,6 +212,11 @@ export async function runClock() {
       if (!(row.metaMedia as { id?: string } | null)?.id) continue;
       if (await retryInboundMedia(row)) summary.mediaRecovered += 1;
     }
+  });
+
+  // Venda faturada no ERP depois da abertura da oportunidade → card em "Ganho" (no máximo 1x por hora).
+  await block("oportunidades ganhas", async () => {
+    await syncWonOpportunities(now);
   });
 
   return summary;

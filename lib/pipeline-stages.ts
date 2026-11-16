@@ -1,5 +1,5 @@
 export type PipelineId = "novos" | "relacionamento";
-export type StageId = "novo-lead" | "em-atendimento" | "fechamento" | "pos-venda" | "recompra" | "reativacao";
+export type StageId = "novo-lead" | "em-atendimento" | "fechamento" | "ganho" | "pos-venda" | "recompra" | "reativacao";
 
 export const CONTACT_CATEGORIES = ["cliente", "lead", "nps", "inativo"] as const;
 
@@ -44,6 +44,7 @@ export const STAGE_DEFINITIONS: StageDefinition[] = [
   { id: "novo-lead", pipelineId: "novos", titulo: "Novo lead", descricao: "Aguardando qualificação", bgColuna: "bg-[#f8f9fc] dark:bg-[#07194f]/60" },
   { id: "em-atendimento", pipelineId: "novos", titulo: "Em atendimento", descricao: "Necessidade e orçamento", bgColuna: "bg-[#f5f8ff] dark:bg-[#07194f]/60" },
   { id: "fechamento", pipelineId: "novos", titulo: "Fechamento", descricao: "Pronto para a primeira compra", bgColuna: "bg-[#fbfcf5] dark:bg-[#07194f]/60" },
+  { id: "ganho", pipelineId: "novos", titulo: "Ganho", descricao: "Venda fechada (ERP ou vendedor)", bgColuna: "bg-[#f4f9e0] dark:bg-[#07194f]/60" },
   { id: "pos-venda", pipelineId: "relacionamento", titulo: "Pós-venda", descricao: "Acompanhamento e satisfação", bgColuna: "bg-[#f8f9fc] dark:bg-[#07194f]/60" },
   { id: "recompra", pipelineId: "relacionamento", titulo: "Recompra", descricao: "Reposição e novas necessidades", bgColuna: "bg-[#fbfcf5] dark:bg-[#07194f]/60" },
   { id: "reativacao", pipelineId: "relacionamento", titulo: "Reativação", descricao: "Retomar clientes inativos", bgColuna: "bg-[#f5f8ff] dark:bg-[#07194f]/60" },
@@ -53,6 +54,7 @@ export const STAGE_PROGRESS: Record<StageId, number> = {
   "novo-lead": 15,
   "em-atendimento": 55,
   fechamento: 90,
+  ganho: 100,
   "pos-venda": 20,
   recompra: 60,
   reativacao: 85,

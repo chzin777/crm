@@ -20,6 +20,7 @@ const generateId = () => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 };
 import { useToast } from "@/components/ToastProvider";
+import { CUSTOMER_TYPE_COLOR, CUSTOMER_TYPE_LABEL, type CustomerType } from "@/lib/sales-pipeline";
 import type { Contact } from "@/lib/contacts";
 import {
   STAGE_DEFINITIONS,
@@ -110,6 +111,19 @@ interface PipelineCard {
   coluna: ColumnId;
   mensagem: string;
   entrouEmEtapaEm?: string;
+  // Oportunidade automática (IA / conversa): ver lib/sales-pipeline.ts.
+  conversationId?: string;
+  customerType?: CustomerType;
+  sourceTrigger?: string;
+  estimatedValue?: number | null;
+  autoMoveEnabled?: boolean;
+  aiSummary?: string;
+  receitaAnexada?: boolean;
+  lojaInteresse?: string;
+  produtoInteresse?: string;
+  ultimaCompraResumo?: string;
+  abertaEm?: string;
+  valorFaturado?: number | null;
 }
 
 function migrateCards(cards: PipelineCard[]): { cards: PipelineCard[]; changed: boolean } {
@@ -654,6 +668,7 @@ export default function Home() {
       "novo-lead": [],
       "em-atendimento": [],
       fechamento: [],
+      ganho: [],
       "pos-venda": [],
       recompra: [],
       reativacao: [],
@@ -907,16 +922,40 @@ export default function Home() {
                                   {card.cliente}
                                 </p>
                               </div>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${card.tagColor}`}>
-                                {card.tag}
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${card.customerType ? CUSTOMER_TYPE_COLOR[card.customerType] : card.tagColor}`}>
+                                {card.customerType ? CUSTOMER_TYPE_LABEL[card.customerType] : card.tag}
                               </span>
                             </div>
+
+                            {/* Oportunidade automática: receita, loja e atalho para a conversa */}
+                            {(card.receitaAnexada || card.lojaInteresse || card.conversationId) && (
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                                {card.receitaAnexada && (
+                                  <span className="rounded-full bg-[#002187]/10 px-2 py-0.5 text-[#002187] dark:bg-[#002187]/40 dark:text-white">📄 Receita anexada</span>
+                                )}
+                                {card.lojaInteresse && (
+                                  <span className="max-w-full truncate rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[#9a3d12] dark:text-[#F7915E]" title={card.lojaInteresse}>📍 {card.lojaInteresse}</span>
+                                )}
+                                {card.conversationId && (
+                                  <a
+                                    href={`/chat?c=${card.conversationId}`}
+                                    onClick={(event) => event.stopPropagation()}
+                                    draggable={false}
+                                    className="pointer-events-auto cursor-pointer rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[#051647] hover:underline dark:text-[#C4D600]"
+                                    title="Abrir a conversa no Chat"
+                                  >
+                                    💬 Abrir conversa
+                                  </a>
+                                )}
+                              </div>
+                            )}
 
                             {/* Valor e Porcentagem */}
                             <div>
                               <div className="flex items-baseline justify-between">
                                 <span className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
                                   {card.valor}
+                                  {card.estimatedValue && !card.valorFaturado ? <span className="ml-1 text-[10px] font-semibold text-slate-400">estimado</span> : null}
                                 </span>
                                 <span className="text-[11px] font-semibold text-slate-400">
                                   {card.progresso}%
@@ -1563,6 +1602,13 @@ export default function Home() {
                       </div>
                     </dl>
                   </section>
+                  {(selectedCard.aiSummary || selectedCard.ultimaCompraResumo) && (
+                    <section className="rounded-xl border border-[#002187]/20 bg-[#f5f8ff] p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-[#07194f]/60 dark:text-slate-200">
+                      <h4 className="mb-1 text-[11px] font-bold uppercase tracking-wide text-[#002187] dark:text-[#C4D600]">Resumo da IA</h4>
+                      <p className="whitespace-pre-line">{selectedCard.aiSummary || `Última compra: ${selectedCard.ultimaCompraResumo}`}</p>
+                      {selectedCard.autoMoveEnabled === false && <p className="mt-1 font-semibold text-slate-500">Movimentação automática pausada neste card.</p>}
+                    </section>
+                  )}
                 </div>
               )}
 
