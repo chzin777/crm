@@ -42,8 +42,12 @@ export function parsePrescriptionDate(value: unknown): Date | null {
   let year: number, month: number, day: number;
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(raw);
   const br = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(raw);
+  // Por extenso, como a IA às vezes transcreve: "02 de abril de 2026".
+  const written = /^(\d{1,2})\s+de\s+([a-zç]+)\s+de\s+(\d{4})$/i.exec(raw.normalize("NFD").replace(/[̀-ͯ]/g, ""));
+  const MONTHS = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
   if (iso) [year, month, day] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
   else if (br) [day, month, year] = [Number(br[1]), Number(br[2]), Number(br[3].length === 2 ? `20${br[3]}` : br[3])];
+  else if (written && MONTHS.includes(written[2].toLowerCase())) [day, month, year] = [Number(written[1]), MONTHS.indexOf(written[2].toLowerCase()) + 1, Number(written[3])];
   else return null;
   const date = new Date(Date.UTC(year, month - 1, day, 12));
   if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || year < 1990 || year > 2100) return null;
@@ -145,4 +149,45 @@ export function serializePrescription(row: Record<PrescriptionTextField, string 
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Resumo da receita que a IA já gravou na nota do transbordo ("Receita — OD: esf -2,00 | cil -1,00 | eixo 125°; OE: ...;
+ * Médico: Dr. X (CRM 123); Data: ...") de volta para a extração estruturada (backfill de conversas antigas).
+ * Resumo ilegível ("graus não legíveis") ou de outro documento → undefined.
+ */
+export function extractionFromSummary(summary: string): DocumentExtraction | undefined {
+  const body = summary.trim().replace(/^Receita\s+—\s+/, "");
+  if (body === summary.trim() || /^graus não legíveis/i.test(body)) return undefined;
+  const receita: NonNullable<DocumentExtraction["receita"]> = {};
+  const EYE_KEYS: Record<string, keyof EyeRx> = { esf: "esferico", cil: "cilindrico", eixo: "eixo", "adição": "adicao", adicao: "adicao", dnp: "dnp", prisma: "prisma" };
+  for (const part of body.split(/;\s*(?=(?:OD|OE|DNP|Médico|Data|Obs\.):)/)) {
+    const [label, ...rest] = part.split(":");
+    const value = rest.join(":").trim();
+    if (!value) continue;
+    if (label === "OD" || label === "OE") {
+      const eye: EyeRx = {};
+      for (const item of value.split("|")) {
+        const match = /^\s*(\S+)\s+(.+?)\s*$/.exec(item);
+        const key = match && EYE_KEYS[match[1].toLowerCase()];
+        if (key) eye[key] = match[2];
+      }
+      receita[label === "OD" ? "od" : "oe"] = eye;
+    } else if (label === "DNP") receita.dnp = value;
+    else if (label === "Médico") {
+      const crm = /\(CRM\s+([^)]+)\)\s*$/.exec(value);
+      receita.medico = value.replace(/\s*\(CRM[^)]*\)\s*$/, "").trim();
+      if (crm) receita.crm = crm[1].trim();
+    } else if (label === "Data") receita.data = value;
+    else if (label === "Obs.") receita.observacoes = value;
+  }
+  return Object.keys(receita).length ? { tipo: "receita", receita } : undefined;
+}
+
+/** Resumos de receita dentro da nota do transbordo ("Cliente enviou receita (...): A || B"). */
+export function prescriptionSummariesFromNote(note: string): string[] {
+  const start = note.indexOf("Cliente enviou receita");
+  if (start < 0) return [];
+  const list = note.slice(note.indexOf(":", note.indexOf(")", start)) + 1);
+  return list.split(" || ").map((item) => item.trim()).filter((item) => item.startsWith("Receita — "));
 }

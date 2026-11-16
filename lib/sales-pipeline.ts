@@ -255,3 +255,11 @@ export function detectSalesEvents(input: {
 
 /** Fila comercial (transbordo que vira evento de orçamento). */
 export const isSalesQueue = (name: string | null | undefined) => !!name && /venda|comercial/i.test(plain(name));
+
+/** Ficha de produto enviada pela IA ("*Prada Linea Rossa | Ref. PS 07RV*" ... "*Valor:* R$ 1.290,00") → interesse. */
+export function productFromCard(text: string): { name: string; price: number | null } | null {
+  const title = /\*([^*|\n]+?)\s*\|\s*Ref\.\s*([^*\n]+?)\*/.exec(text);
+  if (!title) return null;
+  const price = /Valor:\*?\s*(R\$\s*[\d.,]+)/i.exec(text);
+  return { name: `${title[1].trim()} ${title[2].trim()}`.slice(0, 80), price: parseBrl(price?.[1]) };
+}
