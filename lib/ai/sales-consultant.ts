@@ -253,3 +253,16 @@ export function priceTransparency(reply: string) {
   if (lastIndex === 0 || showcase.some((line) => last.includes(line)) || /💵/.test(last)) return [...parts, note].join(`\n${BUBBLE_SPLIT}\n`);
   return [...parts.slice(0, -1), `${note} ${last}`].join(`\n${BUBBLE_SPLIT}\n`);
 }
+
+/** Pergunta redundante depois da ficha com lojas ("Quer que eu veja em quais lojas de Goiânia tem essa peça?"). */
+const STORE_CHECK_QUESTION = /(?:^|(?<=[.!?…]\s)|(?<=\n))[^.!?\n]*\b(?:quer que eu|posso|gostaria que eu|deseja que eu)\s+(?:veja|verifique|confira|consulte|cheque|olhe)\b[^?\n]*\b(?:lojas?|unidades?|filia(?:l|is))\b[^?\n]*\?/giu;
+
+/**
+ * A ficha já traz as lojas com estoque (📍): no lugar de oferecer "ver as lojas", a pergunta convida a provar na
+ * unidade mais perto ou mandar a receita.
+ */
+export function withoutRedundantStoreQuestion(reply: string) {
+  if (!/📍/.test(reply) || !STORE_CHECK_QUESTION.test(reply)) return reply;
+  STORE_CHECK_QUESTION.lastIndex = 0;
+  return reply.replace(STORE_CHECK_QUESTION, "Quer passar na unidade mais perto de você pra provar? Se tiver a receita, me manda foto que eu já calculo as lentes junto!");
+}

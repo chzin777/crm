@@ -3,7 +3,7 @@
  * referência: "tem o Ray-Ban Justin?"). Na ampla, a tool devolve uma vitrine enxuta de modelos distintos com estoque
  * (nome + preço, sem foto e sem lojas); na específica, o detalhamento por loja com foto e ficha. Sem banco nem rede.
  */
-import { commercialName } from "@/lib/ai/product-card";
+import { cleanReference, commercialName } from "@/lib/ai/product-card";
 import { expandModelNicknames, KNOWN_BRANDS } from "@/lib/ai/product-names";
 import { mainPrice, stockInCity, type StockLookup, type StoreInfo } from "@/lib/ai/stock";
 import { modelFamilyKey } from "@/lib/ai/product-names";
@@ -142,7 +142,8 @@ export function formatShowcase(models: ShowcaseModel[], options: { header?: bool
 function formatShowcaseLines(models: ShowcaseModel[]) {
   return models.map((model, index) => {
     const icon = /sol/i.test(model.categoriaModelo ?? "") || !model.categoriaModelo ? "🕶️" : /lente/i.test(model.categoriaModelo) ? "👁️" : "👓";
-    const name = `${model.nomeComercial}${model.referencia ? ` (Ref. ${model.referencia})` : ""}`;
+    const ref = cleanReference(model.referencia);
+    const name = `${model.nomeComercial}${ref ? ` (Ref. ${ref})` : ""}`;
     return `${index + 1}. ${icon} *${name}*${model.precoVenda ? ` — ${model.precoVaria ? "a partir de " : ""}${model.precoVenda}` : ""}`;
   });
 }

@@ -97,6 +97,17 @@ vi.mock("@/lib/ai/stock-db", () => ({
       const produtos = [{ codigo: chosen.code, produto: chosen.description, marca: chosen.brand, preco: 1960, precoVenda: "R$ 1.960,00", nomeProduto: chosen.description, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 3, lojasComEstoque: [{ code: "39", loja: "Loja Jardim Goiás — Av. Deputado Jamel Cecilio, 3300", quantidade: 2, cidade: "Goiânia" }, { code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
       return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 2, ms: 1, cached: false } };
     }
+    // Lumen: só 1 modelo com estoque em Goiânia, com a referência quebrada do ERP ("DO -").
+    if (/lumen/i.test(term)) {
+      const lumen = { code: "880001", description: "OCS LUMEN PRAIA FORTE DO - 55", brand: "LUMEN" };
+      if (args.tipoBusca !== "modelo_especifico") {
+        const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
+        const result = buildShowcaseResult({ term, groups: showcaseCandidates([lumen]), lookup: { stockStatus: "ok", fromCache: 0, requested: 1, byCode: { "880001": [{ unit: "36", name: "LJ 36", qty: 1, price: 440 }] } }, stores: STORES, withPrices: true, brand: "LUMEN", city: typeof args.cidade === "string" ? args.cidade : undefined });
+        return { result, log: { term, region: "", scenario: result.cenario, products: result.modelos.length, stores: 0, ms: 1, cached: false, kind: "marca_ampla" } };
+      }
+      const produtos = [{ codigo: lumen.code, produto: lumen.description, marca: "LUMEN", preco: 440, precoVenda: "R$ 440,00", nomeProduto: lumen.description, referencia: "DO -", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 1, lojasComEstoque: [{ code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
+      return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 1, ms: 1, cached: false } };
+    }
     // Armação de grau sem marca (orçamento): 2 modelos em Goiânia (R$ 189 e R$ 239), 1 acima do teto e 1 só em Brasília.
     if (args.tipo === "grau") {
       const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
@@ -159,6 +170,27 @@ beforeEach(() => {
   calls.prompts.length = 0;
   model.script = null;
   model.vision = null;
+});
+
+describe("busca com 1 único modelo na cidade", () => {
+  it("entrega direto a ficha com foto e lojas locais, sem lista \"1.\", sem \"(Ref. DO -)\", sem ---SPLIT--- e sem oferecer ver as lojas", async () => {
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ termoBusca: "Lumen", tipoBusca: "marca_ampla" })) as { fichaFormatada?: string; vitrineFormatada?: string };
+      return { reply: `Separei uma opção em Goiânia pra você:\n${result.fichaFormatada ?? result.vitrineFormatada}\n\n---SPLIT---\n\nÉ uma ótima pedida. Quer que eu veja em quais lojas de Goiânia tem essa peça pra você provar?`, action: "reply" };
+    };
+    const turn = await simulateAgent(settings, [{ from: "customer", text: "tem Lumen?" }], "user-1", undefined, { sessionId: "sessao-unico", knownCity: "Goiânia" });
+    expect(calls.stock.at(-1)).toMatchObject({ tipoBusca: "modelo_especifico", cidade: "Goiânia" });
+    expect(turn.image?.sku).toBe("880001");
+    const text = turn.messages.join("\n");
+    expect(text).toContain("📍 *Loja Setor Marista*");
+    expect(text).toContain("R$ 440,00");
+    expect(text).not.toMatch(/^\s*1\.\s/m);
+    expect(text).not.toMatch(/Ref\. DO|\(Ref\. -\)/);
+    expect(text).not.toMatch(/SPLIT/);
+    expect(text).not.toMatch(/em quais lojas/i);
+    expect(text).toMatch(/unidade mais perto de você pra provar\?/);
+    expect(turn.interactiveList).toBeUndefined();
+  });
 });
 
 describe("saudação informal pura no agente", () => {
@@ -295,7 +327,7 @@ describe("isolamento de sessão", () => {
       { from: "customer", text: "Goiânia" },
     ];
     await simulateAgent(settings, history, "user-1");
-    expect(calls.stock.at(-1)).toMatchObject({ tipo: "grau", maxPrice: 200, sortBy: "price_asc", cidade: "Goiânia" });
+    expect(calls.stock[0]).toMatchObject({ tipo: "grau", maxPrice: 200, sortBy: "price_asc", cidade: "Goiânia" });
   });
 
   it("cidade do cadastro do contato já libera a vitrine sem perguntar", async () => {

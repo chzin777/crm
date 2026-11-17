@@ -1,8 +1,14 @@
 import { brClock } from "@/lib/br-time";
 
 /** Troca travessões por hífen na saída para o cliente. */
+/** Garantia final: o marcador de bolhas (---SPLIT--- / [SPLIT]) nunca chega ao cliente; vira quebra de parágrafo. */
+export function withoutSplitMarkers(text: string) {
+  if (!/-{2,}\s*split\s*-{2,}|\[\s*split\s*\]/i.test(text)) return text;
+  return text.replace(/[ \t]*\n?[ \t]*(?:-{2,}\s*split\s*-{2,}|\[\s*split\s*\])[ \t]*\n?[ \t]*/gi, "\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function withoutDashes(text: string) {
-  return text.replace(/\s*[—–]\s*/g, " - ").replace(/ {2,}/g, " ");
+  return withoutSplitMarkers(text).replace(/\s*[—–]\s*/g, " - ").replace(/ {2,}/g, " ");
 }
 
 export type TextVariables = {

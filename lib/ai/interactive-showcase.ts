@@ -5,6 +5,7 @@
  */
 import type { ShowcaseModel } from "@/lib/ai/stock-showcase";
 import type { ChatInteractiveList } from "@/lib/chat/types";
+import { cleanReference } from "@/lib/ai/product-card";
 
 export const LIST_LIMITS = { body: 1024, button: 20, sectionTitle: 24, rowTitle: 24, rowDescription: 72, rowId: 200, rows: 10 } as const;
 /** Modelos na gaveta (a vitrine já vem com até 8 deduplicados). */
@@ -27,7 +28,7 @@ const rowKey = (model: Pick<ShowcaseModel, "referencia" | "codigos">) => (model.
 
 /** Título da linha (≤ 24): "Ref. PS 07RV"; referência longa ou só código interno → nome comercial curto. */
 function rowTitle(model: Pick<ShowcaseModel, "nomeComercial" | "referencia">) {
-  const ref = model.referencia && !model.referencia.startsWith("#") ? model.referencia : "";
+  const ref = cleanReference(model.referencia) && !model.referencia?.startsWith("#") ? cleanReference(model.referencia) ?? "" : "";
   if (ref && `Ref. ${ref}`.length <= LIST_LIMITS.rowTitle) return `Ref. ${ref}`;
   if (ref && ref.length <= LIST_LIMITS.rowTitle) return ref;
   return fit(model.nomeComercial, LIST_LIMITS.rowTitle);

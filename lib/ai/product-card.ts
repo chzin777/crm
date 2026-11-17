@@ -20,6 +20,21 @@ export type ProductCardFields = {
 
 const CATEGORY: Record<string, string> = { "Armação": "Armação de grau", "Óculos de grau": "Armação de grau", "Óculos de sol": "Óculos de sol", "Lente de contato": "Lente de contato", "Óculos": "Óculos" };
 
+/**
+ * Referência apresentável ou null: vazio, só hífen/pontuação, "N/A", "null", "undefined" ou prefixo do ERP sem
+ * código ("DO -", "DO") não viram "(Ref. ...)".
+ */
+export function cleanReference(value: string | null | undefined): string | null {
+  const text = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!text || /^(n\/?a|null|undefined|sem ref(erencia)?|-+)$/i.test(text)) return null;
+  // Tokens só de pontuação saem ("DO -" → "DO"); prefixo "DO" do ERP sem código também.
+  const tokens = text.split(" ").filter((token) => /[\p{L}\p{N}]/u.test(token));
+  const useful = (tokens[0]?.toUpperCase() === "DO" ? tokens.slice(1) : tokens).join(" ").replace(/^[^\p{L}\p{N}#]+|[^\p{L}\p{N}]+$/gu, "");
+  const alnum = useful.replace(/[^\p{L}\p{N}]/gu, "");
+  if (alnum.length < 2 || /^(n\/?a|null|undefined)$/i.test(useful)) return null;
+  return useful;
+}
+
 /** "OCS RAY BAN REF-RB4165 JUSTIN 622/8G" → nome "Ray-Ban Justin", referência "RB4165", categoria "Óculos de sol". */
 export function commercialName(description: string, brand?: string | null) {
   const parsed = parseErpName(description, brand);
@@ -33,7 +48,7 @@ export function commercialName(description: string, brand?: string | null) {
   const name = [parsed.marca, ...nickname].filter(Boolean).join(" ").trim();
   return {
     nomeComercial: name || description.trim(),
-    referencia: codes.length ? codes.join(" ") : null,
+    referencia: codes.length ? cleanReference(codes.join(" ")) : null,
     categoriaModelo: parsed.tipo ? CATEGORY[parsed.tipo] ?? parsed.tipo : null,
   };
 }
@@ -76,7 +91,7 @@ export function buildProductCard(fields: ProductCardFields, opening: string = AV
   const lines = [
     opening,
     "",
-    `🕶️ *${fields.nomeComercial}${fields.referencia ? ` | Ref. ${fields.referencia}` : ""}*`,
+    `🕶️ *${fields.nomeComercial}${cleanReference(fields.referencia) ? ` | Ref. ${cleanReference(fields.referencia)}` : ""}*`,
     fields.categoriaModelo ? `Ⓜ️ *Modelo:* ${fields.categoriaModelo}` : "",
     fields.formatoArmacao && !isLens ? `👓 *Armação:* ${fields.formatoArmacao}` : "",
     fields.acabamentoOuMaterial ? `✨ *Acabamento:* ${fields.acabamentoOuMaterial}` : "",

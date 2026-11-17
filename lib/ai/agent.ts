@@ -19,7 +19,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { hoursFor } from "@/lib/chat/operations";
 import { ChatRuleError, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
-import { fillVariables } from "@/lib/chat/text";
+import { fillVariables, withoutSplitMarkers } from "@/lib/chat/text";
 import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
 import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, baseType, extensionOf, TRANSCRIBABLE_VIDEO, unsupportedReason, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
@@ -28,7 +28,7 @@ import { readFile } from "@/lib/minio";
 import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { asksCustomerCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { activeClosing, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
@@ -37,7 +37,7 @@ import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, showcaseReference } from "@/lib/ai/stock-showcase";
 import { ambiguousChoiceQuestion, asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, pickFromListQuestion, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
-import { buildProductCard, CARD_QUESTION, cardOpening, cardStore, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
+import { buildProductCard, CARD_QUESTION, cardOpening, cardStore, cleanReference, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
@@ -656,8 +656,21 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
       if (wantsKids) query.publicoInfantil = true;
       else delete query.publicoInfantil;
-      const { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
+      let { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
+      // Só 1 modelo na cidade: nada de lista "1." nem "quer que eu veja as lojas?" — já abre a ficha com foto e lojas.
+      if (result.tipoBusca === "marca_ampla" && "modelos" in result && result.modelos.length === 1) {
+        const only = result.modelos[0];
+        const ref = cleanReference(only.referencia);
+        const exactQuery: Record<string, unknown> = { termoBusca: `${only.nomeComercial} ${ref && !ref.startsWith("#") ? ref : only.codigos[0]}`, tipoBusca: "modelo_especifico", cidade: query.cidade };
+        const exact = await consultarEstoqueProduto(exactQuery, { products: catalogProducts, withPrices: settings.canQuotePrices });
+        if (exact.result.tipoBusca !== "marca_ampla" && (exact.result.produtos ?? []).some((product) => product.lojasComEstoque?.length)) {
+          ({ result, log } = exact);
+          stock.push(log);
+          query.termoBusca = exactQuery.termoBusca;
+          query.tipoBusca = "modelo_especifico";
+        }
+      }
       if (result.tipoBusca === "marca_ampla") currentCatalogFilterHash = [String(query.termoBusca ?? ""), String(query.cidade ?? ""), catalogState.category].map(normalizeTerm).join("|");
       // Lojas da consulta, direto do objeto estruturado (o texto da conversa é só o fallback).
       for (const product of result.produtos ?? []) {
@@ -958,7 +971,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     }
   }
   // Transparência comercial: armação de grau → lentes orçadas à parte; óculos de sol → peça completa.
-  if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: priceTransparency(outcome.reply) };
+  if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: priceTransparency(withoutRedundantStoreQuestion(outcome.reply)) };
   // Fechamento ativo: vitrine de opções termina com pergunta direta de avanço (nunca "Se quiser, posso...").
   if (outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2)) {
     outcome = { ...outcome, reply: activeClosing(outcome.reply, { city: catalogState.preferredCity, variant: input.aiReplies }) };
@@ -1325,7 +1338,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
   const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue, outcome.staffQueueId) : null;
   return {
     ...outcome,
-    messages: run.interactiveList || run.singleReply ? [outcome.reply] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
+    messages: run.interactiveList || run.singleReply ? [withoutSplitMarkers(outcome.reply)] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
     assignee: outcome.assigneeName,
     handoffQueue: target?.name ?? "",
     handoffQueueSource: target?.source,
