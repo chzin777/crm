@@ -70,6 +70,7 @@ const RECENT_MS = 24 * 60 * 60 * 1000;
 const jobKey = (id: string) => `bulk-job:${id}`;
 const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const BULK_RESUME_IDLE_MS = 3 * 60 * 1000;
 const jitterDelay = () => MIN_DELAY_MS + Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1));
 
 // Estado compartilhado entre rotas (hot reload cria módulos novos em desenvolvimento).
@@ -395,12 +396,13 @@ export async function getBulkJob(id: string, userId: string, isAdmin = false) {
  * aos concluídos nas últimas 24h. Também retoma lotes que pararam com o servidor.
  */
 export async function listBulkJobs(options: { userId: string; all?: boolean; filterUserId?: string; recent?: boolean }): Promise<BulkJob[]> {
-  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "bulk-job:" } }, select: { value: true } });
+  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "bulk-job:" } }, select: { value: true, updatedAt: true } });
   const now = Date.now();
   const jobs: BulkJob[] = [];
   for (const row of rows) {
     const job = row.value as unknown as BulkJob;
-    if (job.status === "running" && !running.has(job.id)) enqueue(job.id);
+    // Gravado há menos de 3 min: outra instância (deploy blue/green) ainda processa o lote.
+    if (job.status === "running" && !running.has(job.id) && now - row.updatedAt.getTime() >= BULK_RESUME_IDLE_MS) enqueue(job.id);
     const owner = options.all ? (options.filterUserId ? job.userId === options.filterUserId : true) : job.userId === options.userId;
     if (!owner) continue;
     if (options.recent && job.finishedAt && now - Date.parse(job.finishedAt) > RECENT_MS) continue;

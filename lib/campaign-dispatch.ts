@@ -484,13 +484,19 @@ export async function stopDispatch(campaignId: string, action: "pause" | "cancel
   return job;
 }
 
+/** Maior pausa sem gravar o progresso é a espera de limite da Meta (2 min): 3 min sem gravar = ninguém está enviando. */
+export const RESUME_IDLE_MS = 3 * 60 * 1000;
+export const recentlyActive = (updatedAt: Date, now = Date.now()) => now - updatedAt.getTime() < RESUME_IDLE_MS;
+
 // Lista os disparos e retoma os que ficaram "em andamento" após reinício do servidor.
 export async function listDispatchJobs(): Promise<DispatchJob[]> {
-  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "dispatch:" } }, select: { value: true } });
+  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "dispatch:" } }, select: { value: true, updatedAt: true } });
   const jobs = rows.map((row) => row.value as unknown as DispatchJob);
-  for (const job of jobs) {
-    if (job.status === "running" && !running.has(job.campaignId)) enqueue(job.campaignId);
-  }
+  rows.forEach((row, index) => {
+    const job = jobs[index];
+    // Atualizado há pouco = outra instância (deploy blue/green) ainda está enviando: não retoma em paralelo.
+    if (job.status === "running" && !running.has(job.campaignId) && !recentlyActive(row.updatedAt)) enqueue(job.campaignId);
+  });
   return jobs;
 }
 

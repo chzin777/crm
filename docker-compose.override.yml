@@ -8,6 +8,12 @@ services:
   redis:
     mem_limit: 320m
     cpus: 0.5
-  crm-app:
+  crm-proxy:
+    mem_limit: 64m
+    cpus: 0.5
+  crm-app-blue:
+    mem_limit: 1536m
+    cpus: 2.0
+  crm-app-green:
     mem_limit: 1536m
     cpus: 2.0

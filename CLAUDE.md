@@ -26,10 +26,15 @@
 
 ## ⚠️ REBUILD OBRIGATÓRIO APÓS QUALQUER ALTERAÇÃO
 
-Toda alteração exige rebuild imediato no servidor:
+Toda alteração vai ao ar pelo deploy sem queda (blue/green). O push na `main` dispara o webhook, que roda
+`deploy/auto-deploy.sh` → `scripts/deploy-zero-downtime.sh`. Manualmente (fallback):
 ```bash
-cd /opt/crm && docker compose down && docker compose up --build -d
+cd /opt/crm && git pull origin main && bash scripts/deploy-zero-downtime.sh
 ```
+- Arquitetura: Cloudflare Tunnel → `:3000` `crm-proxy` (nginx) → `crm-app-blue` (`:3001`) ou `crm-app-green` (`:3002`).
+- Rollback rápido: `bash /opt/crm/scripts/rollback.sh` (release anterior) ou `rollback.sh --list` / `rollback.sh <sha>`.
+- Log: `/var/log/crm-deploy.log`. Cor ativa: `/opt/crm/runtime/active-color`.
+- **Nunca** usar `docker compose down` nem `docker compose up --build` para o app: não existe mais o serviço `crm-app`.
 
 ---
 

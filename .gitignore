@@ -45,3 +45,6 @@ postgres/
 redis/
 .next/
 backups/
+
+# estado do deploy blue/green no servidor (cor ativa, upstream do proxy, releases)
+/runtime/

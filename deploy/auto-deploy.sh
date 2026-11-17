@@ -32,12 +32,18 @@ main() {
   current="$(git rev-parse HEAD)"
   target="$(git rev-parse origin/main)"
   if [ "$mode" = "poll" ] && [ "$current" = "$target" ]; then
-    # Servidor em dia: confere só se o container está rodando a mesma versão.
+    # Servidor em dia: confere só se o que está no ar (porta 3000) é a mesma versão.
+    # Release fixada pelo scripts/rollback.sh: o timer não reconstrói por cima dela.
+    [ -s "$dir/runtime/rollback-pin" ] && return 0
     local running
-    running="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' crm-app 2>/dev/null | sed -n 's/^GIT_COMMIT=//p')"
+    running="$(curl -fsS -m 5 http://127.0.0.1:3000/api/health 2>/dev/null | sed -n 's/.*"commit":"\([0-9a-f]*\)".*/\1/p')"
     [ "$running" = "${target:0:9}" ] && return 0
-    say "container com versão '${running:-desconhecida}' e repositório em ${target:0:9}: reconstruindo"
+    # Sem resposta pode ser só lentidão momentânea: só reconstrói com versão diferente confirmada.
+    [ -z "$running" ] && { say "AVISO: /api/health sem resposta; nada a fazer agora"; return 0; }
+    say "no ar a versão '$running' e repositório em ${target:0:9}: reconstruindo"
   fi
+  # Commit novo na main substitui qualquer rollback fixado.
+  [ "$current" != "$target" ] && rm -f "$dir/runtime/rollback-pin"
 
   say "início: ${current:0:9} -> ${target:0:9} ($(git log -1 --format=%s "$target" | cut -c1-100))"
   # reset em vez de pull: alteração local em arquivo versionado não trava mais o deploy.
@@ -49,25 +55,12 @@ main() {
 
   export GIT_COMMIT="${target:0:9}"
   export APP_VERSION="$(git log -1 --format=%s "$target" | grep -oE '^v[0-9]+\.[0-9]+\.[0-9]+' || echo "sem-versao")"
-  local started=$SECONDS
-  if ! docker compose up -d --build crm-app >> "$log" 2>&1; then
-    say "ERRO: build/subida do container falhou (veja as linhas acima); container anterior segue no ar"
+  # Blue/green sem queda: build isolado, health da cor nova, virada do proxy e rollback automático.
+  if ! CRM_DEPLOY_LOCKED=1 CRM_DEPLOY_LOG="$log" bash "$dir/scripts/deploy-zero-downtime.sh" > /dev/null 2>&1; then
+    say "ERRO: deploy sem queda falhou (detalhes acima); a versão anterior segue no ar"
     return 1
   fi
-
-  # Confirma que a versão nova respondeu (até 3 min).
-  local health=""
-  for _ in $(seq 1 36); do
-    health="$(curl -fsS -m 5 http://127.0.0.1:3000/api/health 2>/dev/null || true)"
-    echo "$health" | grep -q "\"commit\":\"$GIT_COMMIT\"" && break
-    sleep 5
-  done
-  if echo "$health" | grep -q "\"commit\":\"$GIT_COMMIT\""; then
-    say "OK: $APP_VERSION ($GIT_COMMIT) no ar em $((SECONDS - started))s"
-  else
-    say "ERRO: container subiu mas /api/health não confirmou $GIT_COMMIT (resposta: ${health:-nenhuma})"
-    return 1
-  fi
+  say "OK: $APP_VERSION ($GIT_COMMIT) no ar"
   # API de estoque do VMSet (host): recarrega o script versionado, se o serviço estiver instalado.
   systemctl try-restart crm-vmset-stock.service >> "$log" 2>&1 || true
   docker image prune -f >> "$log" 2>&1 || true

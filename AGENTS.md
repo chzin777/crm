@@ -56,18 +56,20 @@ Em qualquer desenvolvimento de interface ou estilo deste projeto, é obrigatóri
 
 ### Procedimento obrigatório (sempre, sem exceção):
 
-1. Sincronizar as alterações locais para `/opt/crm/crm/` no servidor (via SCP, git push/pull ou rsync)
-2. Conectar via SSH ao servidor (`172.30.20.15`, credenciais na memória privada `server-credentials`)
-3. Em `/opt/crm/`, executar **obrigatoriamente e na ordem exata**:
-   ```bash
-   docker compose down
-   docker compose up --build -d
-   ```
-4. Aguardar os containers subirem e verificar com `docker compose ps` que todos estão `running`/`healthy`
+1. Commitar e dar `git push origin main`: o webhook do servidor roda `deploy/auto-deploy.sh`, que chama
+   `scripts/deploy-zero-downtime.sh` (deploy blue/green sem queda)
+2. Conferir em `/var/log/crm-deploy.log` a linha `OK: vX.Y.Z (<sha>) no ar`
+3. Fallback manual (webhook fora do ar): `cd /opt/crm && git pull origin main && bash scripts/deploy-zero-downtime.sh`
+
+### Arquitetura de deploy (blue/green):
+- Cloudflare Tunnel → `:3000` `crm-proxy` (nginx) → `crm-app-blue` (`:3001`) ou `crm-app-green` (`:3002`)
+- A nova versão é construída (`docker build`) e sobe na cor parada; só recebe tráfego depois de responder `/api/health`
+  com o commit novo. Se a porta 3000 não confirmar em 15 s, o proxy volta sozinho para a cor anterior
+- Rollback rápido: `bash /opt/crm/scripts/rollback.sh` (release anterior), `rollback.sh --list`, `rollback.sh <sha>`
+- Ficam as 3 últimas releases (imagens `crm-app:<sha>`); estado em `/opt/crm/runtime/`
 
 ### Regras inegociáveis:
-- **Nunca** pular o `docker compose down` antes do `up --build` — imagens antigas ficam cacheadas e as alterações não são aplicadas
-- **Nunca** usar apenas `docker compose restart` ou `docker compose up -d` sem `--build` — isso não reconstrói a imagem
-- **Nunca** considerar uma alteração "pequena demais" para rebuild — toda mudança exige rebuild
-- O caminho do código-fonte no servidor é `/opt/crm/crm/` e o `docker-compose.yml` ativo fica em `/opt/crm/` com `build.context: ./crm`
-- Quando o usuário perguntar "fez o rebuild?", ele se refere especificamente a `docker compose down && docker compose up --build -d`
+- **Nunca** usar `docker compose down` nem `docker compose up --build`: não existe mais o serviço `crm-app`,
+  e o `down` derrubaria banco, proxy e as duas cores
+- **Nunca** considerar uma alteração "pequena demais" para deploy — toda mudança vai ao ar pelo fluxo acima
+- O código-fonte no servidor fica direto em `/opt/crm/` (raiz do repositório)

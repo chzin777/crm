@@ -16,3 +16,5 @@ README.md*
 postgres/
 backups/
 crm/
+redis/
+runtime/
