@@ -1,11 +1,10 @@
 "use client";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import Link from "next/link";
 import {
   addEdge,
   Background,
   BackgroundVariant,
-  Controls,
   Handle,
   MarkerType,
   MiniMap,
@@ -17,37 +16,39 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeChange,
   type Node,
+  type NodeChange,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, ArrowLeft, Bell, Bot, CheckCircle2, ChevronRight, Clock, Copy, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, PlusCircle, Save, ShieldOff, Tag, Tags, Timer, Trash2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, Bell, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
+import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
-import { NODE_DEF, NODE_DEFS, STAGE_OPTIONS, isTrigger, type FieldDef, type FlowEdge, type FlowNode, type NodeCategory, type NodeType } from "@/lib/automations/nodes";
+import {
+  describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
+  type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
+} from "@/lib/automations/nodes";
 
 type FlowStatus = "draft" | "active" | "paused";
 type FlowData = { id: string; name: string; description: string; status: FlowStatus; webhookToken: string; nodes: FlowNode[]; edges: FlowEdge[] };
 type Options = { queues: { id: string; name: string }[]; users: { id: string; name: string }[] };
-type NodeData = { kind: NodeType; config: Record<string, unknown> };
+type NodeData = { kind: NodeType; config: Record<string, unknown>; dir?: "LR" };
 type CanvasNode = Node<NodeData, "automation">;
 type Step = { id: string; nodeId: string; nodeType: string; status: string; message: string; createdAt: string };
 type Execution = { id: string; status: string; currentNodeId: string | null; resumeAt: string | null; error: string | null; startedAt: string; finishedAt: string | null; conversationId: string | null; contact: { id: string; name: string; phone: string | null }; steps: Step[] };
+type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook,
   send_whatsapp: MessageSquare, delay: Timer, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, opt_out: ShieldOff, condition: GitBranch, http: Globe,
 };
-const CATEGORIES: { id: NodeCategory; label: string }[] = [
-  { id: "gatilho", label: "Gatilhos" },
-  { id: "mensagem", label: "Mensagem e tempo" },
-  { id: "crm", label: "CRM e funil" },
-  { id: "logica", label: "Lógica e integração" },
-];
 const HEADER: Record<NodeCategory, string> = {
   gatilho: "bg-[#C4D600] text-[#051647]",
   mensagem: "bg-[#002187] text-white",
+  ia: "bg-[#002187] text-[#C4D600]",
   crm: "bg-[#051647] text-white",
   logica: "bg-[#F7915E] text-[#051647]",
 };
@@ -61,7 +62,18 @@ const EXEC_LABEL: Record<string, { label: string; cls: string }> = {
 };
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
 const handleCls = "!h-3 !w-3 !border-2 !border-white !bg-[#002187] dark:!border-[#07194f] dark:!bg-[#C4D600]";
+const toolBtn = "grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 dark:text-slate-300 dark:hover:bg-white/10";
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" }) : "");
+const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** Expande/recolhe com transição suave de altura (grid 0fr → 1fr). */
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div className={`grid transition-all duration-200 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`} aria-hidden={!open} inert={!open}>
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
 
 /** Resumo de uma linha da configuração, mostrado no cartão do nó. */
 function summary(kind: NodeType, config: Record<string, unknown>, options: Options): string {
@@ -70,14 +82,14 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_message": return config.mode === "keywords" ? `Palavras: ${(Array.isArray(config.keywords) ? config.keywords : []).join(", ") || "(nenhuma)"}` : "Qualquer mensagem";
     case "trigger_stage": case "move_stage": return stage(config.stage);
     case "trigger_tag": case "add_tag": case "remove_tag": return String(config.tag || "(sem tag)");
-    case "trigger_inactive": return `${Number(config.days) || 0} dias sem contato`;
+    case "trigger_inactive": { const { amount, unit } = readDuration(config, "days"); return `${durationLabel(amount, unit)} sem contato${config.businessHours ? " · horário comercial" : ""}`; }
     case "trigger_webhook": return "POST na URL do fluxo";
     case "send_whatsapp": return String(config.text || "(mensagem vazia)");
-    case "delay": return `${Number(config.amount) || 0} ${config.unit === "minutes" ? "min" : config.unit === "days" ? "dia(s)" : "hora(s)"}${config.businessHours ? " · horário comercial" : ""}`;
+    case "delay": { const { amount, unit } = readDuration(config, "hours"); return `${durationLabel(amount, unit)}${config.businessHours ? " · horário comercial" : ""}`; }
     case "ai_agent": return String(config.objective || "Atendimento pela IA");
     case "assign": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "(escolha a fila)";
     case "notify": return String(config.title || "Notificação");
-    case "condition": return `${String(config.field)} ${String(config.operator)} ${String(config.value ?? "")}`.trim();
+    case "condition": return config.field === "none" ? "Regras & Filtros do nó" : `${String(config.field)} ${String(config.operator)} ${String(config.value ?? "")}`.trim();
     case "http": return `${String(config.method)} ${String(config.url || "(sem URL)")}`;
     case "create_opportunity": return "Novo lead (se não houver aberta)";
     case "opt_out": return "Fora das campanhas (LGPD)";
@@ -86,26 +98,35 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
 }
 
 const OptionsContext = { current: { queues: [], users: [] } as Options };
+const queueNames = () => Object.fromEntries(OptionsContext.current.queues.map((queue) => [queue.id, queue.name]));
 
 const AutomationNode = memo(function AutomationNode({ data, selected }: NodeProps<CanvasNode>) {
   const def = NODE_DEF[data.kind];
   const Icon = ICONS[data.kind] ?? Zap;
+  const horizontal = data.dir === "LR";
+  const filters = readFilters(data.config);
   return (
     <div className={`w-[240px] rounded-xl border bg-white shadow-md dark:bg-[#07194f] ${selected ? "border-[#002187] ring-2 ring-[#002187]/30 dark:border-[#C4D600] dark:ring-[#C4D600]/30" : "border-slate-200 dark:border-slate-700"}`}>
-      {!isTrigger(data.kind) && <Handle type="target" position={Position.Top} className={handleCls} />}
+      {!isTrigger(data.kind) && <Handle type="target" position={horizontal ? Position.Left : Position.Top} className={handleCls} />}
       <div className={`flex items-center gap-2 rounded-t-[11px] px-3 py-1.5 text-[11px] font-bold ${HEADER[def.category]}`}>
         <Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{def.label}</span>
         {isTrigger(data.kind) && <span className="ml-auto rounded bg-white/40 px-1 text-[9px] uppercase">início</span>}
       </div>
-      <p className="line-clamp-2 break-words px-3 py-2 text-[11px] text-slate-600 dark:text-slate-300">{summary(data.kind, data.config, OptionsContext.current)}</p>
+      <p className="line-clamp-2 break-words px-3 pt-2 text-[11px] text-slate-600 dark:text-slate-300">{summary(data.kind, data.config, OptionsContext.current)}</p>
+      {filters.rules.length > 0 ? (
+        <p className="mx-3 mt-1.5 flex items-center gap-1 truncate rounded bg-[#002187]/5 px-1.5 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-[#C4D600]" title={describeFilters(filters, { queues: queueNames() })}>
+          <Filter className="h-3 w-3 shrink-0" /><span className="truncate">{filters.rules.length} regra{filters.rules.length === 1 ? "" : "s"} ({filters.combinator === "or" ? "OU" : "E"})</span>
+        </p>
+      ) : null}
+      <div className="h-2" />
       {data.kind === "condition" ? (
         <>
-          <Handle id="true" type="source" position={Position.Bottom} style={{ left: "28%" }} className="!h-3 !w-3 !border-2 !border-white !bg-emerald-500" />
-          <Handle id="false" type="source" position={Position.Bottom} style={{ left: "72%" }} className="!h-3 !w-3 !border-2 !border-white !bg-red-500" />
-          <div className="flex justify-between px-6 pb-1 text-[9px] font-bold uppercase"><span className="text-emerald-600">Sim</span><span className="text-red-600">Não</span></div>
+          <Handle id="true" type="source" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "35%" } : { left: "28%" }} className="!h-3 !w-3 !border-2 !border-white !bg-emerald-500" />
+          <Handle id="false" type="source" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "72%" } : { left: "72%" }} className="!h-3 !w-3 !border-2 !border-white !bg-red-500" />
+          <div className={`flex px-6 pb-1 text-[9px] font-bold uppercase ${horizontal ? "flex-col items-end gap-1 pr-3" : "justify-between"}`}><span className="text-emerald-600">Sim</span><span className="text-red-600">Não</span></div>
         </>
       ) : (
-        <Handle type="source" position={Position.Bottom} className={handleCls} />
+        <Handle type="source" position={horizontal ? Position.Right : Position.Bottom} className={handleCls} />
       )}
     </div>
   );
@@ -117,8 +138,42 @@ const edgeStyle = { markerEnd: { type: MarkerType.ArrowClosed, width: 16, height
 let nodeSeq = 0;
 const newNodeId = (kind: NodeType) => `${kind.replace(/_/g, "-")}-${Date.now().toString(36)}${(nodeSeq += 1).toString(36)}`;
 
-const toCanvas = (node: FlowNode): CanvasNode => ({ id: node.id, type: "automation", position: node.position, data: { kind: node.type, config: node.data.config } });
+const toCanvas = (node: FlowNode): CanvasNode => ({ id: node.id, type: "automation", position: node.position, data: { kind: node.type, config: node.data.config, ...(node.data.dir ? { dir: node.data.dir } : {}) } });
 const toCanvasEdge = (edge: FlowEdge): Edge => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null, ...edgeStyle, ...(edge.sourceHandle ? { label: edge.sourceHandle === "true" ? "Sim" : "Não" } : {}) });
+
+/**
+ * Auto-organizar: camadas pela distância a partir dos gatilhos (e nós sem entrada), na vertical (de cima para baixo)
+ * ou na horizontal (da esquerda para a direita); dentro da camada mantém a ordem atual.
+ */
+function autoLayout(nodes: CanvasNode[], edges: Edge[], dir: "TB" | "LR"): CanvasNode[] {
+  const depth = new Map<string, number>();
+  const incoming = new Set(edges.map((edge) => edge.target));
+  for (const node of nodes) if (isTrigger(node.data.kind) || !incoming.has(node.id)) depth.set(node.id, 0);
+  for (let pass = 0; pass < nodes.length; pass += 1) {
+    let changed = false;
+    for (const edge of edges) {
+      const from = depth.get(edge.source);
+      if (from === undefined) continue;
+      const next = Math.min(from + 1, nodes.length);
+      if ((depth.get(edge.target) ?? -1) < next) { depth.set(edge.target, next); changed = true; }
+    }
+    if (!changed) break;
+  }
+  const layers = new Map<number, CanvasNode[]>();
+  for (const node of nodes) {
+    const level = depth.get(node.id) ?? 0;
+    layers.set(level, [...(layers.get(level) ?? []), node]);
+  }
+  const positions = new Map<string, { x: number; y: number }>();
+  for (const [level, items] of layers) {
+    items.sort((a, b) => (dir === "TB" ? a.position.x - b.position.x : a.position.y - b.position.y));
+    items.forEach((node, index) => {
+      const offset = index - (items.length - 1) / 2;
+      positions.set(node.id, dir === "TB" ? { x: Math.round(offset * 290), y: level * 180 } : { x: level * 330, y: Math.round(offset * 160) });
+    });
+  }
+  return nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position, data: dir === "LR" ? { ...node.data, dir: "LR" } : { kind: node.data.kind, config: node.data.config } }));
+}
 
 function Field({ field, value, onChange, options }: { field: FieldDef; value: unknown; onChange: (value: unknown) => void; options: Options }) {
   const label = <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>;
@@ -159,7 +214,165 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
       </div>
     );
   }
-  return <label className="block space-y-1">{label}<input type={field.kind === "number" ? "number" : "text"} value={String(value ?? "")} placeholder={"placeholder" in field ? field.placeholder : undefined} onChange={(event) => onChange(field.kind === "number" ? Number(event.target.value) : event.target.value)} className={input} />{hint}</label>;
+  return <label className="block space-y-1">{label}<input type={field.kind === "number" ? "number" : "text"} min={field.kind === "number" ? 0 : undefined} value={String(value ?? "")} placeholder={"placeholder" in field ? field.placeholder : undefined} onChange={(event) => onChange(field.kind === "number" ? Number(event.target.value) : event.target.value)} className={input} />{hint}</label>;
+}
+
+/** Regras & Filtros de Execução de qualquer nó (E/OU, fila, tipo de contato, etapa, tag, cidade, receita). */
+function FiltersEditor({ kind, filters, onChange, options }: { kind: NodeType; filters: NodeFilters; onChange: (filters: NodeFilters) => void; options: Options }) {
+  const [open, setOpen] = useState(filters.rules.length > 0);
+  const setRule = (index: number, rule: FilterRule) => onChange({ ...filters, rules: filters.rules.map((item, position) => (position === index ? rule : item)) });
+  const addRule = () => { setOpen(true); onChange({ ...filters, rules: [...filters.rules, { kind: "queue", op: "none" }] }); };
+  const trigger = isTrigger(kind);
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left text-[11px] font-bold text-[#051647] dark:text-white">
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 ease-in-out ${open ? "rotate-180" : ""}`} />
+        <Filter className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+        <span className="flex-1">Regras & Filtros de Execução</span>
+        {filters.rules.length > 0 && <span className="rounded-full bg-[#002187]/10 px-1.5 text-[10px] text-[#002187] dark:bg-white/10 dark:text-[#C4D600]">{filters.rules.length}</span>}
+      </button>
+      <Collapse open={open}>
+        <div className="space-y-2 border-t border-slate-100 p-2.5 dark:border-slate-800">
+          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+            {trigger ? "Se as regras não forem atendidas, este gatilho é ignorado." : kind === "condition" ? "As regras entram no Sim/Não junto com a verificação acima." : "Se as regras não forem atendidas, o passo é pulado ou o ramo é encerrado (com registro no histórico)."} Contatos com opt-out (LGPD) são sempre bloqueados.
+          </p>
+          <select aria-label="Combinar regras" value={filters.combinator} onChange={(event) => onChange({ ...filters, combinator: event.target.value === "or" ? "or" : "and" })} className={`${input} cursor-pointer`}>
+            <option value="and">Todas as regras (E)</option>
+            <option value="or">Qualquer regra (OU)</option>
+          </select>
+          {filters.rules.map((rule, index) => {
+            const def = FILTER_KINDS.find((item) => item.kind === rule.kind) ?? FILTER_KINDS[0];
+            const op = def.ops.find((item) => item.value === rule.op) ?? def.ops[0];
+            return (
+              <div key={index} className="space-y-1.5 rounded-lg bg-slate-50 p-2 dark:bg-white/5">
+                <div className="flex gap-1">
+                  <select aria-label="Tipo de regra" value={rule.kind} onChange={(event) => { const next = FILTER_KINDS.find((item) => item.kind === event.target.value) ?? FILTER_KINDS[0]; setRule(index, { kind: next.kind as FilterKind, op: next.ops[0].value }); }} className={`${input} cursor-pointer`}>
+                    {FILTER_KINDS.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}
+                  </select>
+                  <button type="button" aria-label="Remover regra" title="Remover regra" onClick={() => onChange({ ...filters, rules: filters.rules.filter((_, position) => position !== index) })} className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+                <select aria-label="Operador da regra" value={op.value} onChange={(event) => setRule(index, { kind: rule.kind, op: event.target.value, ...(rule.value ? { value: rule.value } : {}) })} className={`${input} cursor-pointer`}>
+                  {def.ops.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+                {op.needsValue === "queue" && (
+                  <select aria-label="Fila" value={rule.value ?? ""} onChange={(event) => setRule(index, { ...rule, value: event.target.value })} className={`${input} cursor-pointer`}>
+                    <option value="">Escolha a fila</option>
+                    {options.queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
+                  </select>
+                )}
+                {op.needsValue === "stage" && (
+                  <select aria-label="Etapa" value={rule.value ?? ""} onChange={(event) => setRule(index, { ...rule, value: event.target.value })} className={`${input} cursor-pointer`}>
+                    <option value="">Escolha a etapa</option>
+                    {STAGE_OPTIONS.map((stage) => <option key={stage.value} value={stage.value}>{stage.label}</option>)}
+                  </select>
+                )}
+                {op.needsValue === "text" && <input aria-label="Valor da regra" value={rule.value ?? ""} placeholder={rule.kind === "tag" ? "vip" : "Goiânia"} onChange={(event) => setRule(index, { ...rule, value: event.target.value })} className={input} />}
+              </div>
+            );
+          })}
+          <button type="button" onClick={addRule} className="inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 text-[11px] font-semibold text-[#002187] hover:border-[#002187] dark:border-slate-600 dark:text-[#C4D600]"><Plus className="h-3.5 w-3.5" />Adicionar regra</button>
+          {!trigger && kind !== "condition" && filters.rules.length > 0 && (
+            <label className="block space-y-1"><span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Se não atender</span>
+              <select value={filters.onFail} onChange={(event) => onChange({ ...filters, onFail: event.target.value === "stop" ? "stop" : "skip" })} className={`${input} cursor-pointer`}>
+                <option value="skip">Pular este passo e seguir o fluxo</option>
+                <option value="stop">Encerrar o ramo aqui</option>
+              </select>
+            </label>
+          )}
+        </div>
+      </Collapse>
+    </div>
+  );
+}
+
+/** Testar fluxo: simula para um contato real, sem enviar mensagens nem gravar nada. */
+function TestDialog({ flowId, graph, triggers, onClose }: { flowId: string; graph: { nodes: FlowNode[]; edges: FlowEdge[] }; triggers: CanvasNode[]; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ id: string; nome: string; telefone: string }[]>([]);
+  const [contact, setContact] = useState<{ id: string; nome: string; telefone: string } | null>(null);
+  const [triggerId, setTriggerId] = useState(triggers[0]?.id ?? "");
+  const [running, setRunning] = useState(false);
+  const [outcome, setOutcome] = useState<{ status: string; error: string | null; steps: { nodeId: string; label: string; status: string; message: string }[] } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (query.trim().length < 2) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/contacts/search?q=${encodeURIComponent(query.trim())}&limit=8&withPhone=1`)
+        .then((response) => response.json())
+        .then((data: { data?: { id: string; nome: string; telefone: string }[] }) => { if (active) setResults(data.data ?? []); })
+        .catch(() => { if (active) setResults([]); });
+    }, 300);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [query]);
+
+  const run = async () => {
+    if (!contact) return;
+    setRunning(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/automations/${flowId}/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId: contact.id, triggerNodeId: triggerId, ...graph }) });
+      const data = (await response.json()) as { status?: string; error?: string | null; steps?: { nodeId: string; label: string; status: string; message: string }[] };
+      if (!response.ok) throw new Error(data.error ?? "Não foi possível simular.");
+      setOutcome({ status: data.status ?? "completed", error: data.error ?? null, steps: data.steps ?? [] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível simular.");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <EntityDialog titleId="testar-fluxo" title="Testar fluxo" description="Simula o fluxo atual (mesmo sem salvar) para um contato real: regras, condições e dados são reais; nenhuma mensagem é enviada e nada é gravado. As esperas são puladas." onClose={onClose} size="md">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        <label className="block space-y-1"><span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Contato</span>
+          {contact ? (
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs dark:border-slate-700">
+              <span className="min-w-0 flex-1 truncate font-semibold text-[#051647] dark:text-white">{contact.nome} · {contact.telefone}</span>
+              <button type="button" onClick={() => { setContact(null); setOutcome(null); }} className="cursor-pointer text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">Trocar</button>
+            </div>
+          ) : (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={(event) => { setQuery(event.target.value); if (event.target.value.trim().length < 2) setResults([]); }} placeholder="Buscar por nome ou telefone" className={`${input} pl-8`} />
+            </div>
+          )}
+        </label>
+        {!contact && results.length > 0 && (
+          <ul className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            {results.map((item) => (
+              <li key={item.id}><button type="button" onClick={() => { setContact(item); setResults([]); }} className="w-full cursor-pointer px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-white/5"><span className="font-semibold text-[#051647] dark:text-white">{item.nome}</span> <span className="text-slate-500">{item.telefone}</span></button></li>
+            ))}
+          </ul>
+        )}
+        {triggers.length > 1 && (
+          <label className="block space-y-1"><span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Começar pelo gatilho</span>
+            <select value={triggerId} onChange={(event) => setTriggerId(event.target.value)} className={`${input} cursor-pointer`}>
+              {triggers.map((node) => <option key={node.id} value={node.id}>{NODE_DEF[node.data.kind].label} — {summary(node.data.kind, node.data.config, OptionsContext.current)}</option>)}
+            </select>
+          </label>
+        )}
+        <button type="button" disabled={!contact || running} onClick={() => void run()} className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[#002187] text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
+          {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}Simular execução
+        </button>
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
+        {outcome && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-[#051647] dark:text-white">Resultado: {EXEC_LABEL[outcome.status]?.label ?? outcome.status}{outcome.error ? ` — ${outcome.error}` : ""}</p>
+            <ol className="space-y-1 rounded-lg bg-slate-50 p-3 dark:bg-white/5">
+              {outcome.steps.map((step, index) => (
+                <li key={`${step.nodeId}-${index}`} className="flex items-start gap-2 text-[11px]">
+                  {step.status === "ok" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" /> : step.status === "waiting" ? <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" /> : step.status === "skipped" ? <SkipForward className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" /> : step.status === "cancelled" ? <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#F7915E]" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />}
+                  <span className="min-w-0 break-words"><span className="font-semibold text-slate-700 dark:text-slate-200">{step.label}</span>{step.message ? <span className="text-slate-500 dark:text-slate-400"> — {step.message}</span> : null}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </div>
+    </EntityDialog>
+  );
 }
 
 function Executions({ flowId, nodes }: { flowId: string; nodes: CanvasNode[] }) {
@@ -201,7 +414,7 @@ function Executions({ flowId, nodes }: { flowId: string; nodes: CanvasNode[] }) 
                   <ol className="space-y-1 border-t border-slate-100 bg-slate-50/60 px-4 py-2 dark:border-slate-800 dark:bg-white/[0.03]">
                     {row.steps.map((step) => (
                       <li key={step.id} className="flex items-start gap-2 text-[11px]">
-                        {step.status === "ok" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" /> : step.status === "waiting" ? <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" /> : step.status === "cancelled" ? <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#F7915E]" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />}
+                        {step.status === "ok" ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" /> : step.status === "waiting" ? <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" /> : step.status === "skipped" ? <SkipForward className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" /> : step.status === "cancelled" ? <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#F7915E]" /> : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />}
                         <span className="min-w-0 flex-1 break-words"><span className="font-semibold text-slate-700 dark:text-slate-200">{label(step.nodeId, step.nodeType)}</span>{step.message ? <span className="text-slate-500 dark:text-slate-400"> — {step.message}</span> : null}</span>
                         <span className="shrink-0 text-[10px] text-slate-400">{when(step.createdAt)}</span>
                       </li>
@@ -218,20 +431,70 @@ function Executions({ flowId, nodes }: { flowId: string; nodes: CanvasNode[] }) 
   );
 }
 
+/** Paleta lateral: categorias recolhíveis com animação e busca rápida de nós. */
+function Palette({ onAdd }: { onAdd: (kind: NodeType) => void }) {
+  const [query, setQuery] = useState("");
+  const [closed, setClosed] = useState<Set<NodeCategory>>(() => new Set());
+  const term = plain(query.trim());
+  return (
+    <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-200/70 md:flex dark:border-slate-800" aria-label="Paleta de nós">
+      <div className="border-b border-slate-200/70 p-2 dark:border-slate-800">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nó" aria-label="Buscar nó" className={`${input} h-8 pl-7`} />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+        {NODE_CATEGORIES.map((category) => {
+          const defs = NODE_DEFS.filter((def) => def.category === category.id && (!term || plain(`${def.label} ${def.description}`).includes(term)));
+          if (!defs.length) return null;
+          const open = !!term || !closed.has(category.id);
+          return (
+            <div key={category.id}>
+              <button type="button" aria-expanded={open} onClick={() => setClosed((current) => { const next = new Set(current); if (next.has(category.id)) next.delete(category.id); else next.add(category.id); return next; })} className="flex w-full cursor-pointer items-center gap-1.5 rounded px-1 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 hover:text-[#051647] dark:text-slate-400 dark:hover:text-white">
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ease-in-out ${open ? "" : "-rotate-90"}`} />{category.label}<span className="ml-auto font-medium normal-case">{defs.length}</span>
+              </button>
+              <Collapse open={open}>
+                <div className="space-y-1 pb-1.5">
+                  {defs.map((def) => {
+                    const Icon = ICONS[def.type];
+                    return (
+                      <button key={def.type} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-automation-node", def.type); event.dataTransfer.effectAllowed = "move"; }} onClick={() => onAdd(def.type)} title={def.description} className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-[#C4D600]">
+                        <span className={`grid h-5 w-5 shrink-0 place-items-center rounded ${HEADER[def.category]}`}><Icon className="h-3 w-3" /></span><span className="min-w-0 truncate">{def.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Collapse>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
 function Editor({ flowId }: { flowId: string }) {
   const toast = useToast();
   const flowApi = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
   const [flow, setFlow] = useState<FlowData | null>(null);
   const [options, setOptions] = useState<Options>({ queues: [], users: [] });
-  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<CanvasNode>([]);
+  const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [saved, setSaved] = useState("");
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<"editor" | "execucoes">("editor");
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
+  // Desfazer/refazer: fotos do canvas antes de cada mudança (edições seguidas no mesmo campo viram uma só).
+  const latest = useRef<Snapshot>({ nodes: [], edges: [] });
+  const history = useRef<{ past: Snapshot[]; future: Snapshot[]; key: string; at: number }>({ past: [], future: [], key: "", at: 0 });
+  const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
+
+  useEffect(() => { latest.current = { nodes, edges }; }, [nodes, edges]);
 
   useEffect(() => {
     let active = true;
@@ -250,27 +513,83 @@ function Editor({ flowId }: { flowId: string }) {
     return () => { active = false; };
   }, [flowId, setEdges, setNodes]);
 
+  const record = useCallback((key = "") => {
+    const now = Date.now();
+    const current = history.current;
+    if (key && key === current.key && now - current.at < 1500) { current.at = now; return; }
+    current.past = [...current.past.slice(-49), latest.current];
+    current.future = [];
+    current.key = key;
+    current.at = now;
+    setHistorySize({ past: current.past.length, future: 0 });
+  }, []);
+  const undo = useCallback(() => {
+    const current = history.current;
+    const previous = current.past.at(-1);
+    if (!previous) return;
+    current.past = current.past.slice(0, -1);
+    current.future = [...current.future, latest.current];
+    current.key = "";
+    setNodes(previous.nodes);
+    setEdges(previous.edges);
+    setHistorySize({ past: current.past.length, future: current.future.length });
+  }, [setEdges, setNodes]);
+  const redo = useCallback(() => {
+    const current = history.current;
+    const next = current.future.at(-1);
+    if (!next) return;
+    current.future = current.future.slice(0, -1);
+    current.past = [...current.past, latest.current];
+    current.key = "";
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setHistorySize({ past: current.past.length, future: current.future.length });
+  }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) { event.preventDefault(); undo(); }
+      else if (key === "y" || (key === "z" && event.shiftKey)) { event.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
+
+  const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
+    if (changes.some((change) => change.type === "remove")) record();
+    onNodesChangeBase(changes);
+  }, [onNodesChangeBase, record]);
+  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
+    if (changes.some((change) => change.type === "remove")) record();
+    onEdgesChangeBase(changes);
+  }, [onEdgesChangeBase, record]);
+
   const graph = useMemo(() => ({
-    nodes: nodes.map((node) => ({ id: node.id, type: node.data.kind, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) }, data: { config: node.data.config } })),
+    nodes: nodes.map((node) => ({ id: node.id, type: node.data.kind, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) }, data: { config: node.data.config, ...(node.data.dir ? { dir: node.data.dir } : {}) } })),
     edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null })),
   }), [nodes, edges]);
   const dirty = !!flow && JSON.stringify({ name, ...graph }) !== saved;
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
+  const triggers = nodes.filter((node) => isTrigger(node.data.kind));
+  const direction = nodes.some((node) => node.data.dir === "LR") ? "LR" : undefined;
 
   const onConnect = useCallback((connection: Connection) => {
+    record();
     // Cada saída leva a um só passo (na condição, um para Sim e um para Não): nova conexão substitui a anterior.
     setEdges((current) => addEdge({ ...connection, id: `${connection.source}-${connection.sourceHandle ?? "out"}-${connection.target}`, ...edgeStyle, ...(connection.sourceHandle ? { label: connection.sourceHandle === "true" ? "Sim" : "Não" } : {}) }, current.filter((edge) => !(edge.source === connection.source && (edge.sourceHandle ?? null) === (connection.sourceHandle ?? null)))));
-  }, [setEdges]);
+  }, [setEdges, record]);
 
+  // Vários gatilhos por fluxo: qualquer um que disparar inicia a execução a partir dele.
   const addNode = (kind: NodeType, position?: { x: number; y: number }) => {
-    if (isTrigger(kind) && nodes.some((node) => isTrigger(node.data.kind))) {
-      toast.error("Um gatilho por fluxo", "Remova o gatilho atual para trocar.");
-      return;
-    }
+    record();
     const bounds = wrapper.current?.getBoundingClientRect();
     const at = position ?? flowApi.screenToFlowPosition({ x: (bounds?.left ?? 0) + (bounds?.width ?? 600) / 2 - 120, y: (bounds?.top ?? 0) + (bounds?.height ?? 400) / 3 });
     const id = newNodeId(kind);
-    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), { id, type: "automation", position: at, selected: true, data: { kind, config: { ...NODE_DEF[kind].defaults } } }]);
+    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), { id, type: "automation", position: at, selected: true, data: { kind, config: { ...NODE_DEF[kind].defaults }, ...(direction ? { dir: direction } : {}) } }]);
     setSelectedId(id);
   };
   const onDrop = (event: DragEvent) => {
@@ -278,12 +597,21 @@ function Editor({ flowId }: { flowId: string }) {
     const kind = event.dataTransfer.getData("application/x-automation-node") as NodeType;
     if (kind && NODE_DEF[kind]) addNode(kind, flowApi.screenToFlowPosition({ x: event.clientX - 120, y: event.clientY - 20 }));
   };
-  const updateConfig = (key: string, value: unknown) => setNodes((current) => current.map((node) => (node.id === selectedId ? { ...node, data: { ...node.data, config: { ...node.data.config, [key]: value } } } : node)));
+  const updateConfig = (key: string, value: unknown) => {
+    record(`cfg:${selectedId}:${key}`);
+    setNodes((current) => current.map((node) => (node.id === selectedId ? { ...node, data: { ...node.data, config: { ...node.data.config, [key]: value } } } : node)));
+  };
   const removeSelected = () => {
     if (!selectedId) return;
+    record();
     setNodes((current) => current.filter((node) => node.id !== selectedId));
     setEdges((current) => current.filter((edge) => edge.source !== selectedId && edge.target !== selectedId));
     setSelectedId(null);
+  };
+  const organize = (dir: "TB" | "LR") => {
+    record();
+    setNodes((current) => autoLayout(current, latest.current.edges, dir));
+    window.setTimeout(() => void flowApi.fitView({ padding: 0.3, maxZoom: 1, duration: 300 }), 50);
   };
 
   const save = async (status?: FlowStatus) => {
@@ -306,6 +634,11 @@ function Editor({ flowId }: { flowId: string }) {
   if (error) return <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error} <Link href="/automacoes" className="font-semibold underline">Voltar</Link></p>;
   if (!flow) return <p className="flex items-center gap-2 py-10 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando automação...</p>;
   const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/automations/webhook/${flow.id}?token=${flow.webhookToken}` : "";
+  const selectedFields = selected ? NODE_DEF[selected.data.kind].fields.filter((field) => {
+    if (field.key === "keywords" && selected.data.config.mode !== "keywords") return false;
+    if (selected.data.kind === "condition" && (field.key === "operator" || field.key === "value") && selected.data.config.field === "none") return false;
+    return true;
+  }) : [];
 
   return (
     <div className="flex h-[calc(100dvh-7rem)] min-h-[560px] flex-col gap-3">
@@ -319,9 +652,6 @@ function Editor({ flowId }: { flowId: string }) {
             <button type="button" onClick={() => setView("editor")} className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-xs font-semibold ${view === "editor" ? "bg-white text-[#051647] shadow-sm dark:bg-[#051647] dark:text-white" : "text-slate-500"}`}><Workflow className="h-3.5 w-3.5" />Editor</button>
             <button type="button" onClick={() => setView("execucoes")} className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-xs font-semibold ${view === "execucoes" ? "bg-white text-[#051647] shadow-sm dark:bg-[#051647] dark:text-white" : "text-slate-500"}`}><History className="h-3.5 w-3.5" />Execuções</button>
           </div>
-          <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="relative inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/5">
-            {dirty && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#F7915E]" />}<Save className="h-3.5 w-3.5" />Salvar
-          </button>
           {flow.status === "active" ? (
             <button type="button" disabled={saving} onClick={() => void save("paused")} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#F7915E] px-3 text-xs font-bold text-[#051647] hover:brightness-105 disabled:opacity-50"><Pause className="h-3.5 w-3.5" />Pausar</button>
           ) : (
@@ -333,51 +663,54 @@ function Editor({ flowId }: { flowId: string }) {
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40">
         {view === "execucoes" ? <div className="min-w-0 flex-1"><Executions flowId={flow.id} nodes={nodes} /></div> : (
           <>
-            <aside className="hidden w-56 shrink-0 space-y-3 overflow-y-auto border-r border-slate-200/70 p-3 md:block dark:border-slate-800" aria-label="Paleta de nós">
-              {CATEGORIES.map((category) => (
-                <div key={category.id}>
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{category.label}</p>
-                  <div className="space-y-1">
-                    {NODE_DEFS.filter((def) => def.category === category.id).map((def) => {
-                      const Icon = ICONS[def.type];
-                      return (
-                        <button key={def.type} type="button" draggable onDragStart={(event) => { event.dataTransfer.setData("application/x-automation-node", def.type); event.dataTransfer.effectAllowed = "move"; }} onClick={() => addNode(def.type)} title={def.description} className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-[11px] font-medium text-slate-700 hover:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-[#C4D600]">
-                          <span className={`grid h-5 w-5 shrink-0 place-items-center rounded ${HEADER[def.category]}`}><Icon className="h-3 w-3" /></span><span className="min-w-0 truncate">{def.label}</span>
-                        </button>
-                      );
-                    })}
+            <Palette onAdd={(kind) => addNode(kind)} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div role="toolbar" aria-label="Ferramentas do canvas" className="flex flex-wrap items-center gap-0.5 border-b border-slate-200/70 px-2 py-1 dark:border-slate-800">
+                <button type="button" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={!historySize.past} onClick={undo} className={toolBtn}><Undo2 className="h-4 w-4" /></button>
+                <button type="button" title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={!historySize.future} onClick={redo} className={toolBtn}><Redo2 className="h-4 w-4" /></button>
+                <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
+                <button type="button" title="Aumentar zoom" aria-label="Aumentar zoom" onClick={() => void flowApi.zoomIn({ duration: 200 })} className={toolBtn}><ZoomIn className="h-4 w-4" /></button>
+                <button type="button" title="Diminuir zoom" aria-label="Diminuir zoom" onClick={() => void flowApi.zoomOut({ duration: 200 })} className={toolBtn}><ZoomOut className="h-4 w-4" /></button>
+                <button type="button" title="Centralizar" aria-label="Centralizar" onClick={() => void flowApi.fitView({ padding: 0.3, maxZoom: 1, duration: 300 })} className={toolBtn}><Scan className="h-4 w-4" /></button>
+                <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
+                <button type="button" title="Auto-organizar na vertical" aria-label="Auto-organizar na vertical" disabled={!nodes.length} onClick={() => organize("TB")} className={toolBtn}><AlignVerticalSpaceAround className="h-4 w-4" /></button>
+                <button type="button" title="Auto-organizar na horizontal" aria-label="Auto-organizar na horizontal" disabled={!nodes.length} onClick={() => organize("LR")} className={toolBtn}><AlignHorizontalSpaceAround className="h-4 w-4" /></button>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button type="button" disabled={!triggers.length} onClick={() => setTesting(true)} className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-[#002187] hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5"><FlaskConical className="h-3.5 w-3.5" />Testar fluxo</button>
+                  <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
+                    {dirty && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#F7915E]" />}{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}Salvar
+                  </button>
+                </div>
+              </div>
+              <div ref={wrapper} className="relative min-h-0 flex-1" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={onDrop}>
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onNodeDragStart={() => record()}
+                  onSelectionChange={({ nodes: picked }) => setSelectedId(picked[0]?.id ?? null)}
+                  onPaneClick={() => setSelectedId(null)}
+                  deleteKeyCode={["Delete", "Backspace"]}
+                  fitView
+                  fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
+                  proOptions={{ hideAttribution: true }}
+                  defaultEdgeOptions={edgeStyle}
+                >
+                  <Background variant={BackgroundVariant.Dots} gap={18} size={1.4} />
+                  <MiniMap pannable zoomable className="!hidden sm:!block" nodeColor={(node) => (isTrigger((node.data as NodeData).kind) ? "#C4D600" : "#002187")} />
+                </ReactFlow>
+                {nodes.length === 0 && (
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
+                    <p className="max-w-xs text-xs text-slate-400">Arraste um ou mais <b>gatilhos</b> da paleta (ou clique neles) para começar. Depois ligue os passos pelos pontos de conexão.</p>
                   </div>
-                </div>
-              ))}
-            </aside>
-            <div ref={wrapper} className="relative min-w-0 flex-1" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={onDrop}>
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                nodeTypes={nodeTypes}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={onConnect}
-                onSelectionChange={({ nodes: picked }) => setSelectedId(picked[0]?.id ?? null)}
-                onPaneClick={() => setSelectedId(null)}
-                deleteKeyCode={["Delete", "Backspace"]}
-                fitView
-                fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
-                proOptions={{ hideAttribution: true }}
-                defaultEdgeOptions={edgeStyle}
-              >
-                <Background variant={BackgroundVariant.Dots} gap={18} size={1.4} />
-                <Controls showInteractive={false} />
-                <MiniMap pannable zoomable className="!hidden sm:!block" nodeColor={(node) => (isTrigger((node.data as NodeData).kind) ? "#C4D600" : "#002187")} />
-              </ReactFlow>
-              {nodes.length === 0 && (
-                <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
-                  <p className="max-w-xs text-xs text-slate-400">Arraste um <b>gatilho</b> da paleta (ou clique nele) para começar. Depois ligue os passos pelos pontos de conexão.</p>
-                </div>
-              )}
+                )}
+              </div>
             </div>
             {selected && (
-              <aside className="flex w-72 shrink-0 flex-col border-l border-slate-200/70 dark:border-slate-800" aria-label="Configuração do nó">
+              <aside className="flex w-80 shrink-0 flex-col border-l border-slate-200/70 dark:border-slate-800" aria-label="Configuração do nó">
                 <div className={`flex items-center gap-2 px-3 py-2 text-xs font-bold ${HEADER[NODE_DEF[selected.data.kind].category]}`}>
                   {(() => { const Icon = ICONS[selected.data.kind]; return <Icon className="h-4 w-4" />; })()}
                   <span className="min-w-0 flex-1 truncate">{NODE_DEF[selected.data.kind].label}</span>
@@ -395,10 +728,10 @@ function Editor({ flowId }: { flowId: string }) {
                       <span className="block text-[10px] text-slate-400">Corpo JSON: {"{ \"telefone\": \"62999990000\", \"campo\": \"valor\" }"}. Campos viram {"{{campo}}"}.</span>
                     </div>
                   )}
-                  {NODE_DEF[selected.data.kind].fields.map((field) => (
-                    (field.key === "keywords" && selected.data.config.mode !== "keywords") ? null :
-                      <Field key={field.key} field={field} value={selected.data.config[field.key]} options={options} onChange={(value) => updateConfig(field.key, value)} />
+                  {selectedFields.map((field) => (
+                    <Field key={field.key} field={field} value={selected.data.config[field.key]} options={options} onChange={(value) => updateConfig(field.key, value)} />
                   ))}
+                  <FiltersEditor key={selected.id} kind={selected.data.kind} filters={readFilters(selected.data.config)} options={options} onChange={(filters) => updateConfig("filters", filters)} />
                 </div>
                 <div className="border-t border-slate-200/70 p-3 dark:border-slate-800">
                   <button type="button" onClick={removeSelected} className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-red-200 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />Remover passo</button>
@@ -408,6 +741,7 @@ function Editor({ flowId }: { flowId: string }) {
           </>
         )}
       </div>
+      {testing && <TestDialog flowId={flow.id} graph={graph} triggers={triggers} onClose={() => setTesting(false)} />}
     </div>
   );
 }

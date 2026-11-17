@@ -44,7 +44,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
     description: "Contato sem conversar há 120 dias vai para Reativação e a equipe recebe o alerta.",
     graph: {
       nodes: [
-        node("t", "trigger_inactive", 0, 0, { days: 120 }),
+        node("t", "trigger_inactive", 0, 0, { amount: 120, unit: "days" }),
         node("s", "move_stage", 0, 140, { stage: "reativacao" }),
         node("g", "add_tag", 0, 280, { tag: "reativacao" }),
         node("n", "notify", 0, 420, { title: "Cliente sumido: {{nome}}", message: "Sem contato há 120 dias. Vale uma ligação ou um modelo de reativação." }),

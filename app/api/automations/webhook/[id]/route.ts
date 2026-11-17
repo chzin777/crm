@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: Context) {
   const token = request.headers.get("x-automation-token") ?? new URL(request.url).searchParams.get("token") ?? "";
   const flow = await prisma.automationFlow.findUnique({ where: { id }, select: { id: true, status: true, triggerType: true, webhookToken: true } });
   if (!flow || !sameToken(token, flow.webhookToken)) return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
-  if (flow.status !== "active" || flow.triggerType !== "trigger_webhook") return NextResponse.json({ error: "Automação inativa ou sem gatilho de webhook." }, { status: 409 });
+  if (flow.status !== "active" || !flow.triggerType.split(",").includes("trigger_webhook")) return NextResponse.json({ error: "Automação inativa ou sem gatilho de webhook." }, { status: 409 });
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: "Envie um JSON." }, { status: 400 });
   const phone = String(body.telefone ?? body.phone ?? "").replace(/\D/g, "");

@@ -1,9 +1,12 @@
-import { isTrigger, NODE_DEF, triggerNode, type FlowEdge, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
+import { describeFilters, evaluateFilters, isTrigger, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
+
+export type { ContactFacts } from "@/lib/automations/nodes";
 
 /**
  * Motor das automações: percorre o grafo a partir do nó atual da execução, executa cada passo pelas "portas"
  * (efeitos no CRM, injetados: banco/WhatsApp em produção, fakes nos testes) e para no Aguardar (delay), no fim,
- * em erro ou quando o contato pediu opt-out (LGPD).
+ * em erro ou quando o contato pediu opt-out (LGPD). Cada nó pode ter Regras & Filtros: no gatilho decidem se o
+ * disparo vale; nas ações, se o passo roda (senão pula ou encerra o ramo); na condição, entram no Sim/Não.
  */
 
 export type ExecutionContext = {
@@ -13,6 +16,8 @@ export type ExecutionContext = {
   waitingNodeId?: string | null;
   /** Início da execução (ISO): a "resposta do cliente" da condição é a mensagem recebida depois dele. */
   startedAt: string;
+  /** Gatilho que iniciou a execução (fluxo com vários gatilhos). */
+  triggerNodeId?: string | null;
   http?: Record<string, unknown>;
 };
 
@@ -26,7 +31,6 @@ export type ExecutionState = {
 };
 
 export type StepStatus = "ok" | "error" | "waiting" | "skipped" | "cancelled";
-export type ContactFacts = { tags: string[]; stage: string | null; city: string | null };
 
 /** Efeitos no CRM. Cada ação devolve uma mensagem curta para o log (ou lança erro). */
 export type EnginePorts = {
@@ -55,7 +59,6 @@ export type AdvanceResult =
   | { status: "cancelled"; state: ExecutionState; reason: string };
 
 const MAX_STEPS = 60;
-const UNIT_MS: Record<string, number> = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 
 /** {{nome}}, {{cidade}}, {{http.campo}}...: variáveis desconhecidas viram vazio. */
 export function renderTemplate(text: string, context: ExecutionContext): string {
@@ -68,9 +71,16 @@ export function renderTemplate(text: string, context: ExecutionContext): string 
   });
 }
 
-export function delayMs(config: Record<string, unknown>): number {
-  const amount = Math.max(0, Number(config.amount) || 0);
-  return Math.min(amount * (UNIT_MS[String(config.unit)] ?? UNIT_MS.hours), 365 * UNIT_MS.days);
+/** Quando o Aguardar termina (segundos a anos; meses/anos pelo calendário). */
+export function delayUntil(now: Date, config: Record<string, unknown>): Date {
+  const { amount, unit } = readDuration(config, "hours");
+  return shiftDate(now, amount, unit, 1);
+}
+
+/** Limite da inatividade: última mensagem do cliente antes deste instante = inativo. */
+export function inactiveSince(now: Date, config: Record<string, unknown>): Date {
+  const { amount, unit } = readDuration(config, "days");
+  return shiftDate(now, amount, unit, -1);
 }
 
 const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
@@ -80,6 +90,7 @@ export function evaluateCondition(config: Record<string, unknown>, input: { fact
   const field = String(config.field ?? "reply");
   const operator = String(config.operator ?? "exists");
   const expected = plain(String(config.value ?? ""));
+  if (field === "none") return true;
   if (field === "hour") {
     const value = Number(config.value);
     if (operator === "gte") return input.hour >= value;
@@ -125,9 +136,14 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
       return { message: `HTTP ${response.status}` };
     }
     case "condition": {
-      const [facts, reply] = await Promise.all([ports.facts(state), ports.lastReply(state, new Date(state.context.startedAt))]);
-      const branch = evaluateCondition(config, { facts, hour: brasiliaHour(ports.now()), reply });
-      return { message: branch ? "Condição verdadeira: caminho Sim" : "Condição falsa: caminho Não", branch };
+      const filters = readFilters(config);
+      const needsFacts = config.field !== "none" || filters.rules.length > 0;
+      const [facts, reply] = await Promise.all([needsFacts ? ports.facts(state) : Promise.resolve({ tags: [], stage: null, city: null } as ContactFacts), config.field === "reply" ? ports.lastReply(state, new Date(state.context.startedAt)) : Promise.resolve(null)]);
+      const check = evaluateCondition(config, { facts, hour: brasiliaHour(ports.now()), reply });
+      const rules = evaluateFilters(filters, facts);
+      const branch = check && rules;
+      const detail = filters.rules.length ? ` (regras: ${describeFilters(filters)} → ${rules ? "atendidas" : "não atendidas"})` : "";
+      return { message: `${branch ? "Condição verdadeira: caminho Sim" : "Condição falsa: caminho Não"}${detail}`, branch };
     }
     default: return { message: "" };
   }
@@ -139,7 +155,9 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
  */
 export async function advance(graph: FlowGraph, input: ExecutionState, ports: EnginePorts): Promise<AdvanceResult> {
   const state: ExecutionState = { ...input, context: { ...input.context, vars: { ...input.context.vars } } };
-  if (!state.currentNodeId) state.currentNodeId = triggerNode(graph)?.id ?? null;
+  if (!state.currentNodeId) state.currentNodeId = (state.context.triggerNodeId && graph.nodes.some((node) => node.id === state.context.triggerNodeId) ? state.context.triggerNodeId : triggerNode(graph)?.id) ?? null;
+  let facts: ContactFacts | null = null;
+  const loadFacts = async () => (facts ??= await ports.facts(state));
   for (let step = 0; step < MAX_STEPS; step += 1) {
     const node = graph.nodes.find((item) => item.id === state.currentNodeId);
     if (!node) return { status: "completed", state: { ...state, currentNodeId: null } };
@@ -153,9 +171,24 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
       state.currentNodeId = nextNodeId(graph, node);
       continue;
     }
+    // Regras & Filtros da ação (a condição usa as regras no Sim/Não). Retomada de Aguardar não reavalia.
+    const filters = readFilters(node.data.config);
+    if (node.type !== "condition" && filters.rules.length && state.context.waitingNodeId !== node.id) {
+      facts = null;
+      if (!evaluateFilters(filters, await loadFacts())) {
+        const rules = describeFilters(filters);
+        if (filters.onFail === "stop") {
+          await ports.log(state, node, "skipped", `Regras não atendidas (${rules}): ramo encerrado.`);
+          return { status: "completed", state: { ...state, currentNodeId: null } };
+        }
+        await ports.log(state, node, "skipped", `Regras não atendidas (${rules}): passo pulado.`);
+        state.currentNodeId = nextNodeId(graph, node);
+        continue;
+      }
+    }
     if (node.type === "delay") {
       if (state.context.waitingNodeId !== node.id) {
-        let resumeAt = new Date(ports.now().getTime() + delayMs(node.data.config));
+        let resumeAt = delayUntil(ports.now(), node.data.config);
         if (node.data.config.businessHours === true) resumeAt = await ports.nextBusinessTime(resumeAt);
         state.context.waitingNodeId = node.id;
         await ports.log(state, node, "waiting", `Aguardando até ${resumeAt.toISOString()}`);
@@ -170,6 +203,8 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
       const result = await runNode(node, state, ports);
       await ports.log(state, node, "ok", result.message);
       state.currentNodeId = nextNodeId(graph, node, result.branch);
+      // Ações mudam tags/etapa/fila: as próximas regras releem os dados.
+      facts = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha no passo.";
       await ports.log(state, node, "error", message);
@@ -179,14 +214,15 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
   return { status: "failed", state, error: "Fluxo com passos demais (possível laço)." };
 }
 
-/** O gatilho deste fluxo casa com o evento? */
+/** Evento real do CRM. Inatividade aponta o nó de gatilho (cada um tem seu tempo). */
 export type TriggerEvent =
   | { type: "trigger_message"; text: string }
   | { type: "trigger_stage"; stage: string }
   | { type: "trigger_tag"; tag: string }
-  | { type: "trigger_inactive"; days: number }
+  | { type: "trigger_inactive"; nodeId: string }
   | { type: "trigger_webhook" };
 
+/** Este nó de gatilho casa com o evento? (sem as regras & filtros, avaliadas em pickTrigger). */
 export function triggerMatches(node: FlowNode | null, event: TriggerEvent): boolean {
   if (!node || node.type !== event.type) return false;
   const config = node.data.config;
@@ -198,6 +234,22 @@ export function triggerMatches(node: FlowNode | null, event: TriggerEvent): bool
   }
   if (event.type === "trigger_stage") return String(config.stage ?? "") === event.stage;
   if (event.type === "trigger_tag") return plain(String(config.tag ?? "")) === plain(event.tag);
-  if (event.type === "trigger_inactive") return Number(config.days) === event.days;
+  if (event.type === "trigger_inactive") return node.id === event.nodeId;
   return true;
+}
+
+/**
+ * Fluxo com vários gatilhos: o primeiro (na ordem do canvas) que casa com o evento e passa nas suas Regras &
+ * Filtros inicia a execução a partir dele. Os dados do contato só são lidos se algum gatilho tiver regras.
+ */
+export async function pickTrigger(graph: FlowGraph, event: TriggerEvent, loadFacts: () => Promise<ContactFacts>): Promise<FlowNode | null> {
+  let facts: ContactFacts | null = null;
+  for (const node of triggerNodes(graph)) {
+    if (!triggerMatches(node, event)) continue;
+    const filters = readFilters(node.data.config);
+    if (!filters.rules.length) return node;
+    facts ??= await loadFacts();
+    if (evaluateFilters(filters, facts)) return node;
+  }
+  return null;
 }

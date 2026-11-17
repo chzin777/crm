@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { sanitizeGraph, triggerNode, validateGraph } from "@/lib/automations/nodes";
+import { sanitizeGraph, triggerTypesOf, validateGraph } from "@/lib/automations/nodes";
 
 type Context = { params: Promise<{ id: string }> };
 const STATUSES = ["draft", "active", "paused"];
@@ -38,7 +38,7 @@ export async function PUT(request: Request, { params }: Context) {
       name,
       description: typeof body?.description === "string" ? body.description.slice(0, 500) : current.description,
       status,
-      triggerType: triggerNode(graph)?.type ?? "",
+      triggerType: triggerTypesOf(graph).join(","),
       nodes: graph.nodes as unknown as Prisma.InputJsonValue,
       edges: graph.edges as unknown as Prisma.InputJsonValue,
     },

@@ -1,8 +1,8 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { advance, triggerMatches, type EnginePorts, type ExecutionContext, type ExecutionState, type TriggerEvent } from "@/lib/automations/engine";
-import { sanitizeGraph, triggerNode, type FlowGraph } from "@/lib/automations/nodes";
+import { advance, inactiveSince, pickTrigger, type AdvanceResult, type EnginePorts, type ExecutionContext, type ExecutionState, type StepStatus, type TriggerEvent } from "@/lib/automations/engine";
+import { NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
 import { addedTags, stageChanges } from "@/lib/automations/events";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
 import { sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -22,6 +22,7 @@ const AUTHOR = "Automação";
 const LOCK_MS = 5 * 60_000;
 const RESUME_BATCH = 50;
 const HOUR = 3_600_000;
+const MINUTE = 60_000;
 
 type Target = { contactId: string; conversationId?: string | null; vars?: Record<string, string> };
 
@@ -52,16 +53,31 @@ async function setTags(state: ExecutionState, change: (tags: string[]) => string
   return { conversation, before: conversation.tags, tags };
 }
 
+/** Dados do contato para Regras & Filtros e condições: tags, etapa, cidade, fila, lead x recorrente, receita. */
+async function contactFacts(state: Pick<ExecutionState, "contactId" | "conversationId">) {
+  const [conversation, contact, prescriptions, { contactOpportunity, classifyCustomerRecurrence }] = await Promise.all([
+    conversationOf(state as ExecutionState),
+    prisma.contact.findUnique({ where: { id: state.contactId }, select: { city: true } }),
+    prisma.customerPrescription.count({ where: { contactId: state.contactId } }).catch(() => 0),
+    import("@/lib/sales-pipeline-db"),
+  ]);
+  const [opportunity, recurrence] = await Promise.all([contactOpportunity(state.contactId).catch(() => null), classifyCustomerRecurrence(state.contactId).catch(() => null)]);
+  return {
+    tags: conversation?.tags ?? [],
+    stage: opportunity?.card?.coluna ?? null,
+    city: contact?.city ?? null,
+    queueId: conversation?.queueId ?? null,
+    isCustomer: recurrence ? recurrence.type === "recorrente" : null,
+    hasPrescription: prescriptions > 0,
+  };
+}
+
 /** Portas reais do motor (banco, WhatsApp, funil). */
 export function databasePorts(flowId: string): EnginePorts {
   return {
     now: () => new Date(),
     isOptedOut: async (contactId) => !!(await prisma.contact.findUnique({ where: { id: contactId }, select: { marketingOptOut: true } }))?.marketingOptOut,
-    facts: async (state) => {
-      const [conversation, contact, { contactOpportunity }] = await Promise.all([conversationOf(state), prisma.contact.findUnique({ where: { id: state.contactId }, select: { city: true } }), import("@/lib/sales-pipeline-db")]);
-      const opportunity = await contactOpportunity(state.contactId).catch(() => null);
-      return { tags: conversation?.tags ?? [], stage: opportunity?.card?.coluna ?? null, city: contact?.city ?? null };
-    },
+    facts: (state) => contactFacts(state),
     lastReply: async (state, since) => (await prisma.chatMessage.findFirst({ where: { conversation: { contactId: state.contactId }, author: "customer", createdAt: { gt: since } }, orderBy: { createdAt: "desc" }, select: { text: true } }))?.text ?? null,
     nextBusinessTime: async (date) => {
       const rule = await hoursFor(null).catch(() => null);
@@ -171,7 +187,7 @@ export function databasePorts(flowId: string): EnginePorts {
 
 function toState(row: { id: string; flowId: string; contactId: string; conversationId: string | null; currentNodeId: string | null; context: unknown; startedAt: Date }): ExecutionState {
   const context = (row.context && typeof row.context === "object" ? row.context : {}) as Partial<ExecutionContext>;
-  return { id: row.id, flowId: row.flowId, contactId: row.contactId, conversationId: row.conversationId, currentNodeId: row.currentNodeId, context: { vars: context.vars ?? {}, waitingNodeId: context.waitingNodeId ?? null, startedAt: context.startedAt ?? row.startedAt.toISOString(), ...(context.http ? { http: context.http } : {}) } };
+  return { id: row.id, flowId: row.flowId, contactId: row.contactId, conversationId: row.conversationId, currentNodeId: row.currentNodeId, context: { vars: context.vars ?? {}, waitingNodeId: context.waitingNodeId ?? null, startedAt: context.startedAt ?? row.startedAt.toISOString(), triggerNodeId: context.triggerNodeId ?? null, ...(context.http ? { http: context.http } : {}) } };
 }
 
 /**
@@ -213,27 +229,72 @@ async function contactVars(contactId: string): Promise<Record<string, string> | 
 }
 
 /**
- * Evento real do CRM → inicia os fluxos ativos cujo gatilho casa. Um contato não entra de novo num fluxo em que
- * ainda está (rodando ou aguardando); quem pediu opt-out não entra em nenhum.
+ * Evento real do CRM → inicia os fluxos ativos com algum gatilho que casa (e passa nas suas Regras & Filtros); a
+ * execução começa no gatilho que disparou. Um contato não entra de novo num fluxo em que ainda está (rodando ou
+ * aguardando); quem pediu opt-out não entra em nenhum. startAt adia o início (ex.: horário comercial).
  */
-export async function triggerAutomations(event: TriggerEvent, target: Target, options: { onlyFlowId?: string; excludeFlowId?: string; notStartedSince?: Date } = {}) {
-  const flows = await prisma.automationFlow.findMany({ where: { status: "active", triggerType: event.type, ...(options.onlyFlowId ? { id: options.onlyFlowId } : {}), ...(options.excludeFlowId ? { id: { not: options.excludeFlowId } } : {}) } });
+export async function triggerAutomations(event: TriggerEvent, target: Target, options: { onlyFlowId?: string; excludeFlowId?: string; notStartedSince?: Date; startAt?: Date } = {}) {
+  const flows = await prisma.automationFlow.findMany({ where: { status: "active", triggerType: { contains: event.type }, ...(options.onlyFlowId ? { id: options.onlyFlowId } : {}), ...(options.excludeFlowId ? { id: { not: options.excludeFlowId } } : {}) } });
   if (!flows.length) return [];
   const base = await contactVars(target.contactId);
   if (!base) return [];
   const started: string[] = [];
+  let facts: Awaited<ReturnType<typeof contactFacts>> | null = null;
+  const loadFacts = async () => (facts ??= await contactFacts({ contactId: target.contactId, conversationId: target.conversationId ?? null }));
   for (const flow of flows) {
     const graph = sanitizeGraph(flow);
-    if (!triggerMatches(triggerNode(graph), event)) continue;
+    const trigger = await pickTrigger(graph, event, loadFacts);
+    if (!trigger) continue;
     const busy = await prisma.automationExecution.findFirst({ where: { flowId: flow.id, contactId: target.contactId, OR: [{ status: { in: ["running", "waiting"] } }, ...(options.notStartedSince ? [{ startedAt: { gte: options.notStartedSince } }] : [])] }, select: { id: true } });
     if (busy) continue;
     const now = new Date();
-    const context: ExecutionContext = { vars: { ...base, ...(event.type === "trigger_message" ? { mensagem: event.text } : {}), ...(target.vars ?? {}) }, startedAt: now.toISOString() };
-    const execution = await prisma.automationExecution.create({ data: { flowId: flow.id, contactId: target.contactId, conversationId: target.conversationId ?? null, status: "waiting", resumeAt: now, context: context as unknown as Prisma.InputJsonValue } });
+    const resumeAt = options.startAt && options.startAt > now ? options.startAt : now;
+    const context: ExecutionContext = { vars: { ...base, ...(event.type === "trigger_message" ? { mensagem: event.text } : {}), ...(target.vars ?? {}) }, startedAt: now.toISOString(), triggerNodeId: trigger.id };
+    const execution = await prisma.automationExecution.create({ data: { flowId: flow.id, contactId: target.contactId, conversationId: target.conversationId ?? null, status: "waiting", resumeAt, currentNodeId: trigger.id, context: context as unknown as Prisma.InputJsonValue } });
     started.push(execution.id);
-    await runExecution(execution.id).catch((error: unknown) => console.error(`[automacoes] execução ${execution.id}:`, error));
+    if (resumeAt <= now) await runExecution(execution.id).catch((error: unknown) => console.error(`[automacoes] execução ${execution.id}:`, error));
   }
   return started;
+}
+
+/**
+ * "Testar fluxo": roda o grafo (mesmo sem salvar) para um contato real sem efeitos: dados e condições são reais,
+ * ações só descrevem o que fariam e os Aguardar são pulados. Nada é gravado.
+ */
+export async function simulateFlow(graph: FlowGraph, contactId: string, triggerNodeId?: string | null) {
+  const contact = await prisma.contact.findUnique({ where: { id: contactId }, select: { id: true, name: true, city: true, phone: true, marketingOptOut: true } });
+  if (!contact) throw new Error("Contato não encontrado.");
+  const conversation = await prisma.chatConversation.findFirst({ where: { contactId }, orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } }, select: { id: true } });
+  const full = contact.name?.trim() ?? "";
+  const trigger = triggerNodes(graph).find((node) => node.id === triggerNodeId) ?? triggerNodes(graph)[0];
+  if (!trigger) throw new Error("Adicione um gatilho para testar.");
+  const steps: { nodeId: string; nodeType: string; label: string; status: StepStatus; message: string }[] = [];
+  const real = databasePorts("simulacao");
+  const describe = (text: string) => async () => `Simulado: ${text}`;
+  const ports: EnginePorts = {
+    ...real,
+    isOptedOut: async () => contact.marketingOptOut,
+    nextBusinessTime: async (date) => date,
+    sendWhatsApp: async (_state, input) => `Simulado: enviaria "${input.text.slice(0, 160)}"${input.mediaUrl ? " com imagem" : ""}`,
+    aiAgent: async (_state, objective) => `Simulado: passaria a conversa para a IA${objective ? ` (${objective.slice(0, 120)})` : ""}`,
+    moveStage: async (_state, stage) => `Simulado: moveria a oportunidade para ${stage}`,
+    createOpportunity: describe("criaria a oportunidade em Novo lead"),
+    addTag: async (_state, tag) => `Simulado: adicionaria a tag "${tag}"`,
+    removeTag: async (_state, tag) => `Simulado: removeria a tag "${tag}"`,
+    assign: describe("colocaria a conversa na fila escolhida"),
+    notify: async (_state, input) => `Simulado: notificaria ${input.userIds.length || "os supervisores"} (${input.title.slice(0, 80)})`,
+    optOut: describe("marcaria o contato como opt-out"),
+    http: async (input) => ({ status: 200, data: { simulado: true, url: input.url } }),
+    log: async (_state, node: FlowNode, status, message) => { steps.push({ nodeId: node.id, nodeType: node.type, label: NODE_DEF[node.type].label, status, message }); },
+  };
+  let state: ExecutionState = { id: "simulacao", flowId: "simulacao", contactId, conversationId: conversation?.id ?? null, currentNodeId: trigger.id, context: { vars: { nome: full.split(/\s+/)[0] ?? "", nome_completo: full, cidade: contact.city ?? "", telefone: contact.phone ?? "", mensagem: "(mensagem de teste)" }, startedAt: new Date().toISOString(), triggerNodeId: trigger.id } };
+  let result: AdvanceResult = { status: "completed", state };
+  for (let round = 0; round < 20; round += 1) {
+    result = await advance(graph, state, ports);
+    if (result.status !== "waiting") break;
+    state = result.state;
+  }
+  return { status: result.status, error: result.status === "failed" ? result.error : null, steps };
 }
 
 /** Relógio por minuto: retoma delays vencidos e execuções travadas de container que caiu. */
@@ -249,20 +310,42 @@ export async function resumeDueExecutions(now = new Date()) {
   return resumed;
 }
 
-/** Gatilho "Cliente inativo por tempo": de hora em hora, contatos cuja última mensagem fez exatamente N dias. */
+/**
+ * Janela de checagem da inatividade: tempos de 1 dia ou mais são varridos de hora em hora; menores, a cada minuto
+ * (segundos arredondam para o minuto do relógio).
+ */
+export function inactivityWindowMs(now: Date, config: Record<string, unknown>) {
+  return now.getTime() - inactiveSince(now, config).getTime() >= 24 * HOUR ? HOUR : MINUTE;
+}
+
+/**
+ * Gatilho "Cliente inativo por tempo" (segundos a anos): a cada janela (minuto ou hora, reservada uma única vez
+ * entre os containers), contatos cuja última mensagem caiu na janela anterior deslocada pelo tempo configurado.
+ */
 export async function checkInactiveTriggers(now = new Date()) {
-  if (!(await firstDispatch(`automation-inactive:${now.toISOString().slice(0, 13)}`))) return 0;
-  const flows = await prisma.automationFlow.findMany({ where: { status: "active", triggerType: "trigger_inactive" } });
+  const flows = await prisma.automationFlow.findMany({ where: { status: "active", triggerType: { contains: "trigger_inactive" } } });
+  if (!flows.length) return 0;
+  const claimed = new Map<number, boolean>();
+  const claim = async (window: number) => {
+    if (!claimed.has(window)) claimed.set(window, await firstDispatch(`automation-inactive:${window === HOUR ? "h" : "m"}:${Math.floor(now.getTime() / window)}`));
+    return claimed.get(window)!;
+  };
   let started = 0;
   for (const flow of flows) {
-    const days = Number((triggerNode(sanitizeGraph(flow))?.data.config.days as number | undefined) ?? 0);
-    if (!(days > 0)) continue;
-    const to = new Date(now.getTime() - days * 24 * HOUR);
-    const from = new Date(to.getTime() - 24 * HOUR);
-    const rows = await prisma.chatConversation.groupBy({ by: ["contactId"], _max: { lastInboundAt: true }, having: { lastInboundAt: { _max: { gte: from, lt: to } } }, orderBy: { contactId: "asc" }, take: 200 });
-    for (const row of rows) {
-      const ids = await triggerAutomations({ type: "trigger_inactive", days }, { contactId: row.contactId }, { onlyFlowId: flow.id, notStartedSince: new Date(now.getTime() - days * 24 * HOUR) });
-      started += ids.length;
+    for (const node of triggerNodes(sanitizeGraph(flow)).filter((item) => item.type === "trigger_inactive")) {
+      const config = node.data.config;
+      if (!(readDuration(config, "days").amount > 0)) continue;
+      const window = inactivityWindowMs(now, config);
+      if (!(await claim(window))) continue;
+      const bucketStart = new Date(Math.floor(now.getTime() / window) * window);
+      const to = inactiveSince(bucketStart, config);
+      const from = inactiveSince(new Date(bucketStart.getTime() - window), config);
+      const rows = await prisma.chatConversation.groupBy({ by: ["contactId"], _max: { lastInboundAt: true }, having: { lastInboundAt: { _max: { gte: from, lt: to } } }, orderBy: { contactId: "asc" }, take: 200 });
+      const startAt = config.businessHours === true ? await databasePorts(flow.id).nextBusinessTime(now) : undefined;
+      for (const row of rows) {
+        const ids = await triggerAutomations({ type: "trigger_inactive", nodeId: node.id }, { contactId: row.contactId }, { onlyFlowId: flow.id, notStartedSince: inactiveSince(now, config), startAt });
+        started += ids.length;
+      }
     }
   }
   return started;

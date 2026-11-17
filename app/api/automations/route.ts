@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { NODE_DEF, sanitizeGraph, triggerNode, type FlowGraph } from "@/lib/automations/nodes";
+import { NODE_DEF, sanitizeGraph, triggerNodes, triggerTypesOf, type FlowGraph } from "@/lib/automations/nodes";
 import { FLOW_TEMPLATES } from "@/lib/automations/templates";
 
 /** Lista de automações com gatilho e contadores de execuções. */
@@ -17,10 +17,10 @@ export async function GET() {
   return NextResponse.json({
     flows: flows.map((flow) => {
       const of = (statuses: string[]) => counts.filter((row) => row.flowId === flow.id && statuses.includes(row.status)).reduce((sum, row) => sum + row._count._all, 0);
-      const trigger = triggerNode(sanitizeGraph({ nodes: flow.nodes, edges: [] }));
+      const triggers = triggerNodes(sanitizeGraph({ nodes: flow.nodes, edges: [] }));
       return {
         id: flow.id, name: flow.name, description: flow.description, status: flow.status, updatedAt: flow.updatedAt,
-        trigger: trigger ? NODE_DEF[trigger.type].label : "Sem gatilho",
+        trigger: triggers.length ? [...new Set(triggers.map((item) => NODE_DEF[item.type].label))].join(" · ") : "Sem gatilho",
         steps: Array.isArray(flow.nodes) ? flow.nodes.length : 0,
         running: of(["running", "waiting"]), completed: of(["completed"]), failed: of(["failed"]), cancelled: of(["cancelled"]),
       };
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       name,
       description: template?.description ?? "",
       status: "draft",
-      triggerType: triggerNode(graph)?.type ?? "",
+      triggerType: triggerTypesOf(graph).join(","),
       nodes: graph.nodes as unknown as Prisma.InputJsonValue,
       edges: graph.edges as unknown as Prisma.InputJsonValue,
       webhookToken: randomBytes(18).toString("hex"),
