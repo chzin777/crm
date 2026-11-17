@@ -6,7 +6,8 @@ import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/li
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
 import { extractClipboardImages } from "@/lib/clipboard";
-import { SIMULATED_PROFILES, type AgentOutcome, type AgentTrigger, type SimulatedProfileId } from "@/lib/ai/agent-core";
+import type { AgentOutcome, AgentTrigger } from "@/lib/ai/agent-core";
+import { SIMULATED_PROFILES, type SimulatedProfileId } from "@/lib/ai/simulated-profiles";
 import type { AiUsageReport } from "@/lib/ai/store";
 import type { StockLog } from "@/lib/ai/stock";
 import type { ImageAnalysis } from "@/lib/ai/catalog-search";

@@ -33,6 +33,8 @@ RUN addgroup -S -g 1001 nodejs && adduser -S -u 1001 -G nodejs nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Módulos de prompt da IA (lib/ai/prompts/*.md), lidos em runtime pelo composeSystemPrompt.
+COPY --from=builder --chown=nextjs:nodejs /app/lib/ai/prompts ./lib/ai/prompts
 
 # Versão e commit (passados pelo deploy/auto-deploy.sh) expostos em /api/health.
 ARG GIT_COMMIT=unknown

@@ -419,8 +419,7 @@ describe("fluxo completo RB3025 → mais detalhes → localização da loja", ()
       return { reply: `${stock.fichaFormatada}\n---SPLIT---\nGostaria de reservar essa peça ou saber mais detalhes sobre o modelo?`, action: "reply" };
     };
     const history: PlaygroundMessage[] = [{ from: "customer", text: "OCS RAY BAN REF 0RB3025 004/7858" }];
-    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-rb3025" });
-    expect(turn1.image?.sku).toBe(AVIATOR.codigo);
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-rb3025" });    expect(turn1.image?.sku).toBe(AVIATOR.codigo);
     expect(turn1.messages[0]).toContain("Ray-Ban Aviator Classic | Ref. RB3025");
     expect(turn1.messages[0]).toContain("(Rua 9, 2106)");
     expect(turn1.anchor?.activeProduct).toBeNull();

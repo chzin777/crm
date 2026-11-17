@@ -1,7 +1,8 @@
 import { explicitBrand, normalizeBrandQuery, normalizeTerm } from "@/lib/ai/catalog-search";
 
-export type CatalogContext = { preferredCity: string; brand: string; category: string; lastCatalogFilterHash: string };
-export const EMPTY_CATALOG_CONTEXT: CatalogContext = { preferredCity: "", brand: "", category: "", lastCatalogFilterHash: "" };
+/** activeBrand: marca pedida que vale nos turnos seguintes (estilo, cidade) até o cliente trocar; brand é o mesmo valor. */
+export type CatalogContext = { preferredCity: string; brand: string; activeBrand: string; category: string; lastCatalogFilterHash: string };
+export const EMPTY_CATALOG_CONTEXT: CatalogContext = { preferredCity: "", brand: "", activeBrand: "", category: "", lastCatalogFilterHash: "" };
 
 const CITY_ALIASES: [string, string][] = [
   ["aparecida de goiania", "Aparecida de Goiânia"], ["caldas novas", "Caldas Novas"],
@@ -39,7 +40,8 @@ export function sanitizeCatalogContext(value: unknown): CatalogContext {
   if (!value || typeof value !== "object") return { ...EMPTY_CATALOG_CONTEXT };
   const raw = value as Record<string, unknown>;
   const field = (key: string) => typeof raw[key] === "string" ? raw[key].slice(0, 100) : "";
-  return { preferredCity: field("preferredCity"), brand: field("brand"), category: field("category"), lastCatalogFilterHash: field("lastCatalogFilterHash") };
+  const brand = field("activeBrand") || field("brand");
+  return { preferredCity: field("preferredCity"), brand, activeBrand: brand, category: field("category"), lastCatalogFilterHash: field("lastCatalogFilterHash") };
 }
 
 export function isBroadBrandRequest(text: string, brand: string): boolean {
@@ -55,7 +57,8 @@ export function updateCatalogContext(previous: CatalogContext, text: string, cit
   const brand = explicitBrand(text);
   const words = plain(text);
   const category = /\b(lente|lentes)\s+de\s+contato\b/.test(words) ? "LENTE_CONTATO" : /\b(sol|solar|solares)\b/.test(words) ? "SOLAR" : /\b(armacao|armacoes|grau)\b/.test(words) ? "ARMACAO" : "";
-  const context = { ...previous, preferredCity: city ?? previous.preferredCity, brand: brand ?? previous.brand, category: category || previous.category };
+  const activeBrand = brand ?? (previous.activeBrand || previous.brand || "");
+  const context: CatalogContext = { ...previous, preferredCity: city ?? previous.preferredCity, brand: activeBrand, activeBrand, category: category || previous.category };
   const correction = /\b(errou|errado|errada|corrigiu|corrigir|correcao|na verdade)\b/i.test(plain(text)) || (!!brand && /\bpedi\b/i.test(plain(text)));
   const changed = !!city || (!!brand && normalizeTerm(brand) !== normalizeTerm(previous.brand)) || !!category || correction;
   return { context, changed, brand, city, correction };

@@ -25,15 +25,15 @@ import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, ba
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
-import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { analysisName, analysisPromptBlock, asksProductInfo, brandFallbackReply, brandSearchArgs, brandStockFallback, CATALOG_FOUND_RULE, explicitBrand, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
-import { asksCustomerCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { asksCustomerCity, canonicalCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
+import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
-import { STOCK_TOOL, type StockLog } from "@/lib/ai/stock";
+import { STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, showcaseReference } from "@/lib/ai/stock-showcase";
 import { ambiguousChoiceQuestion, asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, pickFromListQuestion, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
@@ -571,7 +571,11 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Consultora: orçamento da conversa vira filtro; sem cidade, pergunta antes de listar qualquer produto.
   const { budget, cheap } = conversationBudget([...[...(input.earlierCustomerTexts ?? [])].reverse(), customerText]);
   const wantsKids = conversationWantsKids([...(input.earlierCustomerTexts ?? []), customerText]);
-  const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
+  // Marca ativa da sessão (aiContext.activeBrand): estilo/ocasião dito depois ("mais presença no rosto") continua a
+  // busca da marca; sem cidade, pergunta a cidade em vez de cair no fluxo de modelo específico.
+  const activeBrand = catalogState.activeBrand || catalogState.brand;
+  const continuesBrand = !!activeBrand && !catalogState.preferredCity && !asksStoreLocation(input.pendingText) && !asksForHuman(settings, customerText) && !isPureGreeting(input.pendingText) && !isInstallmentQuestion(customerText);
+  const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: continuesBrand ? `${customerText} ${activeBrand}` : customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
   // "Óculos" sem dizer grau ou sol: pergunta o tipo antes de listar (não mistura sol e grau).
   const typeFirst = needsTypeFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
   const askBudget = (cityFirst || typeFirst) && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
@@ -609,7 +613,9 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SALES_CONSULTANT_RULES, cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
+    // Módulos de lib/ai/prompts escolhidos pelo assunto desta mensagem e pelo estado da sessão.
+    prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length },
+    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -627,6 +633,18 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     image = await searchAndCacheProductImage(product);
     return image;
   };
+  // Marca x modelo: sem referência/SKU, código ou nome de modelo explícito (nem item escolhido na vitrine), a busca da
+  // marca ativa é sempre a vitrine dela; nunca o fluxo de "modelo específico" ("Não encontrei esse modelo...").
+  const categoryWord = catalogState.category === "ARMACAO" ? "armação" : catalogState.category === "SOLAR" ? "solar" : catalogState.category === "LENTE_CONTATO" ? "lentes de contato" : "";
+  // Referência/SKU ("0RB3025", "MU01", "004/7858"), apelido ou modelo icônico ("Justin", "Aviator").
+  const explicitModel = (text: string) => asksSpecificModel(text) || !!iconicModel(text) || /[a-z]-?\d{2,}|\d{3,}[a-z]|\d{3,}\s*\/\s*\d+/i.test(text);
+  const brandOnlySearch = (args: Record<string, unknown>) => {
+    if (!activeBrand || args._photo || input.selectedProductRef || args.tipoBusca === "marca_ampla") return false;
+    const term = String(args.termoBusca ?? [args.marca, args.nomeModelo, args.referenciaOuSku].filter(Boolean).join(" "));
+    const termBrand = explicitBrand(term);
+    if (!termBrand || normalizeTerm(termBrand) !== normalizeTerm(activeBrand)) return false;
+    return !explicitModel(term) && !explicitModel(customerText) && !(typeof args.referenciaOuSku === "string" && args.referenciaOuSku.trim());
+  };
   const toolStores: SessionStore[] = [];
   let currentCatalogFilterHash = "";
   /** A ferramenta recusou listar produtos por falta da cidade nesta resposta. */
@@ -641,7 +659,8 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       const chosen = choice?.type === "item" ? choice.item : null;
       const baseQuery = chosen
         ? { ...args, termoBusca: listedSearchTerm(chosen), tipoBusca: "modelo_especifico" }
-        : anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" } : args;
+        : anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" }
+          : brandOnlySearch(args) ? brandSearchArgs(args, activeBrand, categoryWord) : args;
       // Regra de ouro geográfica: vitrine só com a cidade do cliente conhecida.
       if (!chosen && isGatedStockCall(baseQuery, { knownCity: catalogState.preferredCity, fixedProduct: !!anchoredProduct })) {
         stockGated = true;
@@ -766,6 +785,26 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       proactiveContent = result.vitrineFormatada;
     } else if ("cenario" in result && result.cenario === "unavailable_api") {
       proactiveReply = "Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.";
+    } else if (!cityProduct && catalogState.preferredCity) {
+      // Marca sem saldo na cidade: nunca só "não encontrei". Mesma marca em outras praças (transferência) +
+      // marcas equivalentes com saldo real na cidade do cliente, tudo nesta mesma resposta.
+      const fallback = await brandStockFallback({
+        brand: activeBrand, city: catalogState.preferredCity, categoryWord: category,
+        otherCities: [...new Set(cities.filter(Boolean).map((city) => {
+          const name = canonicalCity(city);
+          return name.length > 3 && name === name.toUpperCase() ? titleCase(name) : name;
+        }))].slice(0, 8),
+        search: async (args) => {
+          const { result, log } = await consultarEstoqueProduto({ ...withBudgetArgs(args, { budget, cheap, category: catalogState.category }), ...(wantsKids ? { publicoInfantil: true } : {}) }, { products: catalogProducts, withPrices: settings.canQuotePrices });
+          stock.push(log);
+          return result.tipoBusca === "marca_ampla" ? result : null;
+        },
+      });
+      if (fallback.unavailable) proactiveReply = "Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.";
+      else {
+        proactiveReply = brandFallbackReply(fallback, input.aiReplies);
+        if (fallback.alternatives.length >= 2) interactiveList = buildShowcaseList(fallback.alternatives, null);
+      }
     } else {
       proactiveReply = `Não encontrei ${cityProduct ? "esse modelo disponível" : `modelos ${catalogState.brand} disponíveis`}${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
     }

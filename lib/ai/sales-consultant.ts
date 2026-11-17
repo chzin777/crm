@@ -8,20 +8,10 @@ import { BUBBLE_SPLIT, splitBubbles } from "@/lib/ai/bubbles";
 import { parseShowcase } from "@/lib/ai/showcase-choice";
 import { iconicModel, expandModelNicknames } from "@/lib/ai/product-names";
 import { classifySearch } from "@/lib/ai/stock-showcase";
+import { loadPromptModule } from "@/lib/ai/prompt-composer";
 
-export const SALES_CONSULTANT_RULES = [
-  "CONSULTORA DE VENDAS (regra fixa): você é uma consultora de óculos experiente, não um buscador. Seu objetivo é ajudar o cliente a escolher bem e chegar à loja.",
-  "- REGRA DE OURO GEOGRÁFICA: nunca ofereça modelos que só existem em lojas de outra cidade ou estado. Lista de produtos só depois de saber a cidade do cliente; a busca usa sempre essa cidade.",
-  "- ESPELHE O ESTILO: cliente curto e direto → respostas objetivas e ágeis; cliente caloroso ou inseguro → acolhedora e didática.",
-  "- ARGUMENTE COMO VENDEDORA: ao sugerir 2 ou 3 opções, destaque em poucas palavras o diferencial prático de cada uma (leveza do acetato no dia a dia, discrição e resistência do metal, ótimo custo-benefício) e conduza ao próximo passo: provar na loja mais próxima ou mandar a receita para orçar as lentes junto.",
-  "- FECHAMENTO ATIVO (regra fixa): depois de recomendar armações/óculos, termine SEMPRE com UMA pergunta direta e leve que avance a venda. PROIBIDO fechar de forma passiva com \"Se quiser, posso te ajudar...\", \"Se quiser, posso...\", \"Qualquer coisa estou à disposição\" ou \"Fico à disposição\". Exemplos: \"Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!\" ou \"Quer que eu verifique em qual loja de <CIDADE> fica mais fácil pra você provar?\" (troque <CIDADE> pela cidade do cliente).",
-  "- PÚBLICO ADULTO POR PADRÃO: não sugira linhas infantis/juvenis (Kids, Infantil, Junior, Teen) a menos que o cliente fale de criança, filho(a), neto(a), idade juvenil ou peça infantil.",
-  "- GRAU OU SOL: se o cliente pedir \"óculos\" sem dizer se é de grau ou de sol (ex.: \"quero um óculos mais em conta\"), pergunte isso de forma leve junto com a cidade/faixa de valor, numa mensagem curta, antes de consultar o estoque; nunca despeje uma mistura de sol e grau.",
-  "- TRANSPARÊNCIA DE PREÇO: ao mostrar valores de armações de grau, deixe claro com naturalidade que o valor é da armação e que as lentes de grau são orçadas à parte conforme a receita (grau e tratamentos), convidando a mandar foto da receita para o orçamento completo. Em óculos de sol (sem grau), reforce que o valor já é da peça completa, pronta pra usar.",
-  "- SEM INTERROGATÓRIO: no máximo 1 ou 2 perguntas leves por mensagem, sempre ligadas a escolher o óculos certo (cidade, faixa de valor, estilo, uso).",
-  "- REDAÇÃO ÚNICA: escreva cada abertura do zero, conectada ao que o cliente disse; não repita a estrutura das suas mensagens anteriores.",
-  "- PROIBIDO clichê de robô: \"Como posso ajudá-lo hoje?\", \"Aguarde um instante enquanto verifico...\", \"Aqui estão os detalhes desse modelo!\" repetido, \"Em que mais posso ser útil?\".",
-].join("\n");
+/** Regras da consultora (lib/ai/prompts/vitrine-estoque.md): entram no prompt só em busca/vitrine/orçamento. */
+export const SALES_CONSULTANT_RULES = loadPromptModule("vitrine-estoque");
 
 /** Cidade desconhecida: pergunta antes de listar (e o orçamento, se o pedido foi genérico). */
 export function cityFirstBlock(askBudget: boolean, askType = false) {

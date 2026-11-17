@@ -8,7 +8,9 @@ describe("saudação sem nome real de exemplo no prompt", () => {
     for (const firstReply of [true, false]) {
       const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "", firstReply });
       expect(prompt).not.toMatch(/Christofer/i);
-      expect(prompt).toContain("Boa tarde, <PRIMEIRO_NOME>! 😊");
+      // saudacao.md só entra no primeiro turno; depois, o núcleo proíbe abrir com "Boa tarde"/"Oi" de novo.
+      if (firstReply) expect(prompt).toContain("Boa tarde, <PRIMEIRO_NOME>! 😊");
+      else expect(prompt).toContain("SEM SAUDAÇÃO REPETIDA");
     }
   });
 

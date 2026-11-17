@@ -1,6 +1,7 @@
 import { formatBrl } from "@/lib/ai/stock";
 import { documentKind, EXTRACTION_SCHEMA, formatExtraction, type DocumentExtraction, type DocumentKind } from "@/lib/ai/document-extract";
 import { iconicModel } from "@/lib/ai/product-names";
+import { formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 /**
  * Foto de produto enviada pelo cliente: a IA identifica o produto em silêncio (JSON interno), o CRM busca
  * no histórico de vendas do ERP e a resposta sai só com o resultado da busca, ou a conversa vai para a equipe.
@@ -355,4 +356,105 @@ export function mentionsKids(text: string) {
   if (/\b(CRIANCAS?|FILH[OA]S?|FILHINH[OA]S?|INFANTIL|INFANTIS|KIDS?|MENIN[OA]S?|NET[OA]S?|NETINH[OA]S?|SOBRINH[OA]S?|BEBES?|ADOLESCENTES?|JUVENIL|TEEN|PRE ?ADOLESCENTE|ESCOLA|ESCOLAR)\b/.test(source)) return true;
   // Idade juvenil dita em anos ("de 9 anos", "tem 12 anos").
   return [...source.matchAll(/\b(\d{1,2})\s*ANOS?\b/g)].some((match) => Number(match[1]) <= 15);
+}
+
+/**
+ * Marcas equivalentes (mesmo posicionamento/estilo) para sugerir quando a marca pedida não tem saldo na cidade.
+ * Ordem = prioridade da sugestão. Marca fora do mapa usa o grupo premium padrão.
+ */
+const PREMIUM_EQUIVALENTS = ["Prada", "Dolce & Gabbana", "Versace", "Tiffany", "Vogue", "Michael Kors", "Carolina Herrera"];
+export const EQUIVALENT_BRANDS: Record<string, string[]> = {
+  "Miu Miu": ["Prada", "Dolce & Gabbana", "Versace", "Tiffany", "Vogue"],
+  Prada: ["Miu Miu", "Dolce & Gabbana", "Versace", "Gucci", "Burberry"],
+  "Prada Linea Rossa": ["Prada", "Oakley", "Emporio Armani", "Ray-Ban"],
+  "Dolce & Gabbana": ["Versace", "Prada", "Miu Miu", "Gucci", "Tiffany"],
+  Versace: ["Dolce & Gabbana", "Prada", "Gucci", "Miu Miu", "Michael Kors"],
+  Gucci: ["Prada", "Versace", "Dolce & Gabbana", "Burberry", "Fendi"],
+  Chanel: ["Dior", "Prada", "Miu Miu", "Tiffany", "Dolce & Gabbana"],
+  Dior: ["Chanel", "Prada", "Gucci", "Versace", "Fendi"],
+  Fendi: ["Gucci", "Prada", "Dior", "Versace", "Miu Miu"],
+  Tiffany: ["Miu Miu", "Prada", "Michael Kors", "Vogue", "Carolina Herrera"],
+  Burberry: ["Prada", "Emporio Armani", "Gucci", "Ray-Ban", "Michael Kors"],
+  "Tom Ford": ["Prada", "Gucci", "Burberry", "Persol", "Emporio Armani"],
+  "Ray-Ban": ["Oakley", "Vogue", "Emporio Armani", "Persol", "Arnette"],
+  Oakley: ["Ray-Ban", "Prada Linea Rossa", "Mormaii", "Speedo", "HB"],
+  Persol: ["Ray-Ban", "Tom Ford", "Emporio Armani", "Burberry", "Prada"],
+  "Emporio Armani": ["Armani", "Ray-Ban", "Burberry", "Prada", "Michael Kors"],
+  Armani: ["Emporio Armani", "Prada", "Burberry", "Ray-Ban", "Persol"],
+  "Michael Kors": ["Tiffany", "Vogue", "Carolina Herrera", "Emporio Armani", "Ray-Ban"],
+  "Carolina Herrera": ["Michael Kors", "Tiffany", "Vogue", "Ana Hickmann", "Prada"],
+  "Ana Hickmann": ["Vogue", "Carolina Herrera", "Atitude", "Michael Kors", "Tiffany"],
+  Vogue: ["Ana Hickmann", "Michael Kors", "Ray-Ban", "Atitude", "Tiffany"],
+};
+
+/** Marcas equivalentes à pedida (sem repetir a própria marca). */
+export function equivalentBrands(brand: string): string[] {
+  const key = normalizeTerm(brand);
+  const entry = Object.entries(EQUIVALENT_BRANDS).find(([name]) => normalizeTerm(name) === key);
+  return (entry?.[1] ?? PREMIUM_EQUIVALENTS).filter((name) => normalizeTerm(name) !== key);
+}
+
+/**
+ * Pedido de marca sem referência nem modelo explícito: a busca é sempre a vitrine da marca (nunca o fluxo de
+ * "modelo específico" que responde "Não encontrei esse modelo"). Estilo dito pelo cliente ("mais presença no
+ * rosto") não vira termo de modelo.
+ */
+export function brandSearchArgs(args: Record<string, unknown>, brand: string, categoryWord = ""): Record<string, unknown> {
+  const { nomeModelo: _model, referenciaOuSku: _ref, ...rest } = args;
+  return { ...rest, termoBusca: [brand, categoryWord].filter(Boolean).join(" "), marca: brand, tipoBusca: "marca_ampla" };
+}
+
+/** Uma vitrine da busca ampla (o que o fallback precisa ler do resultado da ferramenta). */
+export type BrandShowcase = { modelos?: ShowcaseModel[]; cenario?: string } | null;
+export type BrandFallback = { brand: string; city: string; otherCities: string[]; alternatives: ShowcaseModel[]; alternativeBrands: string[]; unavailable: boolean };
+
+/**
+ * Marca sem saldo na cidade do cliente: procura a mesma marca nas outras praças da rede (transferência/encomenda)
+ * e, no mesmo turno, marcas equivalentes com saldo real na cidade do cliente. A busca entra por parâmetro.
+ */
+export async function brandStockFallback(input: {
+  brand: string; city: string; categoryWord?: string; otherCities: string[];
+  search: (args: { termoBusca: string; marca: string; cidade: string; tipoBusca: "marca_ampla" }) => Promise<BrandShowcase>;
+  maxAlternatives?: number;
+}): Promise<BrandFallback> {
+  const term = (brand: string) => [brand, input.categoryWord].filter(Boolean).join(" ");
+  const has = (result: BrandShowcase) => !!result?.modelos?.length;
+  const seen = new Set<string>();
+  const cities = input.otherCities.filter((city) => {
+    const key = normalizeTerm(city);
+    if (!key || key === normalizeTerm(input.city) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const elsewhere = await Promise.all(cities.map(async (city) => ({ city, result: await input.search({ termoBusca: term(input.brand), marca: input.brand, cidade: city, tipoBusca: "marca_ampla" }).catch(() => null) })));
+  const brands = equivalentBrands(input.brand);
+  const local = await Promise.all(brands.map(async (brand) => ({ brand, result: await input.search({ termoBusca: term(brand), marca: brand, cidade: input.city, tipoBusca: "marca_ampla" }).catch(() => null) })));
+  const limit = input.maxAlternatives ?? 4;
+  const alternatives: ShowcaseModel[] = [];
+  const alternativeBrands: string[] = [];
+  // Uma opção (a primeira da vitrine) por marca equivalente, na ordem de prioridade.
+  for (const { brand, result } of local) {
+    if (alternatives.length >= limit || !has(result)) continue;
+    alternatives.push(result!.modelos![0]);
+    alternativeBrands.push(brand);
+  }
+  const unavailable = [...elsewhere.map((item) => item.result), ...local.map((item) => item.result)].every((result) => result?.cenario === "unavailable_api");
+  return { brand: input.brand, city: input.city, otherCities: elsewhere.filter((item) => has(item.result)).map((item) => item.city), alternatives, alternativeBrands, unavailable };
+}
+
+/** Resposta consultiva da marca sem saldo na cidade: transparência + transferência + alternativas locais. */
+export function brandFallbackReply(fallback: BrandFallback, variant = 0) {
+  const { brand, city } = fallback;
+  const transfer = fallback.otherCities.length
+    ? `Em ${city} a *${brand}* está sem saldo agora, mas temos em ${fallback.otherCities.slice(0, 2).join(" e ")}: dá pra pedir a transferência pra uma loja de ${city} 😊`
+    : `No momento a *${brand}* está sem saldo em ${city} e nas outras unidades da rede, mas um atendente pode verificar encomenda pra você.`;
+  if (!fallback.alternatives.length) return `${transfer}\n---SPLIT---\nQuer que eu peça pra separarem uma pra você?`;
+  const intro = [
+    `Enquanto isso, separei opções com o mesmo estilo que estão disponíveis em ${city}:`,
+    `E pra você já ver hoje em ${city}, estas têm a mesma pegada:`,
+    `Já com pronta entrega em ${city}, olha estas no mesmo estilo:`,
+  ][Math.abs(variant) % 3];
+  const showcase = `${transfer}\n---SPLIT---\n${intro}\n${formatShowcase(fallback.alternatives, { header: false })}`;
+  // Vitrine de 2+ itens ganha o fechamento ativo no agente; com 1 só, a pergunta de avanço sai aqui.
+  return fallback.alternatives.length >= 2 ? showcase : `${showcase}\n\nQuer que eu peça a transferência da *${brand}* ou prefere conhecer essa opção na loja?`;
 }
