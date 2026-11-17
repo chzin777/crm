@@ -126,20 +126,25 @@ const SHOWCASE_QUESTION_ONE = "Gostaria de ver a foto, lojas disponíveis e mais
 export const showcaseQuestion = (count: number) => (count === 1 ? SHOWCASE_QUESTION_ONE : SHOWCASE_QUESTION_MANY);
 
 /** Vitrine no padrão do negócio: cabeçalho com a marca e uma linha "🕶️ *Nome (Ref. X)* — R$ ..." por modelo. */
-export function formatShowcase(models: ShowcaseModel[]) {
+export function formatShowcase(models: ShowcaseModel[], options: { header?: boolean } = {}) {
   if (!models.length) return null;
+  // Sem cabeçalho fixo: a abertura é escrita pela IA (vitrine de orçamento).
+  if (options.header === false) return formatShowcaseLines(models).join("\n");
   const brands = new Set(models.map((model) => model.nomeComercial.split(" ")[0]));
   const brand = brands.size === 1 ? commonBrand(models) : null;
   const header = models.length === 1
     ? `Temos este modelo${brand ? ` *${brand}*` : ""} disponível em estoque:`
     : `Temos vários modelos${brand ? ` *${brand}*` : ""} disponíveis em estoque! Confira alguns deles:`;
-  // Numerada para o cliente escolher rápido ("o 1", "o segundo"); a sessão guarda a ordem (listedProducts).
-  const lines = models.map((model, index) => {
+  return [header, "", ...formatShowcaseLines(models)].join("\n");
+}
+
+/** Numerada para o cliente escolher rápido ("o 1", "o segundo"); a sessão guarda a ordem (listedProducts). */
+function formatShowcaseLines(models: ShowcaseModel[]) {
+  return models.map((model, index) => {
     const icon = /sol/i.test(model.categoriaModelo ?? "") || !model.categoriaModelo ? "🕶️" : /lente/i.test(model.categoriaModelo) ? "👁️" : "👓";
     const name = `${model.nomeComercial}${model.referencia ? ` (Ref. ${model.referencia})` : ""}`;
     return `${index + 1}. ${icon} *${name}*${model.precoVenda ? ` — ${model.precoVaria ? "a partir de " : ""}${model.precoVenda}` : ""}`;
   });
-  return [header, "", ...lines].join("\n");
 }
 
 /** Marca comum a todos os modelos (prefixo igual do nome comercial: "Ray-Ban", "Miu Miu", "Dolce & Gabbana"). */
@@ -194,6 +199,20 @@ export function applyPriceFilter(models: ShowcaseModel[], price?: PriceFilter) {
   return ranged;
 }
 
+/** Até `perBrand` modelos de cada marca, na ordem recebida. */
+export function diverseByBrand(models: ShowcaseModel[], perBrand: number) {
+  const count = new Map<string, number>();
+  return models.filter((model) => {
+    const brand = norm(model.nomeComercial).split(" ")[0] ?? "";
+    const used = count.get(brand) ?? 0;
+    count.set(brand, used + 1);
+    return used < perBrand;
+  });
+}
+
+/** Orientação da vitrine de orçamento: a IA escreve a abertura e o argumento de venda (sem pergunta pronta). */
+export const BUDGET_SHOWCASE_GUIDANCE = "Busca por orçamento: comece com UMA frase sua, natural, citando a cidade e o orçamento do cliente; depois copie vitrineFormatada exatamente como veio (sem inventar material, cor ou preço). Depois de ---SPLIT---, como consultora, destaque em 1 ou 2 frases curtas por que 2 ou 3 dessas opções valem a pena (custo-benefício, marca, estilo pelo nome; nada inventado) e conduza ao próximo passo com UMA pergunta: provar na loja mais próxima ou mandar a receita para orçar as lentes junto.";
+
 const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 export function priceRangeLabel(price?: PriceFilter) {
   if (!price?.minPrice && !price?.maxPrice) return "";
@@ -246,7 +265,9 @@ export function buildShowcaseResult(input: {
   const rank = (model: ShowcaseModel) => (model.referencia?.startsWith("#") ? 2 : fallbackOnly.has(model) ? 1 : 0);
   models.sort((a, b) => rank(a) - rank(b));
   const priced = applyPriceFilter(models, input.price);
-  models.splice(0, models.length, ...priced);
+  // Busca por orçamento sem marca: no máximo 2 modelos por marca, para a vitrine ter variedade de verdade.
+  const varied = input.price && !input.brand ? diverseByBrand(priced, 2) : priced;
+  models.splice(0, models.length, ...(varied.length >= 3 ? varied : priced));
   models.splice(SHOWCASE_MAX_MODELS);
   const range = priceRangeLabel(input.price);
   if (!models.length && range) return { ...base, cenario: input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: `Não há modelos com estoque ${range}${input.city ? ` em ${input.city}` : ""} agora. Diga isso com naturalidade e ofereça as opções mais próximas do orçamento (nova busca sem o limite de valor) ou ajuda de um atendente.` };
@@ -255,8 +276,8 @@ export function buildShowcaseResult(input: {
     ...base,
     cenario: "disponivel_em_lojas",
     modelos: models,
-    vitrineFormatada: formatShowcase(models),
-    orientacao: SHOWCASE_GUIDANCE.disponivel_em_lojas.replace("%Q", showcaseQuestion(models.length)),
+    vitrineFormatada: formatShowcase(models, { header: !input.price }),
+    orientacao: input.price ? BUDGET_SHOWCASE_GUIDANCE : SHOWCASE_GUIDANCE.disponivel_em_lojas.replace("%Q", showcaseQuestion(models.length)),
   };
 }
 

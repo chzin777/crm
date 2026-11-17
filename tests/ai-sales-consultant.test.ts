@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { asksCustomerCity, cityQuestion, extractBudget, isProductBrowseRequest, wantsCheap } from "@/lib/ai/catalog-context";
 import { asksSpecificModel, budgetBlock, conversationBudget, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
-import { applyPriceFilter, type ShowcaseModel } from "@/lib/ai/stock-showcase";
+import { applyPriceFilter, diverseByBrand, formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 import { STOCK_TOOL } from "@/lib/ai/stock";
 import { cardOpening } from "@/lib/ai/product-card";
 
@@ -71,6 +71,13 @@ describe("filtro de preço e ordenação da vitrine", () => {
   it("só ordenação mantém todos, sem preço no fim", () => {
     expect(applyPriceFilter(models, { sortBy: "price_asc" }).map((item) => item.nomeComercial)).toEqual(["D", "B", "A", "E", "C"]);
     expect(applyPriceFilter(models, { sortBy: "price_desc" }).map((item) => item.nomeComercial)).toEqual(["E", "A", "B", "D", "C"]);
+  });
+  it("vitrine de orçamento sem marca: no máximo 2 por marca e sem cabeçalho pronto", () => {
+    const radda = [1, 2, 3, 4].map((index) => model(`Radda ${index}`, "R$ 120,00"));
+    const varied = diverseByBrand([...radda, model("Nairoby 1", "R$ 120,00"), model("Vogue 1", "R$ 189,00")], 2);
+    expect(varied.map((item) => item.nomeComercial)).toEqual(["Radda 1", "Radda 2", "Nairoby 1", "Vogue 1"]);
+    expect(formatShowcase(varied, { header: false })).toMatch(/^1\. 👓 \*Radda 1\*/);
+    expect(formatShowcase(varied)).toMatch(/^Temos vários modelos/);
   });
   it("faixa com piso", () => {
     expect(applyPriceFilter(models, { minPrice: 500 }).map((item) => item.nomeComercial)).toEqual(["A", "E"]);
