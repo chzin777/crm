@@ -26,4 +26,4 @@ export function isPureGreeting(text: string | null | undefined) {
 }
 
 /** Dica do turno: saudação pura → abertura acolhedora direta, sem interpretar a palavra como nome/loja/setor. */
-export const PURE_GREETING_HINT = "SAUDAÇÃO PURA NESTE TURNO: a mensagem do cliente é só uma saudação informal (ex.: \"opaa\", \"oiii\", \"eaí\", \"salve\"). Responda apenas com uma abertura acolhedora e direta (ex.: \"Boa tarde, <PRIMEIRO_NOME>! 😊 Em que posso te ajudar?\" ou, sem nome válido, \"Boa tarde! 😊 Em que posso te ajudar?\"); se ele perguntou \"tudo bem?\", retribua antes. NUNCA trate a saudação como nome de pessoa, atendente, loja ou setor (nada de \"Você gostaria de falar com a Opaa?\") e não transfira.";
+export const PURE_GREETING_HINT = "SAUDAÇÃO PURA NESTE TURNO: a mensagem do cliente é só um cumprimento informal (do tipo opa, oi esticado, eaí, salve). Responda com uma abertura acolhedora, curta e com suas palavras, convidando a pessoa a contar o que procura; se ela perguntou como você está, retribua antes. NUNCA trate o cumprimento como nome de pessoa, atendente, loja ou setor e não transfira.";

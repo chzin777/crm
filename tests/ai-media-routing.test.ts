@@ -95,6 +95,7 @@ beforeEach(() => {
   model.stockProducts = [];
   model.pdf = null;
   model.transcribeError = null;
+  model.reply = { reply: "Claro! O Ray-Ban Justin está saindo por R$ 899,00 😊", action: "reply" };
 });
 afterEach(() => vi.useRealTimers());
 
@@ -114,11 +115,14 @@ describe("roteamento de mídia sem transbordo cego", () => {
     expect(userText()).toContain("figurinha");
   });
 
-  it("receita em foto: extrai os graus, confirma ao cliente e transfere para Vendas com o resumo", async () => {
+  it("receita em foto: extrai os graus, a IA confirma com as próprias palavras e transfere para Vendas com o resumo", async () => {
     model.vision = [{ kind: "receita", documento: { tipo: "receita", receita: { od: { esferico: "-2,00", cilindrico: "-0,75", eixo: "180" }, oe: { esferico: "-1,75", cilindrico: "-0,50", eixo: "10" }, data: "10/11/2026" } } }];
+    model.reply = { reply: "Chegou certinho a sua receita! A equipe de Vendas já vai conferir e te chama aqui.", action: "reply" };
     const result = await run([image("receita.jpg")]);
     expect(result.outcome).toMatchObject({ action: "handoff", trigger: "prescription", queue: "Vendas" });
-    expect(result.outcome.reply).toBe("Recebi sua receita! Já anotei os dados aqui e vou te encaminhar agora mesmo para um de nossos especialistas montar o orçamento das lentes ideal pra você 😊");
+    // A confirmação passa pelo LLM (com o fato do documento lido no prompt), nunca uma frase fixa do código.
+    expect(calls.systems.at(-1)).toContain("DOCUMENTO RECEBIDO");
+    expect(result.outcome.reply).toBe("Chegou certinho a sua receita! A equipe de Vendas já vai conferir e te chama aqui.");
     expect(result.outcome.reason).toContain("OD: esf -2,00 | cil -0,75 | eixo 180; OE: esf -1,75 | cil -0,50 | eixo 10; Data: 10/11/2026");
   });
 
@@ -129,6 +133,8 @@ describe("roteamento de mídia sem transbordo cego", () => {
     expect(rx.outcome).toMatchObject({ action: "handoff", trigger: "prescription", queue: "Vendas" });
     expect(rx.outcome.reason).toContain("OD: esf +1,25 | adição +2,00");
     model.vision = [{ kind: "documento", documento: { tipo: "comprovante", comprovante: { valor: "R$ 450,00", data: "12/11/2026", forma: "PIX" } } }];
+    // Resposta vazia do modelo: só aí entra a confirmação padrão.
+    model.reply = { reply: "", action: "reply" };
     const paid = await run([image("pix.jpg")]);
     expect(paid.outcome).toMatchObject({ trigger: "prescription", queue: "Financeiro" });
     expect(paid.outcome.reply).toContain("Recebi seu comprovante!");
@@ -152,7 +158,10 @@ describe("roteamento de mídia sem transbordo cego", () => {
       codigo: String(900700 + index), produto: `OCS RAYBAN REF 0RB4165L ${color} 54`, marca: "RAYBAN",
       precoVenda: "R$ 899,00", lojasComEstoque: [store], lojasNaRegiao: [], nomeProduto: "Ray-Ban Justin", referencia: "RB4165",
     }));
+    model.reply = { reply: "Bom dia, Maria! Que bom te ver de novo. Temos sim esse Ray-Ban Justin, olha as cores disponíveis:", action: "reply" };
     const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "bom dia, vc tem esse óculos ?", aiReplies: 0, contactName: "Maria", isReturningContact: true });
+    expect(calls.systems.at(-1)).toContain("CLIENTE QUE VOLTOU");
+    expect(calls.systems.at(-1)).toContain("FOTO DE PRODUTO: identificado como");
     expect(calls.stockQueries).toHaveLength(1);
     expect(calls.stockQueries[0]).toMatchObject({ marca: "Ray-Ban", nomeModelo: "Justin", referenciaOuSku: "RB4165", textoVisivelNaImagem: "Óculos de Sol Ray-Ban Justin Verde Escuro", tipoBusca: "modelo_especifico" });
     expect(result.outcome.reply).toMatch(/^Bom dia, Maria!/);
@@ -170,8 +179,9 @@ describe("roteamento de mídia sem transbordo cego", () => {
       precoVenda: "R$ 899,00", lojasComEstoque: [{ code: "39", loja: "Loja 39", cidade: "Goiânia", endereco: "Rua 1", quantidade: 1 }],
       lojasNaRegiao: [], nomeProduto: "Ray-Ban Justin", referencia: "RB4165",
     }];
+    model.reply = { reply: "Bom dia, Maria! Temos sim, olha ele aqui:", action: "reply" };
     const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "bom dia, vc tem esse óculos ?", aiReplies: 0, contactName: "Maria" });
-    expect(result.outcome.reply).toMatch(/^(Bom dia|Boa tarde|Boa noite), Maria!/);
+    expect(result.outcome.reply).toMatch(/^(Bom dia|Boa tarde|Boa noite), Maria! Temos sim, olha ele aqui:\n\n🕶️ \*Ray-Ban Justin/);
     expect(result.outcome.reply).toContain("Ray-Ban Justin");
     expect(result.outcome.reply).toContain("R$ 899,00");
     expect(result.outcome.reply).not.toMatch(/não localizei|não está disponível/i);
@@ -183,8 +193,10 @@ describe("roteamento de mídia sem transbordo cego", () => {
     model.vision = [{ kind: "produto", marca: "Ray-Ban", nomeModelo: "Justin", textoVisivelNaImagem: "Ray-Ban Justin" }];
     const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "tem esse?", aiReplies: 1, knownCity: "Goiânia" });
     expect(calls.stockQueries.map((query) => query.tipoBusca)).toEqual(["modelo_especifico", "marca_ampla"]);
-    expect(result.outcome.reply).toContain("não está disponível");
-    expect(result.outcome.reply).toContain("outras opções");
+    // O fato (modelo indisponível + outras opções da marca) vai para a IA, que escreve; a vitrine real é anexada.
+    expect(calls.systems.at(-1)).toContain("mas esse modelo não está disponível em Goiânia");
+    expect(result.outcome.reply).toContain("Claro! O Ray-Ban Justin está saindo por R$ 899,00");
+    expect(result.outcome.reply).toContain("Temos *Ray-Ban* em estoque!");
   });
 
   it("lote com áudio + foto: transcrição e foto chegam juntas à IA", async () => {
@@ -222,7 +234,7 @@ describe("planilha e falhas de leitura com aviso amigável", () => {
     const result = await run([failedMedia("audio", "audio", mediaFailureReason("HTTP 401 token expired"))]);
     expect(result.outcome.action).toBe("reply");
     expect(userText()).toContain("[FALHA_LEITURA_MIDIA: tipo=audio, motivo=falha de autorização ao baixar do WhatsApp]");
-    expect(calls.systems.at(-1)).toContain("Não consegui carregar seu áudio");
+    expect(calls.systems.at(-1)).toContain("sugerindo reenviar ou mandar em outro formato");
   });
 
   it("arquivo .doc antigo e transcrição que estoura o tempo viram aviso, não erro", async () => {

@@ -20,7 +20,7 @@ export const SALES_CONSULTANT_RULES = loadPromptModule("vitrine-estoque");
 export function cityFirstBlock(_askBudget?: boolean, _askType = false) {
   return [
     "CIDADE DESCONHECIDA (regra desta resposta): o cliente quer ver produtos, mas ainda não sabemos a cidade dele.",
-    "NÃO consulte nem liste produtos agora. Responda de forma calorosa e simples, em frase curta, perguntando SOMENTE de qual cidade ele fala (ex.: \"Que presente bonito! De qual cidade você fala, pra eu ver as lojas mais perto de você?\").",
+    "NÃO consulte nem liste produtos agora. Com suas palavras, em frase curta e leve, reconheça o que ele contou e pergunte só a cidade dele (para ver as lojas mais perto), como num bate-papo.",
     "UMA PERGUNTA SÓ: não pergunte bairro, grau ou sol, nem faixa de valor nesta mensagem; isso vem depois, uma coisa de cada vez.",
   ].join("\n");
 }
@@ -93,6 +93,28 @@ export function withBudgetArgs(args: Record<string, unknown>, input: { budget: B
  * Busca de catálogo já feita pelo código (correção de marca, cidade nova): a vitrine/ficha sai exatamente como veio,
  * mas a abertura é a que o modelo escreveu (sem prefixos fixos). Se ele já copiou o conteúdo, vale a resposta dele.
  */
+const DATA_LINE = /^\s*(?:\d{1,2}[.)]\s|🕶️|Ⓜ️|👓|👁️|✨|💵|📦|📍)/u;
+
+/**
+ * Dados montados pelo sistema (ficha, opções da vitrine) junto do texto que o modelo escreveu com as próprias
+ * palavras: comentário dele → dados → última bolha dele (pergunta leve), se houver. Linhas de lista ou
+ * ficha que o modelo tenha reescrito saem (o dado real é o do sistema). Se ele já copiou os dados, vale a resposta.
+ */
+export function withToolContent(llmReply: string, content: string) {
+  const reply = llmReply.trim();
+  if (!content.trim()) return reply;
+  if (!reply) return content;
+  const firstData = content.split("\n").map((line) => line.trim()).find((line) => DATA_LINE.test(line));
+  if (firstData && reply.includes(firstData)) return reply;
+  const own = splitBubbles(reply).map((part) => part.split("\n").filter((line) => !DATA_LINE.test(line)).join("\n").trim()).filter(Boolean);
+  if (!own.length) return content;
+  const opening = own.length > 1 ? own.slice(0, -1).join("\n\n") : own[0];
+  const closing = own.length > 1 ? own[own.length - 1] : "";
+  // Ficha: o comentário vai na mesma bolha (legenda da foto); vitrine: bolha própria antes das fotos.
+  const body = parseShowcase(content).length ? `${opening}\n${BUBBLE_SPLIT}\n${content}` : `${opening}\n\n${content}`;
+  return closing ? `${body}\n${BUBBLE_SPLIT}\n${closing}` : body;
+}
+
 export function mergeProactiveReply(llmReply: string, content: string) {
   const reply = llmReply.trim();
   const firstItem = content.split("\n").find((line) => /^\s*1[.)]\s/.test(line) || /^🕶️|^👓|^👁️/.test(line.trim()));
@@ -206,7 +228,7 @@ export function oneQualifyingQuestion(reply: string, step: "city" | "type") {
 export function typeFirstBlock(askBudget: boolean) {
   return [
     "TIPO DE ÓCULOS DESCONHECIDO (regra desta resposta): o cliente pediu \"óculos\" sem dizer se é de grau ou de sol.",
-    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Pergunte SOMENTE, de forma simples e calorosa, se ele procura óculos de grau ou de sol (ex.: \"Você procura óculos de grau ou de sol?\").",
+    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Com suas palavras, de forma simples e leve, pergunte só se ele procura óculos de grau ou de sol.",
     "UMA PERGUNTA SÓ: não pergunte valor nesta mensagem; isso vem depois.",
   ].join("\n");
 }

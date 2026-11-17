@@ -57,9 +57,8 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
     expect(result.tipoBusca).toBe("marca_ampla");
     expect(result.modelos.map((model) => model.nomeComercial)).toEqual(["Ray-Ban Justin", "Ray-Ban Aviator", "Ray-Ban Wayfarer"]);
     expect(result.modelos[0]).toMatchObject({ referencia: "RB4165", precoVenda: "R$ 1.210,27", totalDisponivelRede: 3 });
+    // Sem cabeçalho fixo: o comentário antes da vitrine é escrito pela IA.
     expect(result.vitrineFormatada).toBe([
-      "Temos vários modelos *Ray-Ban* disponíveis em estoque! Confira alguns deles:",
-      "",
       "1. 🕶️ *Ray-Ban Justin (Ref. RB4165)* — R$ 1.210,27",
       "2. 🕶️ *Ray-Ban Aviator (Ref. RB3025)* — R$ 1.150,00",
       "3. 🕶️ *Ray-Ban Wayfarer (Ref. RB2140)* — R$ 1.190,00",
@@ -68,7 +67,7 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
     expect(allowsProductPhoto(result)).toBe(false);
     expect(result.produtos).toEqual([]);
     expect(result.vitrineFormatada).not.toContain("📍");
-    expect(result.orientacao).toContain("Não mande foto nem lista de lojas");
+    expect(result.orientacao).toContain("Sem lista de lojas nem ficha nesta etapa");
     // Resposta da IA: vitrine intacta na 1ª bolha e a pergunta na 2ª.
     const parts = splitAiResponseMessages(`${result.vitrineFormatada}\n\n---SPLIT---\n\n${showcaseQuestion(result.modelos.length)}`);
     expect(parts).toEqual([result.vitrineFormatada, "Gostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?"]);
@@ -121,7 +120,7 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
   it("prompt traz as 2 etapas com os exemplos literais", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(BROAD_SEARCH_RULES);
-    for (const piece of ["Etapa 1 — descoberta", "tipoBusca \"marca_ampla\"", "SEM foto e SEM lista de lojas", "Temos vários modelos *Ray-Ban* disponíveis em estoque! Confira alguns deles:", "Gostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?", "Etapa 2 — detalhamento", "tipoBusca \"modelo_especifico\"", "me manda foto do Justin"]) {
+    for (const piece of ["Etapa 1 — descoberta", "tipoBusca \"marca_ampla\"", "SEM foto e SEM lista de lojas", "comentário curto seu", "Etapa 2 — detalhamento", "tipoBusca \"modelo_especifico\"", "me manda foto do Justin"]) {
       expect(BROAD_SEARCH_RULES).toContain(piece);
     }
   });

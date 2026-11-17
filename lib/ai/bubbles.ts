@@ -44,11 +44,10 @@ const SINGULAR: [RegExp, string][] = [
 
 /**
  * Concordância da pergunta com a quantidade de lojas da 1ª bolha: com 1 loja, "alguma dessas lojas" vira
- * "dessa loja"; "Qual dessas lojas...?" (não faz sentido com uma só) vira a pergunta padrão no singular.
+ * "dessa loja" (o texto continua sendo o do modelo).
  */
 export function agreeStoreCount(question: string, count: number) {
   if (count !== 1) return question;
-  if (/\bqual (dessas|das) (lojas|unidades)\b/i.test(question)) return SINGLE_STORE_QUESTION;
   let text = question;
   for (const [pattern, singular] of SINGULAR) text = text.replace(pattern, (match) => (match[0] === match[0].toUpperCase() ? singular.charAt(0).toUpperCase() + singular.slice(1) : singular));
   return text;
@@ -147,7 +146,8 @@ function splitParts(text: string | null | undefined, max: number): string[] {
     const tail = lines.slice(start, end + 1).join("\n").trim();
     const head = lines.slice(0, start).join("\n").trim();
     if (head && /\?\s*$/.test(tail) && !LIST_ITEM.test(lines[start]) && hasStoreList(head)) parts = [head, tail];
-    else parts = [block, storeQuestion(countStores(block))];
+    // Sem pergunta do modelo: a lista vai sozinha (nenhuma pergunta pronta é acrescentada pelo código).
+    else parts = [block];
   }
   if (parts.length <= max) return parts;
   // Mais partes que o limite: as excedentes vão juntas na última bolha.
@@ -189,9 +189,9 @@ export const FORMAT_RULES = [
   "- Ao listar 2 ou mais lojas, use a formatação do WhatsApp: agrupe por cidade/região quando houver cidades diferentes (use o campo \"cidade\" das lojas; nunca misture DF com Goiás na mesma lista), com o título 📍 *Cidade*; cada loja numa linha \"• *Nome da loja* — endereço\" (nome em negrito com um asterisco de cada lado, endereço curto).",
   "- Mostre no máximo 5 lojas; se houver mais, priorize a cidade/região que o cliente mencionou e diga que há outras unidades.",
   `- Nunca cole a pergunta de condução no fim de uma lista ou de uma resposta informativa longa: escreva ${BUBBLE_SPLIT} (sozinho numa linha) antes da pergunta final, que vai como uma segunda mensagem curta e natural. Use no máximo um ${BUBBLE_SPLIT} por resposta.`,
-  `- VALE PARA TODA RESPOSTA (não só listas de lojas): sempre que você der uma informação (produto indisponível, horário, endereço, preço, dúvida geral) e terminar com uma pergunta ou oferta de continuação ("Se quiser, posso...", "Quer que eu...", "Posso te..."), separe a pergunta/oferta numa segunda bolha com ${BUBBLE_SPLIT}. Exemplo exato:\nNo momento não temos modelos *Versace* em estoque na rede.\n${BUBBLE_SPLIT}\nSe quiser, posso te encaminhar para um atendente verificar encomenda ou opções parecidas. O que acha?`,
+  `- VALE PARA TODA RESPOSTA: quando você der uma informação e quiser terminar com uma pergunta ou oferta de continuação, separe a pergunta numa segunda bolha com ${BUBBLE_SPLIT}. Escreva as duas com suas palavras, do zero a cada vez.`,
   `- Proibido usar linha em branco (quebra dupla) para separar frases dentro da mesma mensagem curta: ou as frases ficam juntas no mesmo parágrafo, ou vão em bolhas diferentes com ${BUBBLE_SPLIT}. Resposta de uma frase só, sem pergunta/oferta, vai numa mensagem só.`,
-  "REGRA OBRIGATÓRIA DE DUAS MENSAGENS: toda vez que você listar lojas disponíveis ou opções de produtos, a resposta DEVE terminar com o delimitador exato ---SPLIT--- (sozinho numa linha) seguido de uma segunda mensagem curta com uma pergunta natural de continuação (ex.: \"Qual dessas lojas fica mais fácil pra você ir?\" ou \"Quer que eu confira os modelos disponíveis na loja que fica melhor pra você?\"; nunca feche com \"Se quiser, posso...\"). Sem isso a resposta está incompleta.",
-  "CONCORDÂNCIA DA PERGUNTA (regra fixa): conte as lojas que você listou. Com 1 loja só, a pergunta da 2ª bolha fica no singular (\"dessa loja\", \"nessa unidade\"; ex.: \"Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização dessa loja?\"). Com 2 ou mais, no plural (\"de alguma dessas lojas\", \"qual dessas lojas\"; ex.: \"Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?\").",
-  "Formato obrigatório (exato):\nTemos o *Ray-Ban Meta* disponível nestas unidades:\n\n📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8 esq. com Rua 27, 235\n• *Loja Setor Marista* — Rua 135 esq. com Av. Americano do Brasil, 208\n\n---SPLIT---\n\nQual dessas lojas fica melhor pra você? Assim já te passo os detalhes do modelo certo!",
+  "LISTAS E LOJAS: quando listar lojas ou opções de produtos e couber uma pergunta de continuação, coloque-a numa segunda mensagem curta depois do delimitador ---SPLIT--- (sozinho numa linha), escrita com suas palavras. Não force pergunta quando a pessoa já disse o que vai fazer; nunca use fechamento passivo de telemarketing.",
+  "CONCORDÂNCIA DA PERGUNTA (regra fixa): conte as lojas que você listou. Com 1 loja só, a pergunta da 2ª bolha fica no singular; com 2 ou mais, no plural.",
+  "Formato das lojas: nome da cidade em negrito com 📍 e, abaixo, uma linha por loja com • *Nome da loja* — endereço exatamente como veio da ferramenta.",
 ].join("\n");

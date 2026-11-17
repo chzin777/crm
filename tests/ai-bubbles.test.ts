@@ -100,9 +100,9 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
     expect(splitAiResponseMessages(`${STORES}\nQual delas prefere?`)).toEqual([STORES, "Qual delas prefere?"]);
   });
 
-  it("só a lista de lojas, sem pergunta final: injeta a pergunta de condução como 2ª bolha", () => {
-    expect(splitAiResponseMessages(STORES)).toEqual([STORES, DEFAULT_STORE_QUESTION]);
-    expect(splitAiResponseMessages(`${STORES}\n\nTodas abrem às 9h.`)).toEqual([`${STORES}\n\nTodas abrem às 9h.`, DEFAULT_STORE_QUESTION]);
+  it("só a lista de lojas, sem pergunta final: nenhuma pergunta pronta é injetada pelo código", () => {
+    expect(splitAiResponseMessages(STORES)).toEqual([STORES]);
+    expect(splitAiResponseMessages(`${STORES}\n\nTodas abrem às 9h.`)).toEqual([`${STORES}\n\nTodas abrem às 9h.`]);
   });
 
   it("resposta comum (sem lista de lojas) não ganha pergunta extra", () => {
@@ -130,10 +130,10 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
     expect(tidyBubble("*Ray-Ban*\nÓculos leve\n\n\n\n📍 *Goiânia*\n• *Loja Bueno* — Av. T-8")).toBe("*Ray-Ban*\nÓculos leve\n\n📍 *Goiânia*\n• *Loja Bueno* — Av. T-8");
   });
 
-  it("prompt: regra para toda resposta com o exemplo Versace e proibição de linha em branco em mensagem curta", () => {
+  it("prompt: pergunta de continuação em 2ª bolha escrita do zero e proibição de linha em branco em mensagem curta", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
-    expect(prompt).toContain("VALE PARA TODA RESPOSTA (não só listas de lojas)");
-    expect(prompt).toContain("No momento não temos modelos *Versace* em estoque na rede.\n---SPLIT---\nSe quiser, posso te encaminhar para um atendente verificar encomenda ou opções parecidas. O que acha?");
+    expect(prompt).toContain("VALE PARA TODA RESPOSTA: quando você der uma informação");
+    expect(prompt).not.toContain("Versace");
     expect(prompt).toContain("Proibido usar linha em branco (quebra dupla) para separar frases dentro da mesma mensagem curta");
   });
 
@@ -145,9 +145,8 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
     expect(parts[1]).toBe("Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização dessa loja?");
     expect(parts.join(" ")).not.toMatch(/dessas lojas/);
     expect(splitAiResponseMessages(`${card}\n---SPLIT---\nVocê gostaria de reservar em alguma dessas lojas?`)[1]).toBe("Você gostaria de reservar nessa loja?");
-    expect(splitAiResponseMessages(`${card}\n---SPLIT---\nQual dessas lojas fica melhor pra você?`)[1]).toBe(SINGLE_STORE_QUESTION);
-    // Sem pergunta: a pergunta padrão já sai no singular.
-    expect(splitAiResponseMessages(card)).toEqual([card, SINGLE_STORE_QUESTION]);
+    // Sem pergunta do modelo: nenhuma pergunta pronta é acrescentada pelo código.
+    expect(splitAiResponseMessages(card)).toEqual([card]);
     expect(storeQuestion(1)).toContain("dessa loja");
   });
 
@@ -156,7 +155,7 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
     expect(countStores(card)).toBe(2);
     const question = "Quer que eu te passe os detalhes técnicos completos desse modelo ou prefere a localização de alguma dessas lojas?";
     expect(splitAiResponseMessages(`${card}\n---SPLIT---\n${question}`)[1]).toBe(question);
-    expect(splitAiResponseMessages(card)[1]).toBe(DEFAULT_STORE_QUESTION);
+    expect(splitAiResponseMessages(card)).toEqual([card]);
     // Lista agrupada por cidade: título de cidade não conta como loja.
     expect(countStores("📍 *Goiânia*\n• *Loja Setor Bueno* — Av. T-8, 235\n• *Loja Setor Marista* — Rua 27, 2106")).toBe(2);
     expect(agreeStoreCount(question, 3)).toBe(question);
@@ -166,13 +165,13 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain("CONCORDÂNCIA DA PERGUNTA (regra fixa)");
     expect(prompt).toContain("Com 1 loja só, a pergunta da 2ª bolha fica no singular");
-    expect(prompt).toContain("prefere a localização dessa loja?");
-    expect(prompt).toContain("prefere a localização de alguma dessas lojas?");
+    expect(prompt).toContain("com 2 ou mais, no plural");
   });
 
-  it("prompt traz a regra obrigatória com o exemplo literal do ---SPLIT---", () => {
+  it("prompt traz a regra de listas com ---SPLIT--- sem pergunta forçada nem frase pronta", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
-    expect(prompt).toContain("REGRA OBRIGATÓRIA DE DUAS MENSAGENS");
-    expect(prompt).toContain("• *Loja Setor Marista* — Rua 135 esq. com Av. Americano do Brasil, 208\n\n---SPLIT---\n\nQual dessas lojas fica melhor pra você?");
+    expect(prompt).toContain("LISTAS E LOJAS");
+    expect(prompt).toContain("Não force pergunta quando a pessoa já disse o que vai fazer");
+    expect(prompt).not.toContain("Qual dessas lojas fica melhor pra você?");
   });
 });

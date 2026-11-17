@@ -72,7 +72,7 @@ describe("buscarDetalhesProdutoWeb: ficha real + cores com saldo", () => {
     expect(result.orientacao).toContain("cores/variações com saldo");
     expect(DETAILS_TOOL.function.name).toBe("buscarDetalhesProdutoWeb");
     expect(prompt).toContain(DETAILS_RULES);
-    expect(DETAILS_RULES).toContain("Proibido responder pedido de detalhes com frase vazia (\"Posso te ajudar com disponibilidade e lojas\")");
+    expect(DETAILS_RULES).toContain("Nunca responda pedido de detalhes com frase vazia");
   });
 
   it("sem ficha na web: orienta a não inventar material nem funções", () => {
@@ -151,7 +151,7 @@ describe("encerramento silencioso", () => {
     expect(interpretDecision({ action: "no_reply", reply: "" })).toMatchObject({ action: "no_reply", reply: "" });
     expect(interpretDecision({ action: "reply", reply: NO_REPLY_TOKEN })).toMatchObject({ action: "no_reply", reply: "" });
     expect(prompt).toContain(CLOSING_RULES);
-    expect(CLOSING_RULES).toContain("responda UMA única vez, curto e caloroso, sem fazer nova pergunta");
+    expect(CLOSING_RULES).toContain("responda UMA única vez, curto e caloroso, com suas palavras, sem fazer nova pergunta");
     expect(prompt).toContain("\"action\": \"reply\" | \"handoff\" | \"resolved\" | \"no_reply\"");
   });
 });

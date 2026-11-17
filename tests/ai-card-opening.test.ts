@@ -46,6 +46,8 @@ describe("abertura do card e vitrine sem referência duplicada", () => {
 
   it("prompt diferencia as aberturas", () => {
     expect(buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(PRODUCT_CARD_TEMPLATE);
-    for (const piece of ["ABERTURA CONFORME A INTENÇÃO", "\"Temos sim! 😊\" só quando o cliente perguntou se existe/tem", "\"Aqui estão os detalhes desse modelo! 😊\"", "NUNCA \"Temos sim! 😊\" nesse caso"]) expect(PRODUCT_CARD_TEMPLATE).toContain(piece);
+    // Sem frase pronta de abertura: o comentário antes da ficha é escrito pela IA.
+    expect(PRODUCT_CARD_TEMPLATE).toContain("comentário curto, com suas palavras");
+    expect(PRODUCT_CARD_TEMPLATE).not.toMatch(/Temos sim|Aqui estão os detalhes/);
   });
 });

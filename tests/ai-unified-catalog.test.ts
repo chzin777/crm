@@ -196,17 +196,13 @@ describe("catálogo unificado de modelos", () => {
 
 describe("abertura acolhedora", () => {
   const now = new Date("2026-11-16T11:00:00-03:00");
-  it("inclui uma das três boas-vindas para cliente recorrente sem duplicar saudação", () => {
-    const texts = [0, 1, 2].map((variant) => welcomeReply("Bom dia! Temos sim!", { first: true, returning: true, customer: "Maria Silva", pendingText: "bom dia", now, variant }));
-    expect(texts).toEqual([
-      "Bom dia, Maria! Que bom te ver por aqui de novo 😊 Temos sim!",
-      "Bom dia, Maria! Que alegria falar com você novamente! 😊 Temos sim!",
-      "Bom dia, Maria! Seja muito bem-vindo(a) de volta! 😊 Temos sim!",
-    ]);
+  it("boas-vindas do cliente que voltou são escritas pelo modelo: o código não injeta frase pronta", () => {
+    const texts = [0, 1, 2].map((variant) => welcomeReply("Bom dia, Maria! Que bom ter você de volta. Temos sim!", { first: true, returning: true, customer: "Maria Silva", pendingText: "bom dia", now, variant }));
+    expect(new Set(texts)).toEqual(new Set(["Bom dia, Maria! Que bom ter você de volta. Temos sim!"]));
   });
-  it("saúda um cliente novo e retribui saudação em turnos posteriores", () => {
-    expect(welcomeReply("Temos sim!", { first: true, customer: "Maria", pendingText: "tem?", now })).toBe("Bom dia, Maria! 😊 Temos sim!");
-    expect(welcomeReply("Temos sim!", { first: false, customer: "Maria", pendingText: "oi", now })).toBe("Bom dia, Maria! 😊 Temos sim!");
-    expect(welcomeReply("Temos sim!", { first: false, customer: "Maria", pendingText: "tem?", now })).toBe("Temos sim!");
+  it("corrige só o período errado da saudação e tira a saudação repetida", () => {
+    expect(welcomeReply("Boa noite, Maria! Temos sim!", { first: true, customer: "Maria", pendingText: "tem?", now })).toBe("Bom dia, Maria! Temos sim!");
+    expect(welcomeReply("Temos sim!", { first: true, customer: "Maria", pendingText: "tem?", now })).toBe("Temos sim!");
+    expect(welcomeReply("Bom dia, Maria! Temos sim!", { first: false, customer: "Maria", pendingText: "tem?", now })).toBe("Temos sim!");
   });
 });

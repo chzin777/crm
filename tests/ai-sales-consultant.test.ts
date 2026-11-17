@@ -6,6 +6,7 @@ import { FORMAT_RULES } from "@/lib/ai/bubbles";
 import { applyPriceFilter, diverseByBrand, formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 import { STOCK_TOOL } from "@/lib/ai/stock";
 import { cardOpening } from "@/lib/ai/product-card";
+import { loadPromptModule } from "@/lib/ai/prompt-composer";
 
 describe("orçamento na fala do cliente", () => {
   it.each([
@@ -183,8 +184,9 @@ describe("fechamento ativo com chamada para ação", () => {
     expect(activeClosing(active, { variant: 0 })).toBe(active);
   });
 
-  it("regras do prompt proíbem fechamento passivo e trazem os CTAs", () => {
-    for (const piece of ["FECHAMENTO ATIVO", "PROIBIDO fechar de forma passiva", "\"Se quiser, posso te ajudar...\"", "Qual desses estilos combinou mais com você?", "PÚBLICO ADULTO POR PADRÃO"]) expect(SALES_CONSULTANT_RULES).toContain(piece);
+  it("regras do prompt conduzem o próximo passo sem fechamento passivo nem frase pronta", () => {
+    for (const piece of ["PRÓXIMO PASSO", "nunca fechamento passivo de telemarketing", "PÚBLICO ADULTO POR PADRÃO"]) expect(SALES_CONSULTANT_RULES).toContain(piece);
+    expect(SALES_CONSULTANT_RULES).not.toMatch(/"[^"]{20,}"/);
     expect(FORMAT_RULES).not.toMatch(/\(ex\.:[^)]*Se quiser, me diga/);
   });
 });
@@ -198,7 +200,8 @@ describe("redação de vendedora, sem respostas enlatadas", () => {
     expect(mergeProactiveReply("Temos a Vogue por R$ 99,00!", vitrine)).toBe(vitrine);
   });
   it("regras proíbem clichês de robô e pedem argumento de venda e espelhamento", () => {
-    for (const piece of ["Como posso ajudá-lo hoje?", "Aguarde um instante enquanto verifico", "ESPELHE O ESTILO", "ARGUMENTE COMO VENDEDORA", "no máximo 1 ou 2 perguntas", "REGRA DE OURO GEOGRÁFICA"]) expect(SALES_CONSULTANT_RULES).toContain(piece);
+    for (const piece of ["CONSULTORIA GENUÍNA", "comente brevemente, com suas palavras, por que aquelas peças combinam", "GEOGRAFIA", "lentes são orçadas conforme a receita"]) expect(SALES_CONSULTANT_RULES).toContain(piece);
+    for (const piece of ["bordões de telemarketing", "Espelhamento sutil", "Uma coisa de cada vez", "Ritmo real de WhatsApp"]) expect(loadPromptModule("core")).toContain(piece);
   });
   it("abertura da ficha varia entre respostas", () => {
     expect(new Set([0, 1, 2].map((variant) => cardOpening("Me mostra o Aviator", variant))).size).toBe(3);

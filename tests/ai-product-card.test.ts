@@ -18,7 +18,7 @@ describe("paridade do pipeline de produto com o cliente na fila (alreadyQueued =
       expect(queued).toContain(rule);
       expect(normal).toContain(rule);
     }
-    expect(PRODUCT_CARD_RULES).toContain("vale antes e depois de o cliente entrar na fila");
+    expect(PRODUCT_CARD_RULES).toContain("FICHA DE PRODUTO (dado do sistema)");
   });
 
   it("na fila, a foto acompanha a resposta mesmo se o modelo marcar transferência (não transfere de novo)", () => {

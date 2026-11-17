@@ -9,7 +9,7 @@ describe("saudação sem nome real de exemplo no prompt", () => {
       const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "", firstReply });
       expect(prompt).not.toMatch(/Christofer/i);
       // saudacao.md só entra no primeiro turno; depois, o núcleo proíbe abrir com "Boa tarde"/"Oi" de novo.
-      if (firstReply) expect(prompt).toContain("Boa tarde, <PRIMEIRO_NOME>! 😊");
+      if (firstReply) expect(prompt).toContain("SAUDAÇÃO (primeira resposta desta conversa)");
       else expect(prompt).toContain("SEM SAUDAÇÃO REPETIDA");
     }
   });
@@ -54,9 +54,11 @@ describe("saudação única", () => {
     expect(splitAiResponseMessages("Boa tarde! Oi, Christofer 😊 Em que posso te ajudar?")).toEqual(["Boa tarde, Christofer 😊 Em que posso te ajudar?"]);
   });
 
-  it("prompt proíbe duas saudações juntas e traz os exemplos", () => {
+  it("prompt proíbe duas saudações juntas e não traz frase pronta para copiar", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(GREETING_RULES);
-    for (const piece of ["SAUDAÇÃO ÚNICA", "CONTATO SEM NOME", "Boa tarde! 😊 Em que posso te ajudar?", "NUNCA copie nomes de exemplos", "PROIBIDO juntar duas saudações", "\"Boa tarde! Oi, <PRIMEIRO_NOME>\"", "Boa tarde, <PRIMEIRO_NOME>! 😊 Em que posso te ajudar?", "Tudo ótimo por aqui, e com você? 😊"]) expect(GREETING_RULES).toContain(piece);
+    for (const piece of ["Uma saudação só", "sem nome válido, cumprimente sem nome e sem inventar um", "com palavras suas e diferentes a cada conversa"]) expect(GREETING_RULES).toContain(piece);
+    // Nenhum modelo de frase entre aspas (o modelo tende a copiar literalmente).
+    expect(GREETING_RULES).not.toMatch(/"[^"]{12,}"/);
   });
 });

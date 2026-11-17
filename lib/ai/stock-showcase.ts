@@ -163,7 +163,7 @@ function commonBrand(models: ShowcaseModel[]) {
 }
 
 const SHOWCASE_GUIDANCE = {
-  disponivel_em_lojas: "Busca ampla (só marca/categoria): use o campo vitrineFormatada exatamente como veio (sem reescrever, sem acrescentar lojas, quantidades ou descrições) como 1ª bolha; depois ---SPLIT--- e a pergunta: \"%Q\". Não mande foto nem lista de lojas nesta etapa.",
+  disponivel_em_lojas: "Opções com estoque na cidade do cliente: escreva antes um comentário curto, com suas palavras, dizendo em poucas palavras por que essas peças combinam com o que ele pediu (presente, uso diário, estilo, formato do rosto); depois copie vitrineFormatada exatamente como veio (o sistema transforma em fotos com legenda curta, então não cite códigos de referência). Em armação de grau, lembre com naturalidade que as lentes são orçadas conforme a receita. Se couber uma pergunta leve depois das fotos, coloque-a após ---SPLIT---; não force pergunta. Sem lista de lojas nem ficha nesta etapa.",
   sem_estoque_na_rede: "Nenhum modelo dessa marca/categoria tem estoque na rede agora. Diga isso com naturalidade e ofereça transferir para um atendente verificar encomenda ou similares (action handoff se o cliente aceitar).",
   unavailable_api: "Não foi possível verificar o estoque no sistema agora: transfira para um atendente confirmar (action handoff).",
   produto_nao_encontrado: "Nenhum produto dessa marca/categoria foi encontrado no catálogo. Pergunte qual modelo ou referência o cliente procura ou transfira para um atendente (action handoff).",
@@ -212,7 +212,7 @@ export function diverseByBrand(models: ShowcaseModel[], perBrand: number) {
 }
 
 /** Orientação da vitrine de orçamento: a IA escreve a abertura e o argumento de venda (sem pergunta pronta). */
-export const BUDGET_SHOWCASE_GUIDANCE = "Busca por orçamento: comece com UMA frase sua, natural, citando a cidade e o orçamento do cliente; depois copie vitrineFormatada exatamente como veio (sem inventar material, cor ou preço). Depois de ---SPLIT---, como consultora, destaque em 1 ou 2 frases curtas por que 2 ou 3 dessas opções valem a pena (custo-benefício, marca, estilo pelo nome; nada inventado) e feche com UMA pergunta direta de avanço (nunca \"Se quiser, posso...\"), ex.: \"Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!\" ou \"Quer que eu verifique em qual loja da sua cidade fica mais fácil pra você provar?\"";
+export const BUDGET_SHOWCASE_GUIDANCE = "Busca por orçamento: comece com um comentário curto e natural, com suas palavras, ligando as opções à cidade e ao valor que o cliente comentou; depois copie vitrineFormatada exatamente como veio (sem inventar material, cor ou preço; o sistema transforma em fotos com legenda). Como consultora, diga em poucas palavras por que 2 ou 3 delas valem a pena (custo-benefício, marca, estilo; nada inventado). Em armação de grau, lembre com naturalidade que as lentes são orçadas conforme a receita. Se couber, uma pergunta leve após ---SPLIT---, escrita do zero (nunca fechamento passivo de telemarketing).";
 
 const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 export function priceRangeLabel(price?: PriceFilter) {
@@ -278,8 +278,8 @@ export function buildShowcaseResult(input: {
     ...base,
     cenario: "disponivel_em_lojas",
     modelos: models,
-    vitrineFormatada: formatShowcase(models, { header: !input.price }),
-    orientacao: input.price ? BUDGET_SHOWCASE_GUIDANCE : SHOWCASE_GUIDANCE.disponivel_em_lojas.replace("%Q", showcaseQuestion(models.length)),
+    vitrineFormatada: formatShowcase(models, { header: false }),
+    orientacao: input.price ? BUDGET_SHOWCASE_GUIDANCE : SHOWCASE_GUIDANCE.disponivel_em_lojas,
   };
 }
 
@@ -291,9 +291,9 @@ export function allowsProductPhoto(result: { tipoBusca?: SearchKind }) {
 /** Regra fixa do prompt: as 2 etapas (descoberta → detalhamento), com os exemplos literais. */
 export const BROAD_SEARCH_RULES = [
   "BUSCA AMPLA x BUSCA ESPECÍFICA (regra fixa, 2 etapas):",
-  "Etapa 1 — descoberta: o cliente perguntou só pela marca ou por um tipo (\"tem rayban?\", \"quais modelos da Oakley vocês têm?\", \"quais armações femininas têm?\"). Chame consultarEstoqueProduto com tipoBusca \"marca_ampla\" e termoBusca só com a marca/categoria. A ferramenta devolve vitrineFormatada (modelos distintos com estoque e preço): copie exatamente como 1ª bolha, SEM foto e SEM lista de lojas, e na 2ª bolha pergunte qual modelo ele quer ver. Exemplo:",
-  "Temos vários modelos *Ray-Ban* disponíveis em estoque! Confira alguns deles:\n\n1. 🕶️ *Ray-Ban Justin (Ref. RB4165)* — R$ 1.210,27\n2. 🕶️ *Ray-Ban Aviator Classic (Ref. RB3025)* — R$ 1.150,00\n3. 🕶️ *Ray-Ban Erika (Ref. RB4171)* — R$ 980,00\n\n---SPLIT---\n\nGostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?",
-  "Depois da vitrine, \"o 1\", \"esse primeiro\", \"o segundo\", \"o último\" ou \"o de R$ 830\" são escolhas de um item da lista: NUNCA chame marca_ampla de novo nem repita a vitrine; abra o item escolhido com modelo_especifico e a referência dele. Se o preço citado servir para mais de um item, pergunte qual número ou referência o cliente quer ver.",
+  "Etapa 1 — descoberta: o cliente perguntou só pela marca ou por um tipo (\"tem rayban?\", \"quais modelos da Oakley vocês têm?\", \"quais armações femininas têm?\"). Chame consultarEstoqueProduto com tipoBusca \"marca_ampla\" e termoBusca só com a marca/categoria. A ferramenta devolve vitrineFormatada (modelos distintos com estoque e preço, que viram fotos com legenda): escreva um comentário curto seu antes e copie a vitrine exatamente como veio, SEM foto e SEM lista de lojas. Se couber, uma pergunta leve depois, após ---SPLIT---.",
+  "Formato da vitrine (dado do sistema, nunca reescrito): 1. 🕶️ *Nome do modelo (Ref. código)* — R$ valor, uma linha por modelo.",
+  "Depois da vitrine, \"o 1\", \"esse primeiro\", \"o segundo\", \"o último\", \"gostei da segunda foto\" ou \"o de R$ 830\" são escolhas de um item: NUNCA chame marca_ampla de novo nem repita a vitrine; abra o item escolhido com modelo_especifico e a referência dele. Se o preço citado servir para mais de um item, pergunte qual número (foto) o cliente quer ver.",
   "Se o termo tiver nome de modelo ou referência junto da marca (\"Ray-Ban Justin\", \"Oakley Holbrook\", \"RB4165\"), é SEMPRE modelo_especifico, nunca marca_ampla.",
-  "Etapa 2 — detalhamento: o cliente escolheu um modelo da vitrine (\"me manda foto do Justin\", \"quero saber mais do Erika\") ou já perguntou direto por um modelo/referência. Chame consultarEstoqueProduto com tipoBusca \"modelo_especifico\" e termoBusca com a marca + a referência EXATA exibida na vitrine (ex.: \"Ray-Ban RB3025L\" para \"Ray-Ban Aviator Classic (Ref. RB3025L)\"), para o preço do card bater com a lista; sem vitrine anterior, marca + modelo (ex.: \"Ray-Ban Justin\"). A foto vai anexada e a resposta é a ficha completa (fichaFormatada, com estoque e lojas) + ---SPLIT--- + pergunta de continuação no singular ou plural conforme as lojas.",
+  "Etapa 2 — detalhamento: o cliente escolheu um modelo da vitrine (\"me manda foto do Justin\", \"quero saber mais do Erika\") ou já perguntou direto por um modelo/referência. Chame consultarEstoqueProduto com tipoBusca \"modelo_especifico\" e termoBusca com a marca + a referência EXATA exibida na vitrine (ex.: \"Ray-Ban RB3025L\" para \"Ray-Ban Aviator Classic (Ref. RB3025L)\"), para o preço do card bater com a lista; sem vitrine anterior, marca + modelo. A foto vai anexada e a resposta é um comentário curto seu + a ficha completa (fichaFormatada, com estoque e lojas); se couber, uma pergunta leve após ---SPLIT---.",
 ].join("\n");

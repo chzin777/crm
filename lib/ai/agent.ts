@@ -25,24 +25,24 @@ import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, ba
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
-import { analysisName, analysisPromptBlock, asksProductInfo, brandFallbackReply, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_CLOSINGS, CATALOG_FOUND_RULE, catalogOpening, explicitBrand, NO_PHOTOS_NOTE, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
-import { asksCustomerCity, canonicalCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { activeClosing, FRAME_PRICE_NOTE, SUN_PRICE_NOTE, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, oneQualifyingQuestion, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
+import { withToolContent, withoutRedundantStoreQuestion, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-opening";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { formatBrl, STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
-import { allowsProductPhoto, fallbackReference, showcaseReference, type ShowcaseModel } from "@/lib/ai/stock-showcase";
-import { ambiguousChoiceQuestion, asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, pickFromListQuestion, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
+import { allowsProductPhoto, fallbackReference, formatShowcase, showcaseReference, type ShowcaseModel } from "@/lib/ai/stock-showcase";
+import { asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
-import { buildProductCard, CARD_QUESTION, cardOpening, cardStore, cleanReference, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
+import { buildProductCard, cardStore, cleanReference, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
 import { geocodeStoreAddress } from "@/lib/ai/store-geolocation";
-import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, STORE_MISS_REPLY, LOCATION_TOOL, locationText, storeLocation, type SessionStore, type StoreLocation } from "@/lib/ai/store-location";
+import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, LOCATION_TOOL, locationText, storeLocation, type SessionStore, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
 import { sendSatisfactionSurvey } from "@/lib/chat/nps";
@@ -467,23 +467,22 @@ export async function financialFlow(input: AgentRunInput, text: string): Promise
  */
 async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   const { settings } = input;
-  // Pedido de pessoa pelo nome ("Leandro", "Preciso falar com Leandro"): confirma e transfere para ela (fora da fila).
+  // Pedido de pessoa pelo nome ("Preciso falar com <ATENDENTE>"): a transferência para ela é decidida aqui, mas a
+  // confirmação ao cliente é escrita pelo modelo, com as próprias palavras (sem frase pronta).
+  let staffRoute: Pick<AgentOutcome, "reason" | "queue" | "assigneeId" | "assigneeName" | "staffQueueId"> & { name: string } | null = null;
   if (!input.queued) {
     const staff = await activeStaff().catch(() => []);
     const request = detectStaffRequest(input.pendingText, staff, input.contactName);
     if (request) {
-      const outcome: AgentOutcome = {
-        action: "handoff",
-        reply: staffConfirmation(input.contactName, request.name),
+      staffRoute = {
+        name: request.staff?.name ?? request.name,
         reason: `Cliente solicitou atendimento direto com ${request.staff?.name ?? request.name}.`,
         queue: request.staff?.queueName ?? "",
-        trigger: "staff",
         ...(request.staff ? { assigneeId: request.staff.id, assigneeName: request.staff.name, ...(request.staff.queueId ? { staffQueueId: request.staff.queueId } : {}) } : {}),
       };
-      return { outcome, media: null, mediaTriggerSkipped: false, search: null, injection: NO_INJECTION };
     }
   }
-  const early = preAgentOutcome(settings, input);
+  const early = staffRoute ? null : preAgentOutcome(settings, input);
   if (early) return { outcome: early, media: null, mediaTriggerSkipped: false, search: null, injection: NO_INJECTION };
   // Mídia não transfere mais antes da leitura: nada a pular no teste.
   const mediaTriggerSkipped = false;
@@ -510,7 +509,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
 
   // Parcelas/crediário (texto ou áudio): identidade (nome completo + CPF) antes de consultar o VMSet; o resultado
   // só vai ao cliente depois da aprovação do operador no /chat (quando a opção estiver ligada).
-  const financial = await financialFlow(input, [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n"));
+  const financial = staffRoute ? null : await financialFlow(input, [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n"));
   if (financial) return { outcome: financial.outcome, media, mediaTriggerSkipped, search: null, injection, financialApproval: financial.approval, financialLog: financial.log };
 
   // Foto: identificação silenciosa → busca no catálogo do ERP (a foto não é narrada); receita/comprovante em foto ou
@@ -543,11 +542,13 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     }
   }
   const catalogContext = catalogContexts.length ? `${CATALOG_FOUND_RULE}\n\n${catalogContexts.join("\n\n")}` : "";
-  // Receita/comprovante lidos: com a regra de documentos ligada, confirma ao cliente e transfere com o resumo.
-  if (documents.length && settings.handoffOnMedia) {
+  // Receita/comprovante lidos: com a regra de documentos ligada, transfere com o resumo; a confirmação ao cliente
+  // é escrita pelo modelo (documentReply só cobre resposta vazia do modelo).
+  let documentRoute: { kinds: ReadDocument["kind"][]; reason: string; queue: string } | null = null;
+  if (documents.length && settings.handoffOnMedia && !staffRoute) {
     const kinds = documents.map((doc) => doc.kind);
     const queueNames = (await prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { name: true }, orderBy: { order: "asc" } }).catch(() => [])).map((queue) => queue.name);
-    return { outcome: { action: "handoff", reply: documentReply(kinds), reason: documentHandoffReason(documents), queue: documentQueue(queueNames, kinds), trigger: "prescription" }, media, mediaTriggerSkipped, search, injection, documents };
+    documentRoute = { kinds, reason: documentHandoffReason(documents), queue: documentQueue(queueNames, kinds) };
   }
   const documentContext = documents.length ? `Dados extraídos dos documentos do cliente (use para responder; não repita tudo para ele):\n${documents.map((doc) => `- ${doc.summary}`).join("\n")}` : "";
   // Partes que vão ao modelo: anexos ainda não resolvidos no código (falhas e figurinhas vão como texto).
@@ -575,12 +576,12 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // busca da marca; sem cidade, pergunta a cidade em vez de cair no fluxo de modelo específico.
   const activeBrand = catalogState.activeBrand || catalogState.brand;
   const continuesBrand = !!activeBrand && !catalogState.preferredCity && !asksStoreLocation(input.pendingText) && !asksForHuman(settings, customerText) && !isPureGreeting(input.pendingText) && !isInstallmentQuestion(customerText);
-  const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: continuesBrand ? `${customerText} ${activeBrand}` : customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
+  const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: continuesBrand ? `${customerText} ${activeBrand}` : customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued || !!staffRoute || !!documentRoute });
   // "Óculos" sem dizer grau ou sol: pergunta o tipo antes de listar (não mistura sol e grau).
-  const typeFirst = needsTypeFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
+  const typeFirst = needsTypeFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued || !!staffRoute || !!documentRoute });
   const askBudget = (cityFirst || typeFirst) && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
   const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
-  const forceCatalog = !cityFirst && !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
+  const forceCatalog = !cityFirst && !staffRoute && !documentRoute && !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
     && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand));
   // Pedido de pessoa com a IA roteando: sem assunto → 1 pergunta de triagem; com assunto → transfere já para a fila certa.
   // Âncora do atendimento atual: follow-up de detalhes usa o produto fixado; localização no singular usa a loja fixada.
@@ -608,8 +609,6 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   let cardShown: string | null = null;
   let productInterest: { name: string; price: number | null } | null = null;
   let interactiveList: InteractiveShowcase | null = null;
-  let photoReply: string | null = null;
-  let modelVariantReply: string | null = null;
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
   const system = buildSystemPrompt({
@@ -653,14 +652,37 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   };
   const toolStores: SessionStore[] = [];
   let currentCatalogFilterHash = "";
-  /** A ferramenta recusou listar produtos por falta da cidade nesta resposta. */
-  let stockGated = false;
-  let typeGated = false;
+  /** Última vitrine (texto numerado) devolvida ao modelo nesta resposta: base do catálogo com fotos. */
+  let toolShowcase: string | null = null;
+  // Fotos do catálogo por código (cache → web), buscadas junto da vitrine.
+  const catalogPhotos: Record<string, string> = {};
+  const catalogPhotosFor = async (models: ShowcaseModel[]) => {
+    if (!settings.sendProductImage || !models.length) return 0;
+    try {
+      Object.assign(catalogPhotos, await catalogImages(models, { want: VISUAL_CATALOG_MAX, web: !!imageSearchStatus() }));
+    } catch (error) {
+      console.warn(`[ai][catalogo] fotos indisponíveis (${error instanceof Error ? error.message : error})`);
+    }
+    return Math.min(VISUAL_CATALOG_MAX, models.filter((model) => model.codigos.some((code) => !!catalogPhotos[code])).length);
+  };
+  // Marca sem saldo na cidade: mesma marca nas outras praças + até 3 marcas parecidas com saldo na cidade.
+  const localBrandFallback = (brand: string, city: string) => brandStockFallback({
+    brand, city, categoryWord, maxAlternatives: 3,
+    otherCities: [...new Set(cities.filter(Boolean).map((name) => {
+      const canonical = canonicalCity(name);
+      return canonical.length > 3 && canonical === canonical.toUpperCase() ? titleCase(canonical) : canonical;
+    }))].slice(0, 8),
+    search: async (args) => {
+      const { result, log } = await consultarEstoqueProduto({ ...withBudgetArgs(args, { budget, cheap, category: catalogState.category }), ...(wantsKids ? { publicoInfantil: true } : {}) }, { products: catalogProducts, withPrices: settings.canQuotePrices });
+      stock.push(log);
+      return result.tipoBusca === "marca_ampla" ? result : null;
+    },
+  }).catch(() => null);
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
       // Preço que serve para vários itens da vitrine: nada de nova busca (nem a mesma lista); pergunta número/referência.
-      if (choice?.type === "ambiguous") return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Não repita a vitrine. Responda exatamente: "${ambiguousChoiceQuestion(choice.items, choice.price)}"` };
+      if (choice?.type === "ambiguous") return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], opcoesComEssePreco: choice.items.map((item) => item.index), orientacao: `Não repita a vitrine. O preço citado (${formatBrl(choice.price)}) vale para as opções ${choice.items.map((item) => item.index).join(", ")}: pergunte com suas palavras qual delas o cliente quer ver, pelo número da foto, sem citar códigos de referência.` };
       // Item escolhido na vitrine (número, posição, referência ou preço único): busca específica com a referência exata.
       const chosen = choice?.type === "item" ? choice.item : null;
       const baseQuery = chosen
@@ -669,15 +691,15 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
           : brandOnlySearch(args) ? brandSearchArgs(args, activeBrand, categoryWord) : args;
       // Regra de ouro geográfica: vitrine só com a cidade do cliente conhecida.
       if (!chosen && isGatedStockCall(baseQuery, { knownCity: catalogState.preferredCity, fixedProduct: !!anchoredProduct })) {
-        stockGated = true;
         return gatedStockResult(askBudget, typeFirst);
       }
       // Óculos sem tipo: nada de vitrine misturando sol e grau antes de saber qual ele procura.
       if (!chosen && !anchoredProduct && typeFirst && isBroadStockCall(baseQuery)) {
-        typeGated = true;
         return typeGatedResult(askBudget);
       }
-      const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category }), cidade: catalogState.preferredCity || args.cidade };
+      // Cidade digitada pelo modelo com erro ("Goiânai", "Brasila") vira a cidade real da rede.
+      const cityArg = typeof args.cidade === "string" && args.cidade.trim() ? extractPreferredCity(args.cidade, cities) ?? args.cidade : args.cidade;
+      const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category }), cidade: catalogState.preferredCity || cityArg };
       // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
       if (wantsKids) query.publicoInfantil = true;
       else delete query.publicoInfantil;
@@ -706,15 +728,39 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       }
       // Trava anti-loop: a mesma vitrine já enviada nesta sessão não sai de novo; o cliente escolhe pelo número/referência.
       if (!forceCatalog && !intent.changed && (!catalogState.lastCatalogFilterHash || catalogState.lastCatalogFilterHash === currentCatalogFilterHash) && result.tipoBusca === "marca_ampla" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(result.vitrineFormatada ?? "", listed)) {
-        return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `Essa vitrine já foi enviada: NÃO repita a lista. Responda: "${pickFromListQuestion(listed)}"` };
+        return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: "Essas opções já foram enviadas nesta conversa: NÃO repita a lista. Converse com o cliente sobre elas com suas palavras; se ele quiser ver uma, basta dizer o número da foto." };
       }
-      // Busca ampla (só marca/categoria): vitrine com nome e preço, sem foto nem ficha nesta etapa; no WhatsApp,
-      // 2+ modelos também viram Lista Interativa nativa (o texto numerado fica como fallback e histórico).
+      // Busca ampla (só marca/categoria): vitrine com nome e preço, sem ficha nesta etapa. As fotos do catálogo já
+      // são buscadas aqui, para o modelo saber se o cliente vai receber fotos ou só o texto.
       if (result.tipoBusca === "marca_ampla") {
         const models = "modelos" in result ? result.modelos : [];
+        const city = typeof query.cidade === "string" ? query.cidade : catalogState.preferredCity;
+        const brandName = typeof query.marca === "string" && query.marca.trim() ? query.marca : explicitBrand(String(query.termoBusca ?? "")) ?? "";
+        // Marca sem saldo na cidade: no mesmo payload, a mesma marca em outras praças (transferência) e até 3
+        // opções reais de marcas parecidas na cidade do cliente. Quem escreve a resposta é o modelo.
+        if (!models.length && !result.vitrineFormatada && query.tipoBusca !== "modelo_especifico" && city && brandName && "cenario" in result && result.cenario !== "unavailable_api") {
+          const fallback = await localBrandFallback(brandName, city);
+          if (fallback && !fallback.unavailable) {
+            shownModels.push(...fallback.alternatives);
+            if (fallback.alternatives.length >= 2) interactiveList = buildShowcaseList(fallback.alternatives, null);
+            const photos = await catalogPhotosFor(fallback.alternatives);
+            return {
+              ...result,
+              marcaSemSaldoNaCidade: { marca: brandName, cidade: city },
+              disponivelEmOutrasCidades: fallback.otherCities,
+              alternativasNaCidade: fallback.alternatives.map((model) => ({ nome: model.nomeComercial, preco: model.precoVenda, lojas: model.lojas ?? [] })),
+              vitrineFormatada: (toolShowcase = fallback.alternatives.length ? formatShowcase(fallback.alternatives, { header: false }) : null),
+              fotosNoCatalogo: photos,
+              orientacao: fallback.otherCities.length
+                ? `${brandName} está sem saldo em ${city}, mas tem em ${fallback.otherCities.slice(0, 3).join(", ")}: conte isso com transparência e diga que dá para pedir a transferência para uma loja de ${city}.${fallback.alternatives.length ? " Em seguida apresente as alternativas locais (vitrineFormatada), comentando em poucas palavras por que combinam com o pedido." : ""}`
+                : `${brandName} está sem saldo em ${city} e nas outras unidades: diga isso com transparência e ofereça que um atendente verifique encomenda.${fallback.alternatives.length ? " Apresente as alternativas locais (vitrineFormatada), comentando em poucas palavras por que combinam com o pedido." : ""}`,
+            };
+          }
+        }
         shownModels.push(...models);
-        interactiveList = buildShowcaseList(models, result.vitrineFormatada?.split("\n")[0].match(/\*([^*]+)\*/)?.[1] ?? null);
-        return result;
+        interactiveList = buildShowcaseList(models, null);
+        toolShowcase = result.vitrineFormatada ?? null;
+        return { ...result, fotosNoCatalogo: await catalogPhotosFor(models) };
       }
       if (!allowsProductPhoto(result)) return result;
       // Referência pedida (ou o produto fixado) primeiro: a ficha e a foto nunca saem de outro modelo da lista.
@@ -733,9 +779,8 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
           const variants = photoVariants(available, args._photo && imageAnalysis ? analysisName(imageAnalysis) : `Ray-Ban ${iconic?.name ?? ""}`, !!args._photo);
           if (variants) {
             interactiveList = variants.list;
-            if (args._photo) photoReply = variants.text;
-            else modelVariantReply = variants.text;
-            return { ...result, vitrineFormatada: variants.text, orientacao: "Apresente as variações disponíveis usando vitrineFormatada, sem repetir a abertura em outra mensagem." };
+            toolShowcase = variants.text;
+            return { ...result, vitrineFormatada: variants.text, orientacao: "Há mais de uma variação (cor) desse modelo com estoque: comente com suas palavras e deixe o cliente escolher pelo número. As opções são anexadas pelo sistema depois do seu texto." };
           }
         } else {
           available.splice(0, available.length, colorMatches[0]);
@@ -766,105 +811,80 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
         totalUnidades: inStock.lojasComEstoque.reduce((sum, store) => sum + store.quantidade, 0),
         lojasDisponiveis: inStock.lojasComEstoque.map(cardStore),
       };
-      const opening = args._photo && imageAnalysis
-        ? `Esse modelo da foto é *${analysisName(imageAnalysis)}* e temos sim em estoque!`
-        : cardOpening(input.pendingText, input.aiReplies);
-      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, opening), orientacao: `${result.orientacao}\n${cardGuidance()}` };
+      // A ficha leva só os dados do produto; a frase de abertura é do modelo, com as próprias palavras.
+      const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, ""), orientacao: `${result.orientacao}\n${cardGuidance()}` };
       cardShown = card.fichaFormatada;
-      if (args._photo) photoReply = card.fichaFormatada;
       productInterest = { name: [fields.nomeComercial, fields.referencia].filter(Boolean).join(" ").slice(0, 80), price: parseBrl(fields.valorFormatado) };
       return image ? { ...card, fotoAnexada: true } : card;
     },
   };
-  let proactiveReply: string | null = null;
-  let proactiveContent: string | null = null;
-  let proactiveResult: Awaited<ReturnType<typeof stockTool.run>> | null = null;
+  // Buscas que o código faz antes do modelo (marca/cidade nova, item escolhido na vitrine, foto de produto): o
+  // resultado vira FATOS no prompt e o modelo escreve a resposta com as próprias palavras. O sistema só anexa os
+  // dados (ficha, opções com foto) depois do comentário dele; nenhuma frase pronta sai do código.
+  const turnFacts: string[] = [];
+  type StockRun = Awaited<ReturnType<typeof stockTool.run>>;
+  const contentOf = (result: StockRun) => {
+    const data = result as Record<string, unknown>;
+    if (typeof data.fichaFormatada === "string" && data.fichaFormatada) return data.fichaFormatada;
+    return typeof data.vitrineFormatada === "string" && data.vitrineFormatada ? data.vitrineFormatada : null;
+  };
+  const resultFacts = (result: StockRun) => {
+    const data = result as Record<string, unknown>;
+    const keys = ["cenario", "orientacao", "marcaSemSaldoNaCidade", "disponivelEmOutrasCidades", "alternativasNaCidade", "fotosNoCatalogo", "vitrineJaEnviada"];
+    return JSON.stringify(Object.fromEntries(keys.filter((key) => data[key] !== undefined && data[key] !== null).map((key) => [key, data[key]])));
+  };
+  const attachedHint = (result: StockRun) => contentOf(result)
+    ? `${"fichaFormatada" in result ? "A ficha do produto (com foto e lojas)" : "As opções (fotos com legenda curta)"} são anexadas pelo sistema logo depois do seu texto: não reescreva lista, ficha, preços nem códigos. Se couber uma pergunta leve depois das fotos, coloque-a após ---SPLIT---.`
+    : "Não há itens para mostrar: responda com suas palavras a partir desses fatos, sem inventar modelos.";
+  let preResult: StockRun | null = null;
   if (forceCatalog) {
-    const category = catalogState.category === "ARMACAO" ? "armação" : catalogState.category === "SOLAR" ? "solar" : catalogState.category === "LENTE_CONTATO" ? "lentes de contato" : "";
-    const term = cityProduct ? [cityProduct.marca, cityProduct.referencia ?? cityProduct.nomeComercial].filter(Boolean).join(" ") : [catalogState.brand, category].filter(Boolean).join(" ");
-    const result = await stockTool.run({ termoBusca: term, marca: catalogState.brand, cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
-    proactiveResult = result;
-    // Conteúdo exato da consulta; a abertura (desculpa pela correção, carinho com o presente, cidade) quem escreve
-    // é o modelo, com as próprias palavras (mergeProactiveReply), nunca um prefixo fixo.
-    if ("fichaFormatada" in result && typeof result.fichaFormatada === "string") {
-      proactiveContent = result.fichaFormatada;
-    } else if ("vitrineFormatada" in result && result.vitrineFormatada) {
-      proactiveContent = result.vitrineFormatada;
-    } else if ("cenario" in result && result.cenario === "unavailable_api") {
-      proactiveReply = "Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.";
-    } else if (!cityProduct && catalogState.preferredCity) {
-      // Marca sem saldo na cidade: nunca só "não encontrei". Mesma marca em outras praças (transferência) +
-      // marcas equivalentes com saldo real na cidade do cliente, tudo nesta mesma resposta.
-      const fallback = await brandStockFallback({
-        brand: activeBrand, city: catalogState.preferredCity, categoryWord: category,
-        otherCities: [...new Set(cities.filter(Boolean).map((city) => {
-          const name = canonicalCity(city);
-          return name.length > 3 && name === name.toUpperCase() ? titleCase(name) : name;
-        }))].slice(0, 8),
-        search: async (args) => {
-          const { result, log } = await consultarEstoqueProduto({ ...withBudgetArgs(args, { budget, cheap, category: catalogState.category }), ...(wantsKids ? { publicoInfantil: true } : {}) }, { products: catalogProducts, withPrices: settings.canQuotePrices });
-          stock.push(log);
-          return result.tipoBusca === "marca_ampla" ? result : null;
-        },
-      });
-      if (fallback.unavailable) proactiveReply = "Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.";
-      else {
-        proactiveReply = brandFallbackReply(fallback, input.aiReplies);
-        shownModels.push(...fallback.alternatives);
-        if (fallback.alternatives.length >= 2) interactiveList = buildShowcaseList(fallback.alternatives, null);
-      }
-    } else {
-      proactiveReply = `Não encontrei ${cityProduct ? "esse modelo disponível" : `modelos ${catalogState.brand} disponíveis`}${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
-    }
+    const term = cityProduct ? [cityProduct.marca, cityProduct.referencia ?? cityProduct.nomeComercial].filter(Boolean).join(" ") : [catalogState.brand, categoryWord].filter(Boolean).join(" ");
+    preResult = await stockTool.run({ termoBusca: term, marca: catalogState.brand, cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
+  } else if (choice?.type === "item" && !photoQueries.length) {
+    // Item escolhido na vitrine ("gostei da segunda", toque na lista): a ficha dele já sai, mesmo se o modelo não buscar.
+    preResult = await stockTool.run({ termoBusca: listedSearchTerm(choice.item), tipoBusca: "modelo_especifico" });
   }
-  const proactiveBlock = proactiveContent
-    ? `\n\nBUSCA JÁ FEITA NESTA RESPOSTA (o resultado está em consultarEstoqueProduto): escreva UMA frase curta de abertura, única e ligada ao que o cliente disse (${intent.correction ? "peça desculpas pelo engano com naturalidade" : /\b(presentear|presente)\b/i.test(customerText) ? "reconheça o presente com carinho" : catalogState.preferredCity ? `cite que separou opções em ${catalogState.preferredCity}` : "vá direto ao ponto"}) e em seguida copie o conteúdo exatamente como veio.`
-    : "";
-  const photoReplies: string[] = [];
+  const preContent = preResult ? contentOf(preResult) : null;
+  if (preResult) {
+    const tone = intent.correction ? "reconheça o engano com naturalidade" : /\b(presentear|presente)\b/i.test(customerText) ? "reconheça o presente com carinho" : "conecte com o que o cliente acabou de dizer";
+    turnFacts.push(`BUSCA JÁ FEITA NESTA RESPOSTA: ${resultFacts(preResult)}\nEscreva um comentário curto e natural (${tone}). ${attachedHint(preResult)}`);
+  }
+  const photoContents: string[] = [];
   for (const currentPhoto of photoQueries) {
     photoQuery = currentPhoto;
     imageAnalysis = makeImageAnalysis(currentPhoto);
-    photoReply = null;
+    const name = analysisName(imageAnalysis) || [photoQuery.brand, photoQuery.model].filter(Boolean).join(" ");
     const term = [photoQuery.brand, photoQuery.model || (!photoQuery.reference ? photoQuery.line : ""), photoQuery.reference].filter(Boolean).join(" ");
     const specific = !!(photoQuery.model || photoQuery.reference);
-    if (term) {
-      const equivalents = iconicModel(photoQuery.model ?? "", photoQuery.brand)?.references ?? [];
-      const result = await stockTool.run({
-        termoBusca: term, tipoBusca: specific ? "modelo_especifico" : "marca_ampla",
-        marca: photoQuery.brand, nomeModelo: photoQuery.model, referenciaOuSku: photoQuery.reference || (equivalents.length === 1 ? equivalents[0] : ""),
-        textoVisivelNaImagem: photoQuery.visibleText, _photo: true,
-      });
-      const last = stock[stock.length - 1];
-      if (last) search = { kind: "produto", term, found: last.products };
-      if (!photoReply && "cenario" in result) {
-        if (result.cenario === "unavailable_api") {
-          photoReply = "Não consegui consultar o estoque agora. Posso pedir a um atendente para confirmar a disponibilidade desse modelo?";
-        } else if (specific && (result.cenario === "sem_estoque_na_cidade" || result.cenario === "sem_estoque_na_rede" || result.cenario === "produto_nao_encontrado") && photoQuery.brand) {
-          const family = [photoQuery.brand, photoQuery.line].filter(Boolean).join(" ");
-          const alternative = await stockTool.run({ termoBusca: family, tipoBusca: "marca_ampla" });
-          const opening = `Esse modelo *${analysisName(imageAnalysis!)}* não está disponível${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
-          if ("cenario" in alternative && alternative.cenario === "cidade_desconhecida") {
-            photoReply = `${opening} ${cityQuestion({ askBudget: false, variant: input.aiReplies }).replace("os modelos disponíveis", "opções parecidas disponíveis")}`;
-          } else if ("vitrineFormatada" in alternative && alternative.vitrineFormatada) {
-            photoReply = `${opening} Confira outras opções da mesma marca:\n${alternative.vitrineFormatada}`;
-          } else if ("cenario" in alternative && alternative.cenario === "unavailable_api") {
-            photoReply = `${opening} Não consegui consultar as outras opções agora; posso pedir a um atendente para verificar?`;
-          } else {
-            photoReply = `${opening} Posso pedir a um atendente para verificar opções semelhantes ou encomenda?`;
-          }
-        } else if ("vitrineFormatada" in result && result.vitrineFormatada) {
-          photoReply = result.vitrineFormatada;
-        } else {
-          photoReply = `Não encontrei esse modelo em estoque agora. Posso pedir a um atendente para verificar opções semelhantes?`;
-        }
-      }
-    } else {
-      photoReply = "Não consegui identificar esse modelo com segurança. Você pode me informar a marca ou a referência da haste?";
+    if (!term) {
+      turnFacts.push("FOTO DE PRODUTO: não deu para identificar o modelo com segurança. Peça com naturalidade a marca ou a referência escrita na haste.");
+      continue;
     }
-    if (photoReply) photoReplies.push(photoReply);
+    const equivalents = iconicModel(photoQuery.model ?? "", photoQuery.brand)?.references ?? [];
+    const result = await stockTool.run({
+      termoBusca: term, tipoBusca: specific ? "modelo_especifico" : "marca_ampla",
+      marca: photoQuery.brand, nomeModelo: photoQuery.model, referenciaOuSku: photoQuery.reference || (equivalents.length === 1 ? equivalents[0] : ""),
+      textoVisivelNaImagem: photoQuery.visibleText, _photo: true,
+    });
+    const last = stock[stock.length - 1];
+    if (last) search = { kind: "produto", term, found: last.products };
+    const content = contentOf(result);
+    const missing = "cenario" in result && ["sem_estoque_na_cidade", "sem_estoque_na_rede", "produto_nao_encontrado"].includes(String(result.cenario));
+    if (content && !missing) {
+      photoContents.push(content);
+      turnFacts.push(`FOTO DE PRODUTO: identificado como ${name}, com estoque. ${resultFacts(result)}\nConfirme com suas palavras, sem descrever a foto. ${attachedHint(result)}`);
+    } else if (specific && missing && photoQuery.brand) {
+      const family = [photoQuery.brand, photoQuery.line].filter(Boolean).join(" ");
+      const alternative = await stockTool.run({ termoBusca: family, tipoBusca: "marca_ampla" });
+      const alternativeContent = contentOf(alternative);
+      if (alternativeContent) photoContents.push(alternativeContent);
+      turnFacts.push(`FOTO DE PRODUTO: identificado como ${name}, mas esse modelo não está disponível${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " agora"}. Conte isso com transparência. Busca de outras opções da mesma marca: ${resultFacts(alternative)}\n${attachedHint(alternative)}`);
+    } else {
+      turnFacts.push(`FOTO DE PRODUTO: identificado como ${name}. Resultado da busca: ${resultFacts(result)}\n${attachedHint(result)}`);
+    }
   }
+  const photoContent = photoContents.length ? photoContents.join("\n---SPLIT---\n") : null;
   if (photoQueries.length > 1) {
-    photoReply = photoReplies.join("\n\n");
     interactiveList = null;
     image = null;
   }
@@ -957,40 +977,44 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       return { enviado: false, orientacao: "Loja não encontrada no cadastro: pergunte o bairro ou o nome da loja." };
     },
   };
+  // Localização pedida: resolvida antes do modelo (sessão → CRM → ERP); ele confirma com as próprias palavras e o
+  // pin sai logo depois da resposta. Mais de uma unidade possível: o modelo pergunta qual, pela ferramenta.
+  if (storeFollowUp || asksStoreLocation(input.pendingText)) {
+    const fixed = await anchoredLocation("").catch(() => null);
+    const requested = fixed ?? (asksStoreLocation(input.pendingText) ? await locateStoreRequest([input.pendingText]).then((request) => (request.type === "found" ? request.location : null)).catch(() => null) : null);
+    if (requested) {
+      location = requested;
+      turnFacts.push(`LOCALIZAÇÃO JÁ RESOLVIDA: ${requested.nome} (${requested.endereco}). O ${requested.pinNativo ? "pin no mapa" : "link do Google Maps"} sai automaticamente logo depois da sua resposta: confirme curto, com suas palavras, sem repetir o endereço inteiro e sem dizer que não encontrou a loja.`);
+    }
+  }
+  if (staffRoute) turnFacts.push(`PEDIDO DE PESSOA ESPECÍFICA: o cliente pediu para falar com ${staffRoute.name}. O sistema transfere a conversa para essa pessoa logo depois da sua resposta: confirme isso em uma frase curta e acolhedora, com suas palavras, sem perguntas e sem oferecer produtos (action "reply").`);
+  if (documentRoute) turnFacts.push(`DOCUMENTO RECEBIDO: ${documentRoute.kinds.join(" e ")} lido(s). A conversa segue para a equipe${documentRoute.queue ? ` (${documentRoute.queue})` : ""} conferir logo depois da sua resposta: confirme com suas palavras que recebeu e que a equipe vai conferir, sem detalhar graus nem valores e sem perguntas (action "reply").`);
+  if (input.isReturningContact && input.aiReplies === 0) turnFacts.push("CLIENTE QUE VOLTOU: ele já conversou ou comprou com a gente antes. Dê as boas-vindas de volta com naturalidade, com suas palavras, sem exagero.");
+  const preset = preResult;
   const decision = await aiJson<AgentDecision>(
     [
-      { role: "system", content: system + proactiveBlock },
+      { role: "system", content: [system, ...turnFacts].join("\n\n") },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [forceCatalog && proactiveResult ? { ...stockTool, run: async () => proactiveResult } : stockTool, detailsTool]), locationTool, closeTool] },
+    { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool] },
   );
   let outcome = interpretDecision(decision);
-  // Localização da loja fixada pedida no singular e o modelo não enviou (ou abriu lista de unidades): envia a da sessão.
-  if (storeFollowUp && !location && outcome.action === "reply") {
-    const fixed = await anchoredLocation("").catch(() => null);
-    if (fixed) {
-      location = fixed;
-      outcome = { ...outcome, reply: `Claro! Te mandei a localização da *${fixed.nome.replace(/^Óticas Brasil - /, "")}* aqui embaixo 👇` };
-    }
+  // Transferência já decidida (pessoa pelo nome, documento lido): a confirmação é a que o modelo escreveu; a frase
+  // padrão só cobre resposta vazia do modelo.
+  if (staffRoute || documentRoute) {
+    const written = outcome.action === "no_reply" ? "" : outcome.reply.trim();
+    const routed: AgentOutcome = staffRoute
+      ? { action: "handoff", reply: written || staffConfirmation(input.contactName, staffRoute.name), reason: staffRoute.reason, queue: staffRoute.queue, trigger: "staff", ...(staffRoute.assigneeId ? { assigneeId: staffRoute.assigneeId, assigneeName: staffRoute.assigneeName } : {}), ...(staffRoute.staffQueueId ? { staffQueueId: staffRoute.staffQueueId } : {}) }
+      : { action: "handoff", reply: written || documentReply(documentRoute!.kinds), reason: documentRoute!.reason, queue: documentRoute!.queue, trigger: "prescription" };
+    return { outcome: routed, media, mediaTriggerSkipped, search, injection, stock, documents };
   }
-  // Escolha na vitrine resolvida no código: preço ambíguo → pergunta número/referência; item → ficha + foto mesmo se o
-  // modelo não buscou; nunca a mesma vitrine duas vezes seguidas.
-  if (outcome.action === "reply" && choice?.type === "ambiguous") outcome = { ...outcome, reply: ambiguousChoiceQuestion(choice.items, choice.price) };
-  else if (outcome.action === "reply" && choice?.type === "item" && !cardShown) {
-    const forced = (await stockTool.run({ termoBusca: listedSearchTerm(choice.item), tipoBusca: "modelo_especifico" }).catch(() => null)) as { fichaFormatada?: string } | null;
-    if (forced?.fichaFormatada) outcome = { ...outcome, reply: `${forced.fichaFormatada}\n---SPLIT---\n${CARD_QUESTION}` };
-  } else if (!forceCatalog && !intent.changed && outcome.action === "reply" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(outcome.reply, listed)) {
-    outcome = { ...outcome, reply: pickFromListQuestion(listed) };
+  // Opções já enviadas: se o modelo copiou a mesma lista de novo, ela sai da resposta (o texto dele fica).
+  if (!forceCatalog && !intent.changed && outcome.action === "reply" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(outcome.reply, listed)) {
+    const kept = splitBubbles(outcome.reply).filter((part) => !repeatsShowcase(part, listed));
+    if (kept.length) outcome = { ...outcome, reply: kept.join("\n---SPLIT---\n") };
   }
-  // Pediu a localização e o modelo não enviou (ou disse que não achou a loja): a cascata resolve pelo pedido do cliente.
-  if (!location && outcome.action === "reply" && asksStoreLocation(input.pendingText)) {
-    const request = await locateStoreRequest([input.pendingText]).catch(() => null);
-    if (request?.type === "found") {
-      location = request.location;
-      if (STORE_MISS_REPLY.test(outcome.reply)) outcome = { ...outcome, reply: `Claro! Te mandei a localização da *${request.location.nome.replace(/^Óticas Brasil - /, "")}* aqui embaixo 👇` };
-    }
-  }
-  // Encerramento: tool encerrarAtendimento ou action "resolved", sempre pela trava fixa.
+  // Encerramento: tool encerrarAtendimento ou action "resolved", sempre pela trava fixa (a despedida padrão só cobre
+  // o modelo encerrar sem escrever nada).
   const requestedClose = closeReason as string | null;
   if (requestedClose && outcome.trigger === "no_reply") outcome = { action: "resolved", reply: AI_FAREWELL, reason: requestedClose, queue: "", trigger: "ai" };
   const close = aiCloseDecision({ requested: !forceCatalog && (!!requestedClose || outcome.action === "resolved"), enabled: settings.closeWhenResolved, queued: !!input.queued, assigned: false, asksHuman: asksForHuman(settings, input.pendingText), pendingText: input.pendingText });
@@ -998,66 +1022,51 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   else if (outcome.action === "resolved") outcome = { ...outcome, action: "reply" };
   // Silêncio só faz sentido diante de um fechamento de cortesia; em outra mensagem, a equipe assume.
   if (outcome.action === "no_reply" && !isCourtesyClosing(input.pendingText.replace(/\n+/g, " "))) outcome = { action: "handoff", reply: "", reason: "A IA não soube responder", queue: "", trigger: "no_reply" };
-  // Pergunta informativa ("qual o nome desse modelo?", "que marca é essa?") ou foto de produto: nunca transfere
-  // sem o cliente pedir uma pessoa; responde com a análise da foto desta sessão.
+  // Pergunta informativa ("qual o nome desse modelo?") ou foto de produto: nunca transfere sem o cliente pedir uma
+  // pessoa. Vale o texto do modelo; a resposta pela análise da foto só cobre texto vazio ou de transferência.
   const informative = informativeReply(outcome, { pendingText: input.pendingText, askedHuman: asksForHuman(settings, input.pendingText), queued: !!input.queued, photoThisTurn: !!imageAnalysis, analysis });
-  if (informative) outcome = { ...outcome, action: "reply", reply: informative, reason: asksProductInfo(input.pendingText) ? "Pergunta informativa sobre o produto" : "Foto de produto respondida", queue: "", trigger: "ai" };
-  // Foto com estoque: a ficha (referência exata) ou a vitrine da mesma marca/linha sai mesmo se o modelo não buscou
-  // (ou se respondeu só "sem estoque").
-  if ((photoReply || modelVariantReply) && outcome.action === "reply") outcome = { ...outcome, reply: photoReply || modelVariantReply || outcome.reply };
-  if (proactiveContent && humanMode !== "route") proactiveReply = mergeProactiveReply(outcome.action === "reply" ? outcome.reply : "", proactiveContent);
-  if (proactiveReply && humanMode !== "route") outcome = { ...outcome, action: "reply", reply: proactiveReply, reason: "Busca de catálogo atualizada", queue: "", trigger: "ai" };
-  // Cidade desconhecida: a resposta precisa perguntar onde o cliente está (o modelo escreve; aqui só a garantia).
-  // Uma pergunta simples por vez: cidade primeiro; com a cidade conhecida, grau ou sol; valor só depois.
-  if (!photoReply && outcome.action === "reply") {
-    const cityStep = cityFirst || stockGated;
-    const typeStep = !cityStep && (typeFirst || typeGated);
-    if (cityStep || typeStep) outcome = { ...outcome, reply: oneQualifyingQuestion(outcome.reply, cityStep ? "city" : "type") };
-    const askCity = cityStep && !asksCustomerCity(outcome.reply);
-    const askType = typeStep && !asksGlassesType(outcome.reply);
-    if (askCity || askType) {
-      outcome = { ...outcome, reply: `${outcome.reply.trim()} ${qualifyQuestion({ askCity, askType, askBudget: false, variant: input.aiReplies })}`.trim() };
-    }
+  if (informative) {
+    const own = outcome.reply.trim() && !/transfer|encaminh|atendente|equipe/i.test(outcome.reply) ? outcome.reply : informative;
+    outcome = { ...outcome, action: "reply", reply: own, reason: asksProductInfo(input.pendingText) ? "Pergunta informativa sobre o produto" : "Foto de produto respondida", queue: "", trigger: "ai" };
   }
-  // Transparência comercial: armação de grau → lentes orçadas à parte; óculos de sol → peça completa.
-  if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: priceTransparency(withoutRedundantStoreQuestion(outcome.reply)) };
-  // Fechamento ativo: vitrine de opções termina com pergunta direta de avanço (nunca "Se quiser, posso...").
-  if (outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2)) {
-    outcome = { ...outcome, reply: activeClosing(outcome.reply, { city: catalogState.preferredCity, variant: input.aiReplies }) };
+  // Dados do sistema (ficha, opções da vitrine) junto do texto do modelo: comentário dele → dados → pergunta leve
+  // dele, se houver. Busca feita pelo código (foto, marca/cidade nova, item escolhido) sempre leva os dados.
+  const forcedContent = photoContent ?? preContent;
+  if (forcedContent && humanMode !== "route" && !close.close) {
+    outcome = { ...outcome, action: "reply", reply: withToolContent(outcome.action === "reply" ? outcome.reply : "", forcedContent), reason: outcome.action === "reply" ? outcome.reason : "Busca de catálogo atualizada", queue: "", trigger: "ai" };
+  } else if (outcome.action === "reply" && !close.close && (cardShown || toolShowcase)) {
+    outcome = { ...outcome, reply: withToolContent(outcome.reply, (cardShown ?? toolShowcase)!) };
   }
+  if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: withoutRedundantStoreQuestion(outcome.reply) };
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
-  // Vitrine de opções vira catálogo visual: abertura curta → 1 foto por modelo (até 4) com legenda limpa (nome,
-  // preço, lojas da cidade, sem "Ref.") → pergunta de escolha. Sem nenhuma foto, a vitrine segue em texto limpo.
+  // Vitrine de opções vira catálogo visual: comentário do modelo → 1 foto por modelo (até 4) com legenda limpa (nome,
+  // preço, lojas da cidade, sem "Ref.") → o que o modelo escreveu depois da lista. Sem foto, segue em texto limpo.
   let visualCatalog: VisualCatalog | null = null;
   const bubbles = outcome.action === "reply" && !close.close ? splitBubbles(outcome.reply) : [];
   const showcaseAt = bubbles.findIndex((part) => parseShowcase(part).length >= 2);
   if (showcaseAt >= 0) {
     const items = parseShowcase(bubbles[showcaseAt]);
+    const lines = bubbles[showcaseAt].split("\n");
+    const isItem = (line: string) => /^\s*\d{1,2}[.)]\s/.test(line);
+    const firstItem = lines.findIndex(isItem);
+    const lastItem = lines.length - 1 - [...lines].reverse().findIndex(isItem);
+    const joinText = (parts: string[]) => parts.map((part) => part.trim()).filter(Boolean).join("\n\n");
+    const before = joinText([...bubbles.slice(0, showcaseAt), lines.slice(0, firstItem).join("\n")]);
+    const after = joinText([lines.slice(lastItem + 1).join("\n"), ...bubbles.slice(showcaseAt + 1)]);
     const key = (value: string | null | undefined) => normalizeTerm(cleanReference(value ?? "") ?? "");
     const ordered: ShowcaseModel[] = items.map((item) => shownModels.find((model) => !!item.referencia && key(model.referencia) === key(item.referencia))
       ?? shownModels.find((model) => normalizeTerm(model.nomeComercial) === normalizeTerm(item.nomeComercial) && (item.preco === null || parseBrl(model.precoVenda ?? "") === item.preco))
       ?? { nomeComercial: item.nomeComercial, referencia: item.referencia, categoriaModelo: null, precoVenda: item.preco ? formatBrl(item.preco) : null, totalDisponivelRede: 0, codigos: item.sku ? [item.sku] : [] });
-    let images: Record<string, string> = {};
-    try {
-      if (settings.sendProductImage) images = await catalogImages(ordered, { want: VISUAL_CATALOG_MAX, web: !!imageSearchStatus() });
-    } catch (error) {
-      console.warn(`[ai][catalogo] fotos indisponíveis (${error instanceof Error ? error.message : error})`);
-    }
-    const priceNote = [FRAME_PRICE_NOTE, SUN_PRICE_NOTE].filter((note) => outcome.reply.includes(note)).join(" ");
-    const closing = [priceNote, CATALOG_CLOSINGS[Math.abs(input.aiReplies) % CATALOG_CLOSINGS.length]].filter(Boolean).join("\n\n");
-    visualCatalog = buildVisualCatalog({ models: ordered, images, city: catalogState.preferredCity, opening: "", closing });
+    if (!ordered.some((model) => model.codigos.some((code) => !!catalogPhotos[code]))) await catalogPhotosFor(ordered);
+    visualCatalog = buildVisualCatalog({ models: ordered, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after });
     if (visualCatalog) {
-      const opening = catalogOpening({ count: visualCatalog.items.length, category: catalogState.category, city: catalogState.preferredCity, budget: !!(budget.maxPrice || budget.minPrice) });
-      // Bolhas antes da vitrine (ex.: aviso de transferência da marca) continuam antes da abertura.
-      visualCatalog.opening = [...bubbles.slice(0, showcaseAt), opening].join("\n\n");
-      outcome = { ...outcome, reply: [visualCatalog.opening, ...visualCatalog.items.map((item) => item.caption), visualCatalog.closing].join("\n---SPLIT---\n") };
+      outcome = { ...outcome, reply: [before, ...visualCatalog.items.map((item) => item.caption), after].filter(Boolean).join("\n---SPLIT---\n") };
       catalogState.lastShownProducts = shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })));
       interactiveList = null;
     } else {
-      // Sem foto cadastrada: texto limpo (sem código interno), avisando que as fotos não estão disponíveis.
-      const clean = withoutShowcaseRefs(bubbles[showcaseAt]);
-      bubbles[showcaseAt] = settings.sendProductImage ? `${clean}\n\n${NO_PHOTOS_NOTE}` : clean;
+      // Sem foto cadastrada: a vitrine segue em texto, sem código interno (o modelo já sabia que não havia fotos).
+      bubbles[showcaseAt] = withoutShowcaseRefs(bubbles[showcaseAt]);
       outcome = { ...outcome, reply: bubbles.join("\n---SPLIT---\n") };
       catalogState.lastShownProducts = shownProductsOf(items.map((item, position) => ({ index: item.index, sku: item.sku ?? ordered[position].codigos[0] ?? null, ref: item.referencia, name: item.nomeComercial, priceValue: item.preco, stores: ordered[position].lojas ?? [] })));
     }
@@ -1071,23 +1080,24 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
   if (outcome.action === "reply" && currentCatalogFilterHash && parseShowcase(outcome.reply).length) catalogState.lastCatalogFilterHash = currentCatalogFilterHash;
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList && !visualCatalog ? list : null, imageAnalysis, singleReply: !visualCatalog && (!!photoQuery || !!proactiveReply) && outcome.action === "reply", documents, productInterest: productInterest as { name: string; price: number | null } | null, visualCatalog: visualCatalog && outcome.action === "reply" ? visualCatalog : null };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList && !visualCatalog ? list : null, imageAnalysis, singleReply: false, documents, productInterest: productInterest as { name: string; price: number | null } | null, visualCatalog: visualCatalog && outcome.action === "reply" ? visualCatalog : null };
 }
 
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const run = await runAiAgentInternal(input);
   if (!run.outcome.reply || run.outcome.action === "no_reply") return run;
-  // Saudação do horário + no máximo 1 emoji de expressão na resposta inteira (os repetidos saem, só o 1º fica).
+  // Saudação escrita pelo modelo: só corrige o período errado (ou a saudação repetida); no máximo 1 emoji de
+  // expressão na resposta inteira (os repetidos saem, só o 1º fica).
   const reply = singleEmoji(welcomeReply(run.outcome.reply, {
     first: input.aiReplies === 0,
     returning: input.isReturningContact,
     customer: input.contactName,
     pendingText: input.pendingText,
   }));
-  // Catálogo visual: a abertura (com a saudação, se houver) e o fechamento seguem o texto final.
+  // Catálogo visual: abertura e fechamento (do modelo) seguem o texto final; as legendas ficam no meio.
   const parts = reply.split(/\s*---SPLIT---\s*/);
-  const visualCatalog = run.visualCatalog && parts.length === run.visualCatalog.items.length + 2
-    ? { ...run.visualCatalog, opening: parts[0], closing: parts[parts.length - 1] }
+  const visualCatalog = run.visualCatalog && parts.length === run.visualCatalog.items.length + (run.visualCatalog.opening ? 1 : 0) + (run.visualCatalog.closing ? 1 : 0)
+    ? { ...run.visualCatalog, opening: run.visualCatalog.opening ? parts[0] : "", closing: run.visualCatalog.closing ? parts[parts.length - 1] : "" }
     : run.visualCatalog;
   return {
     ...run,
@@ -1337,9 +1347,9 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Catálogo visual: abertura curta → 1 foto por modelo com legenda limpa (em ordem) → pergunta de escolha. */
 async function sendVisualCatalog(conversation: ChatConversation, catalog: VisualCatalog, typingMessageId?: string | null) {
-  let sent = await sendAutomaticMessage(conversation, catalog.opening, undefined, undefined, AI_AUTHOR);
-  for (const item of catalog.items) {
-    await wait(CATALOG_PHOTO_GAP_MS);
+  let sent = catalog.opening.trim() ? await sendAutomaticMessage(conversation, catalog.opening, undefined, undefined, AI_AUTHOR) : null;
+  for (const [position, item] of catalog.items.entries()) {
+    if (position > 0 || sent) await wait(CATALOG_PHOTO_GAP_MS);
     // Foto recusada (URL quebrada/Meta): a legenda sai em texto e a foto é marcada inválida no cache.
     sent = (await sendAutomaticImage(conversation, item.imageUrl, item.caption, AI_AUTHOR, () => invalidateProductImage(item.sku), item.sku)) ?? sent;
   }

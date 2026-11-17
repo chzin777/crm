@@ -52,7 +52,42 @@ export function extractPreferredCity(text: string, cities: string[]): string | n
     }
   }
   matches.sort((a, b) => b.score - a.score || a.index - b.index || b.length - a.length);
-  return matches[0]?.city ?? null;
+  return matches[0]?.city ?? fuzzyCity(source, candidates);
+}
+
+/** Distância de edição com troca de letras vizinhas ("goianai" ↔ "goiania" = 1). */
+function editDistance(a: string, b: string) {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) rows[i][j] = Math.min(rows[i][j], rows[i - 2][j - 2] + 1);
+    }
+  }
+  return rows[a.length][b.length];
+}
+
+/**
+ * Cidade digitada com erro ("Goiânai", "Brasila", "Anapolis", "aparecida de goiana"): compara palavras e pares de
+ * palavras com os nomes da rede, tolerando 1 erro (2 em nomes longos). Só nomes com 6+ letras, para não confundir
+ * palavras comuns com cidades.
+ */
+function fuzzyCity(source: string, candidates: [string, string][]): string | null {
+  const words = source.split(/[^a-z0-9]+/).filter(Boolean);
+  const grams = [...words, ...words.slice(1).map((word, index) => `${words[index]} ${word}`), ...words.slice(2).map((word, index) => `${words[index]} ${words[index + 1]} ${word}`)];
+  let best: { city: string; distance: number; length: number } | null = null;
+  for (const [alias, city] of candidates) {
+    if (alias.length < 6) continue;
+    const limit = alias.length >= 10 ? 2 : 1;
+    for (const gram of grams) {
+      if (Math.abs(gram.length - alias.length) > limit) continue;
+      const distance = editDistance(gram, alias);
+      if (distance > limit || distance === 0) continue;
+      if (!best || distance < best.distance || (distance === best.distance && alias.length > best.length)) best = { city: canonicalCity(city), distance, length: alias.length };
+    }
+  }
+  return best?.city ?? null;
 }
 
 export function sanitizeCatalogContext(value: unknown): CatalogContext {

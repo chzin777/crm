@@ -30,9 +30,10 @@ describe("saudação informal pura", () => {
     expect(detectStaffRequest("fala com o Leandro", STAFF, "Ana Souza")).toMatchObject({ name: "Leandro" });
   });
 
-  it("saudação repetida em turno seguinte recebe abertura do horário, sem nome inventado", () => {
+  it("a saudação é do modelo: o código não acrescenta frase pronta, só corrige o período errado", () => {
     const now = new Date("2026-11-17T17:00:00Z"); // 14h em Brasília
-    expect(welcomeReply("Em que posso te ajudar?", { first: false, customer: "Ana Souza", pendingText: "opaaa", now })).toBe("Boa tarde, Ana! 😊 Em que posso te ajudar?");
-    expect(welcomeReply("Em que posso te ajudar?", { first: true, customer: "5562999998888", pendingText: "eai", now })).toBe("Boa tarde! 😊 Em que posso te ajudar?");
+    expect(welcomeReply("Opa, tudo certo? Me conta o que você procura.", { first: false, customer: "Ana Souza", pendingText: "opaaa", now })).toBe("Opa, tudo certo? Me conta o que você procura.");
+    expect(welcomeReply("Bom dia! Me conta o que você procura.", { first: true, customer: "5562999998888", pendingText: "eai", now })).toBe("Boa tarde! Me conta o que você procura.");
+    expect(welcomeReply("Me conta o que você procura.", { first: true, customer: "Ana Souza", pendingText: "eai", now })).toBe("Me conta o que você procura.");
   });
 });

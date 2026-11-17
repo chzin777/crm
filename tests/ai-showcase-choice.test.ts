@@ -27,7 +27,8 @@ describe("vitrine de marca numerada e identificável", () => {
     expect(fallbackReference("ARM RADDA    OPBR 455 C2", "RADDA")).toBe("OPBR 455");
     expect(fallbackReference("ARM RADDA", "RADDA")).toBeNull();
     const result = raddaShowcase();
-    expect(result.vitrineFormatada?.split("\n").slice(2)).toEqual([
+    // Sem cabeçalho fixo: só as linhas numeradas (o comentário antes é da IA).
+    expect(result.vitrineFormatada?.split("\n")).toEqual([
       "1. 👓 *Radda (Ref. JC60020)* — R$ 120,00",
       "2. 👓 *Radda (Ref. JC2501)* — R$ 120,00",
       "3. 👓 *Radda (Ref. JC60016)* — R$ 120,00",

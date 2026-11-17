@@ -196,11 +196,12 @@ describe("busca com 1 único modelo na cidade", () => {
 
 describe("saudação informal pura no agente", () => {
   it.each(["opaa", "oiii", "bom diaaa", "eai"])("%j → abertura acolhedora, sem tratar como nome/loja/setor", async (text) => {
-    model.script = async () => ({ reply: "Em que posso te ajudar?", action: "reply" });
+    model.script = async () => ({ reply: "Oi, Michel! Me conta o que você está procurando.", action: "reply" });
     const run = await simulateAgent(settings, [{ from: "customer", text }], "user-1", undefined, { contactName: "Michel" });
     expect(run.action).toBe("reply");
     expect(run.handoffQueue).toBe("");
-    expect(run.reply).toMatch(/^(Bom dia|Boa tarde|Boa noite), Michel! 😊 Em que posso te ajudar\?$/);
+    // A abertura é a do modelo, sem frase pronta acrescentada pelo código.
+    expect(run.reply).toBe("Oi, Michel! Me conta o que você está procurando.");
     expect(run.reply).not.toMatch(/falar com/i);
     expect(calls.prompts.at(-1)).toContain("SAUDAÇÃO PURA NESTE TURNO");
     expect(calls.prompts.at(-1)).not.toContain("ATENÇÃO NESTE TURNO");
@@ -210,7 +211,8 @@ describe("saudação informal pura no agente", () => {
 
 describe("isolamento de sessão", () => {
   it("sem cidade pergunta antes de listar; com a cidade lista só lá; a correção abre com as palavras da IA", async () => {
-    // Turno 1: marca pedida, cidade desconhecida → nenhuma consulta de estoque, pergunta a cidade.
+    // Turno 1: marca pedida, cidade desconhecida → nenhuma consulta de estoque, a IA pergunta a cidade.
+    model.script = async () => ({ reply: "Que presente lindo! Em qual cidade você está?", action: "reply" });
     const first = await simulateAgent(settings, [{ from: "customer", text: "Queria armação da miumiu para presentear minha esposa" }], "user-1", undefined, { contactName: "Michel" });
     expect(calls.stock).toHaveLength(0);
     expect(first.reply).toMatch(/cidade/i);
@@ -247,7 +249,7 @@ describe("isolamento de sessão", () => {
     let gated: unknown = null;
     model.script = async (tools) => {
       gated = await tools.consultarEstoqueProduto({ tipo: "grau", sortBy: "price_asc" });
-      return { reply: "Temos sim, e com ótimo custo-benefício!", action: "reply" };
+      return { reply: "Consigo te mostrar umas bem em conta! De qual cidade você fala?", action: "reply" };
     };
     const history: PlaygroundMessage[] = [{ from: "customer", text: "vocês têm armação de grau barata?" }];
     const ask = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
@@ -282,21 +284,20 @@ describe("isolamento de sessão", () => {
   it("\"quero um óculos mais em conta\" sem cidade nem tipo → pergunta só a cidade; depois só grau ou sol, sem catálogo", async () => {
     model.script = async (tools) => {
       await tools.consultarEstoqueProduto({ sortBy: "price_asc" });
-      return { reply: "Temos sim, várias opções!", action: "reply" };
+      return { reply: "Claro! Em qual cidade você está?", action: "reply" };
     };
     const ask = await simulateAgent(settings, [{ from: "customer", text: "quero um óculos mais em conta" }], "user-1", undefined, { contactName: "Ana" });
     expect(calls.stock).toHaveLength(0);
-    expect(ask.reply).toMatch(/cidade/i);
-    expect(ask.reply).not.toMatch(/de grau ou de sol/);
-    expect(ask.reply).not.toMatch(/faixa de valor|quanto|R\$/);
-    expect(ask.reply).not.toMatch(/\d\.\s/);
-    expect(calls.prompts.at(-1)).toContain("perguntando SOMENTE de qual cidade");
+    // A pergunta é a do modelo (nada acrescentado pelo código); a regra de 1 pergunta está no prompt.
+    expect(ask.reply).toBe("Claro! Em qual cidade você está?");
+    expect(calls.prompts.at(-1)).toContain("pergunte só a cidade dele");
+    expect(calls.prompts.at(-1)).toContain("UMA PERGUNTA SÓ");
 
     // Cidade conhecida, tipo ainda não: continua sem listar e pergunta só grau ou sol.
     const history: PlaygroundMessage[] = [{ from: "customer", text: "quero um óculos mais em conta" }, { from: "ai", text: ask.reply }, { from: "customer", text: "sou de Goiânia" }];
     model.script = async (tools) => {
       const result = (await tools.consultarEstoqueProduto({ sortBy: "price_asc", cidade: "Goiânia" })) as { cenario: string };
-      return { reply: result.cenario === "tipo_desconhecido" ? "Perfeito!" : "Olha essas:", action: "reply" };
+      return { reply: result.cenario === "tipo_desconhecido" ? "Perfeito! E você procura de grau ou de sol?" : "Olha essas:", action: "reply" };
     };
     const type = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
     expect(calls.stock).toHaveLength(0);
@@ -307,16 +308,16 @@ describe("isolamento de sessão", () => {
     history.push({ from: "ai", text: type.reply }, { from: "customer", text: "de grau, até 250" });
     model.script = async (tools) => {
       const result = (await tools.consultarEstoqueProduto({ tipo: "grau", maxPrice: 250, sortBy: "price_asc", cidade: "Goiânia" })) as { vitrineFormatada: string };
-      return { reply: `Separei estas em Goiânia:\n${result.vitrineFormatada}`, action: "reply" };
+      return { reply: `Separei estas em Goiânia, leves pro dia a dia:\n${result.vitrineFormatada}\n---SPLIT---\nO valor é só da armação; as lentes a gente orça pela sua receita.`, action: "reply" };
     };
     const offer = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
     expect(calls.stock.at(-1)).toMatchObject({ tipo: "grau", maxPrice: 250 });
     const text = offer.messages.join("\n");
     expect(text).toMatch(/1\. 👓 \*Vogue/);
-    expect(text).toContain("esses valores são da armação; as lentes de grau são orçadas à parte, conforme a sua receita");
-    // Aviso das lentes antes do CTA ativo, que fecha a resposta.
-    const cta = text.search(/Qual desses estilos combinou mais com você\?|Quer que eu verifique em qual loja|Qual deles você quer ver de pertinho primeiro\?/);
-    expect(cta).toBeGreaterThan(text.indexOf("as lentes de grau são orçadas à parte"));
+    // O aviso das lentes é escrito pelo modelo (a regra está no prompt); o código não acrescenta nota nem CTA fixo.
+    expect(text).toContain("as lentes a gente orça pela sua receita");
+    expect(calls.prompts.at(-1)).toContain("lentes são orçadas conforme a receita");
+    expect(text).not.toMatch(/Qual desses estilos combinou mais com você\?|esses valores são da armação/);
   });
 
   it("orçamento dito antes da cidade vira filtro mesmo se a IA esquecer de passar", async () => {
@@ -457,12 +458,13 @@ describe("fluxo completo RB3025 → mais detalhes → localização da loja", ()
     const turn3 = await simulateAgent(settings, ask, "user-1", undefined, { sessionId: "sessao-rb3025" });
     expect(turn3.location?.endereco).toBe("Rua 9, 2106");
 
-    // Turno 3b: o modelo nem chama a ferramenta e lista 4 lojas → o backend envia a localização fixada mesmo assim.
-    model.script = async () => ({ reply: "Temos 4 lojas no Setor Marista:\n• Rua 9, 2106\n• Rua 9, 1855\n• Rua 27, 2106\n• Rua 135, 208\nQual delas?", action: "reply" });
+    // Turno 3b: o modelo nem chama a ferramenta → a loja fixada já chega resolvida no prompt (fato), ele confirma com
+    // as próprias palavras e o backend envia a localização; nenhuma frase pronta substitui a resposta.
+    model.script = async () => ({ reply: "Prontinho, é a do Setor Marista, pertinho de você.", action: "reply" });
     const fallback = await simulateAgent(settings, ask, "user-1", undefined, { sessionId: "sessao-rb3025" });
     expect(fallback.location?.endereco).toBe("Rua 9, 2106");
-    expect(fallback.messages.join("\n")).not.toContain("1855");
-    expect(fallback.messages[0]).toContain("Loja Setor Marista");
+    expect(calls.prompts.at(-1)).toMatch(/LOCALIZAÇÃO JÁ RESOLVIDA: [^\n]*Setor Marista[^\n]*Rua 9, 2106/);
+    expect(fallback.messages).toEqual(["Prontinho, é a do Setor Marista, pertinho de você."]);
   });
 });
 
@@ -589,11 +591,13 @@ describe("localização de loja listada pelo estoque (cascata sessão → CRM �
     };
     const viaTool = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-prada" });
     expect(viaTool.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
-    // Modelo responde "não identifiquei" sem chamar a ferramenta: o backend resolve e envia mesmo assim.
-    model.script = async () => ({ reply: "Não identifiquei essa unidade no cadastro. Pode me dizer o bairro?", action: "reply" });
+    // Modelo não chama a ferramenta: a loja já chega resolvida no prompt (fato) e o backend envia a localização;
+    // a confirmação é a do modelo, sem regex trocando o texto dele.
+    model.script = async () => ({ reply: "Prontinho! É a do Jardim Goiás.", action: "reply" });
     const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-prada" });
     expect(fallback.location?.endereco).toBe("Av. Deputado Jamel Cecilio, 3300");
-    expect(fallback.messages.join("\n")).not.toMatch(/não identifiquei/i);
+    expect(calls.prompts.at(-1)).toContain("LOCALIZAÇÃO JÁ RESOLVIDA");
+    expect(fallback.messages).toEqual(["Prontinho! É a do Jardim Goiás."]);
   });
 });
 
@@ -602,7 +606,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     // Turno 1: busca ampla → vitrine numerada com referências reais (o item sem REF vai para o fim, com a ref. do cadastro).
     model.script = async (tools) => {
       const result = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { vitrineFormatada: string };
-      return { reply: `${result.vitrineFormatada}\n---SPLIT---\nGostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?`, action: "reply" };
+      return { reply: `Tem sim! Separei as Radda que estão aqui:\n${result.vitrineFormatada}\n---SPLIT---\nAs fotos não estão no sistema agora, mas me diz qual número te chamou atenção.`, action: "reply" };
     };
     const history: PlaygroundMessage[] = [{ from: "customer", text: "ta, tem radda?" }];
     const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
@@ -610,20 +614,26 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     expect(turn1.messages[0]).toContain("1. 👓 *Radda* — R$ 120,00");
     expect(turn1.messages[0]).toContain("4. 👓 *Radda* — R$ 120,00");
     expect(turn1.messages[0]).not.toMatch(/Ref\./);
-    expect(turn1.messages[0]).toContain("fotos desses modelos não estão disponíveis");
+    // A ferramenta já avisou o modelo de que não há fotos (fotosNoCatalogo: 0); o aviso é dele, não do código.
+    expect(turn1.messages.join("\n")).toContain("As fotos não estão no sistema agora");
     expect(turn1.catalogContext?.lastShownProducts?.map((item) => item.ref)).toEqual(["JC60020", "JC2501", "JC60016", "OPBR 455"]);
     history.push(...turn1.messages.map((text, index): PlaygroundMessage => ({ from: "ai", text, ...(index === 0 ? { catalogContext: turn1.catalogContext } : {}) })));
 
     // Turno 2: "esse de 120" com 4 itens a R$ 120 → o modelo tenta a busca ampla de novo; nada de vitrine repetida.
     const searchesBefore = calls.stock.length;
     model.script = async (tools) => {
-      const again = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { vitrineFormatada?: string };
-      return { reply: again.vitrineFormatada ?? turn1.messages[0], action: "reply" };
+      const again = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { vitrineFormatada?: string; orientacao?: string };
+      seen = again;
+      return { reply: "Os quatro estão por R$ 120! Qual número você quer ver primeiro?", action: "reply" };
     };
+    let seen: { vitrineFormatada?: string; orientacao?: string } | null = null;
     history.push({ from: "customer", text: "deixa eu ver esse de 120 ai" });
     const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(calls.stock.length).toBe(searchesBefore);
-    expect(turn2.messages.join("\n")).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número você quer ver primeiro? (ex.: o 1 ou o 2)");
+    // A ferramenta não devolve a vitrine de novo e orienta perguntar o número (sem frase pronta nem código "Ref.").
+    expect(seen).toMatchObject({ vitrineJaEnviada: true, opcoesComEssePreco: [1, 2, 3, 4] });
+    expect(seen!.orientacao).not.toMatch(/Ref\.|"/);
+    expect(turn2.messages.join("\n")).toBe("Os quatro estão por R$ 120! Qual número você quer ver primeiro?");
     expect(turn2.image).toBeUndefined();
     history.push(...turn2.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
 
@@ -689,15 +699,15 @@ describe("foto de óculos: cascata referência → marca/linha e pergunta inform
   const PHOTO = { name: "oculos.jpg", mime: "image/jpeg", data: new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70]) };
   it("foto de Prada Linea Rossa sem a ref exata → identifica, avisa e mostra os modelos da linha; \"Qual o nome desse modelo?\" responde sem transferir", async () => {
     model.vision = { kind: "produto", marca: "Prada", linha: "Linea Rossa", modeloOuReferenciaProvavel: "PS 05YS", caracteristicasVisuais: { tipo: "Óculos de sol", formato: "Retangular", cor: "Preto fosco" } };
-    // O modelo erra como no caso real: diz só "sem estoque" e não busca.
-    model.script = async () => ({ reply: "No momento, esse modelo está sem estoque na rede.", action: "reply" });
+    // A IA recebe os fatos (modelo identificado, indisponível na cidade, outras opções da linha) e escreve com as
+    // próprias palavras; a vitrine real da linha é anexada pelo sistema depois do comentário dela.
+    model.script = async () => ({ reply: "Esse aí é um Prada Linea Rossa! Ele não está em Goiânia agora, mas olha outras da mesma linha:", action: "reply" });
     const history: PlaygroundMessage[] = [{ from: "customer", text: "" }];
     const turn1 = await simulateAgent(settings, history, "user-1", PHOTO, { sessionId: "sessao-foto", knownCity: "Goiânia" });
     expect(turn1.action).toBe("reply");
     expect(turn1.messages).toHaveLength(1);
-    expect(turn1.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite)!/);
-    expect(turn1.messages[0]).toContain("Esse modelo *Prada Linea Rossa* não está disponível em Goiânia.");
-    expect(turn1.messages.join("\n")).not.toMatch(/sem estoque na rede/i);
+    expect(calls.prompts.at(-1)).toContain("mas esse modelo não está disponível em Goiânia");
+    expect(turn1.messages[0]).toMatch(/^Esse aí é um Prada Linea Rossa! Ele não está em Goiânia agora, mas olha outras da mesma linha:\s+1\. /);
     expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Prada Linea Rossa", tipoBusca: "marca_ampla" });
     expect(turn1.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:PS 07RV", "product_select:PS 02WV"]);
     expect(turn1.imageAnalysis).toMatchObject({ marca: "Prada", linha: "Linea Rossa", modeloProvavel: "PS 05YS", tipo: "Óculos de sol" });
@@ -735,21 +745,23 @@ describe("cliente pede um atendente pelo nome", () => {
     expect(turn1.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite), Vivi! 😊 Em que posso te ajudar\?$/);
     history.push({ from: "ai", text: turn1.messages[0] }, { from: "customer", text: "Leandro" });
 
-    // O modelo erraria como no print ("Leandro, em que posso te ajudar?"): o código decide antes dele.
-    model.script = async () => ({ reply: "Leandro, em que posso te ajudar?", action: "reply" });
+    // O código decide a transferência para o Leandro (não vira o nome dela), mas quem escreve a confirmação é o LLM,
+    // com o fato no prompt; nenhuma frase pronta.
+    model.script = async () => ({ reply: "Claro, Vivi! Já te passo pro Leandro, ele te responde por aqui.", action: "reply" });
     const prompts = calls.prompts.length;
     const turn2 = await simulateAgent({ ...settings, handoffMessage: "" }, history, "user-1", undefined, { sessionId: "sessao-vivi", contactName: "Vivi" });
-    expect(calls.prompts.length).toBe(prompts);
+    expect(calls.prompts.length).toBe(prompts + 1);
+    expect(calls.prompts.at(-1)).toContain("PEDIDO DE PESSOA ESPECÍFICA: o cliente pediu para falar com Leandro Martins");
     expect(turn2).toMatchObject({ action: "handoff", trigger: "staff", reason: "Cliente solicitou atendimento direto com Leandro Martins.", assignee: "Leandro Martins" });
-    expect(turn2.messages).toEqual(["Claro, Vivi! Vou te transferir agora mesmo para falar com o Leandro. Só um instante! 😊"]);
-    expect(turn2.messages.join(" ")).not.toMatch(/^Leandro,/);
+    expect(turn2.messages).toEqual(["Claro, Vivi! Já te passo pro Leandro, ele te responde por aqui."]);
   });
 
   it("\"Preciso falar com Leandro\" → confirmação ao cliente antes da fila (nunca transferência silenciosa)", async () => {
     model.script = async () => ({ reply: "", action: "handoff", reason: "Cliente pediu o Leandro" });
     const turn = await simulateAgent({ ...settings, handoffMessage: "" }, [{ from: "customer", text: "Preciso falar com Leandro" }], "user-1", undefined, { sessionId: "sessao-leandro", contactName: "Vivi" });
     expect(turn.action).toBe("handoff");
-    expect(turn.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite), Vivi! 😊 Claro, Vivi! Vou te transferir/);
+    // Resposta vazia do modelo: só aí entra a confirmação padrão (nunca transferência silenciosa).
+    expect(turn.messages[0]).toMatch(/^Claro, Vivi! Vou te transferir/);
   });
 
   it("transferência decidida pela IA sem texto e sem mensagem configurada: aviso padrão em vez de silêncio", async () => {

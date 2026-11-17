@@ -107,7 +107,7 @@ export const LOCATION_TOOL = {
 /** Regra fixa do prompt: pedido de localização vira pin/link de verdade. */
 export const LOCATION_RULES = [
   "LOCALIZAÇÃO (regra fixa): quando o cliente pedir a localização, o mapa, como chegar ou onde fica a loja, chame enviarLocalizacaoLoja com a loja da conversa. A localização (pin no mapa ou link do Google Maps) é enviada automaticamente logo depois da sua resposta.",
-  "Nesse caso responda curto, sem repetir o endereço inteiro (ex.: \"Claro! Te mandei a localização da *Loja Setor Bueno* aqui embaixo 👇\"). Se a ferramenta devolver mais de uma loja possível, pergunte qual delas listando cada opção com o endereço completo exatamente como veio em lojasPossiveis (ex.: \"• *Loja Setor Sul* — Rua 95\" e \"• *Loja Setor Sul* — Rua 90, 118\"). Nunca diga que não consegue mandar a localização.",
+  "Nesse caso responda curto, com suas palavras, sem repetir o endereço inteiro. Se a ferramenta devolver mais de uma loja possível, pergunte qual delas listando cada opção com o endereço completo exatamente como veio em lojasPossiveis (• *Nome da loja* — endereço). Nunca diga que não consegue mandar a localização.",
   "NUNCA pergunte \"Qual dessas unidades você quer?\" listando nomes iguais sem endereço. Se o cliente disser \"essa loja\" (ou \"dessa loja do setor X\") referindo-se à unidade que você acabou de informar, chame enviarLocalizacaoLoja com o nome e o endereço dessa unidade (ex.: \"Setor Sul Rua 95\") e envie direto, sem pedir confirmação.",
 ].join("\n");
 

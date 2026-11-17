@@ -233,14 +233,14 @@ export const DETAILS_TOOL = {
 
 /** Regra fixa do prompt: pedido de detalhes vira ficha real, nunca resposta genérica. */
 export const DETAILS_RULES = [
-  "DETALHES DO PRODUTO (regra fixa): quando o cliente pedir \"mais detalhes\", \"como é esse modelo?\", \"quais os diferenciais?\", \"do que é feito?\" ou parecido, chame buscarDetalhesProdutoWeb com o produto da conversa e responda com as características reais devolvidas (material, formato, público, lentes/proteção, funções especiais) e as cores/variações com saldo no ERP.",
-  "Proibido responder pedido de detalhes com frase vazia (\"Posso te ajudar com disponibilidade e lojas\") ou repetir só a loja e o estoque.",
+  "DETALHES DO PRODUTO (regra fixa): quando o cliente quiser saber mais sobre o modelo (detalhes, diferenciais, material, como ele é), chame buscarDetalhesProdutoWeb com o produto da conversa e responda com as características reais devolvidas (material, formato, público, lentes/proteção, funções especiais) e as cores/variações com saldo no ERP.",
+  "Nunca responda pedido de detalhes com frase vazia nem repetindo só a loja e o estoque.",
 ].join("\n");
 
 /** Regra fixa do prompt: ficha no template visual na 1ª consulta do modelo e descrição técnica em "mais detalhes". */
 export const PRODUCT_CARD_RULES = [
   PRODUCT_CARD_TEMPLATE,
-  "Quando o cliente pedir \"mais detalhes\", \"mais informações\" ou \"como é\": NÃO repita a ficha nem a lista de lojas; chame buscarDetalhesProdutoWeb e entregue a descricaoDetalhada (materiais, diferenciais técnicos, conforto e cores em estoque) em texto natural, terminando com um próximo passo.",
+  "Quando o cliente pedir mais detalhes ou informações do modelo: NÃO repita a ficha nem a lista de lojas; chame buscarDetalhesProdutoWeb e entregue a descricaoDetalhada (materiais, diferenciais técnicos, conforto e cores em estoque) em texto natural, com suas palavras.",
 ].join("\n");
 
 /** O cliente pediu para ver o modelo/foto ("manda a foto", "tem imagem?", "quero ver"). */
@@ -264,8 +264,8 @@ export function shouldSendProductPhoto(input: { sku: string; sentSkus: Iterable<
  */
 export function cardGuidance() {
   return [
-    "FICHA DO PRODUTO: use o campo fichaFormatada exatamente como veio (sem reescrever, sem acrescentar ou tirar linhas) como 1ª bolha.",
-    `Depois escreva ---SPLIT--- e a pergunta de condução (ex.: "${CARD_QUESTION}").`,
+    "FICHA DO PRODUTO: antes dela, um comentário curto com suas palavras; depois copie fichaFormatada exatamente como veio (sem reescrever, sem acrescentar ou tirar linhas).",
+    "Se couber, uma pergunta leve de próximo passo após ---SPLIT---, escrita do zero.",
     "Se a ficha deste modelo já foi enviada antes nesta conversa, não repita: responda só o que o cliente perguntou agora.",
   ].join("\n");
 }

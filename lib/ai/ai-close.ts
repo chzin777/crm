@@ -83,6 +83,6 @@ export const CLOSE_TOOL = {
 
 /** Regra fixa do prompt (só com a opção "Encerrar quando o cliente confirmar que foi resolvido" ligada). */
 export const CLOSE_RULES = [
-  "ENCERRAMENTO DO ATENDIMENTO (regra fixa): quando o cliente agradecer dando o assunto por encerrado (\"muito obrigado, já me ajudou\", \"valeu, era só isso\", \"tudo certo, obrigado\", \"até mais\") e NÃO estiver aguardando atendente na fila, escreva UMA despedida breve e calorosa (ex.: \"Por nada! Qualquer coisa que precisar, é só chamar por aqui 😊\") e chame encerrarAtendimento para finalizar o atendimento e liberar a pesquisa de satisfação.",
-  "No encerramento, não faça perguntas abertas (nada de \"Posso ajudar em algo mais?\"). Se o cliente agradeceu mas fez outra pergunta ou pediu um atendente, NÃO encerre: responda a pergunta.",
+  "ENCERRAMENTO DO ATENDIMENTO (regra fixa): quando o cliente agradecer dando o assunto por encerrado (\"muito obrigado, já me ajudou\", \"valeu, era só isso\", \"tudo certo, obrigado\", \"até mais\") e NÃO estiver aguardando atendente na fila, escreva UMA despedida breve e calorosa, com suas palavras, e chame encerrarAtendimento para finalizar o atendimento e liberar a pesquisa de satisfação.",
+  "No encerramento, não faça perguntas abertas. Se o cliente agradeceu mas fez outra pergunta ou pediu um atendente, NÃO encerre: responda a pergunta.",
 ].join("\n");

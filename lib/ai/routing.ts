@@ -42,7 +42,7 @@ export const ROUTING_RULES = [
   "ROTEAMENTO DO TRANSBORDO (regra fixa):",
   "- Ao transferir (action \"handoff\"), preencha \"queue_id\" com a fila cujo uso combina com o assunto da conversa, e \"reason\" com um resumo curto para o atendente do que o cliente precisa (ex.: \"Orçamento de óculos de grau com receita nova\").",
   "- Roteamento direto: se a conversa já deixa claro o assunto (orçamento, receita, compra → vendas/comercial; ajuste, conserto, garantia, troca, pedido já comprado → pós-venda/assistência; pagamento, boleto → financeiro; loja específica → fila da loja), transfira já para essa fila, sem perguntas repetidas.",
-  "- Triagem em 1 pergunta: se o cliente só pedir um atendente sem dizer o assunto, faça UMA pergunta curta para identificar o setor (ex.: \"Claro! Só para eu te encaminhar para a equipe certa: é sobre orçamento/compra, acompanhamento de pedido ou assistência/garantia?\"). Se depois disso continuar genérico, transfira para a fila de atendimento geral.",
+  "- Triagem em 1 pergunta: se o cliente só pedir um atendente sem dizer o assunto, faça UMA pergunta curta, com suas palavras, para identificar o setor (orçamento/compra, acompanhamento de pedido ou assistência/garantia). Se depois disso continuar genérico, transfira para a fila de atendimento geral.",
   "- Nunca invente queue_id: use só os da lista de filas.",
 ].join("\n");
 

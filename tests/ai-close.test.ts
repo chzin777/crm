@@ -68,7 +68,7 @@ describe("encerramento pela IA no fluxo oficial (encerra no banco + pesquisa de 
     const on = buildSystemPrompt({ settings, info: "" });
     expect(on).toContain(CLOSE_RULES);
     expect(CLOSE_RULES).toContain("chame encerrarAtendimento para finalizar o atendimento e liberar a pesquisa de satisfação");
-    expect(CLOSE_RULES).toContain("nada de \"Posso ajudar em algo mais?\"");
+    expect(CLOSE_RULES).toContain("não faça perguntas abertas");
     expect(buildSystemPrompt({ settings: { ...settings, closeWhenResolved: false }, info: "" })).not.toContain(CLOSE_RULES);
   });
 });

@@ -69,12 +69,15 @@ describe("ficha de produto no template visual do negócio", () => {
     expect(parseSheet(JSON.stringify({ miniDescricao: "x", formato: "quadrada", acabamento: null }))).toMatchObject({ formato: "Quadrada", acabamento: null });
   });
 
-  it("prompt traz o template exato e o resultado orienta copiar a fichaFormatada", () => {
+  it("prompt orienta comentário próprio + fichaFormatada copiada, sem abertura pronta", () => {
     const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(PRODUCT_CARD_TEMPLATE);
-    for (const piece of ["Temos sim! 😊", "🕶️ *[Nome Comercial] | Ref. [Referência]*", "Ⓜ️ *Modelo:*", "👓 *Armação:*", "✨ *Acabamento:*", "💵 *Valor:*", "📦 *Estoque:*", "📍 *[Nome da Loja]* - [Cidade] ([Endereço completo]) — [X] unidade(s)", "---SPLIT---", "nunca escreva \"Não informado\" ou \"N/A\""]) {
+    for (const piece of ["copie fichaFormatada exatamente como veio", "comentário curto, com suas palavras", "---SPLIT---", "Nunca escreva atributos sem dado"]) {
       expect(PRODUCT_CARD_TEMPLATE).toContain(piece);
     }
-    expect(cardGuidance()).toContain("use o campo fichaFormatada exatamente como veio");
+    expect(PRODUCT_CARD_TEMPLATE).not.toMatch(/Temos sim/);
+    expect(cardGuidance()).toContain("copie fichaFormatada exatamente como veio");
+    // Sem abertura, a ficha começa direto no nome do produto (o comentário é do modelo).
+    expect(buildProductCard(justin, "").startsWith("🕶️ *Ray-Ban Justin | Ref. RB4165*")).toBe(true);
   });
 });

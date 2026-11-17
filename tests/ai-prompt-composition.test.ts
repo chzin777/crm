@@ -75,7 +75,7 @@ import { composeSystemPrompt, loadPromptModule, PROMPT_MODULES, selectPromptModu
 import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { brandFallbackReply, brandSearchArgs, equivalentBrands } from "@/lib/ai/catalog-search";
-import { updateCatalogContext, EMPTY_CATALOG_CONTEXT } from "@/lib/ai/catalog-context";
+import { extractPreferredCity, updateCatalogContext, EMPTY_CATALOG_CONTEXT } from "@/lib/ai/catalog-context";
 import { singleEmoji } from "@/lib/ai/response-opening";
 import { resolveListedChoice } from "@/lib/ai/showcase-choice";
 
@@ -111,7 +111,7 @@ describe("composeSystemPrompt carrega só os módulos do estágio/intenção", (
     const later = composeSystemPrompt({ hasGreetedInSession: true, text: "estou procurando armações miu miu", activeBrand: "Miu Miu" });
     expect(later).not.toContain(loadPromptModule("saudacao"));
     expect(later).toContain("SEM SAUDAÇÃO REPETIDA");
-    expect(later).toContain('PROIBIDO iniciar a resposta com "Bom dia", "Boa tarde", "Boa noite", "Oi"');
+    expect(later).toContain("não comece a resposta com bom dia, boa tarde, boa noite, oi ou olá");
   });
 
   it("crediário não carrega vitrine nem qualificação", () => {
@@ -196,7 +196,7 @@ describe("fluxo multi-turno: saudação única, marca ativa e cidade", () => {
     // 3) Estilo: o modelo tenta "modelo específico"; vira vitrine da marca, barrada sem cidade → pede a cidade.
     const t3 = await turn("mais presença no rosto", async (tools) => {
       await tools.consultarEstoqueProduto({ termoBusca: "Miu Miu mais presença", tipoBusca: "modelo_especifico" });
-      return { reply: "Boa tarde! Ótima escolha de estilo.", action: "reply" };
+      return { reply: "Boa tarde! Ótima escolha de estilo. Em qual cidade você está?", action: "reply" };
     });
     expect(t3.result.catalogContext?.activeBrand).toBe("Miu Miu");
     expect(t3.stock).toHaveLength(0);
@@ -205,14 +205,18 @@ describe("fluxo multi-turno: saudação única, marca ativa e cidade", () => {
     expect(t3.result.reply).toMatch(/cidade/i);
 
     // 4) Goiânia: busca a marca na cidade; sem saldo → transferência de Brasília + alternativas locais na mesma resposta.
-    const t4 = await turn("eu falo de Goiânia", async () => ({ reply: "Boa tarde! Vou ver aqui.", action: "reply" }));
+    const t4 = await turn("eu falo de Goiânia", async () => ({ reply: "Boa tarde! Em Goiânia a Miu Miu está sem saldo agora, mas tem em Brasília e dá pra pedir a transferência pra cá. Enquanto isso, olha estas que têm a mesma pegada:", action: "reply" }));
+    // Os fatos da marca sem saldo (outras praças + alternativas locais) chegam ao modelo no mesmo payload.
+    expect(t4.prompt).toContain("\"disponivelEmOutrasCidades\":[\"Brasília\"]");
+    expect(t4.prompt).toContain("alternativasNaCidade");
     expect(t4.stock[0]).toMatchObject({ marca: "Miu Miu", cidade: "Goiânia", tipoBusca: "marca_ampla" });
     expect(t4.stock).toEqual(expect.arrayContaining([expect.objectContaining({ marca: "Miu Miu", cidade: "Brasília" }), expect.objectContaining({ marca: "Prada", cidade: "Goiânia" })]));
     expect(t4.stock.some((args) => args.tipoBusca === "modelo_especifico")).toBe(false);
     expect(t4.result.reply).toContain("Brasília");
     expect(t4.result.reply).toMatch(/transferência/i);
     expect(t4.result.reply).toMatch(/prada/i);
-    expect(t4.result.reply).toMatch(/vogue/i);
+    // No máximo 3 alternativas reais na cidade do cliente.
+    expect(t4.result.catalogContext?.lastShownProducts?.length ?? 0).toBeLessThanOrEqual(3);
     expect(t4.result.reply).not.toMatch(/Não encontrei/i);
     expect(t4.result.reply).not.toMatch(/boa tarde/i);
     expect(t4.result.interactiveList?.rows.length).toBeGreaterThanOrEqual(2);
@@ -254,9 +258,13 @@ describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
 
   it("óculos de sol em Goiânia com fotos: no máximo 4 itens com imageUrl e legenda \"Nome — R$ Preço\" + lojas, sem Ref.", async () => {
     photos.byCode = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`r${n}`, `https://img.test/r${n}.jpg`]));
-    model.script = async () => ({ reply: "Separei umas opções de sol pra você:", action: "reply" });
+    const opening = "Separei umas de sol que vão bem no dia a dia, leves e clássicas 👇";
+    const closing = "Alguma delas chamou sua atenção?";
+    model.script = async () => ({ reply: `${opening}\n---SPLIT---\n${closing}`, action: "reply" });
     const run = await simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
     expect(calls.stock[0]).toMatchObject({ marca: "Ray-Ban", cidade: "Goiânia", tipoBusca: "marca_ampla" });
+    // O modelo soube das fotos antes de escrever (fato da busca no prompt).
+    expect(calls.prompts.at(-1)).toContain("\"fotosNoCatalogo\":4");
     const catalog = run.visualCatalog!;
     expect(catalog.items).toHaveLength(4);
     expect(catalog.items.map((item) => item.imageUrl)).toEqual(["https://img.test/r1.jpg", "https://img.test/r2.jpg", "https://img.test/r3.jpg", "https://img.test/r4.jpg"]);
@@ -265,9 +273,10 @@ describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
       expect(item.caption).toMatch(/^\d\. [^\n]+ — R\$ 999,00\nLoja em Goiânia: Setor Marista$/);
       expect(item.caption).not.toMatch(/Ref\.|RB910/);
     }
-    expect(catalog.opening).toMatch(/Separei 4 opções de óculos de sol em Goiânia 👇$/);
-    expect(catalog.closing).toMatch(/\?$/);
-    // O que o cliente recebe (e o /ia mostra): abertura, 1 legenda por foto, pergunta de escolha.
+    // Abertura e pergunta são as do modelo (nada fixo do código); as legendas são dados do sistema.
+    expect(catalog.opening).toBe(opening);
+    expect(catalog.closing).toBe(closing);
+    // O que o cliente recebe (e o /ia mostra): comentário, 1 legenda por foto, pergunta do modelo.
     expect(run.messages).toEqual([catalog.opening, ...catalog.items.map((item) => item.caption), catalog.closing]);
     expect(run.interactiveList).toBeUndefined();
     expect(run.catalogContext?.lastShownProducts).toEqual(catalog.items.map((item) => ({ index: item.index, id: item.sku, ref: item.ref, name: item.name, price: 999, stores: ["Setor Marista"] })));
@@ -291,13 +300,56 @@ describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
     expect(resolveListedChoice("quero esse primeiro", listed)).toEqual({ type: "item", item: listed[0] });
   });
 
-  it("sem nenhuma foto: vitrine em texto limpo, sem Ref., avisando que as fotos não estão disponíveis", async () => {
-    model.script = async () => ({ reply: "Separei umas opções de sol pra você:", action: "reply" });
+  it("sem nenhuma foto: vitrine em texto limpo, sem Ref.; o modelo sabe antes que não há fotos", async () => {
+    model.script = async () => ({ reply: "Separei umas opções de sol pra você (as fotos não estão no sistema agora):", action: "reply" });
     const run = await simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
     expect(run.visualCatalog).toBeUndefined();
     const text = run.messages.join("\n");
     expect(text).toMatch(/^1\. .*R\$ 999,00/m);
     expect(text).not.toMatch(/Ref\.|RB910/);
-    expect(text).toContain("fotos desses modelos não estão disponíveis");
+    expect(calls.prompts.at(-1)).toContain("\"fotosNoCatalogo\":0");
+    expect(text).toContain("as fotos não estão no sistema agora");
+  });
+});
+
+describe("conversa livre: typos e variações sempre passam pelo LLM", () => {
+  it.each([
+    "oii tudo bem?",
+    "quero oculos pra minha esposa",
+    "pode me indicarw uma armacao bonita?",
+    "kkkk sério que vcs tem isso?",
+    "vou falar com ela e te retorno",
+    "sou de Goiânai",
+    "tem miumiu ai?",
+    "qual o horario de vcs",
+    "nao sei se é de grau ou de sol rs",
+  ])("%j → resposta escrita pelo modelo, sem frase pronta do código", async (text) => {
+    const sentinel = `LLM respondeu: ${text.length}`;
+    model.script = async () => ({ reply: sentinel, action: "reply" });
+    const before = calls.prompts.length;
+    const run = await simulateAgent(settings, [{ from: "customer", text }], "user-1", undefined, { contactName: "5562999998888" });
+    expect(calls.prompts.length).toBe(before + 1);
+    expect(run.action).toBe("reply");
+    expect(run.messages[0].startsWith(sentinel)).toBe(true);
+    expect(run.messages.join("\n")).not.toMatch(/De qual cidade você fala|Você procura óculos de grau ou de sol|Qual desses estilos combinou|esses valores são da armação/);
+  });
+
+  it("cidade com erro de digitação vira a cidade real da rede", () => {
+    const cities = ["GOIANIA", "ANAPOLIS", "BRASILIA", "APARECIDA DE GOIANIA"];
+    expect(extractPreferredCity("sou de Goiânai", cities)).toBe("Goiânia");
+    expect(extractPreferredCity("moro em Anapolis", cities)).toBe("Anápolis");
+    expect(extractPreferredCity("to em brasila", cities)).toBe("Brasília");
+    expect(extractPreferredCity("aparecida de goiana", cities)).toBe("Aparecida de Goiânia");
+    expect(extractPreferredCity("quero um óculos do brasil", cities)).toBeNull();
+    expect(extractPreferredCity("gostaria de ver armações", cities)).toBeNull();
+  });
+
+  it("\"Goiânai\" no meio da conversa: a busca da marca sai em Goiânia", async () => {
+    model.script = async () => ({ reply: "Que bom! Olha as que estão aí:", action: "reply" });
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "quero óculos de sol ray-ban" }, { from: "ai", text: "Em qual cidade você está?" }, { from: "customer", text: "goiânai" }];
+    const run = await simulateAgent(settings, history, "user-1", undefined, { contactName: "5562999998888" });
+    expect(run.catalogContext?.preferredCity).toBe("Goiânia");
+    expect(calls.stock.at(-1)).toMatchObject({ cidade: "Goiânia", tipoBusca: "marca_ampla" });
+    expect(run.messages[0].startsWith("Que bom! Olha as que estão aí:")).toBe(true);
   });
 });

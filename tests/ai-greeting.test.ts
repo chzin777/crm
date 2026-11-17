@@ -35,17 +35,16 @@ describe("saudação natural no prompt", () => {
   it("proíbe apresentação como assistente virtual e manda saudar pelo horário", () => {
     const prompt = buildSystemPrompt({ settings, info: "", now: br("11:10"), firstReply: true });
     expect(prompt).toContain(GREETING_RULES);
-    expect(GREETING_RULES).toContain('NUNCA se apresente como "assistente virtual"');
-    expect(GREETING_RULES).toContain('"Olá! Eu sou a assistente virtual da Óticas Brasil"');
-    expect(prompt).toContain('Horário atual em Brasília: 11:10 (período: manhã -> use "Bom dia")');
-    expect(prompt).toContain('comece com "Bom dia!"');
+    expect(GREETING_RULES).toContain("Nunca se apresente como assistente virtual, robô ou IA");
+    expect(prompt).toContain("Horário atual em Brasília: 11:10 (período: manhã; saudação do período: Bom dia)");
+    expect(prompt).toContain("cumprimente com a saudação deste período (Bom dia)");
     // Nenhuma instrução manda se apresentar como assistente virtual.
     expect(prompt).not.toMatch(/apresente-se[^.]*assistente virtual/i);
   });
 
   it("à noite usa Boa noite e, depois da primeira resposta, não cumprimenta de novo", () => {
     const later = buildSystemPrompt({ settings, info: "", now: br("21:00"), firstReply: false });
-    expect(later).toContain('(período: noite -> use "Boa noite")');
+    expect(later).toContain("(período: noite; saudação do período: Boa noite)");
     expect(later).toContain("não cumprimente de novo");
     expect(later).not.toContain("primeira resposta nesta conversa");
   });
@@ -53,12 +52,9 @@ describe("saudação natural no prompt", () => {
   it('responde à gentileza ("tudo bem?") antes de conduzir o atendimento', () => {
     const prompt = buildSystemPrompt({ settings, info: "", now: br("15:00"), firstReply: true });
     expect(prompt).toContain(GREETING_RULES);
-    expect(prompt).toContain('"tudo bem?", "tudo bom?", "como vai?"');
-    expect(prompt).toContain('"blz?"');
-    expect(prompt).toContain('responda primeiro à gentileza de forma natural e leve (ex.: "Tudo ótimo por aqui, e com você?"');
-    expect(prompt).toContain('"Boa tarde! Tudo ótimo por aqui, e com você? 😊 Me conta o que você está procurando hoje!"');
-    expect(prompt).toContain('Nunca ignore o "tudo bem?" pulando direto para a pergunta');
-    expect(prompt).toContain("no máximo 1 emoji por mensagem inteira");
-    expect(prompt).toContain('(período: tarde -> use "Boa tarde")');
+    expect(prompt).toContain("Gentileza pede gentileza: se a pessoa perguntar como você está, responda de forma leve antes de seguir.");
+    expect(prompt).toContain("Se ela perguntou como você está, responda à gentileza primeiro");
+    expect(prompt).toContain("no máximo 1 por resposta inteira");
+    expect(prompt).toContain("(período: tarde; saudação do período: Boa tarde)");
   });
 });

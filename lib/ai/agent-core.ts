@@ -229,11 +229,11 @@ export function buildSystemPrompt(input: { settings: AiSettings; queues?: Routin
     input.queued ? queuedAssistBlock(input.queued.queueName) : "",
     ...(input.extra ?? []).filter(Boolean),
     `Agora: ${formatBr(now, { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
-    `Horário atual em Brasília: ${time.time} (período: ${time.period} -> use "${time.greeting}").`,
+    `Horário atual em Brasília: ${time.time} (período: ${time.period}; saudação do período: ${time.greeting}).`,
     input.firstReply === undefined || input.queued
       ? ""
       : input.firstReply
-        ? `Esta é a sua primeira resposta nesta conversa: comece com "${time.greeting}!" (com o primeiro nome do cliente, se conhecido) e já responda o que ele pediu.`
+        ? `Esta é a sua primeira resposta nesta conversa: cumprimente com a saudação deste período (${time.greeting}), com o primeiro nome do cliente se conhecido, e já responda o que ele pediu, com suas palavras.`
         : "Você já respondeu nesta conversa: não cumprimente de novo, continue direto do ponto.",
   ].concat([
     `Informações que você pode usar:\n${input.info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`,
