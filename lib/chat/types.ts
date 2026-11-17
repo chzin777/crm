@@ -69,6 +69,8 @@ export type ConversationItem = {
   lastMessage: { text: string; author: ChatAuthor; delivery: ChatDelivery | null; attachmentKind: string | null } | null;
   /** Próximo lembrete de retorno pendente da conversa (de qualquer atendente). */
   followUp: { dueAt: string; note: string } | null;
+  /** Atendimentos do contato no histórico (a lista mostra só o mais recente de cada cliente). */
+  totalSessions?: number;
 };
 
 export type ConversationDetail = ConversationItem & {
@@ -97,6 +99,8 @@ export type ContactProfile = {
 
 export type ChatMessageItem = {
   id: string;
+  /** Atendimento (conversa) da mensagem: a timeline do contato desenha um divisor quando ele muda. */
+  conversationId?: string;
   author: ChatAuthor;
   authorName: string | null;
   text: string;

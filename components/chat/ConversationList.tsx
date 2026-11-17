@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
+import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, SLA_BREACH_MINUTES, SLA_WARN_MINUTES, type ChatCounts, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
@@ -336,6 +336,15 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                           </span>
                         )}
                         <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
+                        {(item.totalSessions ?? 1) > 1 && (
+                          <span
+                            title={`Cliente recorrente: ${item.totalSessions} atendimentos no histórico`}
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300"
+                          >
+                            <History className="h-2.5 w-2.5" />
+                            {item.totalSessions} atendimentos
+                          </span>
+                        )}
                       </span>
                       <span title={corner.title} className={`shrink-0 text-xs tabular-nums ${corner.tone}`}>{corner.text}</span>
                     </div>

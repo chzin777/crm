@@ -7,6 +7,7 @@ import { chatError, requireChatActor, scopeWhere, type ChatActor } from "@/lib/c
 import { firstActiveQueue, isWindowOpen } from "@/lib/chat/conversation";
 import { DISPATCH_TAG } from "@/lib/chat/dispatch-history";
 import { ChatRuleError, sendAgentMessage } from "@/lib/chat/outbound";
+import { consolidateByContact, firstPerContact, isSession } from "@/lib/chat/consolidate";
 import { conversationInclude, serializeConversation } from "@/lib/chat/serialize";
 import { SLA_BREACH_MINUTES, type ChatCounts } from "@/lib/chat/types";
 
@@ -17,8 +18,6 @@ const OPEN: Prisma.ChatConversationWhereInput = { closedAt: null };
 function tabWhere(tab: string, actor: ChatActor): Prisma.ChatConversationWhereInput {
   if (tab === "queue") return { status: "waiting", closedAt: null };
   if (tab === "mine") return { assigneeId: actor.id, ...OPEN };
-  // Conversas que só guardam envios sem resposta não poluem a aba de encerradas.
-  if (tab === "closed") return { status: "closed", NOT: { tags: { has: DISPATCH_TAG } } };
   if (tab === "unread") return { unreadCount: { gt: 0 }, ...OPEN };
   if (tab === "campaigns") return { campaignId: { not: null }, ...OPEN };
   // Lembretes de retorno do próprio atendente, inclusive em conversa já encerrada (o retorno reabre o contato).
@@ -146,11 +145,10 @@ export async function GET(request: Request) {
     ...searchWhere(search),
   ];
 
-  const orderBy: Prisma.ChatConversationOrderByWithRelationInput[] = tab === "closed"
-    ? [{ closedAt: "desc" }]
-    : [{ lastMessageAt: { sort: "desc", nulls: "last" } }];
+  // "Todas" e "Encerradas": 1 entrada por contato (o atendimento mais recente), calculada sobre os filtros/busca.
+  const contacts = loadByContact(filters);
 
-  // A aba de lembretes mostra o retorno mais próximo primeiro.
+  // A aba de lembretes mostra o retorno mais próximo primeiro (1 por contato).
   if (tab === "followups") {
     const due = await prisma.followUp.groupBy({
       by: ["conversationId"],
@@ -158,49 +156,84 @@ export async function GET(request: Request) {
       _min: { dueAt: true },
     });
     due.sort((a, b) => (a._min.dueAt?.getTime() ?? 0) - (b._min.dueAt?.getTime() ?? 0));
-    const page = due.slice(offset, offset + PAGE_SIZE).map((item) => item.conversationId);
+    const owners = await prisma.chatConversation.findMany({ where: { id: { in: due.map((item) => item.conversationId) } }, select: { id: true, contactId: true } });
+    const contactOf = new Map(owners.map((row) => [row.id, row.contactId]));
+    const unique = firstPerContact(due, (item) => contactOf.get(item.conversationId));
+    const page = unique.slice(offset, offset + PAGE_SIZE).map((item) => item.conversationId);
     const [rows, counts] = await Promise.all([
       prisma.chatConversation.findMany({ where: { id: { in: page } }, include: conversationInclude }),
-      tabCounts(actor, filters),
+      tabCounts(actor, filters, contacts),
     ]);
-    const byId = new Map(rows.map((row) => [row.id, row]));
-    return NextResponse.json({
-      items: page.flatMap((id) => (byId.has(id) ? [serializeConversation(byId.get(id)!)] : [])),
-      nextCursor: due.length > offset + PAGE_SIZE ? offset + PAGE_SIZE : null,
-      counts,
-    });
+    const items = await withSessionTotals(page.flatMap((id) => rows.filter((row) => row.id === id)));
+    return NextResponse.json({ items, nextCursor: unique.length > offset + PAGE_SIZE ? offset + PAGE_SIZE : null, counts });
   }
 
+  if (tab === "all" || tab === "closed") {
+    const [{ all, closed }, counts] = await Promise.all([contacts, tabCounts(actor, filters, contacts)]);
+    const entries = tab === "all" ? all : closed;
+    const page = entries.slice(offset, offset + PAGE_SIZE);
+    const rows = await prisma.chatConversation.findMany({ where: { id: { in: page.map((entry) => entry.id) } }, include: conversationInclude });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const items = await withSessionTotals(page.flatMap((entry) => (byId.has(entry.id) ? [byId.get(entry.id)!] : [])));
+    return NextResponse.json({ items, nextCursor: entries.length > offset + PAGE_SIZE ? offset + PAGE_SIZE : null, counts });
+  }
+
+  // Abas de conversas abertas: o openKey único já garante no máximo 1 por contato.
   const [rows, counts] = await Promise.all([
     prisma.chatConversation.findMany({
       where: { AND: [tabWhere(tab, actor), ...filters] },
       include: conversationInclude,
-      orderBy: [...orderBy, { id: "asc" }],
+      orderBy: [{ lastMessageAt: { sort: "desc", nulls: "last" } }, { id: "asc" }],
       skip: offset,
       take: PAGE_SIZE + 1,
     }),
-    tabCounts(actor, filters),
+    tabCounts(actor, filters, contacts),
   ]);
 
   return NextResponse.json({
-    items: rows.slice(0, PAGE_SIZE).map(serializeConversation),
+    items: await withSessionTotals(rows.slice(0, PAGE_SIZE)),
     nextCursor: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
     counts,
   });
 }
 
-async function tabCounts(actor: ChatActor, filters: Prisma.ChatConversationWhereInput[]): Promise<ChatCounts> {
+/** Conversas que passam nos filtros, consolidadas por contato para "Todas" e "Encerradas". */
+async function loadByContact(filters: Prisma.ChatConversationWhereInput[]) {
+  const [rows, open] = await Promise.all([
+    prisma.chatConversation.findMany({
+      where: { AND: filters },
+      select: { id: true, contactId: true, status: true, tags: true, closedAt: true, lastMessageAt: true, createdAt: true },
+    }),
+    // Aberta em qualquer fila (mesmo fora do escopo do atendente) tira o cliente das encerradas.
+    prisma.chatConversation.findMany({ where: { closedAt: null }, select: { contactId: true } }),
+  ]);
+  const openContactIds = new Set(open.map((row) => row.contactId));
+  return { all: consolidateByContact(rows, "all", openContactIds), closed: consolidateByContact(rows, "closed", openContactIds) };
+}
+
+type ConversationRow = Parameters<typeof serializeConversation>[0];
+
+/** Total de atendimentos de cada contato no banco (sem os envios de campanha sem resposta). */
+async function withSessionTotals(rows: ConversationRow[]) {
+  const contactIds = [...new Set(rows.map((row) => row.contactId))];
+  const totals = contactIds.length
+    ? await prisma.chatConversation.groupBy({ by: ["contactId"], where: { contactId: { in: contactIds }, NOT: { tags: { has: DISPATCH_TAG } } }, _count: { _all: true } })
+    : [];
+  const byContact = new Map(totals.map((row) => [row.contactId, row._count._all]));
+  return rows.map((row) => ({ ...serializeConversation(row), totalSessions: Math.max(1, byContact.get(row.contactId) ?? (isSession(row) ? 1 : 0)) }));
+}
+
+async function tabCounts(actor: ChatActor, filters: Prisma.ChatConversationWhereInput[], contacts: ReturnType<typeof loadByContact>): Promise<ChatCounts> {
   const count = (where: Prisma.ChatConversationWhereInput) => prisma.chatConversation.count({ where: { AND: [where, ...filters] } });
-  const [queue, mine, all, closed, unread, campaigns, followups, followupsOverdue, slaBreached] = await Promise.all([
+  const [queue, mine, byContact, unread, campaigns, followups, followupsOverdue, slaBreached] = await Promise.all([
     count(tabWhere("queue", actor)),
     count(tabWhere("mine", actor)),
-    count(tabWhere("all", actor)),
-    count(tabWhere("closed", actor)),
+    contacts,
     count(tabWhere("unread", actor)),
     count(tabWhere("campaigns", actor)),
     count(tabWhere("followups", actor)),
     count({ followUps: { some: { userId: actor.id, status: "PENDING", dueAt: { lte: new Date() } } } }),
     count(slaBreachedWhere()),
   ]);
-  return { queue, mine, all, closed, unread, campaigns, followups, followupsOverdue, slaBreached };
+  return { queue, mine, all: byContact.all.length, closed: byContact.closed.length, unread, campaigns, followups, followupsOverdue, slaBreached };
 }

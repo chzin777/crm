@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { chatError, conversationNotFound, findScopedConversation, requireChatActor } from "@/lib/chat/access";
+import { chatError, conversationNotFound, findScopedConversation, requireChatActor, scopeWhere } from "@/lib/chat/access";
 import { ChatRuleError, sendAgentMessage } from "@/lib/chat/outbound";
 import { serializeMessage } from "@/lib/chat/serialize";
 
@@ -60,8 +60,17 @@ export async function GET(request: Request, context: Context) {
   const cursor = url.searchParams.get("cursor");
   const after = url.searchParams.get("after");
 
+  // Timeline única do cliente: todos os atendimentos do contato (no escopo de quem vê), do mais recente para trás.
+  // Cada atendimento continua sendo uma conversa própria no banco; a tela só desenha os divisores entre eles.
+  const sessions = await prisma.chatConversation.findMany({
+    where: { AND: [{ contactId: conversation.contactId }, scopeWhere(guard.actor)] },
+    select: { id: true, createdAt: true, closedAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const sessionIds = sessions.some((session) => session.id === id) ? sessions.map((session) => session.id) : [id];
+
   const rows = await prisma.chatMessage.findMany({
-    where: { conversationId: id, ...(after ? { createdAt: { gte: new Date(after) } } : {}) },
+    where: { conversationId: { in: sessionIds }, ...(after ? { createdAt: { gte: new Date(after) } } : {}) },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: PAGE_SIZE + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -71,5 +80,6 @@ export async function GET(request: Request, context: Context) {
   return NextResponse.json({
     items: page.reverse().map(serializeMessage),
     nextCursor: rows.length > PAGE_SIZE ? page[0].id : null,
+    sessions: sessions.length ? sessions : [{ id, createdAt: conversation.createdAt, closedAt: conversation.closedAt }],
   });
 }

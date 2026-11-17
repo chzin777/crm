@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, Mic, RotateCcw, Smile } from "lucide-react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { AlertCircle, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, MessageSquarePlus, Mic, RotateCcw, Smile } from "lucide-react";
+import { sessionBreak, type ChatSession } from "@/lib/chat/session-divider";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
 import { MediaViewer } from "@/components/chat/MediaViewer";
@@ -166,8 +167,20 @@ function ScheduledBubble({ item, onCancel }: { item: ScheduledMessageItem; onCan
   );
 }
 
+/** Linha sutil centralizada que separa um atendimento do outro na timeline do contato. */
+function SessionLine({ icon, text }: { icon: ReactNode; text: string }) {
+  return (
+    <div className="flex items-center gap-3 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+      <span className="h-px flex-1 bg-slate-300/70 dark:bg-slate-700" />
+      <span className="inline-flex min-w-0 items-center gap-1.5 break-words text-center">{icon}{text}</span>
+      <span className="h-px flex-1 bg-slate-300/70 dark:bg-slate-700" />
+    </div>
+  );
+}
+
 export function MessageList({ conversationId, tick, onReply, listRef, scheduled, onCancelScheduled }: Props) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
+  const [sessions, setSessions] = useState<ReadonlyMap<string, ChatSession>>(() => new Map());
   const [viewing, setViewing] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -194,16 +207,29 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     return true;
   };
 
+  // Atendimentos do contato (a timeline junta todos; os divisores vêm daqui).
+  const rememberSessions = useCallback((list: ChatSession[] | undefined) => {
+    if (!list?.length) return;
+    setSessions((current) => {
+      const next = new Map(current);
+      for (const session of list) next.set(session.id, session);
+      return next;
+    });
+  }, []);
+
   const fetchLatest = useCallback(async () => {
     const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, { cache: "no-store" });
     if (!response.ok) throw new Error("Falha ao carregar mensagens.");
-    return (await response.json()) as { items: ChatMessageItem[]; nextCursor: string | null };
-  }, [conversationId]);
+    const data = (await response.json()) as { items: ChatMessageItem[]; nextCursor: string | null; sessions?: ChatSession[] };
+    rememberSessions(data.sessions);
+    return data;
+  }, [conversationId, rememberSessions]);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setMessages([]);
+    setSessions(new Map());
     setCursor(null);
     fetchLatest()
       .then((data) => {
@@ -278,7 +304,8 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     try {
       const response = await fetch(`/api/chat/conversations/${conversationId}/messages?cursor=${cursor}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = (await response.json()) as { items: ChatMessageItem[]; nextCursor: string | null };
+      const data = (await response.json()) as { items: ChatMessageItem[]; nextCursor: string | null; sessions?: ChatSession[] };
+      rememberSessions(data.sessions);
       restoreFrom.current = scroller.current?.scrollHeight ?? null;
       merge(data.items);
       setCursor(data.nextCursor);
@@ -312,6 +339,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
           {loadingOlder && <p className="text-center text-xs text-slate-500">Carregando...</p>}
           {messages.map((message, index) => {
             const newDay = index === 0 || dayLabel(messages[index - 1].createdAt) !== dayLabel(message.createdAt);
+            const divider = index > 0 ? sessionBreak(messages[index - 1], message, sessions) : null;
             const fromUs = message.author === "agent" || message.author === "bot";
             const sticker = message.attachment?.kind === "sticker" && !message.text;
             const missing = message.author === "customer" && !message.attachment ? message.pendingMedia ?? LABEL_KINDS[message.text] : undefined;
@@ -320,6 +348,12 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
             const pill = voice && !message.text && !message.replyTo && !message.internal;
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
+                {divider && (
+                  <div role="separator" className="my-5 space-y-1.5">
+                    {divider.closed && <SessionLine icon={<CircleCheck className="h-3.5 w-3.5 shrink-0" />} text={divider.closed} />}
+                    <SessionLine icon={<MessageSquarePlus className="h-3.5 w-3.5 shrink-0" />} text={divider.opened} />
+                  </div>
+                )}
                 {newDay && (
                   <div className="mb-3 flex justify-center">
                     <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-medium text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300">{dayLabel(message.createdAt)}</span>

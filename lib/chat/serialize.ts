@@ -61,6 +61,7 @@ export function serializeMessage(message: ChatMessage) {
   const metaMedia = message.metaMedia as { id?: string; kind?: string; interactive?: ChatInteractiveList } | null;
   return {
     id: message.id,
+    conversationId: message.conversationId,
     interactive: metaMedia?.interactive?.type === "list" ? metaMedia.interactive : null,
     pendingMedia: !attachment && metaMedia?.id ? metaMedia.kind ?? null : null,
     author: message.author,
