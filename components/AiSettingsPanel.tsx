@@ -780,7 +780,8 @@ export function AiSettingsPanel() {
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
       {/* Menu lateral interno do Estúdio (vertical, sem barra de abas horizontal). */}
-      <nav aria-label="Seções do Estúdio de IA" className="shrink-0 lg:sticky lg:top-4 lg:w-[220px]">
+      {/* Fixa na rolagem só no desktop: o topo desconta a faixa de abas fixa do CRM (92px, 56px no modo compacto) + 24px. */}
+      <nav aria-label="Seções do Estúdio de IA" className="z-10 shrink-0 lg:sticky lg:self-start lg:top-[116px] lg:w-[220px] lg:compact:top-20">
         <ul className="grid grid-cols-1 gap-1 rounded-xl border border-slate-200/70 bg-white p-1.5 sm:grid-cols-2 lg:grid-cols-1 dark:border-slate-800 dark:bg-slate-900/40">
           {TABS.map((item) => {
             const Icon = item.icon;
