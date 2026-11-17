@@ -1,19 +1,23 @@
 import { NextResponse } from "next/server";
 import { requireModule } from "@/lib/api-auth";
-import { loadSkills, saveSkills } from "@/lib/ai/studio-db";
+import { prisma } from "@/lib/prisma";
+import { normalizeSkillInput, SKILL_TOOLS, type AiSkillInput } from "@/lib/ai/studio";
+import { listSkills } from "@/lib/ai/studio-db";
 
-/** Skills da IA (Estúdio): liga/desliga e instruções extras de cada habilidade nativa. */
+/** Skills da IA em Markdown (Estúdio): lista (com seed das nativas na primeira vez) e criação de skill customizada. */
 export async function GET() {
   const guard = await requireModule("ia", "configuracoes");
   if (guard.response) return guard.response;
-  return NextResponse.json({ skills: await loadSkills() });
+  return NextResponse.json({ skills: await listSkills(), tools: SKILL_TOOLS });
 }
 
-export async function PUT(request: Request) {
+export async function POST(request: Request) {
   const guard = await requireModule("ia", "configuracoes");
   if (guard.response) return guard.response;
-  const body = (await request.json().catch(() => null)) as { skills?: { key: string; enabled: boolean; instructions?: string }[] } | null;
-  if (!Array.isArray(body?.skills)) return NextResponse.json({ error: "Envie a lista de skills." }, { status: 400 });
-  const skills = await saveSkills(body.skills.map((skill) => ({ key: String(skill.key), enabled: skill.enabled !== false, instructions: String(skill.instructions ?? "") })));
-  return NextResponse.json({ skills });
+  const data = normalizeSkillInput(((await request.json().catch(() => null)) ?? {}) as AiSkillInput);
+  if ("error" in data) return NextResponse.json({ error: data.error }, { status: 400 });
+  const taken = await prisma.aiSkill.findUnique({ where: { slug: data.slug }, select: { id: true } });
+  if (taken) return NextResponse.json({ error: `Já existe uma skill com o slug "${data.slug}".` }, { status: 409 });
+  const skill = await prisma.aiSkill.create({ data: { ...data, builtin: false } });
+  return NextResponse.json({ skill }, { status: 201 });
 }

@@ -71,59 +71,198 @@ export function businessRulesBlock(rules: BusinessRule[]): string {
   ].join("\n\n");
 }
 
-// ---------------------------------------------------------------- Skills
+// ---------------------------------------------------------------- Regras: migração dos "Assuntos rápidos"
 
-export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano"] as const;
-export type SkillKey = (typeof SKILL_KEYS)[number];
-export type SkillConfig = { key: SkillKey; enabled: boolean; instructions: string };
-
-export const SKILLS: { key: SkillKey; label: string; description: string; tools: string[] }[] = [
-  { key: "estoque_cidade", label: "Consultar Estoque por Cidade", description: "Busca modelos com saldo nas lojas da cidade do cliente (VMSet), ficha do produto e vitrine com fotos.", tools: ["consultarEstoqueProduto", "buscarDetalhesProdutoWeb"] },
-  { key: "leitura_receita", label: "Leitura de Receita", description: "Lê receitas e comprovantes enviados em foto ou PDF, extrai os graus e salva no receituário do cliente.", tools: [] },
-  { key: "calculo_lentes", label: "Cálculo de Lentes", description: "Orienta o tipo de lente pelos graus (visão simples, multifocal, espessura e tratamentos).", tools: [] },
-  { key: "crediario_aprovacao", label: "Consulta de Crediário com Aprovação", description: "Consulta parcelas no VMSet com nome completo + CPF e gera o card de aprovação para o operador no /chat.", tools: [] },
-  { key: "pipeline_automatico", label: "Criação Automática no Pipeline", description: "Cria ou avança a oportunidade no funil de vendas em receita, consulta de modelo, orçamento ou transbordo para Vendas.", tools: [] },
-  { key: "transbordo_humano", label: "Transbordo Humano", description: "Passa a conversa para um atendente em reclamação, intenção de compra, dúvida ou documento. Pedido explícito de pessoa sempre transfere.", tools: [] },
-];
-
-export const DEFAULT_SKILLS: Record<SkillKey, SkillConfig> = Object.fromEntries(SKILL_KEYS.map((key) => [key, { key, enabled: true, instructions: "" }])) as Record<SkillKey, SkillConfig>;
-
-/** Junta o que está no banco com o padrão (skill sem linha = ligada). Chaves desconhecidas são ignoradas. */
-export function mergeSkills(rows: { key: string; enabled: boolean; instructions?: string | null }[]): Record<SkillKey, SkillConfig> {
-  const merged = { ...DEFAULT_SKILLS };
-  for (const row of rows) {
-    if (!(SKILL_KEYS as readonly string[]).includes(row.key)) continue;
-    const key = row.key as SkillKey;
-    merged[key] = { key, enabled: row.enabled, instructions: (row.instructions ?? "").slice(0, 4000) };
-  }
-  return merged;
+/**
+ * Converte os assuntos rápidos (base anterior, em AiSettings.topics) em regras da empresa, sem perder conteúdo:
+ * título, texto e liga/desliga são mantidos; "sempre incluir" preserva o comportamento antigo (o assunto entrava em
+ * toda conversa). Slug repetido (já existe regra igual) é pulado; título repetido entre assuntos ganha sufixo.
+ */
+export function topicsToRules(topics: { id?: string; title: string; enabled: boolean; content: string }[], takenSlugs: Iterable<string>): Omit<BusinessRule, "id">[] {
+  const taken = new Set(takenSlugs);
+  const seen = new Set<string>();
+  const rules: Omit<BusinessRule, "id">[] = [];
+  topics.forEach((topic, index) => {
+    const title = topic.title.trim().slice(0, 120);
+    if (!title) return;
+    let slug = slugify(title);
+    if (taken.has(slug)) return;
+    for (let n = 2; seen.has(slug); n += 1) slug = `${slugify(title).slice(0, 56)}-${n}`;
+    seen.add(slug);
+    rules.push({ title, slug, keywords: [], content: topic.content.replace(/\r\n/g, "\n").slice(0, 20_000), order: 1000 + index * 10, active: topic.enabled !== false, alwaysInclude: true });
+  });
+  return rules;
 }
 
-export const skillEnabled = (skills: Record<SkillKey, SkillConfig> | undefined, key: SkillKey) => skills?.[key]?.enabled !== false;
+// ---------------------------------------------------------------- Skills em Markdown
 
-/** Remove as tools das skills desligadas (tools sem skill dona continuam). */
-export function filterToolsBySkills<T extends { definition: { function: { name: string } } }>(tools: T[], skills: Record<SkillKey, SkillConfig> | undefined): T[] {
-  const blocked = new Set(SKILLS.filter((skill) => !skillEnabled(skills, skill.key)).flatMap((skill) => skill.tools));
+/** Skills nativas: o slug liga a skill às ferramentas e fluxos do CRM (desligar a skill desliga a ferramenta). */
+export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano"] as const;
+export type SkillKey = (typeof SKILL_KEYS)[number];
+
+export type AiSkill = {
+  id: string;
+  name: string;
+  slug: string;
+  /** Quando a IA deve acionar a skill. */
+  triggerDescription: string;
+  /** Protocolo completo em Markdown, editável pela equipe. */
+  instructionsMd: string;
+  isActive: boolean;
+  sortOrder: number;
+  /** Nativa: ligada a ferramentas/fluxos do CRM, não pode ser excluída nem trocar de slug. */
+  builtin: boolean;
+};
+export type AiSkillInput = Partial<Omit<AiSkill, "id" | "builtin">>;
+
+/** Ferramentas e fluxos do motor que cada skill nativa controla. */
+export const SKILL_TOOLS: Record<SkillKey, { tools: string[]; flows: string }> = {
+  estoque_cidade: { tools: ["consultarEstoqueProduto", "buscarDetalhesProdutoWeb"], flows: "Consulta de estoque VMSet e vitrine com fotos" },
+  leitura_receita: { tools: [], flows: "Leitura de receita em foto/PDF e receituário do cliente" },
+  calculo_lentes: { tools: [], flows: "Módulo de orientação de lentes pelos graus" },
+  crediario_aprovacao: { tools: [], flows: "Consulta de parcelas com card de aprovação no /chat" },
+  pipeline_automatico: { tools: [], flows: "Criação/avanço automático da oportunidade no funil" },
+  transbordo_humano: { tools: [], flows: "Transbordo por reclamação, compra, dúvida ou documento" },
+};
+
+export const DEFAULT_SKILLS: Omit<AiSkill, "id">[] = [
+  {
+    name: "Consultar Estoque por Cidade",
+    slug: "estoque_cidade",
+    triggerDescription: "Cliente pergunta por modelo, marca, armação, óculos de sol, preço ou disponibilidade.",
+    instructionsMd: "## Protocolo\n1. Confirme a **cidade** do cliente antes de buscar (sem cidade, pergunte a cidade e a faixa de valor).\n2. Busque o estoque **na mesma rodada**, sem pedir permissão para buscar.\n3. Mostre só modelos com saldo em lojas da cidade do cliente; nunca ofereça produto disponível apenas em cidades distantes.\n4. Apresente no máximo 4 opções, com legenda curta (marca, modelo e preço).\n5. Se nada for encontrado, diga isso com clareza e ofereça alternativas próximas (outra marca ou faixa de preço).",
+    isActive: true,
+    sortOrder: 10,
+    builtin: true,
+  },
+  {
+    name: "Leitura de Receita",
+    slug: "leitura_receita",
+    triggerDescription: "Cliente envia foto ou PDF de receita oftalmológica, ou fala dos graus.",
+    instructionsMd: "## Protocolo\n1. Leia os graus de OD e OE (esférico, cilíndrico, eixo, adição e DNP quando houver).\n2. Confirme com o cliente os valores que ficaram ilegíveis, sem chutar números.\n3. Os graus ficam salvos no receituário para conferência humana: avise que a equipe confere antes do orçamento final.\n4. Não faça diagnóstico médico.",
+    isActive: true,
+    sortOrder: 20,
+    builtin: true,
+  },
+  {
+    name: "Orçamento de Lentes",
+    slug: "calculo_lentes",
+    triggerDescription: "Cliente pede orçamento de lentes, pergunta tipo, espessura, multifocal ou tratamentos.",
+    instructionsMd: "## Protocolo\n1. Com a receita em mãos, indique o tipo de lente (visão simples ou multifocal) pela presença de adição.\n2. Para graus altos, explique a vantagem de lentes mais finas (índice maior).\n3. Apresente tratamentos (antirreflexo, filtro de luz azul, fotossensível) como opções, sem empurrar.\n4. Valores sempre como \"a partir de\", com o orçamento final confirmado pela loja.",
+    isActive: true,
+    sortOrder: 30,
+    builtin: true,
+  },
+  {
+    name: "Consulta de Crediário",
+    slug: "crediario_aprovacao",
+    triggerDescription: "Cliente pergunta de parcelas, boleto, carnê, crediário ou valor em aberto.",
+    instructionsMd: "## Protocolo\n1. Peça **nome completo** e **CPF** antes de qualquer consulta.\n2. Valide o CPF; se inválido, peça de novo com educação.\n3. A consulta gera um card de aprovação para o operador no /chat: **nunca** informe valores antes da aprovação humana.\n4. Avise o cliente que um atendente vai confirmar os dados em instantes.",
+    isActive: true,
+    sortOrder: 40,
+    builtin: true,
+  },
+  {
+    name: "Criação Automática no Pipeline",
+    slug: "pipeline_automatico",
+    triggerDescription: "Receita enviada, consulta de modelo, pedido de orçamento ou transbordo para Vendas.",
+    instructionsMd: "## Protocolo\n1. Registre a oportunidade só em gatilho comercial real (receita, modelo, orçamento ou transbordo para Vendas).\n2. Classifique o cliente como novo ou recorrente pelo histórico.\n3. Nunca faça a etapa voltar quando ela foi movida manualmente pela equipe.",
+    isActive: true,
+    sortOrder: 50,
+    builtin: true,
+  },
+  {
+    name: "Transbordo Humano",
+    slug: "transbordo_humano",
+    triggerDescription: "Reclamação, intenção clara de compra, dúvida que a IA não resolve ou documento para conferência.",
+    instructionsMd: "## Protocolo\n1. Pedido explícito de falar com uma pessoa **sempre** transfere.\n2. Em reclamação, acolha o cliente primeiro e transfira em seguida.\n3. Ao transferir, avise o cliente com naturalidade e resuma o caso para o atendente.\n4. Não prometa prazos de retorno que a equipe não definiu.",
+    isActive: true,
+    sortOrder: 60,
+    builtin: true,
+  },
+];
+
+const isSkillKey = (value: string): value is SkillKey => (SKILL_KEYS as readonly string[]).includes(value);
+
+export function skillSlug(value: string): string {
+  return plain(value).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || "skill";
+}
+
+/** Normaliza o que veio da tela: nome obrigatório, slug derivado, limites de tamanho. */
+export function normalizeSkillInput(input: AiSkillInput, current?: AiSkill): Omit<AiSkill, "id" | "builtin"> | { error: string } {
+  const name = String(input.name ?? current?.name ?? "").trim().slice(0, 120);
+  if (!name) return { error: "Informe o nome da skill." };
+  // Skill nativa mantém o slug: é ele que liga a skill às ferramentas do motor.
+  const slug = current?.builtin ? current.slug : skillSlug(String(input.slug ?? current?.slug ?? "").trim() || name);
+  if (!current?.builtin && isSkillKey(slug) && current?.slug !== slug) return { error: `O slug "${slug}" é reservado para uma skill nativa.` };
+  const order = Number(input.sortOrder ?? current?.sortOrder ?? 0);
+  return {
+    name,
+    slug,
+    triggerDescription: String(input.triggerDescription ?? current?.triggerDescription ?? "").trim().slice(0, 600),
+    instructionsMd: String(input.instructionsMd ?? current?.instructionsMd ?? "").replace(/\r\n/g, "\n").slice(0, 20_000),
+    isActive: typeof input.isActive === "boolean" ? input.isActive : current?.isActive ?? true,
+    sortOrder: Number.isFinite(order) ? Math.trunc(order) : 0,
+  };
+}
+
+/**
+ * Linhas do seed inicial (tabela vazia). Aproveita o liga/desliga e as instruções extras da configuração anterior
+ * (AiSkillConfig), anexadas ao Markdown padrão.
+ */
+export function seedSkillRows(legacy: { key: string; enabled: boolean; instructions?: string | null }[] = []): Omit<AiSkill, "id">[] {
+  return DEFAULT_SKILLS.map((skill) => {
+    const old = legacy.find((row) => row.key === skill.slug);
+    if (!old) return { ...skill };
+    const extra = (old.instructions ?? "").trim();
+    return { ...skill, isActive: old.enabled, instructionsMd: extra ? `${skill.instructionsMd}\n\n## Instruções extras da equipe\n${extra}` : skill.instructionsMd };
+  });
+}
+
+/** Skills padrão em memória (banco fora): todas as nativas ligadas, comportamento anterior. */
+export const fallbackSkills = (): AiSkill[] => DEFAULT_SKILLS.map((skill) => ({ ...skill, id: skill.slug }));
+
+/** Skill nativa ligada? Sem lista (banco fora) ou sem a linha: ligada. */
+export function skillEnabled(skills: AiSkill[] | undefined, key: SkillKey): boolean {
+  return skills?.find((skill) => skill.builtin && skill.slug === key)?.isActive !== false;
+}
+
+/** Remove as tools das skills nativas desligadas (tools sem skill dona continuam). */
+export function filterToolsBySkills<T extends { definition: { function: { name: string } } }>(tools: T[], skills: AiSkill[] | undefined): T[] {
+  const blocked = new Set(SKILL_KEYS.filter((key) => !skillEnabled(skills, key)).flatMap((key) => SKILL_TOOLS[key].tools));
   return tools.filter((tool) => !blocked.has(tool.definition.function.name));
 }
 
 /** Transbordo desligado: só o pedido explícito de pessoa (palavras e limite de respostas) continua transferindo. */
-export function applySkillsToSettings(settings: AiSettings, skills: Record<SkillKey, SkillConfig> | undefined): AiSettings {
+export function applySkillsToSettings(settings: AiSettings, skills: AiSkill[] | undefined): AiSettings {
   if (skillEnabled(skills, "transbordo_humano")) return settings;
   return { ...settings, handoffOnComplaint: false, handoffOnPurchaseIntent: false, handoffWhenUnsure: false, handoffOnMedia: false };
 }
 
-/** Avisos e instruções das skills para o prompt de sistema. */
-export function skillsPromptBlock(skills: Record<SkillKey, SkillConfig> | undefined): string {
-  if (!skills) return "";
-  const lines: string[] = [];
-  if (!skillEnabled(skills, "estoque_cidade")) lines.push("- Consulta de estoque DESLIGADA: não informe disponibilidade, modelos nem preços de estoque; oriente o cliente a falar com a loja.");
-  if (!skillEnabled(skills, "leitura_receita")) lines.push("- Leitura de receita DESLIGADA: não interprete graus de receitas enviadas; diga que a equipe vai conferir.");
-  if (!skillEnabled(skills, "calculo_lentes")) lines.push("- Cálculo de lentes DESLIGADO: não recomende tipo, espessura ou índice de lente; a loja faz o orçamento.");
-  if (!skillEnabled(skills, "crediario_aprovacao")) lines.push("- Consulta de crediário DESLIGADA: não consulte parcelas; diga que o setor financeiro responde.");
-  const custom = SKILLS.filter((skill) => skillEnabled(skills, skill.key) && skills[skill.key].instructions.trim()).map((skill) => `- ${skill.label}: ${skills[skill.key].instructions.trim()}`);
-  if (!lines.length && !custom.length) return "";
-  return ["HABILIDADES CONFIGURADAS NO ESTÚDIO:", ...lines, ...custom].join("\n");
+/**
+ * Bloco de skills do prompt de sistema: diretriz obrigatória + cada skill ativa com nome, gatilho e o Markdown
+ * completo; skills nativas desligadas viram proibição explícita.
+ */
+export function skillsPromptBlock(skills: AiSkill[] | undefined): string {
+  if (!skills?.length) return "";
+  const off: string[] = [];
+  if (!skillEnabled(skills, "estoque_cidade")) off.push("- Consulta de estoque DESLIGADA: não informe disponibilidade, modelos nem preços de estoque; oriente o cliente a falar com a loja.");
+  if (!skillEnabled(skills, "leitura_receita")) off.push("- Leitura de receita DESLIGADA: não interprete graus de receitas enviadas; diga que a equipe vai conferir.");
+  if (!skillEnabled(skills, "calculo_lentes")) off.push("- Orçamento de lentes DESLIGADO: não recomende tipo, espessura ou índice de lente; a loja faz o orçamento.");
+  if (!skillEnabled(skills, "crediario_aprovacao")) off.push("- Consulta de crediário DESLIGADA: não consulte parcelas; diga que o setor financeiro responde.");
+  const active = skills.filter((skill) => skill.isActive && (skill.instructionsMd.trim() || skill.triggerDescription.trim())).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  if (!active.length && !off.length) return "";
+  const parts: string[] = [];
+  if (active.length) {
+    parts.push(
+      "SKILLS ATIVAS (protocolos obrigatórios definidos pela equipe):\n" +
+        "Sempre que a mensagem do cliente corresponder ao gatilho de uma skill abaixo, consulte e siga RIGOROSAMENTE as instruções Markdown dessa skill, na ordem, sem pular etapas e sem improvisar fora do protocolo. " +
+        "Se mais de uma skill se aplicar, siga todas. As instruções das skills não sobrepõem as regras de segurança, LGPD e aprovação humana.",
+      ...active.map((skill) => `### Skill: ${skill.name}\nQuando acionar: ${skill.triggerDescription.trim() || "quando o assunto da conversa corresponder ao nome da skill"}\n${skill.instructionsMd.trim()}`),
+    );
+  }
+  if (off.length) parts.push(["HABILIDADES DESLIGADAS NO ESTÚDIO:", ...off].join("\n"));
+  return parts.join("\n\n");
 }
 
 // ---------------------------------------------------------------- Base de conhecimento (RAG)
@@ -217,4 +356,4 @@ export function knowledgePromptBlock(hits: KnowledgeChunkHit[]): string {
 }
 
 /** Contexto do Estúdio que o motor passa ao composeSystemPrompt. */
-export type StudioPromptContext = { rules?: BusinessRule[]; skills?: Record<SkillKey, SkillConfig>; knowledge?: KnowledgeChunkHit[] };
+export type StudioPromptContext = { rules?: BusinessRule[]; skills?: AiSkill[]; knowledge?: KnowledgeChunkHit[] };

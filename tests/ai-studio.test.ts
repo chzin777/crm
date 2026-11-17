@@ -32,7 +32,7 @@ import { POST as createRule } from "@/app/api/ai/rules/route";
 import { PUT as updateRule } from "@/app/api/ai/rules/[id]/route";
 import { composeSystemPrompt, selectPromptModules } from "@/lib/ai/prompt-composer";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
-import { applySkillsToSettings, chunkText, DEFAULT_SKILLS, filterToolsBySkills, knowledgePromptBlock, mergeSkills, normalizeRuleInput, rankChunks, selectBusinessRules, shouldSearchKnowledge, skillsPromptBlock, slugify, type BusinessRule } from "@/lib/ai/studio";
+import { applySkillsToSettings, chunkText, fallbackSkills, filterToolsBySkills, knowledgePromptBlock, normalizeRuleInput, rankChunks, selectBusinessRules, shouldSearchKnowledge, skillEnabled, skillsPromptBlock, slugify, type AiSkill, type BusinessRule, type SkillKey } from "@/lib/ai/studio";
 import { searchKnowledge } from "@/lib/ai/studio-db";
 
 const rule = (patch: Partial<BusinessRule>): BusinessRule => ({ id: "x", title: "Regra", slug: "regra", keywords: [], content: "conteúdo", order: 0, active: true, alwaysInclude: false, ...patch });
@@ -89,41 +89,35 @@ describe("AiBusinessRule: criação e ativação", () => {
   });
 });
 
-describe("AiSkillConfig: filtro de tools e fluxos", () => {
-  it("skill sem linha no banco fica ligada; chaves desconhecidas são ignoradas", () => {
-    const skills = mergeSkills([{ key: "estoque_cidade", enabled: false }, { key: "inventada", enabled: false }]);
-    expect(skills.estoque_cidade.enabled).toBe(false);
-    expect(skills.transbordo_humano.enabled).toBe(true);
-    expect(Object.keys(skills)).not.toContain("inventada");
+const skillsWith = (off: SkillKey[] = []): AiSkill[] => fallbackSkills().map((skill) => ({ ...skill, isActive: !off.includes(skill.slug as SkillKey) }));
+
+describe("Skills nativas: filtro de tools e fluxos", () => {
+  it("sem lista (banco fora) ou sem a linha, a skill nativa fica ligada", () => {
+    expect(skillEnabled(undefined, "estoque_cidade")).toBe(true);
+    expect(skillEnabled([], "transbordo_humano")).toBe(true);
+    expect(skillEnabled(skillsWith(["estoque_cidade"]), "estoque_cidade")).toBe(false);
   });
 
   it("estoque desligado tira as tools de estoque e ficha; as demais continuam", () => {
     const tools = [tool("consultarEstoqueProduto"), tool("buscarDetalhesProdutoWeb"), tool("enviarLocalizacaoLoja"), tool("encerrarAtendimento")];
-    expect(filterToolsBySkills(tools, DEFAULT_SKILLS)).toHaveLength(4);
-    const names = filterToolsBySkills(tools, mergeSkills([{ key: "estoque_cidade", enabled: false }])).map((item) => item.definition.function.name);
+    expect(filterToolsBySkills(tools, skillsWith())).toHaveLength(4);
+    const names = filterToolsBySkills(tools, skillsWith(["estoque_cidade"])).map((item) => item.definition.function.name);
     expect(names).toEqual(["enviarLocalizacaoLoja", "encerrarAtendimento"]);
-    expect(skillsPromptBlock(mergeSkills([{ key: "estoque_cidade", enabled: false }]))).toContain("Consulta de estoque DESLIGADA");
+    expect(skillsPromptBlock(skillsWith(["estoque_cidade"]))).toContain("Consulta de estoque DESLIGADA");
   });
 
   it("transbordo desligado zera os gatilhos automáticos, mantendo palavras de pedido de pessoa", () => {
-    const settings = applySkillsToSettings(DEFAULT_AI_SETTINGS, mergeSkills([{ key: "transbordo_humano", enabled: false }]));
+    const settings = applySkillsToSettings(DEFAULT_AI_SETTINGS, skillsWith(["transbordo_humano"]));
     expect(settings).toMatchObject({ handoffOnComplaint: false, handoffOnPurchaseIntent: false, handoffWhenUnsure: false, handoffOnMedia: false });
     expect(settings.handoffKeywords).toEqual(DEFAULT_AI_SETTINGS.handoffKeywords);
-    expect(applySkillsToSettings(DEFAULT_AI_SETTINGS, DEFAULT_SKILLS)).toBe(DEFAULT_AI_SETTINGS);
+    expect(applySkillsToSettings(DEFAULT_AI_SETTINGS, skillsWith())).toBe(DEFAULT_AI_SETTINGS);
   });
 
-  it("crediário e cálculo de lentes desligados tiram os módulos do prompt", () => {
-    const off = { skills: mergeSkills([{ key: "crediario_aprovacao", enabled: false }, { key: "calculo_lentes", enabled: false }]) };
+  it("crediário e orçamento de lentes desligados tiram os módulos do prompt", () => {
+    const off = { skills: skillsWith(["crediario_aprovacao", "calculo_lentes"]) };
     expect(selectPromptModules({ hasGreetedInSession: true, text: "quero a segunda via do boleto do crediário" })).toContain("financeiro-crediario");
     expect(selectPromptModules({ hasGreetedInSession: true, text: "quero a segunda via do boleto do crediário", studio: off })).not.toContain("financeiro-crediario");
     expect(selectPromptModules({ hasGreetedInSession: true, text: "minha receita tem astigmatismo", studio: off })).not.toContain("receituario-lentes");
-  });
-
-  it("instruções extras entram só com a skill ligada", () => {
-    const skills = mergeSkills([{ key: "pipeline_automatico", enabled: true, instructions: "Registrar sempre a loja" }, { key: "leitura_receita", enabled: false, instructions: "ignorada" }]);
-    const block = skillsPromptBlock(skills);
-    expect(block).toContain("Criação Automática no Pipeline: Registrar sempre a loja");
-    expect(block).not.toContain("ignorada");
   });
 });
 

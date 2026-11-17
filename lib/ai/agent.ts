@@ -201,7 +201,8 @@ async function knowledge(settings: AiSettings) {
     const lines = rows.map((row) => `- ${row.scope === GLOBAL_HOURS_SCOPE ? "Atendimento" : `Fila ${queues.find((queue) => queue.id === row.scope)?.name ?? "?"}`}: ${describeSchedule(sanitizeSchedule(row.schedule))}`);
     if (lines.length) parts.push(`Horário de atendimento (Brasília):\n${lines.join("\n")}`);
   }
-  for (const topic of settings.topics.filter((item) => item.enabled && item.content.trim())) parts.push(`${topic.title}:\n${topic.content.trim()}`);
+  // Os antigos "Assuntos rápidos" (settings.topics) foram unificados nas Regras da empresa (AiBusinessRule) e entram
+  // pelo bloco de regras do composeSystemPrompt.
   if (settings.canQuotePrices) {
     const products = await catalog();
     if (products) parts.push(`Preços médios praticados (use só como referência "a partir de", confirmando na loja):\n${products}`);

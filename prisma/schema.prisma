@@ -731,6 +731,22 @@ model AiSkillConfig {
   updatedAt    DateTime @updatedAt
 }
 
+/// Skill da IA em Markdown (Estúdio de IA). Nativas (builtin) ligam/desligam ferramentas do motor pelo slug.
+model AiSkill {
+  id                 String   @id @default(cuid())
+  name               String
+  slug               String   @unique
+  triggerDescription String   @default("")
+  instructionsMd     String   @default("")
+  isActive           Boolean  @default(true)
+  sortOrder          Int      @default(0)
+  builtin            Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
 /// Base de conhecimento (RAG): documento enviado (arquivo ou texto) dividido em trechos.
 model KnowledgeDocument {
   id         String           @id @default(cuid())

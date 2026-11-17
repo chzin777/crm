@@ -1,27 +1,64 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
-import { chunkText, mergeSkills, rankChunks, shouldSearchKnowledge, type BusinessRule, type KnowledgeChunkHit, type SkillConfig, type SkillKey, type StudioPromptContext } from "@/lib/ai/studio";
+import { readAiSettings } from "@/lib/ai/store";
+import { chunkText, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
 
 /** Estúdio de IA no banco: regras, skills e base de conhecimento (RAG). Falha de banco nunca derruba a resposta. */
 
-export async function listBusinessRules(): Promise<BusinessRule[]> {
-  return prisma.aiBusinessRule.findMany({ orderBy: [{ order: "asc" }, { title: "asc" }], select: { id: true, title: true, slug: true, keywords: true, content: true, order: true, active: true, alwaysInclude: true } });
-}
+const RULE_SELECT = { id: true, title: true, slug: true, keywords: true, content: true, order: true, active: true, alwaysInclude: true } as const;
+const SKILL_SELECT = { id: true, name: true, slug: true, triggerDescription: true, instructionsMd: true, isActive: true, sortOrder: true, builtin: true } as const;
+const TOPICS_MIGRATED_KEY = "ai-topics-migrated";
+let topicsMigrated = false;
 
-export async function loadSkills(): Promise<Record<SkillKey, SkillConfig>> {
-  try {
-    return mergeSkills(await prisma.aiSkillConfig.findMany({ select: { key: true, enabled: true, instructions: true } }));
-  } catch {
-    // Tabela ainda não criada ou banco fora: todas as skills ligadas (comportamento anterior).
-    return mergeSkills([]);
+/**
+ * Unifica os "Assuntos rápidos" (base anterior, dentro das configurações da IA) com as Regras da empresa: copia cada
+ * assunto para AiBusinessRule uma única vez (marcador no banco). O JSON original fica intacto como histórico.
+ */
+export async function migrateLegacyTopics(): Promise<number> {
+  if (topicsMigrated) return 0;
+  const marker = await prisma.crmWorkspaceData.findUnique({ where: { key: TOPICS_MIGRATED_KEY }, select: { key: true } });
+  if (marker) {
+    topicsMigrated = true;
+    return 0;
   }
+  const settings = await readAiSettings();
+  const existing = await prisma.aiBusinessRule.findMany({ select: { slug: true } });
+  const rules = topicsToRules(settings.topics, existing.map((rule) => rule.slug));
+  // skipDuplicates: outro container (Blue/Green) pode estar migrando ao mesmo tempo.
+  const created = rules.length ? (await prisma.aiBusinessRule.createMany({ data: rules, skipDuplicates: true })).count : 0;
+  await prisma.crmWorkspaceData.upsert({ where: { key: TOPICS_MIGRATED_KEY }, create: { key: TOPICS_MIGRATED_KEY, value: { at: new Date().toISOString(), topics: settings.topics.length, created } }, update: {} });
+  topicsMigrated = true;
+  return created;
 }
 
-export async function saveSkills(skills: { key: string; enabled: boolean; instructions?: string }[]) {
-  const merged = mergeSkills(skills);
-  await prisma.$transaction(Object.values(merged).map((skill) => prisma.aiSkillConfig.upsert({ where: { key: skill.key }, create: { key: skill.key, enabled: skill.enabled, instructions: skill.instructions }, update: { enabled: skill.enabled, instructions: skill.instructions } })));
-  return merged;
+export async function listBusinessRules(): Promise<BusinessRule[]> {
+  await migrateLegacyTopics().catch(() => 0);
+  return prisma.aiBusinessRule.findMany({ orderBy: [{ order: "asc" }, { title: "asc" }], select: RULE_SELECT });
+}
+
+/** Popula as skills padrão quando a tabela está vazia (idempotente: slug único + skipDuplicates). */
+export async function seedSkills(): Promise<void> {
+  if (await prisma.aiSkill.count()) return;
+  const legacy = await prisma.aiSkillConfig.findMany({ select: { key: true, enabled: true, instructions: true } }).catch(() => []);
+  await prisma.aiSkill.createMany({ data: seedSkillRows(legacy), skipDuplicates: true });
+}
+
+export async function listSkills(): Promise<AiSkill[]> {
+  const rows = await prisma.aiSkill.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: SKILL_SELECT });
+  if (rows.length) return rows;
+  await seedSkills();
+  return prisma.aiSkill.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: SKILL_SELECT });
+}
+
+/** Skills para o motor. Banco fora ou tabela ausente: skills nativas ligadas (comportamento anterior). */
+export async function loadSkills(): Promise<AiSkill[]> {
+  try {
+    const skills = await listSkills();
+    return skills.length ? skills : fallbackSkills();
+  } catch {
+    return fallbackSkills();
+  }
 }
 
 /** Lê o texto de um PDF pelo modelo (o projeto não tem leitor de PDF local). */
@@ -72,7 +109,10 @@ export async function searchKnowledge(query: string, options: { topK?: number; u
 export async function loadStudioContext(text: string, meta: { userId?: string | null; conversationId?: string | null }): Promise<StudioPromptContext> {
   const safe = async <T,>(run: () => Promise<T>, fallback: T) => { try { return await run(); } catch { return fallback; } };
   const [rules, skills, knowledge] = await Promise.all([
-    safe(() => prisma.aiBusinessRule.findMany({ where: { active: true }, orderBy: [{ order: "asc" }, { title: "asc" }], select: { id: true, title: true, slug: true, keywords: true, content: true, order: true, active: true, alwaysInclude: true } }), [] as BusinessRule[]),
+    safe(async () => {
+      await migrateLegacyTopics().catch(() => 0);
+      return prisma.aiBusinessRule.findMany({ where: { active: true }, orderBy: [{ order: "asc" }, { title: "asc" }], select: RULE_SELECT });
+    }, [] as BusinessRule[]),
     loadSkills(),
     shouldSearchKnowledge(text) ? safe(() => searchKnowledge(text, meta), [] as KnowledgeChunkHit[]) : Promise.resolve([] as KnowledgeChunkHit[]),
   ]);

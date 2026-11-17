@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, Boxes, Calculator, ChevronRight, CreditCard, FileText, FileUp, Glasses, GitBranch, Headset, Loader2, PackageSearch, Plus, RefreshCw, Save, Search, Trash2, Wand2 } from "lucide-react";
+import { BookOpenText, Boxes, Calculator, ChevronDown, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
-import { SKILLS, slugify, type BusinessRule, type KnowledgeChunkHit, type SkillConfig, type SkillKey } from "@/lib/ai/studio";
+import { skillSlug, slugify, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type SkillKey } from "@/lib/ai/studio";
 
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
 const area = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
@@ -31,6 +31,15 @@ function Switch({ label, checked, onChange, disabled }: { label: string; checked
       <span className="pointer-events-none absolute inset-0 rounded-full bg-slate-300 transition-colors peer-checked:bg-[#C4D600] peer-focus-visible:ring-2 peer-focus-visible:ring-[#002187] dark:bg-slate-600" />
       <span className="pointer-events-none absolute left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
     </label>
+  );
+}
+
+/** Expande/recolhe com transição suave de altura (grid 0fr → 1fr); recolhido fica fora do foco do teclado. */
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div className={`grid transition-all duration-200 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`} aria-hidden={!open} inert={!open}>
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
   );
 }
 
@@ -153,7 +162,7 @@ export function RulesSection() {
               <li key={rule.id} className="bg-white dark:bg-slate-900/40">
                 <div className="flex items-center gap-3 px-3 py-3 sm:px-4">
                   <button type="button" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : rule.id)} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
-                    <ChevronRight className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ease-in-out ${expanded ? "rotate-180" : ""}`} />
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-1.5">
                         <span className={`truncate text-sm font-medium ${rule.active ? "text-[#051647] dark:text-white" : "text-slate-400 line-through"}`}>{rule.title || "Sem título"}</span>
@@ -166,7 +175,7 @@ export function RulesSection() {
                   <Switch label={`Regra ${rule.title} ativa`} checked={rule.active} onChange={(value) => void toggleActive(rule, value)} />
                   <button type="button" aria-label={`Excluir ${rule.title}`} title="Excluir regra" disabled={busy === rule.id} onClick={() => void remove(rule)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
                 </div>
-                {expanded && (
+                <Collapse open={expanded}>
                   <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-white/[0.03]">
                     <div className="grid gap-3 sm:grid-cols-[1fr_1fr_100px]">
                       <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Título
@@ -195,7 +204,7 @@ export function RulesSection() {
                       </button>
                     </div>
                   </div>
-                )}
+                </Collapse>
               </li>
             );
           })}
@@ -209,67 +218,145 @@ export function RulesSection() {
 // ---------------------------------------------------------------- Skills
 
 const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset };
+type SkillDraft = AiSkill & { dirty?: boolean; isNew?: boolean };
+type ToolMap = Record<SkillKey, { tools: string[]; flows: string }>;
 
 export function SkillsSection() {
   const toast = useToast();
-  const [skills, setSkills] = useState<Record<SkillKey, SkillConfig> | null>(null);
-  const [saved, setSaved] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [skills, setSkills] = useState<SkillDraft[] | null>(null);
+  const [tools, setTools] = useState<Partial<ToolMap>>({});
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    api<{ skills: Record<SkillKey, SkillConfig> }>("/api/ai/skills")
-      .then((data) => { if (active) { setSkills(data.skills); setSaved(JSON.stringify(data.skills)); } })
-      .catch((cause: unknown) => toast.error("Skills da IA", cause instanceof Error ? cause.message : "Não foi possível carregar."));
+    api<{ skills: AiSkill[]; tools: ToolMap }>("/api/ai/skills")
+      .then((data) => { if (active) { setSkills(data.skills); setTools(data.tools ?? {}); } })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        toast.error("Skills da IA", cause instanceof Error ? cause.message : "Não foi possível carregar.");
+        setSkills([]);
+      });
     return () => { active = false; };
   }, [toast]);
 
-  const dirty = !!skills && JSON.stringify(skills) !== saved;
-  const set = (key: SkillKey, change: Partial<SkillConfig>) => setSkills((current) => (current ? { ...current, [key]: { ...current[key], ...change } } : current));
-  const save = async () => {
-    if (!skills) return;
-    setSaving(true);
+  const patch = (id: string, change: Partial<SkillDraft>) => setSkills((current) => current?.map((skill) => (skill.id === id ? { ...skill, ...change, dirty: true } : skill)) ?? current);
+  const add = () => {
+    const id = `novo-${Date.now()}`;
+    setSkills((current) => [...(current ?? []), { id, name: "Nova skill", slug: skillSlug("Nova skill"), triggerDescription: "", instructionsMd: "## Protocolo\n1. ...\n2. ...", isActive: true, sortOrder: ((current?.length ?? 0) + 1) * 10, builtin: false, dirty: true, isNew: true }]);
+    setOpen(id);
+  };
+  const save = async (skill: SkillDraft) => {
+    setBusy(skill.id);
     try {
-      const data = await api<{ skills: Record<SkillKey, SkillConfig> }>("/api/ai/skills", json("PUT", { skills: Object.values(skills) }));
-      setSkills(data.skills);
-      setSaved(JSON.stringify(data.skills));
-      toast.success("Skills salvas", "A IA já respeita as habilidades ligadas e desligadas.");
+      const body = { name: skill.name, slug: skill.slug, triggerDescription: skill.triggerDescription, instructionsMd: skill.instructionsMd, isActive: skill.isActive, sortOrder: skill.sortOrder };
+      const data = skill.isNew ? await api<{ skill: AiSkill }>("/api/ai/skills", json("POST", body)) : await api<{ skill: AiSkill }>(`/api/ai/skills/${skill.id}`, json("PUT", body));
+      setSkills((current) => current?.map((item) => (item.id === skill.id ? data.skill : item)) ?? current);
+      if (open === skill.id) setOpen(data.skill.id);
+      toast.success("Skill salva", "A IA já segue o novo protocolo nas próximas respostas.");
     } catch (cause) {
-      toast.error("Erro ao salvar as skills", cause instanceof Error ? cause.message : "Tente de novo.");
+      toast.error("Erro ao salvar a skill", cause instanceof Error ? cause.message : "Tente de novo.");
     } finally {
-      setSaving(false);
+      setBusy(null);
     }
   };
+  const toggleActive = async (skill: SkillDraft, isActive: boolean) => {
+    if (skill.isNew) return patch(skill.id, { isActive });
+    setSkills((current) => current?.map((item) => (item.id === skill.id ? { ...item, isActive } : item)) ?? current);
+    try {
+      await api(`/api/ai/skills/${skill.id}`, json("PUT", { isActive }));
+      toast.success(isActive ? "Skill ligada" : "Skill desligada", skill.builtin && !isActive ? "A ferramenta e o fluxo ligados a ela também foram desligados." : skill.name);
+    } catch (cause) {
+      setSkills((current) => current?.map((item) => (item.id === skill.id ? { ...item, isActive: !isActive } : item)) ?? current);
+      toast.error("Erro ao atualizar", cause instanceof Error ? cause.message : "Tente de novo.");
+    }
+  };
+  const remove = async (skill: SkillDraft) => {
+    if (!skill.isNew && !window.confirm(`Excluir a skill "${skill.name}"?`)) return;
+    setBusy(skill.id);
+    try {
+      if (!skill.isNew) await api(`/api/ai/skills/${skill.id}`, { method: "DELETE" });
+      setSkills((current) => current?.filter((item) => item.id !== skill.id) ?? current);
+    } catch (cause) {
+      toast.error("Erro ao excluir", cause instanceof Error ? cause.message : "Tente de novo.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const activeCount = (skills ?? []).filter((skill) => skill.isActive && !skill.isNew).length;
 
   return (
     <Panel
       title="Skills (habilidades)"
-      hint="Ligue ou desligue cada habilidade nativa da IA. Desligada, a ferramenta some para o modelo e o fluxo correspondente não roda. As instruções extras entram no prompt quando a skill está ligada."
-      action={<button type="button" disabled={!dirty || saving} onClick={() => void save()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Salvar skills</button>}
+      hint="Cada skill é um protocolo em Markdown: quando o assunto bate com o gatilho, a IA segue as instruções à risca. Nas skills nativas, desligar o toggle também desliga a ferramenta e o fluxo do CRM ligados a ela."
+      action={<button type="button" onClick={add} className={primary}><Plus className="h-3.5 w-3.5" />Nova skill</button>}
     >
-      {!skills ? <p className="flex items-center gap-2 py-6 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando skills...</p> : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {SKILLS.map((skill) => {
-            const Icon = SKILL_ICONS[skill.key] ?? Glasses;
-            const config = skills[skill.key];
+      <p className="text-xs text-slate-500 dark:text-slate-400">{skills?.length ?? 0} skill{skills?.length === 1 ? "" : "s"} · {activeCount} ativa{activeCount === 1 ? "" : "s"}</p>
+      {!skills ? <p className="flex items-center gap-2 py-6 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando skills...</p> : skills.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">Nenhuma skill cadastrada. Use “Nova skill”.</p>
+      ) : (
+        <ul className="divide-y divide-slate-200/70 overflow-hidden rounded-xl border border-slate-200/70 dark:divide-slate-800 dark:border-slate-800">
+          {skills.map((skill) => {
+            const expanded = open === skill.id;
+            const key = skill.builtin ? (skill.slug as SkillKey) : null;
+            const Icon = (key && SKILL_ICONS[key]) || Sparkles;
+            const linked = key ? tools[key] : undefined;
             return (
-              <div key={skill.key} className={`flex min-w-0 flex-col gap-3 rounded-xl border p-4 transition ${config.enabled ? "border-[#C4D600]/70 bg-[#C4D600]/5" : "border-slate-200/70 dark:border-slate-800"}`}>
-                <div className="flex items-start gap-3">
-                  <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${config.enabled ? "bg-[#051647] text-[#C4D600]" : "bg-slate-100 text-slate-400 dark:bg-white/10"}`}><Icon className="h-4 w-4" /></span>
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words text-sm font-semibold text-[#051647] dark:text-white">{skill.label}</p>
-                    <p className="mt-0.5 break-words text-[11px] text-slate-500 dark:text-slate-400">{skill.description}</p>
-                  </div>
-                  <Switch label={`Skill ${skill.label}`} checked={config.enabled} onChange={(value) => set(skill.key, { enabled: value })} />
+              <li key={skill.id} className="bg-white dark:bg-slate-900/40">
+                <div className="flex items-center gap-3 px-3 py-3 sm:px-4">
+                  <button type="button" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : skill.id)} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ease-in-out ${expanded ? "rotate-180" : ""}`} />
+                    <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${skill.isActive ? "bg-[#051647] text-[#C4D600]" : "bg-slate-100 text-slate-400 dark:bg-white/10"}`}><Icon className="h-4 w-4" /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className={`truncate text-sm font-medium ${skill.isActive ? "text-[#051647] dark:text-white" : "text-slate-400 line-through"}`}>{skill.name || "Sem nome"}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${skill.builtin ? "bg-[#002187]/10 text-[#002187] dark:bg-white/10 dark:text-[#C4D600]" : "bg-[#F7915E]/15 text-[#9a4a1c] dark:text-[#F7915E]"}`}>{skill.builtin ? "Nativa" : "Customizada"}</span>
+                        {skill.dirty && <span className="rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]">Não salva</span>}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-500 dark:text-slate-400">{skill.triggerDescription || "Sem gatilho definido"}</span>
+                    </span>
+                  </button>
+                  <Switch label={`Skill ${skill.name} ativa`} checked={skill.isActive} onChange={(value) => void toggleActive(skill, value)} />
+                  {!skill.builtin && <button type="button" aria-label={`Excluir ${skill.name}`} title="Excluir skill" disabled={busy === skill.id} onClick={() => void remove(skill)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>}
                 </div>
-                {skill.tools.length > 0 && <p className="flex flex-wrap gap-1">{skill.tools.map((tool) => <code key={tool} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-white/10 dark:text-slate-300">{tool}</code>)}</p>}
-                <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">Instruções extras (opcional)
-                  <textarea rows={2} disabled={!config.enabled} value={config.instructions} onChange={(event) => set(skill.key, { instructions: event.target.value.slice(0, 4000) })} placeholder="Ex.: sempre mostrar no máximo 3 opções" className={`${area} resize-y disabled:opacity-50`} />
-                </label>
-              </div>
+                <Collapse open={expanded}>
+                  <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-white/[0.03]">
+                    <div className="grid gap-3 sm:grid-cols-[1fr_1fr_100px]">
+                      <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Nome
+                        <input value={skill.name} onChange={(event) => patch(skill.id, { name: event.target.value, ...(skill.isNew ? { slug: skillSlug(event.target.value) } : {}) })} className={input} maxLength={120} />
+                      </label>
+                      <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Slug
+                        <input value={skill.slug} readOnly={skill.builtin} title={skill.builtin ? "Slug fixo: liga a skill às ferramentas do CRM" : undefined} onChange={(event) => patch(skill.id, { slug: event.target.value })} onBlur={(event) => { if (!skill.builtin) patch(skill.id, { slug: skillSlug(event.target.value || skill.name) }); }} className={`${input} font-mono read-only:opacity-60`} maxLength={60} />
+                      </label>
+                      <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Ordem
+                        <input type="number" value={skill.sortOrder} onChange={(event) => patch(skill.id, { sortOrder: Number(event.target.value) })} className={input} />
+                      </label>
+                    </div>
+                    {linked && (
+                      <p className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        <Wrench className="h-3.5 w-3.5 shrink-0" />{linked.flows}
+                        {linked.tools.map((tool) => <code key={tool} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-white/10 dark:text-slate-300">{tool}</code>)}
+                      </p>
+                    )}
+                    <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Quando acionar (gatilho)
+                      <input value={skill.triggerDescription} onChange={(event) => patch(skill.id, { triggerDescription: event.target.value })} placeholder="Ex.: cliente pergunta de parcelas, boleto ou crediário" className={input} maxLength={600} />
+                    </label>
+                    <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Instruções (Markdown)
+                      <textarea rows={Math.min(22, Math.max(8, skill.instructionsMd.split("\n").length + 1))} value={skill.instructionsMd} onChange={(event) => patch(skill.id, { instructionsMd: event.target.value })} className={`${area} resize-y font-mono`} />
+                      <span className="block text-right text-[10px] font-normal text-slate-400">{skill.instructionsMd.length.toLocaleString("pt-BR")} caracteres</span>
+                    </label>
+                    <div className="flex justify-end">
+                      <button type="button" disabled={busy === skill.id || !skill.dirty} onClick={() => void save(skill)} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
+                        {busy === skill.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Salvar skill
+                      </button>
+                    </div>
+                  </div>
+                </Collapse>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </Panel>
   );

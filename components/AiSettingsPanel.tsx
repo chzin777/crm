@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, Coins, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { KnowledgeSection, RulesSection, SkillsSection } from "@/components/ai-studio/StudioSections";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
@@ -505,104 +505,6 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
 }
 
 /** Página Inteligência Artificial (/ia): parâmetros definidos pelo administrador, consumo e teste. */
-type Topic = AiSettings["topics"][number];
-const newTopicId = () => `topico-${Date.now()}`;
-const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-
-/**
- * Base de conhecimento: cada assunto é um item recolhível (todos fechados ao abrir a página), com status,
- * prévia de uma linha, ações rápidas e busca por título ou conteúdo.
- */
-function KnowledgeBase({ topics, onChange }: { topics: Topic[]; onChange: (topics: Topic[]) => void }) {
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
-  const [query, setQuery] = useState("");
-  const visible = topics.map((topic, index) => ({ topic, index })).filter(({ topic }) => !query.trim() || plain(`${topic.title} ${topic.content}`).includes(plain(query.trim())));
-  const allOpen = visible.length > 0 && visible.every(({ topic }) => open.has(topic.id));
-  const toggle = (id: string) => setOpen((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  const update = (index: number, patch: Partial<Topic>) => onChange(topics.map((topic, position) => (position === index ? { ...topic, ...patch } : topic)));
-  const add = () => {
-    const id = newTopicId();
-    onChange([...topics, { id, title: "Novo assunto", enabled: true, content: "" }]);
-    setQuery("");
-    setOpen((current) => new Set(current).add(id));
-  };
-  const duplicate = (index: number) => {
-    const id = newTopicId();
-    const copy = { ...topics[index], id, title: `${topics[index].title} (cópia)` };
-    onChange([...topics.slice(0, index + 1), copy, ...topics.slice(index + 1)]);
-    setOpen((current) => new Set(current).add(id));
-  };
-  const filled = topics.filter((topic) => topic.content.trim()).length;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar assunto por título ou conteúdo" aria-label="Buscar assunto" className={`${input} pl-8`} />
-        </div>
-        <div className="flex gap-2">
-          <button type="button" disabled={!visible.length} onClick={() => setOpen(allOpen ? new Set() : new Set(visible.map(({ topic }) => topic.id)))} className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">
-            {allOpen ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}{allOpen ? "Recolher todos" : "Expandir todos"}
-          </button>
-          <button type="button" onClick={add} className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 sm:flex-none">
-            <Plus className="h-3.5 w-3.5" />Novo assunto
-          </button>
-        </div>
-      </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{topics.length} assunto{topics.length === 1 ? "" : "s"} · {filled} preenchido{filled === 1 ? "" : "s"}{query.trim() ? ` · ${visible.length} encontrado${visible.length === 1 ? "" : "s"}` : ""}</p>
-
-      {visible.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">{topics.length ? "Nenhum assunto encontrado para essa busca." : "Nenhum assunto cadastrado. Use “Novo assunto”."}</p>
-      ) : (
-        <ul className="divide-y divide-slate-200/70 overflow-hidden rounded-xl border border-slate-200/70 dark:divide-slate-800 dark:border-slate-800">
-          {visible.map(({ topic, index }) => {
-            const expanded = open.has(topic.id);
-            const hasContent = !!topic.content.trim();
-            return (
-              <li key={topic.id} className="bg-white dark:bg-slate-900/40">
-                <div role="button" tabIndex={0} aria-expanded={expanded} aria-controls={`topic-${topic.id}`} onClick={() => toggle(topic.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(topic.id); } }} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-slate-50 sm:px-4 dark:hover:bg-white/5">
-                  <ChevronRight className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className={`truncate text-sm font-medium ${topic.enabled ? "text-[#051647] dark:text-white" : "text-slate-400 line-through"}`}>{topic.title || "Sem título"}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${hasContent ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400"}`}>{hasContent ? "Preenchido" : "Vazio"}</span>
-                      {!topic.enabled && <span className="rounded-full bg-[#F7915E]/15 px-2 py-0.5 text-[10px] font-semibold text-[#9a4a1c] dark:text-[#F7915E]">Desligado</span>}
-                    </div>
-                    {!expanded && <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{hasContent ? topic.content.replace(/\s+/g, " ") : "Sem conteúdo: a IA não usa este assunto."}</p>}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                    <button type="button" aria-label={`Duplicar ${topic.title}`} title="Duplicar assunto" onClick={() => duplicate(index)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><Copy className="h-4 w-4" /></button>
-                    <button type="button" aria-label={`Remover ${topic.title}`} title="Remover assunto" onClick={() => onChange(topics.filter((_, position) => position !== index))} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-                <div id={`topic-${topic.id}`} className={`grid transition-[grid-template-rows] duration-200 ${expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-                  <div className="overflow-hidden">
-                    {expanded && (
-                      <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-white/[0.03]">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                          <label className="flex-1 space-y-1 text-sm font-medium text-slate-700 dark:text-slate-200">Título
-                            <input aria-label="Título do assunto" value={topic.title} onChange={(event) => update(index, { title: event.target.value })} className={`${input} font-semibold`} />
-                          </label>
-                          <div className="sm:w-48 sm:pt-5"><Toggle label="Assunto ativo" checked={topic.enabled} onChange={(value) => update(index, { enabled: value })} /></div>
-                        </div>
-                        <label className="block space-y-1 text-sm font-medium text-slate-700 dark:text-slate-200">O que a IA deve responder
-                          <textarea aria-label={`Resposta sobre ${topic.title}`} rows={Math.min(14, Math.max(4, topic.content.split("\n").length + 1))} value={topic.content} onChange={(event) => update(index, { content: event.target.value })} className={`${area} resize-y`} />
-                          <span className="block text-right text-xs font-normal text-slate-400">{topic.content.length.toLocaleString("pt-BR")} caracteres</span>
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 export function AiSettingsPanel() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("geral");
@@ -1159,14 +1061,8 @@ export function AiSettingsPanel() {
         </div>
       )}
 
-      {tab === "regras" && (
-        <div className="space-y-6">
-          <RulesSection />
-          <Collapsible title="Assuntos rápidos (base anterior)" hint="Respostas curtas por assunto que entram em toda conversa (salvas com o botão Salvar alterações). Prefira as Regras da empresa acima para conteúdos por assunto.">
-            <KnowledgeBase topics={settings.topics} onChange={(topics) => set("topics", topics)} />
-          </Collapsible>
-        </div>
-      )}
+      {/* Os antigos "Assuntos rápidos" foram unificados nas Regras da empresa (migrados para AiBusinessRule). */}
+      {tab === "regras" && <RulesSection />}
 
       {tab === "skills" && <SkillsSection />}
 
