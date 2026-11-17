@@ -100,8 +100,9 @@ main() {
   done
   say "crm-app-$idle saudável em ${waited}s (porta $(port_of "$idle"))"
 
-  # 4. Virada do tráfego.
+  # 4. Virada do tráfego. Imagem do proxy baixada antes: a virada não pode esperar download.
   local legacy=""
+  running crm-proxy || compose pull -q crm-proxy >> "$log" 2>&1
   write_upstream "$idle"
   if running crm-proxy; then
     if ! reload_proxy; then
