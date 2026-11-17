@@ -2,7 +2,8 @@
 # Backup diário do PostgreSQL do CRM (roda no host, pelo cron).
 #   - pg_dump dentro do container crm-postgres, comprimido com gzip: backup-YYYYMMDD-HHMMSS.sql.gz
 #   - confere tamanho > 0 e integridade do gzip antes de considerar o backup válido
-#   - retenção: últimos RETENTION_DAYS dias + o último backup de cada mês (RETENTION_MONTHS meses)
+#   - retenção: últimos 14 dias + o último backup de cada mês (3 meses), ajustável no .env
+#   - agendado pelo systemd: deploy/systemd/crm-db-backup.timer (03:00, o servidor não tem cron)
 #   - registra em /var/log/crm-db-backup.log e grava o último backup válido no banco (aparece em /api/health?details=1)
 # Configuração opcional no /opt/crm/.env: BACKUP_DIR, BACKUP_RETENTION_DAYS, BACKUP_RETENTION_MONTHS.
 # Somente leitura no banco (pg_dump) + 1 upsert na chave system:last-backup. Nenhum dado é apagado.
@@ -15,7 +16,7 @@ main() {
 
   local backup_dir="${BACKUP_DIR:-$(env_value BACKUP_DIR)}"; backup_dir="${backup_dir:-/var/backups/crm-db}"
   local keep_days="${BACKUP_RETENTION_DAYS:-$(env_value BACKUP_RETENTION_DAYS)}"; keep_days="${keep_days:-14}"
-  local keep_months="${BACKUP_RETENTION_MONTHS:-$(env_value BACKUP_RETENTION_MONTHS)}"; keep_months="${keep_months:-12}"
+  local keep_months="${BACKUP_RETENTION_MONTHS:-$(env_value BACKUP_RETENTION_MONTHS)}"; keep_months="${keep_months:-3}"
   local container="${PG_CONTAINER:-crm-postgres}"
   local db_user="${PG_USER:-crm_user}" db_name="${PG_DB:-crm}"
   local log="${BACKUP_LOG:-/var/log/crm-db-backup.log}"
@@ -28,6 +29,10 @@ main() {
   if ! flock -n 9; then say "outro backup em andamento; ignorando"; return 0; fi
 
   mkdir -p "$backup_dir" && chmod 700 "$backup_dir" || { say "ERRO: não foi possível criar $backup_dir"; return 1; }
+  # Cada backup tem ~700 MB: sem 3 GB livres, não arrisca encher o disco do servidor.
+  local free_kb
+  free_kb="$(df -Pk "$backup_dir" | awk 'NR==2 {print $4}')"
+  if [ "${free_kb:-0}" -lt 3145728 ]; then say "ERRO: menos de 3 GB livres em $backup_dir; backup não executado"; return 1; fi
   if ! docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -q true; then
     say "ERRO: container $container não está rodando"; return 1
   fi
