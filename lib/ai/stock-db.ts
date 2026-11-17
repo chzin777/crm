@@ -1,11 +1,11 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { storeErpCode } from "@/lib/stores";
-import { explicitBrand, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
+import { CATEGORY_FILTER, explicitBrand, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
 import { broadCatalogMatches, catalogBrands, isBrandFamily, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
 import { expandModelNicknames } from "@/lib/ai/product-names";
 import { buildStockResult, createStockClient, STOCK_MAX_CODES, stockSearchTerms, type StockLog, type StockLookup, type StockToolResult, type StoreInfo } from "@/lib/ai/stock";
-import { buildShowcaseResult, classifySearch, showcaseCandidates, type ShowcaseResult } from "@/lib/ai/stock-showcase";
+import { buildShowcaseResult, classifySearch, modelWords, SHOWCASE_CODES_PER_MODEL, showcaseCandidates, termCategory, type PriceFilter, type ShowcaseResult } from "@/lib/ai/stock-showcase";
 
 /** API de estoque do VMSet no host (scripts/vmset-stock-api.py), alcançada pelo container via host-gateway. */
 const client = createStockClient({
@@ -78,12 +78,36 @@ export function storeDirectory() {
   return load;
 }
 
+const TYPE_CATEGORY: Record<string, "ARMACAO" | "SOLAR" | "LENTE_CONTATO"> = { grau: "ARMACAO", sol: "SOLAR", lente_contato: "LENTE_CONTATO" };
+/** Modelos candidatos de uma busca sem marca (só tipo/orçamento) consultados no saldo do VMSet. */
+const GENERIC_CANDIDATES = 30;
+
+function priceFilterOf(args: { minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown }): PriceFilter | undefined {
+  const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined);
+  const sortBy = args.sortBy === "price_asc" || args.sortBy === "price_desc" ? args.sortBy : undefined;
+  const filter: PriceFilter = { minPrice: number(args.minPrice), maxPrice: number(args.maxPrice), sortBy };
+  return filter.minPrice || filter.maxPrice || filter.sortBy ? filter : undefined;
+}
+
+/**
+ * Candidatos dentro do orçamento pelo preço de cadastro (o preço final é o da loja, conferido na vitrine).
+ * "Barata": mais baratos primeiro; senão, os mais vendidos (variados e aprovados pelos clientes).
+ */
+function orderByBudget(products: IndexedProduct[], price?: PriceFilter) {
+  if (!price) return products;
+  // Folga de 15%: o preço da loja pode diferir um pouco do cadastro.
+  const inRange = products.filter((product) => product.price === null || ((!price.maxPrice || product.price <= price.maxPrice * 1.15) && (!price.minPrice || product.price >= price.minPrice * 0.85)));
+  if (price.sortBy === "price_asc") return [...inRange].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity) || b.sales - a.sales);
+  if (price.sortBy === "price_desc") return [...inRange].sort((a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity) || b.sales - a.sales);
+  return inRange;
+}
+
 /**
  * Tool consultarEstoqueProduto: busca textual local (catálogo do CRM, top 5) → saldo pontual no VMSet só desses códigos.
  * Nunca lança erro: falha ou lentidão da API vira o cenário "unavailable_api".
  */
 export async function consultarEstoqueProduto(
-  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown },
+  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown },
   deps: { products: () => Promise<IndexedProduct[]>; withPrices: boolean },
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
@@ -91,7 +115,11 @@ export async function consultarEstoqueProduto(
   const term = normalizeBrandQuery((field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80));
   const city = field(args.cidade).slice(0, 60);
   const region = typeof args.regiaoOuLoja === "string" ? args.regiaoOuLoja.slice(0, 60) : city;
+  const price = priceFilterOf(args);
+  const category = TYPE_CATEGORY[field(args.tipo)] ?? termCategory(term);
   const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
+  // Tipo pedido (grau/sol/lente de contato) restringe a vitrine também quando não há marca no termo.
+  const inCategory = (product: IndexedProduct) => !category || product.categoryKey === CATEGORY_FILTER[category];
 
   // Marca com erro de digitação ("rada" → RADDA, "okley" → OAKLEY): marca inteira normalizada ou com 1-2 erros.
   const brands = brandsOf(all);
@@ -103,12 +131,19 @@ export async function consultarEstoqueProduto(
   const iconic = matchIconicProducts(all, identity, identityBrand)
     ?? matchIconicProducts(all, field(args.textoVisivelNaImagem).slice(0, 4000), identityBrand);
   // Busca ampla (só marca/categoria): vitrine de modelos distintos com estoque, sem lojas nem foto.
-  const kind = iconic ? "modelo_especifico" : brandMatch && !brandMatch.rest.length ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
+  // Só tipo/orçamento ("armação até 250"): o valor no termo não é referência de modelo.
+  const withoutValues = term.replace(/\b\d{2,5}(?:[.,]\d{2})?\b/g, " ").replace(/\s+/g, " ").trim();
+  const budgetOnly = !iconic && (!!price || !!field(args.tipo)) && !brandMatch?.rest.length && !modelWords(withoutValues).length;
+  const kind = iconic ? "modelo_especifico" : budgetOnly || (brandMatch && !brandMatch.rest.length) ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
   if (kind === "marca_ampla") {
-    const broad = requestedBrand && !brandMatch ? { products: [], brand: requestedBrand } : broadCatalogMatches(all, term, brands, city ? all.length : undefined);
-    const groups = showcaseCandidates(broad.products.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), city ? { groups: broad.products.length, codesPerModel: broad.products.length } : undefined);
+    const broad = requestedBrand && !brandMatch ? { products: [], brand: requestedBrand } : broadCatalogMatches(all, budgetOnly ? withoutValues : term, brands, city || price || category ? all.length : undefined);
+    // Sem marca (só tipo/orçamento) o catálogo é grande: limita os candidatos consultados no saldo.
+    const generic = !broad.brand && (budgetOnly || !modelWords(term).length);
+    const candidates = orderByBudget(broad.products.filter(inCategory), price);
+    const limits = generic ? { groups: GENERIC_CANDIDATES, codesPerModel: SHOWCASE_CODES_PER_MODEL } : city || price ? { groups: candidates.length, codesPerModel: candidates.length } : undefined;
+    const groups = showcaseCandidates(candidates.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), limits);
     const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;
-    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city });
+    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city, price });
     const log: StockLog = { term, region, scenario: result.cenario, products: result.modelos.length, stores: 0, ms: Date.now() - started, cached: !!lookup && lookup.requested === 0, kind };
     console.log(`[ai][estoque] busca ampla: ${log.scenario}, ${log.products} modelos, ${log.ms} ms`);
     return { result, log };

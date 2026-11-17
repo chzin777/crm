@@ -26,7 +26,8 @@ import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQ
 import { readFile } from "@/lib/minio";
 import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
-import { EMPTY_CATALOG_CONTEXT, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
+import { asksCustomerCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
+import { budgetBlock, cityFirstBlock, conversationBudget, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
@@ -406,6 +407,8 @@ export type AgentRunInput = {
   /** Já existe aprovação financeira pendente nesta conversa: não consulta de novo sem CPF novo. */
   hasPendingFinancial?: boolean;
   catalogContext?: CatalogContext;
+  /** Cidade conhecida fora da conversa (cadastro do contato ou loja da última compra): filtra o estoque. */
+  knownCity?: string | null;
   /** Consulta de parcelas no VMSet (testes injetam a sua). */
   lookupInstallments?: (cpf: string) => Promise<InstallmentLookup>;
 };
@@ -562,8 +565,14 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     : [...(input.earlierCustomerTexts ?? [])].reverse().reduce((state, text) => updateCatalogContext(state, text, cities).context, { ...EMPTY_CATALOG_CONTEXT });
   const intent = updateCatalogContext(previousCatalog, customerText, cities);
   const catalogState = intent.context;
+  // Cidade do cadastro/última compra (se for de uma loja da rede) vale como cidade da sessão.
+  if (!catalogState.preferredCity && input.knownCity) catalogState.preferredCity = extractPreferredCity(input.knownCity, cities) ?? "";
+  // Consultora: orçamento da conversa vira filtro; sem cidade, pergunta antes de listar qualquer produto.
+  const { budget, cheap } = conversationBudget([...[...(input.earlierCustomerTexts ?? [])].reverse(), customerText]);
+  const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
+  const askBudget = cityFirst && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
   const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
-  const forceCatalog = !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
+  const forceCatalog = !cityFirst && !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
     && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand));
   // Pedido de pessoa com a IA roteando: sem assunto → 1 pergunta de triagem; com assunto → transfere já para a fila certa.
   // Âncora do atendimento atual: follow-up de detalhes usa o produto fixado; localização no singular usa a loja fixada.
@@ -596,7 +605,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
+    extra: [SALES_CONSULTANT_RULES, cityFirst ? cityFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -616,6 +625,8 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   };
   const toolStores: SessionStore[] = [];
   let currentCatalogFilterHash = "";
+  /** A ferramenta recusou listar produtos por falta da cidade nesta resposta. */
+  let stockGated = false;
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
@@ -626,7 +637,12 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       const baseQuery = chosen
         ? { ...args, termoBusca: listedSearchTerm(chosen), tipoBusca: "modelo_especifico" }
         : anchoredProduct ? { ...args, termoBusca: [anchoredProduct.marca, anchoredProduct.referencia ?? anchoredProduct.nomeComercial].filter(Boolean).join(" "), tipoBusca: "modelo_especifico" } : args;
-      const query: Record<string, unknown> = { ...baseQuery, cidade: catalogState.preferredCity || args.cidade };
+      // Regra de ouro geográfica: vitrine só com a cidade do cliente conhecida.
+      if (!chosen && isGatedStockCall(baseQuery, { knownCity: catalogState.preferredCity, fixedProduct: !!anchoredProduct })) {
+        stockGated = true;
+        return gatedStockResult(askBudget);
+      }
+      const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category }), cidade: catalogState.preferredCity || args.cidade };
       const { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
       if (result.tipoBusca === "marca_ampla") currentCatalogFilterHash = [String(query.termoBusca ?? ""), String(query.cidade ?? ""), catalogState.category].map(normalizeTerm).join("|");
@@ -700,7 +716,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       };
       const opening = args._photo && imageAnalysis
         ? `Esse modelo da foto é *${analysisName(imageAnalysis)}* e temos sim em estoque!`
-        : cardOpening(input.pendingText);
+        : cardOpening(input.pendingText, input.aiReplies);
       const card = { ...result, fichaProduto: fields, fichaFormatada: buildProductCard(fields, opening), orientacao: `${result.orientacao}\n${cardGuidance()}` };
       cardShown = card.fichaFormatada;
       if (args._photo) photoReply = card.fichaFormatada;
@@ -709,24 +725,28 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     },
   };
   let proactiveReply: string | null = null;
+  let proactiveContent: string | null = null;
   let proactiveResult: Awaited<ReturnType<typeof stockTool.run>> | null = null;
   if (forceCatalog) {
     const category = catalogState.category === "ARMACAO" ? "armação" : catalogState.category === "SOLAR" ? "solar" : catalogState.category === "LENTE_CONTATO" ? "lentes de contato" : "";
     const term = cityProduct ? [cityProduct.marca, cityProduct.referencia ?? cityProduct.nomeComercial].filter(Boolean).join(" ") : [catalogState.brand, category].filter(Boolean).join(" ");
     const result = await stockTool.run({ termoBusca: term, marca: catalogState.brand, cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
     proactiveResult = result;
-    const prefix = intent.correction ? "Desculpe pelo engano! " : /\b(presentear|presente)\b/i.test(customerText) ? "Que presente especial! 😊 " : "";
+    // Conteúdo exato da consulta; a abertura (desculpa pela correção, carinho com o presente, cidade) quem escreve
+    // é o modelo, com as próprias palavras (mergeProactiveReply), nunca um prefixo fixo.
     if ("fichaFormatada" in result && typeof result.fichaFormatada === "string") {
-      proactiveReply = `${prefix}${result.fichaFormatada}`;
+      proactiveContent = result.fichaFormatada;
     } else if ("vitrineFormatada" in result && result.vitrineFormatada) {
-      const location = catalogState.preferredCity ? `Confira as opções em ${catalogState.preferredCity}:\n` : "";
-      proactiveReply = `${prefix}${location}${result.vitrineFormatada}`;
+      proactiveContent = result.vitrineFormatada;
     } else if ("cenario" in result && result.cenario === "unavailable_api") {
-      proactiveReply = `${prefix}Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.`;
+      proactiveReply = "Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.";
     } else {
-      proactiveReply = `${prefix}Não encontrei ${cityProduct ? "esse modelo disponível" : `modelos ${catalogState.brand} disponíveis`}${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
+      proactiveReply = `Não encontrei ${cityProduct ? "esse modelo disponível" : `modelos ${catalogState.brand} disponíveis`}${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
     }
   }
+  const proactiveBlock = proactiveContent
+    ? `\n\nBUSCA JÁ FEITA NESTA RESPOSTA (o resultado está em consultarEstoqueProduto): escreva UMA frase curta de abertura, única e ligada ao que o cliente disse (${intent.correction ? "peça desculpas pelo engano com naturalidade" : /\b(presentear|presente)\b/i.test(customerText) ? "reconheça o presente com carinho" : catalogState.preferredCity ? `cite que separou opções em ${catalogState.preferredCity}` : "vá direto ao ponto"}) e em seguida copie o conteúdo exatamente como veio.`
+    : "";
   const photoReplies: string[] = [];
   for (const currentPhoto of photoQueries) {
     photoQuery = currentPhoto;
@@ -750,7 +770,9 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
           const family = [photoQuery.brand, photoQuery.line].filter(Boolean).join(" ");
           const alternative = await stockTool.run({ termoBusca: family, tipoBusca: "marca_ampla" });
           const opening = `Esse modelo *${analysisName(imageAnalysis!)}* não está disponível${catalogState.preferredCity ? ` em ${catalogState.preferredCity}` : " no momento"}.`;
-          if ("vitrineFormatada" in alternative && alternative.vitrineFormatada) {
+          if ("cenario" in alternative && alternative.cenario === "cidade_desconhecida") {
+            photoReply = `${opening} ${cityQuestion({ askBudget: false, variant: input.aiReplies }).replace("os modelos disponíveis", "opções parecidas disponíveis")}`;
+          } else if ("vitrineFormatada" in alternative && alternative.vitrineFormatada) {
             photoReply = `${opening} Confira outras opções da mesma marca:\n${alternative.vitrineFormatada}`;
           } else if ("cenario" in alternative && alternative.cenario === "unavailable_api") {
             photoReply = `${opening} Não consegui consultar as outras opções agora; posso pedir a um atendente para verificar?`;
@@ -864,7 +886,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   };
   const decision = await aiJson<AgentDecision>(
     [
-      { role: "system", content: system },
+      { role: "system", content: system + proactiveBlock },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
     { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [forceCatalog && proactiveResult ? { ...stockTool, run: async () => proactiveResult } : stockTool, detailsTool]), locationTool, closeTool] },
@@ -910,7 +932,12 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Foto com estoque: a ficha (referência exata) ou a vitrine da mesma marca/linha sai mesmo se o modelo não buscou
   // (ou se respondeu só "sem estoque").
   if ((photoReply || modelVariantReply) && outcome.action === "reply") outcome = { ...outcome, reply: photoReply || modelVariantReply || outcome.reply };
+  if (proactiveContent && humanMode !== "route") proactiveReply = mergeProactiveReply(outcome.action === "reply" ? outcome.reply : "", proactiveContent);
   if (proactiveReply && humanMode !== "route") outcome = { ...outcome, action: "reply", reply: proactiveReply, reason: "Busca de catálogo atualizada", queue: "", trigger: "ai" };
+  // Cidade desconhecida: a resposta precisa perguntar onde o cliente está (o modelo escreve; aqui só a garantia).
+  if ((cityFirst || stockGated) && !photoReply && outcome.action === "reply" && !asksCustomerCity(outcome.reply)) {
+    outcome = { ...outcome, reply: `${outcome.reply.trim()} ${cityQuestion({ askBudget, variant: input.aiReplies })}`.trim() };
+  }
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
@@ -989,7 +1016,12 @@ async function respond(conversationId: string, messageId: string) {
   })));
 
   // Nome do contato no cadastro: confirmações de transferência usam ele (nunca o nome citado pelo cliente).
-  const contactName = (await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } }).catch(() => null))?.name ?? null;
+  const contactRow = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true, city: true, store: true } }).catch(() => null);
+  const contactName = contactRow?.name ?? null;
+  // Cidade conhecida: cadastro do contato; senão, a cidade da loja da última compra (VMSet).
+  const knownCity = contactRow?.city?.trim()
+    || (contactRow?.store ? (await prisma.store.findFirst({ where: { name: { contains: contactRow.store, mode: "insensitive" } }, select: { city: true } }).catch(() => null))?.city : null)
+    || null;
   // aiContext.lastAnalyzedImage: análise da última foto de produto deste atendimento (guardada na mensagem da foto).
   const analyzed = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inSession }, orderBy: { createdAt: "desc" }, take: 20, select: { metaMedia: true } }).catch(() => []);
   const lastAnalyzedImage = sanitizeImageAnalysis(analyzed.map((item) => (item.metaMedia as { analysis?: unknown } | null)?.analysis).find(Boolean));
@@ -1024,6 +1056,7 @@ async function respond(conversationId: string, messageId: string) {
       lastAnalyzedImage,
       catalogContext,
       contactName,
+      knownCity,
       isReturningContact: !!previousConversation,
       // Parcelas: CPF só quando o telefone leva a um único cadastro do VMSet; aprovação pendente evita nova consulta.
       linkedCpf,
@@ -1167,7 +1200,7 @@ async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, i
 /** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
 export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSku?: string; imageUrl?: string; catalogContext?: CatalogContext; /** Item tocado na lista interativa simulada. */ selectedProductRef?: string; /** Análise da foto de produto desta mensagem do cliente (como no metaMedia do WhatsApp). */ imageAnalysis?: ImageAnalysis };
 /** queued: simula o cliente já na fila (espera assistida), com o mesmo pipeline de produto. sessionId: sessão de teste (nova a cada "Limpar"). */
-export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string; /** Nome do contato simulado (ex.: "Vivi"); sem ele, o do perfil. */ contactName?: string };
+export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string; /** Nome do contato simulado (ex.: "Vivi"); sem ele, o do perfil. */ contactName?: string; /** Cidade do cadastro simulado (sem ela, a IA pergunta antes de listar produtos). */ knownCity?: string };
 export type PlaygroundResult = AgentOutcome & {
   /** O que o cliente receberia no WhatsApp (resposta e/ou mensagem de transferência). */
   messages: string[];
@@ -1247,6 +1280,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     lastAnalyzedImage: messages.map((message) => message.imageAnalysis).filter((item): item is ImageAnalysis => !!item).at(-1) ?? null,
     catalogContext: messages.map((message) => message.catalogContext).filter((item): item is CatalogContext => !!item).at(-1),
     contactName,
+    knownCity: options.knownCity ?? null,
     isReturningContact: profile.id === "recorrente",
     queued: options.queued ? { queueName: "Vendas" } : null,
     // Mesmas regras do WhatsApp: falha de leitura vira aviso ao cliente (não erro na tela).

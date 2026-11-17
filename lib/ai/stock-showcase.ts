@@ -25,6 +25,8 @@ const GENERIC = new Set([
   "MODELO", "MODELOS", "OPCOES", "OPCAO", "MARCA", "LINHA", "COLECAO", "DISPONIVEL", "DISPONIVEIS", "ESTOQUE", "AI", "LOJA", "LOJAS", "ALGUM", "ALGUMA", "ALGUNS",
   "OCULOS", "SOL", "SOLAR", "SOLARES", "GRAU", "ARMACAO", "ARMACOES", "ARMACAOS", "LENTE", "LENTES", "CONTATO", "ACESSORIO", "ACESSORIOS",
   "FEMININO", "FEMININOS", "FEMININA", "FEMININAS", "MASCULINO", "MASCULINOS", "MASCULINA", "MASCULINAS", "INFANTIL", "INFANTIS", "UNISSEX", "KIDS",
+  // Orçamento ("armação barata até 250 reais") não identifica modelo.
+  "BARATA", "BARATAS", "BARATO", "BARATOS", "BARATINHA", "BARATINHO", "CONTA", "ACESSIVEL", "ACESSIVEIS", "ECONOMICA", "ECONOMICO", "PRECO", "MELHOR", "MENOR", "BOM", "BOA", "ATE", "REAIS", "VALOR", "MAIS", "MENOS",
 ]);
 
 // "Meta" é modelo (Ray-Ban Meta), não marca para vitrine.
@@ -161,6 +163,44 @@ const SHOWCASE_GUIDANCE = {
   produto_nao_encontrado: "Nenhum produto dessa marca/categoria foi encontrado no catálogo. Pergunte qual modelo ou referência o cliente procura ou transfira para um atendente (action handoff).",
 } as const;
 
+export type PriceFilter = { minPrice?: number; maxPrice?: number; sortBy?: "price_asc" | "price_desc" | "relevance" };
+
+/** "R$ 1.070,00" → 1070. */
+export const priceNumber = (text: string | null | undefined) => {
+  if (!text) return null;
+  const value = Number(text.replace(/[^\d,]/g, "").replace(",", "."));
+  return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+/** Mantém só os modelos dentro da faixa (sem preço fica de fora quando há faixa) e ordena por preço se pedido. */
+export function applyPriceFilter(models: ShowcaseModel[], price?: PriceFilter) {
+  if (!price) return models;
+  const { minPrice, maxPrice, sortBy } = price;
+  const ranged = minPrice || maxPrice
+    ? models.filter((model) => {
+      const value = priceNumber(model.precoVenda);
+      return value !== null && (!minPrice || value >= minPrice) && (!maxPrice || value <= maxPrice);
+    })
+    : [...models];
+  if (sortBy === "price_asc" || sortBy === "price_desc") {
+    const direction = sortBy === "price_asc" ? 1 : -1;
+    // Sem preço sempre no fim.
+    ranged.sort((a, b) => {
+      const [x, y] = [priceNumber(a.precoVenda), priceNumber(b.precoVenda)];
+      if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+      return (x - y) * direction;
+    });
+  }
+  return ranged;
+}
+
+const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+export function priceRangeLabel(price?: PriceFilter) {
+  if (!price?.minPrice && !price?.maxPrice) return "";
+  if (price.minPrice && price.maxPrice) return `entre ${brl(price.minPrice)} e ${brl(price.maxPrice)}`;
+  return price.maxPrice ? `até ${brl(price.maxPrice)}` : `acima de ${brl(price.minPrice!)}`;
+}
+
 /** Resultado da busca ampla: modelos distintos com saldo > 0 na rede (até 8, mais vendidos primeiro), com preço. */
 export function buildShowcaseResult(input: {
   term: string;
@@ -171,6 +211,8 @@ export function buildShowcaseResult(input: {
   city?: string;
   /** Marca real reconhecida (com erro de digitação ou não). */
   brand?: string | null;
+  /** Faixa de valor e ordenação pedidas pelo cliente (preço de venda nas lojas com estoque). */
+  price?: PriceFilter;
 }): ShowcaseResult {
   const base = { tipoBusca: "marca_ampla" as const, termoBusca: input.term, regiao: "", regiaoReconhecida: false as const, produtos: [] as [], ...(input.brand ? { marcaResolvida: input.brand } : {}) };
   const brandMissing = input.brand ? `Não há modelos da marca ${input.brand} em estoque${input.city ? ` em ${input.city}` : ""} no momento: diga isso com clareza, sem listar produtos de outras marcas.` : "";
@@ -203,7 +245,11 @@ export function buildShowcaseResult(input: {
   // Modelos com referência comercial do cadastro primeiro; código interno (#) por último; até 8.
   const rank = (model: ShowcaseModel) => (model.referencia?.startsWith("#") ? 2 : fallbackOnly.has(model) ? 1 : 0);
   models.sort((a, b) => rank(a) - rank(b));
+  const priced = applyPriceFilter(models, input.price);
+  models.splice(0, models.length, ...priced);
   models.splice(SHOWCASE_MAX_MODELS);
+  const range = priceRangeLabel(input.price);
+  if (!models.length && range) return { ...base, cenario: input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: `Não há modelos com estoque ${range}${input.city ? ` em ${input.city}` : ""} agora. Diga isso com naturalidade e ofereça as opções mais próximas do orçamento (nova busca sem o limite de valor) ou ajuda de um atendente.` };
   if (!models.length) return { ...base, cenario: input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: brandMissing || (input.city ? `Não há modelos disponíveis em ${input.city} no momento.` : SHOWCASE_GUIDANCE.sem_estoque_na_rede), ...(input.brand ? { semEstoqueDaMarca: true } : {}) };
   return {
     ...base,

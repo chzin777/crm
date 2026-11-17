@@ -181,7 +181,7 @@ describe("roteamento de mídia sem transbordo cego", () => {
 
   it("só oferece alternativas da marca após confirmar que o modelo está sem estoque", async () => {
     model.vision = [{ kind: "produto", marca: "Ray-Ban", nomeModelo: "Justin", textoVisivelNaImagem: "Ray-Ban Justin" }];
-    const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "tem esse?", aiReplies: 1 });
+    const result = await run([image("justin.jpg")], { hasMedia: false, pendingText: "tem esse?", aiReplies: 1, knownCity: "Goiânia" });
     expect(calls.stockQueries.map((query) => query.tipoBusca)).toEqual(["modelo_especifico", "marca_ampla"]);
     expect(result.outcome.reply).toContain("não está disponível");
     expect(result.outcome.reply).toContain("outras opções");

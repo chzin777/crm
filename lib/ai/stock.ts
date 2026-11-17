@@ -269,6 +269,7 @@ export function buildStockResult(input: {
 /** Regras fixas no código (não editáveis na tela) sobre estoque. */
 export const STOCK_RULES = [
   "REGRAS DE ESTOQUE (fixas): para disponibilidade, estoque ou \"tem na loja X\", use a ferramenta consultarEstoqueProduto (termoBusca com marca/modelo/referência; regiaoOuLoja quando o cliente citar bairro, cidade ou loja). Não use o histórico de vendas como estoque.",
+  "FILTROS DE ORÇAMENTO (regra fixa): pedido sem marca (\"armação de grau barata\", \"óculos de sol até 300\") também vai para consultarEstoqueProduto, com tipo (grau/sol/lente_contato), maxPrice/minPrice quando o cliente der valor e sortBy \"price_asc\" quando pedir barata, em conta, acessível ou melhor preço. termoBusca pode ficar vazio.",
   "NUNCA diga \"a disponibilidade precisa ser confirmada na loja\" (ou equivalente) quando a ferramenta devolver saldo. Siga o cenário retornado:",
   "- disponivel_na_regiao: confirme que há unidades na loja pedida e informe o endereço comercial;",
   "- esgotado_na_regiao_disponivel_em_outras: diga que naquela loja está esgotado no momento e liste exatamente as outras lojas com estoque;",
@@ -296,9 +297,13 @@ export const STOCK_TOOL = {
         termoBusca: { type: "string", description: "Marca, modelo ou referência do produto, ex.: \"Ray-Ban RB3025\", \"Oakley Holbrook\"." },
         regiaoOuLoja: { type: "string", description: "Bairro, cidade ou loja citada pelo cliente, ex.: \"Parque Amazônia\", \"Aparecida\", \"LJ 36\". Opcional." },
         cidade: { type: "string", description: "Cidade onde o cliente quer comprar ou retirar; restringe os resultados a lojas dessa cidade." },
-        tipoBusca: { type: "string", enum: ["marca_ampla", "modelo_especifico"], description: "marca_ampla: o cliente pediu só a marca ou um tipo (\"tem Ray-Ban?\", \"armações femininas\") → vitrine de modelos com preço, sem foto. modelo_especifico: qualquer nome de modelo ou referência junto ou sem a marca (\"Ray-Ban Justin\", \"RB4165\") → estoque por loja, foto e ficha." },
+        tipoBusca: { type: "string", enum: ["marca_ampla", "modelo_especifico"], description: "marca_ampla: o cliente pediu só a marca ou um tipo (\"tem Ray-Ban?\", \"armações femininas\", \"armação barata\") → vitrine de modelos com preço, sem foto. modelo_especifico: qualquer nome de modelo ou referência junto ou sem a marca (\"Ray-Ban Justin\", \"RB4165\") → estoque por loja, foto e ficha." },
+        tipo: { type: "string", enum: ["grau", "sol", "lente_contato"], description: "Tipo de produto: grau (armação para óculos de grau), sol (óculos solar) ou lente_contato. Use mesmo sem marca (ex.: \"armação barata\" → tipo grau)." },
+        minPrice: { type: "number", description: "Valor mínimo em reais, quando o cliente der piso (\"acima de 300\")." },
+        maxPrice: { type: "number", description: "Valor máximo em reais, quando o cliente der teto (\"até 250 reais\" → 250)." },
+        sortBy: { type: "string", enum: ["price_asc", "price_desc", "relevance"], description: "price_asc quando o cliente pedir barata, em conta, mais acessível ou melhor preço; price_desc para as mais sofisticadas; relevance (padrão) para as mais vendidas." },
       },
-      required: ["termoBusca"],
+      required: [],
       additionalProperties: false,
     },
   },

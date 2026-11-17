@@ -60,3 +60,65 @@ export function updateCatalogContext(previous: CatalogContext, text: string, cit
   const changed = !!city || (!!brand && normalizeTerm(brand) !== normalizeTerm(previous.brand)) || !!category || correction;
   return { context, changed, brand, city, correction };
 }
+
+export type PriceSort = "price_asc" | "price_desc" | "relevance";
+export type Budget = { minPrice?: number; maxPrice?: number };
+
+const money = (value: string) => {
+  const number = Number(value.replace(/\.(?=\d{3}\b)/g, "").replace(",", "."));
+  return Number.isFinite(number) && number > 0 && number < 100_000 ? number : undefined;
+};
+const MONEY = String.raw`(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{2,5}(?:,\d{1,2})?)\s*(?:reais|real|conto|contos|pila|r\$)?`;
+
+/** Faixa de valor dita pelo cliente: "até 250 reais" → max 250; "entre 200 e 400" → 200–400; "acima de 500" → min 500. */
+export function extractBudget(text: string): Budget {
+  const source = plain(text);
+  const range = source.match(new RegExp(String.raw`\b(?:entre|de)\s+${MONEY}\s*(?:e|a|ate)\s+${MONEY}`));
+  if (range) {
+    const [low, high] = [money(range[1]), money(range[2])];
+    if (low && high) return { minPrice: Math.min(low, high), maxPrice: Math.max(low, high) };
+  }
+  const max = source.match(new RegExp(String.raw`\b(?:ate|no maximo|menos de|abaixo de|nao passe de|por volta de|em torno de|uns)\s+${MONEY}`));
+  const min = source.match(new RegExp(String.raw`\b(?:acima de|mais de|a partir de|minimo de|pelo menos)\s+${MONEY}`));
+  const budget: Budget = {};
+  const maxPrice = max ? money(max[1]) : undefined;
+  const minPrice = min ? money(min[1]) : undefined;
+  if (maxPrice) budget.maxPrice = maxPrice;
+  if (minPrice) budget.minPrice = minPrice;
+  return budget;
+}
+
+/** "barata", "em conta", "mais acessível", "melhor preço": vitrine começa pelas opções de entrada. */
+export function wantsCheap(text: string) {
+  return /\b(barat[oa]s?|baratinh[oa]s?|em conta|mais acessive(l|is)|acessive(l|is)|melhor preco|menor preco|preco bom|preco baixo|economic[oa]s?|nao muito car[oa])\b/.test(plain(text));
+}
+
+/** Pedido para ver produtos de uma categoria/marca ("armação de grau barata", "tem óculos de sol?", "quero uma Ray-Ban"). */
+export function isProductBrowseRequest(text: string) {
+  const source = plain(text);
+  return /\b(armac(ao|oes)|oculos|grau|solar|de sol|lentes? de contato)\b/.test(source) || !!explicitBrand(text) || wantsCheap(text);
+}
+
+/**
+ * Pergunta de localização (e de orçamento, quando o pedido foi genérico) para quando a cidade ainda é desconhecida.
+ * Variada pelo número da resposta para não soar repetida.
+ */
+export function cityQuestion(input: { askBudget: boolean; variant?: number }) {
+  const city = [
+    "Me conta de qual cidade você fala? Assim já separo os modelos disponíveis pertinho de você.",
+    "De qual cidade (ou bairro) você é? Quero te mostrar só o que tem numa loja perto de você.",
+    "Pra eu já separar opções numa loja pertinho, de qual cidade você está falando?",
+  ];
+  const budget = [
+    " E tem uma faixa de valor em mente, tipo até uns R$ 200, R$ 300?",
+    " E mais ou menos quanto você quer investir? Até uns R$ 200, R$ 300?",
+    " Ah, e qual faixa de valor fica boa pra você?",
+  ];
+  const index = Math.abs(input.variant ?? 0) % city.length;
+  return `${city[index]}${input.askBudget ? budget[index] : ""}`;
+}
+
+/** A resposta já pergunta onde o cliente está. */
+export function asksCustomerCity(reply: string) {
+  return /\b(cidade|bairro|regiao|onde voce (esta|mora|fica)|de onde)\b/.test(plain(reply));
+}

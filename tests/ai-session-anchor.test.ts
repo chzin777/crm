@@ -97,6 +97,24 @@ vi.mock("@/lib/ai/stock-db", () => ({
       const produtos = [{ codigo: chosen.code, produto: chosen.description, marca: chosen.brand, preco: 1960, precoVenda: "R$ 1.960,00", nomeProduto: chosen.description, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 3, lojasComEstoque: [{ code: "39", loja: "Loja Jardim Goiás — Av. Deputado Jamel Cecilio, 3300", quantidade: 2, cidade: "Goiânia" }, { code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] }];
       return { result: { tipoBusca: "modelo_especifico", cenario: "disponivel_em_lojas", termoBusca: term, regiao: "", regiaoReconhecida: false, produtos, orientacao: "" }, log: { term, region: "", scenario: "disponivel_em_lojas", products: 1, stores: 2, ms: 1, cached: false } };
     }
+    // Armação de grau sem marca (orçamento): 2 modelos em Goiânia (R$ 189 e R$ 239), 1 acima do teto e 1 só em Brasília.
+    if (args.tipo === "grau") {
+      const { buildShowcaseResult, showcaseCandidates } = await import("@/lib/ai/stock-showcase");
+      const frames = [
+        { code: "501", description: "ARM ATITUDE REF AT1001 52", brand: "ATITUDE" },
+        { code: "502", description: "ARM VOGUE REF VO5300 51", brand: "VOGUE" },
+        { code: "503", description: "ARM TECNOL REF TN3010 53", brand: "TECNOL" },
+        { code: "504", description: "ARM RAY BAN REF RB7047 54", brand: "RAY BAN" },
+      ];
+      const at = (unit: string, price: number) => [{ unit, name: `LJ ${unit}`, qty: 1, price }];
+      const result = buildShowcaseResult({
+        term, groups: showcaseCandidates(frames), stores: new Map([...STORES, ["90", { id: "90", name: "LJ 90", address: "SCS QUADRA 2", addressNumber: "1", neighborhood: "ASA SUL", city: "BRASILIA", lat: null, lng: null }]]), withPrices: true,
+        lookup: { stockStatus: "ok", fromCache: 0, requested: 4, byCode: { "501": at("36", 239), "502": at("39", 189), "503": at("90", 149), "504": at("36", 690) } },
+        city: typeof args.cidade === "string" ? args.cidade : undefined,
+        price: { maxPrice: typeof args.maxPrice === "number" ? args.maxPrice : undefined, sortBy: args.sortBy as "price_asc" | undefined },
+      });
+      return { result, log: { term, region: "", scenario: result.cenario, products: result.modelos.length, stores: 0, ms: 1, cached: false, kind: "marca_ampla" } };
+    }
     // Busca aproximada que devolve o Justin primeiro (o vazamento original), com o Aviator logo atrás.
     const product = (item: typeof AVIATOR) => ({ ...item, preco: 899, precoVenda: "R$ 899,00", nomeProduto: item.produto, referencia: "", lojasNaRegiao: [], precoVariaPorLoja: false, precoSobConsulta: false, totalDisponivelRede: 1, lojasComEstoque: [{ code: "36", loja: "Loja Setor Marista — Rua 9, 2106", quantidade: 1, cidade: "Goiânia" }] });
     const produtos = /3025/.test(term) ? [product(JUSTIN), product(AVIATOR)] : [product(JUSTIN)];
@@ -144,29 +162,99 @@ beforeEach(() => {
 });
 
 describe("isolamento de sessão", () => {
-  it("corrige a marca e envia novamente a lista ao receber a cidade", async () => {
+  it("sem cidade pergunta antes de listar; com a cidade lista só lá; a correção abre com as palavras da IA", async () => {
+    // Turno 1: marca pedida, cidade desconhecida → nenhuma consulta de estoque, pergunta a cidade.
     const first = await simulateAgent(settings, [{ from: "customer", text: "Queria armação da miumiu para presentear minha esposa" }], "user-1", undefined, { contactName: "Michel" });
-    expect(first.reply).toContain("Que presente especial");
-    expect(first.reply).toContain("2.");
-    expect(first.interactiveList?.rows).toHaveLength(2);
-    expect(first.catalogContext).toMatchObject({ brand: "Miu Miu", category: "ARMACAO" });
+    expect(calls.stock).toHaveLength(0);
+    expect(first.reply).toMatch(/cidade/i);
+    expect(first.interactiveList).toBeUndefined();
+    expect(first.catalogContext).toMatchObject({ brand: "Miu Miu", category: "ARMACAO", preferredCity: "" });
+    expect(calls.prompts.at(-1)).toContain("CIDADE DESCONHECIDA");
+
+    // Turno 2: cidade informada → busca da marca só em Goiânia; a abertura é a que a IA escreveu (sem prefixo fixo).
     const messages: PlaygroundMessage[] = [
       { from: "customer", text: "Queria armação da miumiu para presentear minha esposa", catalogContext: first.catalogContext },
       { from: "ai", text: first.reply },
-      { from: "customer", text: "vc errou, pedi armação miumiu" },
+      { from: "customer", text: "estou em Goiânia e Brasilia é muito longe" },
     ];
-    const correction = await simulateAgent(settings, messages, "user-1");
-    expect(correction.reply).toContain("Desculpe");
-    expect(correction.interactiveList?.rows).toHaveLength(2);
-    expect(calls.stock.at(-1)).toMatchObject({ marca: "Miu Miu" });
-    messages.push({ from: "ai", text: correction.reply }, { from: "customer", text: "estou em Goiânia e Brasilia é muito longe", catalogContext: correction.catalogContext });
+    model.script = async () => ({ reply: "Que presente lindo! Separei as Miu Miu que estão em Goiânia:", action: "reply" });
     const city = await simulateAgent(settings, messages, "user-1");
     expect(city.catalogContext?.preferredCity).toBe("Goiânia");
     expect(calls.stock.at(-1)).toMatchObject({ marca: "Miu Miu", cidade: "Goiânia" });
     expect(city.interactiveList?.rows).toHaveLength(2);
-    expect(city.reply).not.toMatch(/posso|se quiser|número ou referência/i);
+    expect(city.reply).toMatch(/^Que presente lindo! Separei as Miu Miu que estão em Goiânia:\n/);
     expect(city.reply).toContain("Miu Miu");
+    expect(city.reply).not.toMatch(/Que presente especial|Confira as opções em/);
+    expect(calls.prompts.at(-1)).toContain("BUSCA JÁ FEITA NESTA RESPOSTA");
+
+    // Turno 3: correção com a cidade já conhecida → nova busca, desculpa escrita pela IA.
+    messages.push({ from: "ai", text: city.reply, catalogContext: city.catalogContext }, { from: "customer", text: "vc errou, pedi armação miumiu" });
+    model.script = async () => ({ reply: "Perdão pela confusão! Aqui estão as Miu Miu certinhas:", action: "reply" });
+    const correction = await simulateAgent(settings, messages.map((message, index) => (index === 0 ? { ...message, catalogContext: city.catalogContext } : message)), "user-1");
+    expect(correction.reply).toContain("Perdão pela confusão!");
+    expect(correction.interactiveList?.rows).toHaveLength(2);
+    expect(calls.stock.at(-1)).toMatchObject({ marca: "Miu Miu", cidade: "Goiânia" });
   });
+  it("consultora: \"armação de grau barata\" sem cidade → pergunta cidade e orçamento; \"Goiânia até 250\" → só opções locais até R$ 250", async () => {
+    // Turno 1: a IA tenta buscar mesmo assim; a ferramenta recusa listar sem cidade (nada de outro estado).
+    let gated: unknown = null;
+    model.script = async (tools) => {
+      gated = await tools.consultarEstoqueProduto({ tipo: "grau", sortBy: "price_asc" });
+      return { reply: "Temos sim, e com ótimo custo-benefício!", action: "reply" };
+    };
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "vocês têm armação de grau barata?" }];
+    const ask = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
+    expect(calls.stock).toHaveLength(0);
+    expect(gated).toMatchObject({ cenario: "cidade_desconhecida", produtos: [] });
+    expect(ask.reply).toMatch(/cidade/i);
+    expect(ask.reply).toMatch(/R\$ ?200|faixa de valor|quanto/i);
+    expect(ask.reply).not.toMatch(/\d\.\s/);
+    expect(ask.interactiveList).toBeUndefined();
+    expect(calls.prompts.at(-1)).toContain("CIDADE DESCONHECIDA");
+    expect(calls.prompts.at(-1)).toContain("faixa de valor");
+
+    // Turno 2: cidade + teto → preferredCity salvo e busca grau/até 250/mais baratas primeiro, só em Goiânia.
+    history.push({ from: "ai", text: ask.reply }, { from: "customer", text: "sou de Goiânia e queria algo até 250 reais" });
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ tipo: "grau", maxPrice: 250, sortBy: "price_asc", cidade: "Goiânia" })) as { vitrineFormatada: string };
+      return { reply: `Separei duas ótimas opções aqui em Goiânia dentro do seu orçamento:\n${result.vitrineFormatada}\n---SPLIT---\nA Vogue é leve pro dia a dia; a Atitude é mais resistente. Quer provar na loja ou mandar a receita pra orçar as lentes junto?`, action: "reply" };
+    };
+    const offer = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
+    expect(offer.catalogContext?.preferredCity).toBe("Goiânia");
+    expect(calls.stock.at(-1)).toMatchObject({ tipo: "grau", maxPrice: 250, sortBy: "price_asc", cidade: "Goiânia" });
+    const text = offer.messages.join("\n");
+    expect(text).toMatch(/1\. 👓 \*Vogue[^\n]*R\$ 189,00/);
+    expect(text).toMatch(/2\. 👓 \*Atitude[^\n]*R\$ 239,00/);
+    expect(text).not.toMatch(/Tecnol|149,00/); // só em Brasília
+    expect(text).not.toMatch(/690,00/); // acima do orçamento
+    expect(text).toMatch(/receita/);
+  });
+
+  it("orçamento dito antes da cidade vira filtro mesmo se a IA esquecer de passar", async () => {
+    model.script = async (tools) => {
+      await tools.consultarEstoqueProduto({ tipo: "grau" });
+      return { reply: "Olha essas:", action: "reply" };
+    };
+    const history: PlaygroundMessage[] = [
+      { from: "customer", text: "queria uma armação de grau baratinha, até 200 reais" },
+      { from: "ai", text: "De qual cidade você fala?" },
+      { from: "customer", text: "Goiânia" },
+    ];
+    await simulateAgent(settings, history, "user-1");
+    expect(calls.stock.at(-1)).toMatchObject({ tipo: "grau", maxPrice: 200, sortBy: "price_asc", cidade: "Goiânia" });
+  });
+
+  it("cidade do cadastro do contato já libera a vitrine sem perguntar", async () => {
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ tipo: "grau", sortBy: "price_asc" })) as { vitrineFormatada: string };
+      return { reply: result.vitrineFormatada, action: "reply" };
+    };
+    const run = await simulateAgent(settings, [{ from: "customer", text: "tem armação barata?" }], "user-1", undefined, { knownCity: "goiania" });
+    expect(calls.stock.at(-1)).toMatchObject({ cidade: "Goiânia" });
+    expect(run.catalogContext?.preferredCity).toBe("Goiânia");
+    expect(run.reply).not.toMatch(/de qual cidade/i);
+  });
+
   it("novo atendimento após encerramento: mensagens da sessão encerrada não entram no prompt, só o nome do cliente", () => {
     const closedAt = new Date("2026-11-10T15:00:00-03:00");
     const rows: TranscriptRow[] = [
@@ -429,7 +517,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
       return { reply: `${result.vitrineFormatada}\n---SPLIT---\nGostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?`, action: "reply" };
     };
     const history: PlaygroundMessage[] = [{ from: "customer", text: "ta, tem radda?" }];
-    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(turn1.messages[0]).toContain("1. 👓 *Radda (Ref. JC60020)* — R$ 120,00");
     expect(turn1.messages[0]).toContain("4. 👓 *Radda (Ref. OPBR 455)* — R$ 120,00");
     expect(turn1.messages[0]).not.toMatch(/\*Radda\* —/);
@@ -442,7 +530,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
       return { reply: again.vitrineFormatada ?? turn1.messages[0], action: "reply" };
     };
     history.push({ from: "customer", text: "deixa eu ver esse de 120 ai" });
-    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(calls.stock.length).toBe(searchesBefore);
     expect(turn2.messages.join("\n")).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número ou referência você quer ver primeiro? (ex.: o 1 - Ref. JC60020, ou o 2 - Ref. JC2501)");
     expect(turn2.image).toBeUndefined();
@@ -455,7 +543,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
       return { reply: `${result.fichaFormatada ?? result.vitrineFormatada}\n---SPLIT---\nGostaria de reservar essa peça?`, action: "reply" };
     };
     history.push({ from: "customer", text: "ata, deixa eu ver esse primeiro" });
-    const turn3 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    const turn3 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Radda JC60020", tipoBusca: "modelo_especifico" });
     expect(turn3.image?.sku).toBe("145145");
     expect(turn3.messages[0]).toContain("Radda | Ref. JC60020");
@@ -465,7 +553,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     // Mesmo pedido, mas o modelo nem chama a ferramenta: o backend abre a ficha do 1º mesmo assim.
     calls.photos.length = 0;
     model.script = async () => ({ reply: "Qual modelo você quer ver?", action: "reply" });
-    const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda" });
+    const fallback = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(fallback.messages[0]).toContain("Radda | Ref. JC60020");
     expect(fallback.image?.sku).toBe("145145");
   });
@@ -479,7 +567,7 @@ describe("vitrine como Lista Interativa nativa do WhatsApp", () => {
       return { reply: `${result.vitrineFormatada}\n---SPLIT---\nQual desses te interessou?`, action: "reply" };
     };
     const history: PlaygroundMessage[] = [{ from: "customer", text: "Vocês têm Prada Linea Rossa?" }];
-    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-lista" });
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-lista", knownCity: "Goiânia" });
     expect(turn1.interactiveList).toMatchObject({ buttonText: "Ver modelos", sectionTitle: "Modelos em estoque" });
     expect(turn1.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:PS 07RV", "product_select:PS 02WV"]);
     expect(turn1.interactiveList?.rows[0]).toMatchObject({ title: "Ref. PS 07RV", description: "Prada Linea Rossa • R$ 1.960,00" });
@@ -496,7 +584,7 @@ describe("vitrine como Lista Interativa nativa do WhatsApp", () => {
       return { reply: `${result.fichaFormatada ?? result.vitrineFormatada}\n---SPLIT---\nGostaria de reservar essa peça?`, action: "reply" };
     };
     history.push({ from: "customer", text: tapped.text, selectedProductRef: tapped.selectedProductRef });
-    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-lista" });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-lista", knownCity: "Goiânia" });
     expect(calls.stock.at(-1)).toMatchObject({ tipoBusca: "modelo_especifico" });
     expect(String(calls.stock.at(-1)?.termoBusca)).toContain("PS 07RV");
     expect(turn2.image?.sku).toBe("900701");
@@ -513,11 +601,11 @@ describe("foto de óculos: cascata referência → marca/linha e pergunta inform
     // O modelo erra como no caso real: diz só "sem estoque" e não busca.
     model.script = async () => ({ reply: "No momento, esse modelo está sem estoque na rede.", action: "reply" });
     const history: PlaygroundMessage[] = [{ from: "customer", text: "" }];
-    const turn1 = await simulateAgent(settings, history, "user-1", PHOTO, { sessionId: "sessao-foto" });
+    const turn1 = await simulateAgent(settings, history, "user-1", PHOTO, { sessionId: "sessao-foto", knownCity: "Goiânia" });
     expect(turn1.action).toBe("reply");
     expect(turn1.messages).toHaveLength(1);
     expect(turn1.messages[0]).toMatch(/^(Bom dia|Boa tarde|Boa noite)!/);
-    expect(turn1.messages[0]).toContain("Esse modelo *Prada Linea Rossa* não está disponível no momento.");
+    expect(turn1.messages[0]).toContain("Esse modelo *Prada Linea Rossa* não está disponível em Goiânia.");
     expect(turn1.messages.join("\n")).not.toMatch(/sem estoque na rede/i);
     expect(calls.stock.at(-1)).toMatchObject({ termoBusca: "Prada Linea Rossa", tipoBusca: "marca_ampla" });
     expect(turn1.interactiveList?.rows.map((row) => row.id)).toEqual(["product_select:PS 07RV", "product_select:PS 02WV"]);
@@ -529,7 +617,7 @@ describe("foto de óculos: cascata referência → marca/linha e pergunta inform
     history.push(...turn1.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
     history.push({ from: "customer", text: "Qual o nome desse modelo?" });
     model.script = async () => ({ reply: "Vou te passar para um dos nossos atendentes, só um instante! 😊", action: "handoff", reason: "Cliente quer saber o nome do modelo" });
-    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-foto" });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-foto", knownCity: "Goiânia" });
     expect(turn2.action).toBe("reply");
     expect(turn2.handoffQueue).toBe("");
     expect(turn2.messages[0]).toContain("Esse modelo é um *Prada Linea Rossa*");

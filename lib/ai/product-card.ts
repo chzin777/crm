@@ -60,8 +60,12 @@ export function asksAvailability(text: string) {
 }
 
 /** Abertura do card conforme a intenção: disponibilidade → "Temos sim! 😊"; ver/detalhar → apresentação. */
-export function cardOpening(customerText: string) {
-  return asksAvailability(customerText) ? AVAILABILITY_OPENING : DETAILS_OPENING;
+export function cardOpening(customerText: string, variant = 0) {
+  // Variações para não repetir a mesma abertura a cada ficha da conversa (variant = nº de respostas da IA).
+  const options = asksAvailability(customerText)
+    ? [AVAILABILITY_OPENING, "Tem sim! 😊", "Temos, sim! Olha só: 😊"]
+    : [DETAILS_OPENING, "Claro! Olha ele aqui: 😊", "Separei os detalhes pra você: 😊"];
+  return options[Math.abs(variant) % options.length];
 }
 
 /** Ficha no padrão exato: abertura, 🕶️ nome | ref, Ⓜ️ modelo, 👓 armação, ✨ acabamento, 💵 valor, 📦 estoque, 📍 lojas. */
