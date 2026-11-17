@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { isProductBrowseRequest } from "@/lib/ai/catalog-context";
 import { isInstallmentQuestion } from "@/lib/ai/installments";
+import { businessRulesBlock, knowledgePromptBlock, selectBusinessRules, skillEnabled, skillsPromptBlock, type StudioPromptContext } from "@/lib/ai/studio";
 
 /**
  * Dynamic Prompt Composition: o prompt de sistema é montado a partir de módulos Markdown curtos em
@@ -39,6 +40,10 @@ export type PromptState = {
   category?: string;
   /** Há vitrine/ficha de produto nesta resposta ou na sessão. */
   showcase?: boolean;
+  /** Estúdio de IA: regras da empresa (Markdown), skills e trechos da base de conhecimento (RAG). */
+  studio?: StudioPromptContext;
+  /** Texto da conversa usado para casar as palavras-chave das regras (padrão: text). */
+  conversationText?: string;
 };
 
 const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -73,13 +78,22 @@ export function selectPromptModules(state: PromptState): PromptModule[] {
   if (!state.hasGreetedInSession) modules.push("saudacao");
   if (productInterest && (!state.preferredCity || !state.category)) modules.push("qualificacao");
   if (productInterest || prescription) modules.push("vitrine-estoque");
-  if (prescription) modules.push("receituario-lentes");
-  if (financial) modules.push("financeiro-crediario");
+  if (prescription && skillEnabled(state.studio?.skills, "calculo_lentes")) modules.push("receituario-lentes");
+  if (financial && skillEnabled(state.studio?.skills, "crediario_aprovacao")) modules.push("financeiro-crediario");
   if (afterSales) modules.push("pos-venda-suporte");
   return modules;
 }
 
-/** Prompt dos módulos escolhidos, separados por linha em branco. */
+/**
+ * Prompt dos módulos escolhidos, separados por linha em branco, seguido do que o time edita no Estúdio de IA:
+ * regras da empresa ligadas ao assunto da conversa (ou "sempre incluir"), skills e trechos do RAG.
+ */
 export function composeSystemPrompt(state: PromptState): string {
-  return selectPromptModules(state).map(loadPromptModule).filter(Boolean).join("\n\n");
+  const studio = state.studio;
+  return [
+    ...selectPromptModules(state).map(loadPromptModule),
+    studio?.rules ? businessRulesBlock(selectBusinessRules(studio.rules, state.conversationText ?? state.text ?? "")) : "",
+    skillsPromptBlock(studio?.skills),
+    knowledgePromptBlock(studio?.knowledge ?? []),
+  ].filter(Boolean).join("\n\n");
 }

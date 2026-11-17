@@ -46,6 +46,8 @@ import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, res
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
 import { sendSatisfactionSurvey } from "@/lib/chat/nps";
+import { applySkillsToSettings, filterToolsBySkills, skillEnabled } from "@/lib/ai/studio";
+import { loadSkills, loadStudioContext } from "@/lib/ai/studio-db";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
@@ -253,7 +255,7 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : target?.source === "staff" ? " (fila do atendente pedido)" : "";
   await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}${how}` : ""}: ${reason}`);
   // Transbordo para Vendas/Comercial: a oportunidade do contato vai para Orçamento com o resumo.
-  if (isSalesQueue(target?.name)) await recordSalesEvents({ contactId: conversation.contactId, conversationId: conversation.id, events: [{ type: "transbordo_vendas", summary: reason.slice(0, 200) }] });
+  if (isSalesQueue(target?.name) && skillEnabled(await loadSkills(), "pipeline_automatico")) await recordSalesEvents({ contactId: conversation.contactId, conversationId: conversation.id, events: [{ type: "transbordo_vendas", summary: reason.slice(0, 200) }] });
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
 }
 
@@ -465,8 +467,11 @@ export async function financialFlow(input: AgentRunInput, text: string): Promise
  * Regras antes da IA → anexo (visão, transcrição, PDF, documento) → prompt com base de conhecimento e filas →
  * modelo → interpretação. Erro do modelo sobe para quem chamou (o WhatsApp transfere; o teste mostra o erro).
  */
-async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
-  const { settings } = input;
+async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
+  // Estúdio de IA: skills desligadas tiram tools, fluxos e gatilhos de transbordo desta resposta.
+  const skills = await loadSkills();
+  const settings = applySkillsToSettings(rawInput.settings, skills);
+  const input: AgentRunInput = { ...rawInput, settings };
   // Pedido de pessoa pelo nome ("Preciso falar com <ATENDENTE>"): a transferência para ela é decidida aqui, mas a
   // confirmação ao cliente é escrita pelo modelo, com as próprias palavras (sem frase pronta).
   let staffRoute: Pick<AgentOutcome, "reason" | "queue" | "assigneeId" | "assigneeName" | "staffQueueId"> & { name: string } | null = null;
@@ -509,7 +514,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
 
   // Parcelas/crediário (texto ou áudio): identidade (nome completo + CPF) antes de consultar o VMSet; o resultado
   // só vai ao cliente depois da aprovação do operador no /chat (quando a opção estiver ligada).
-  const financial = staffRoute ? null : await financialFlow(input, [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n"));
+  const financial = staffRoute || !skillEnabled(skills, "crediario_aprovacao") ? null : await financialFlow(input, [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n"));
   if (financial) return { outcome: financial.outcome, media, mediaTriggerSkipped, search: null, injection, financialApproval: financial.approval, financialLog: financial.log };
 
   // Foto: identificação silenciosa → busca no catálogo do ERP (a foto não é narrada); receita/comprovante em foto ou
@@ -526,7 +531,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     if (item.kind === "image") {
       const vision = await aiJson<VisionResult>([{ role: "system", content: VISION_PROMPT }, { role: "user", content: item.parts.filter((part) => part.type === "image_url") }], { ...input.meta, maxTokens: 4096 });
       const { kind, query } = readVision(vision);
-      const docKind = kind === "receita" || kind === "documento" ? documentKind(kind, vision.documento) : null;
+      const docKind = (kind === "receita" || kind === "documento") && skillEnabled(skills, "leitura_receita") ? documentKind(kind, vision.documento) : null;
       if (docKind) {
         documents.push({ kind: docKind, summary: formatExtraction(docKind, vision.documento), extraction: vision.documento, source: item.source });
         consumed.add(item);
@@ -535,7 +540,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
         photoQueries.push(query);
         consumed.add(item);
       }
-    } else if (item.kind === "pdf") {
+    } else if (item.kind === "pdf" && skillEnabled(skills, "leitura_receita")) {
       const read = await aiJson<{ kind?: string; documento?: DocumentExtraction }>([{ role: "system", content: DOCUMENT_EXTRACT_PROMPT }, { role: "user", content: item.parts }], { ...input.meta, maxTokens: 700 }).catch(() => null);
       const kind = read ? documentKind(read.kind ?? "", read.documento) : null;
       if (kind) documents.push({ kind, summary: formatExtraction(kind, read?.documento), extraction: read?.documento, source: item.source });
@@ -554,12 +559,15 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Partes que vão ao modelo: anexos ainda não resolvidos no código (falhas e figurinhas vão como texto).
   const sendParts = mediaList.filter((item) => !consumed.has(item)).flatMap((item) => item.parts);
 
-  const [context, info, queues] = await Promise.all([
+  const customerText = [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n");
+  // Regras da empresa casam com o assunto das últimas mensagens do cliente; o RAG busca pela mensagem atual.
+  const conversationText = [customerText, ...(input.earlierCustomerTexts ?? []).slice(0, 4)].join("\n");
+  const [context, info, queues, studioContext] = await Promise.all([
     input.buildContext(media),
     knowledge(settings),
     settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
+    loadStudioContext(customerText, { userId: input.meta.userId, conversationId: input.meta.conversationId }).catch(() => ({ skills })),
   ]);
-  const customerText = [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n");
   const directory = await storeDirectory();
   const cities = [...directory.values()].map((store) => store.city ?? "");
   const previousCatalog = input.catalogContext?.brand || input.catalogContext?.preferredCity
@@ -619,7 +627,8 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     firstReply: input.aiReplies === 0,
     queued: input.queued,
     // Módulos de lib/ai/prompts escolhidos pelo assunto desta mensagem e pelo estado da sessão.
-    prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length },
+    // Estúdio de IA: regras da empresa ligadas ao assunto, skills e trechos do RAG entram no composeSystemPrompt.
+    prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length, studio: { ...studioContext, skills }, conversationText },
     extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
@@ -837,10 +846,11 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     ? `${"fichaFormatada" in result ? "A ficha do produto (com foto e lojas)" : "As opções (fotos com legenda curta)"} são anexadas pelo sistema logo depois do seu texto: não reescreva lista, ficha, preços nem códigos. Se couber uma pergunta leve depois das fotos, coloque-a após ---SPLIT---.`
     : "Não há itens para mostrar: responda com suas palavras a partir desses fatos, sem inventar modelos.";
   let preResult: StockRun | null = null;
-  if (forceCatalog) {
+  const stockSkill = skillEnabled(skills, "estoque_cidade");
+  if (forceCatalog && stockSkill) {
     const term = cityProduct ? [cityProduct.marca, cityProduct.referencia ?? cityProduct.nomeComercial].filter(Boolean).join(" ") : [catalogState.brand, categoryWord].filter(Boolean).join(" ");
     preResult = await stockTool.run({ termoBusca: term, marca: catalogState.brand, cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
-  } else if (choice?.type === "item" && !photoQueries.length) {
+  } else if (choice?.type === "item" && !photoQueries.length && stockSkill) {
     // Item escolhido na vitrine ("gostei da segunda", toque na lista): a ficha dele já sai, mesmo se o modelo não buscar.
     preResult = await stockTool.run({ termoBusca: listedSearchTerm(choice.item), tipoBusca: "modelo_especifico" });
   }
@@ -996,7 +1006,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       { role: "system", content: [system, ...turnFacts].join("\n\n") },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool] },
+    { ...input.meta, maxTokens: 700, tools: filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills) },
   );
   let outcome = interpretDecision(decision);
   // Transferência já decidida (pessoa pelo nome, documento lido): a confirmação é a que o modelo escreveu; a frase
@@ -1232,7 +1242,7 @@ async function respond(conversationId: string, messageId: string) {
   // Receita lida (foto ou PDF): vai para o receituário do cliente, uma por mensagem (a nota do transbordo continua).
   await saveReadPrescriptions(run.documents, { contactId: conversation.contactId, conversationId });
   // Funil de vendas: receita, modelo consultado, orçamento ou loja para comprar criam/avançam a oportunidade do contato.
-  await recordSalesEvents({ contactId: conversation.contactId, conversationId, events: turnSalesEvents(run, pending.map((item) => item.text ?? "").join("\n")) });
+  if (skillEnabled(await loadSkills(), "pipeline_automatico")) await recordSalesEvents({ contactId: conversation.contactId, conversationId, events: turnSalesEvents(run, pending.map((item) => item.text ?? "").join("\n")) });
   // Encerramento silencioso: nada é enviado e a conversa não é transferida.
   if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
   if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply, run.visualCatalog);
@@ -1488,7 +1498,7 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     imageAnalysis: run.imageAnalysis ?? undefined,
     catalogContext: run.catalogContext,
     // Simulação: mostra o que iria para o funil de vendas (o teste não grava no pipeline).
-    salesEvents: (() => { const events = turnSalesEvents(run, pendingText); return events.length ? events : undefined; })(),
+    salesEvents: await (async () => { const events = skillEnabled(await loadSkills(), "pipeline_automatico") ? turnSalesEvents(run, pendingText) : []; return events.length ? events : undefined; })(),
     // Parcelas: o teste mostra o card que o operador veria no /chat (o CPF completo nunca sai do servidor).
     financial: run.financialLog ? { ...run.financialLog, ...(run.financialApproval ? { approval: { customerNameVmset: run.financialApproval.customerNameVmset, customerCpfMasked: run.financialApproval.customerCpfMasked, installmentsSummary: run.financialApproval.installmentsSummary, draftMessage: run.financialApproval.draftMessage, transcribedText: run.financialApproval.transcribedText, nameMatches: run.financialApproval.nameMatches } } : {}) } : undefined,
   };

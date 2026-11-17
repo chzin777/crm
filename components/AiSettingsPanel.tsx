@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, Search, Send, ShieldAlert, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Coins, Copy, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, Plus, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
+import { KnowledgeSection, RulesSection, SkillsSection } from "@/components/ai-studio/StudioSections";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
@@ -18,7 +19,8 @@ import type { SalesEvent, SalesTrigger } from "@/lib/sales-pipeline";
 import type { PlaygroundFinancial } from "@/lib/ai/installments";
 
 type Queue = { id: string; name: string; description?: string };
-type Tab = "identidade" | "conhecimento" | "atuacao" | "conexao" | "teste";
+/** Seções do Estúdio de IA (menu lateral interno). */
+type Tab = "geral" | "regras" | "skills" | "conhecimento" | "simulador";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
 /** silent: turno sem resposta (encerramento silencioso), só aparece no teste e não entra no histórico. */
@@ -125,13 +127,18 @@ const TRIGGER_LABELS: Record<AgentTrigger, string> = {
 const DETAILS_SOURCE_LABELS = { web: "pesquisada na web", cache: "do cache (30 dias)", none: "não encontrada na web" } as const;
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-const TABS: { id: Tab; label: string; short: string; icon: typeof Bot }[] = [
-  { id: "identidade", label: "Identidade e comportamento", short: "Identidade", icon: Bot },
-  { id: "conhecimento", label: "Base de conhecimento", short: "Conhecimento", icon: BookOpenText },
-  { id: "atuacao", label: "Regras e transbordo", short: "Regras", icon: UserRoundCheck },
-  { id: "conexao", label: "Conexão e modelo", short: "Conexão", icon: PlugZap },
-  { id: "teste", label: "Testar a IA", short: "Testar", icon: FlaskConical },
+const TABS: { id: Tab; label: string; hint: string; icon: typeof Bot }[] = [
+  { id: "geral", label: "Geral & Identidade", hint: "Status, modelo, tom, horário e transbordo", icon: Bot },
+  { id: "regras", label: "Regras da Empresa", hint: "Markdown por assunto", icon: ScrollText },
+  { id: "skills", label: "Skills da IA", hint: "Habilidades liga/desliga", icon: Sparkles },
+  { id: "conhecimento", label: "Base de Conhecimento", hint: "RAG: arquivos e textos", icon: BookOpenText },
+  { id: "simulador", label: "Simulador", hint: "Testar com tudo aplicado", icon: FlaskConical },
 ];
+
+/** Título de grupo dentro de uma seção do Estúdio. */
+function GroupTitle({ icon: Icon, title }: { icon: typeof Bot; title: string }) {
+  return <h3 className="flex items-center gap-2 pt-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400"><Icon className="h-3.5 w-3.5" />{title}</h3>;
+}
 
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
 const area = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
@@ -598,7 +605,7 @@ function KnowledgeBase({ topics, onChange }: { topics: Topic[]; onChange: (topic
 
 export function AiSettingsPanel() {
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>("identidade");
+  const [tab, setTab] = useState<Tab>("geral");
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [saved, setSaved] = useState<string>("");
   const [queues, setQueues] = useState<Queue[]>([]);
@@ -659,8 +666,8 @@ export function AiSettingsPanel() {
 
   const heading = (
     <div className="min-w-0">
-      <h1 className="text-2xl font-bold tracking-tight text-[#051647] dark:text-white">Inteligência Artificial</h1>
-      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Como a assistente fala, o que responde, quando passa para uma pessoa, quanto custa e um teste antes de colocar em produção.</p>
+      <h1 className="text-2xl font-bold tracking-tight text-[#051647] dark:text-white">Estúdio de IA</h1>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Identidade, regras da empresa, habilidades, base de conhecimento e simulador da assistente, num só lugar.</p>
     </div>
   );
   if (error) return <div className="space-y-6">{heading}<p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p></div>;
@@ -728,7 +735,7 @@ export function AiSettingsPanel() {
   };
 
   const activeTriggers = [settings.handoffKeywords.length > 0, settings.handoffOnComplaint, settings.handoffOnPurchaseIntent, settings.handoffWhenUnsure, settings.handoffOnMedia].filter(Boolean).length;
-  const counters: Partial<Record<Tab, number>> = { conhecimento: settings.topics.length, atuacao: activeTriggers };
+  const counters: Partial<Record<Tab, number>> = { geral: activeTriggers };
   const balanceTone = usage && (usage.balance.low || usage.status.creditExhausted) ? "warn" : "default";
 
   return (
@@ -771,21 +778,34 @@ export function AiSettingsPanel() {
         )}
       </div>
 
-      <div role="tablist" aria-label="Seções da IA" className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 [scrollbar-width:none] dark:bg-white/5">
-        {TABS.map((item) => {
-          const Icon = item.icon;
-          const count = counters[item.id];
-          return (
-            <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} title={item.label} onClick={() => setTab(item.id)} className={`inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition ${tab === item.id ? "bg-white text-[#051647] shadow-sm dark:bg-[#051647] dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
-              <Icon className="h-3.5 w-3.5" /><span className="hidden md:inline">{item.label}</span><span className="md:hidden">{item.short}</span>
-              {count !== undefined && <span className={`rounded-full px-1.5 text-[10px] font-semibold tabular-nums ${tab === item.id ? "bg-[#C4D600]/30 text-[#051647] dark:text-[#C4D600]" : "bg-slate-200 text-slate-600 dark:bg-white/10 dark:text-slate-300"}`}>{count}</span>}
-            </button>
-          );
-        })}
-      </div>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      {/* Menu lateral interno do Estúdio (vertical, sem barra de abas horizontal). */}
+      <nav aria-label="Seções do Estúdio de IA" className="shrink-0 lg:sticky lg:top-4 lg:w-[220px]">
+        <ul className="grid grid-cols-1 gap-1 rounded-xl border border-slate-200/70 bg-white p-1.5 sm:grid-cols-2 lg:grid-cols-1 dark:border-slate-800 dark:bg-slate-900/40">
+          {TABS.map((item) => {
+            const Icon = item.icon;
+            const count = counters[item.id];
+            const current = tab === item.id;
+            return (
+              <li key={item.id}>
+                <button type="button" aria-current={current ? "page" : undefined} onClick={() => setTab(item.id)} className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${current ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5"}`}>
+                  <Icon className={`h-4 w-4 shrink-0 ${current ? "text-[#C4D600] dark:text-[#051647]" : ""}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-semibold">{item.label}</span>
+                    <span className={`block truncate text-[10px] ${current ? "text-white/70 dark:text-[#051647]/70" : "text-slate-400"}`}>{item.hint}</span>
+                  </span>
+                  {count !== undefined && <span className={`rounded-full px-1.5 text-[10px] font-semibold tabular-nums ${current ? "bg-white/15" : "bg-slate-100 dark:bg-white/10"}`}>{count}</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
 
-      {tab === "identidade" && (
+      <div className="min-w-0 flex-1 space-y-6">
+      {tab === "geral" && (
         <div className="space-y-6">
+          <GroupTitle icon={Bot} title="Identidade e tom" />
           <Block title="Identidade" hint="Como a IA fala com o cliente. Ela cumprimenta pelo horário de Brasília (Bom dia, Boa tarde, Boa noite) sem se apresentar como assistente virtual.">
             <label className={labelCls}>Nome no atendimento (usado só se o cliente perguntar)
               <input value={settings.agentName} onChange={(event) => set("agentName", event.target.value)} className={input} maxLength={60} />
@@ -816,17 +836,8 @@ export function AiSettingsPanel() {
             <textarea aria-label="Instruções adicionais" rows={Math.min(18, Math.max(6, settings.extraInstructions.split("\n").length + 1))} value={settings.extraInstructions} onChange={(event) => set("extraInstructions", event.target.value)} className={`${area} resize-y text-sm`} />
             <p className="text-right text-xs text-slate-400">{settings.extraInstructions.length.toLocaleString("pt-BR")} caracteres</p>
           </Block>
-        </div>
-      )}
 
-      {tab === "conhecimento" && (
-        <Block title="Base de conhecimento da ótica" hint="O que a IA deve dizer sobre cada assunto (lentes, armações, exame de vista, prazos...). Assunto desligado ou fora da lista vira transferência para uma pessoa.">
-          <KnowledgeBase topics={settings.topics} onChange={(topics) => set("topics", topics)} />
-        </Block>
-      )}
-
-      {tab === "atuacao" && (
-        <div className="space-y-6">
+          <GroupTitle icon={UserRoundCheck} title="Atendimento, horário e transbordo" />
           <Block title="Mensagens picadas" hint="Quando o cliente manda várias mensagens seguidas (“Oi” / “queria saber” / “se tem ray ban” / “no bueno”), a IA espera ele terminar e responde tudo de uma vez.">
             <Toggle label="Agrupar mensagens picadas automaticamente" description="Pergunta completa é respondida em cerca de 2 s; saudação ou frase cortada espera até ~5 s; nunca mais de 12 s desde a primeira mensagem. Desligado: responde cada mensagem em ~1,5 s." checked={settings.groupMessages} onChange={(value) => set("groupMessages", value)} />
           </Block>
@@ -964,11 +975,8 @@ export function AiSettingsPanel() {
           <Block title="Quando a IA resolve sozinha">
             <Toggle label="Encerrar quando o cliente confirmar que foi resolvido" description="A IA se despede, encerra a conversa e envia a pesquisa de satisfação (como o botão Encerrar do atendimento). Nunca encerra conversa aguardando atendente na fila." checked={settings.closeWhenResolved} onChange={(value) => set("closeWhenResolved", value)} />
           </Block>
-        </div>
-      )}
 
-      {tab === "conexao" && (
-        <div className="space-y-6">
+          <GroupTitle icon={PlugZap} title="Modelo, conexão e consumo" />
           <Block title="Conexão" hint="A chave da API fica só no servidor (arquivo .env) e nunca aparece na tela.">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
@@ -1150,7 +1158,29 @@ export function AiSettingsPanel() {
         </div>
       )}
 
-      {tab === "teste" && <Playground settings={settings} onUsed={() => setUsage(null)} />}
+      {tab === "regras" && (
+        <div className="space-y-6">
+          <RulesSection />
+          <Collapsible title="Assuntos rápidos (base anterior)" hint="Respostas curtas por assunto que entram em toda conversa (salvas com o botão Salvar alterações). Prefira as Regras da empresa acima para conteúdos por assunto.">
+            <KnowledgeBase topics={settings.topics} onChange={(topics) => set("topics", topics)} />
+          </Collapsible>
+        </div>
+      )}
+
+      {tab === "skills" && <SkillsSection />}
+
+      {tab === "conhecimento" && <KnowledgeSection />}
+
+      {tab === "simulador" && (
+        <div className="space-y-3">
+          <p className="flex items-start gap-2 rounded-lg border border-[#C4D600]/60 bg-[#C4D600]/10 px-3 py-2 text-xs text-[#051647] dark:text-slate-200">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />O simulador já usa as regras da empresa ativas, as skills ligadas e a base de conhecimento salvas, além dos parâmetros desta tela (mesmo os ainda não salvos).
+          </p>
+          <Playground settings={settings} onUsed={() => setUsage(null)} />
+        </div>
+      )}
+      </div>
+      </div>
 
       {/* Barra fixa só com alterações pendentes (o botão do cabeçalho sai da tela ao rolar). */}
       <div className={`sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F7915E]/50 bg-white/95 p-3 shadow-lg backdrop-blur transition-all duration-200 dark:border-[#F7915E]/40 dark:bg-[#051647]/95 ${dirty ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`} aria-hidden={!dirty}>

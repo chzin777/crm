@@ -154,3 +154,39 @@ export async function transcribeAudio(audio: { name: string; mime: string; data:
   await recordAiUsage({ ...base, inputTokens: 0, outputTokens: estimateTokens(text), ok: true, costUsd: transcriptionCostUsd(Number(body.duration)) });
   return text;
 }
+
+const EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings";
+export const EMBEDDING_MODEL = "text-embedding-3-small";
+/** US$ 0,02 por 1 milhão de tokens (text-embedding-3-small). */
+const EMBEDDING_PRICE_PER_MILLION_USD = 0.02;
+
+/** Embeddings da base de conhecimento (RAG), em lotes de até 64 textos. Registra tokens e custo no consumo. */
+export async function embedTexts(texts: string[], meta: Pick<AiCallMeta, "feature" | "userId" | "conversationId">): Promise<number[][]> {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) throw new AiError("IA não configurada: defina OPENAI_API_KEY no servidor.", 503);
+  const base = { feature: meta.feature, model: EMBEDDING_MODEL, conversationId: meta.conversationId, userId: meta.userId };
+  const vectors: number[][] = [];
+  for (let start = 0; start < texts.length; start += 64) {
+    const batch = texts.slice(start, start + 64).map((text) => text.slice(0, 8000));
+    type Body = { error?: { code?: string; type?: string; message?: string }; data?: { index: number; embedding: number[] }[]; usage?: { prompt_tokens?: number } };
+    let response: Response;
+    let body: Body;
+    try {
+      response = await fetch(EMBEDDINGS_URL, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: EMBEDDING_MODEL, input: batch }), signal: AbortSignal.timeout(TIMEOUT_MS) });
+      body = (await response.json().catch(() => ({}))) as Body;
+    } catch {
+      await recordAiUsage({ ...base, inputTokens: 0, outputTokens: 0, ok: false, error: "Tempo esgotado nos embeddings" });
+      throw new AiError("A indexação demorou demais. Tente de novo.", 504);
+    }
+    if (!response.ok || !body.data) {
+      const error = friendlyError(response.status, body.error?.code, body.error?.type);
+      console.error(`[ai] OpenAI ${response.status} (embeddings): ${body.error?.message ?? body.error?.code ?? "sem detalhe"}`);
+      await recordAiUsage({ ...base, inputTokens: 0, outputTokens: 0, ok: false, error: error.message, creditExhausted: error.creditExhausted });
+      throw error;
+    }
+    const tokens = body.usage?.prompt_tokens ?? 0;
+    await recordAiUsage({ ...base, inputTokens: tokens, outputTokens: 0, ok: true, costUsd: (tokens / 1_000_000) * EMBEDDING_PRICE_PER_MILLION_USD });
+    vectors.push(...[...body.data].sort((a, b) => a.index - b.index).map((item) => item.embedding));
+  }
+  return vectors;
+}

@@ -74,6 +74,8 @@ export const AI_FEATURE_LABELS: Record<string, string> = {
   playground: "Teste na página da IA",
   check: "Verificação de conexão",
   transcription: "Transcrição de áudio",
+  knowledge_index: "Indexação da base de conhecimento",
+  knowledge_search: "Busca na base de conhecimento",
 };
 
 type Totals = { calls: number; inputTokens: number; outputTokens: number; costUsd: number };

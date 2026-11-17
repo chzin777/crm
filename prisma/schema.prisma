@@ -704,3 +704,60 @@ model AiPendingAction {
   @@index([conversationId, status])
   @@index([status, createdAt])
 }
+
+/// Estúdio de IA: regra da empresa em Markdown por assunto, injetada no prompt quando o assunto aparece.
+model AiBusinessRule {
+  id            String   @id @default(cuid())
+  title         String
+  slug          String   @unique
+  /// Palavras-chave / gatilho do assunto (minúsculas).
+  keywords      String[] @default([])
+  content       String   @default("")
+  order         Int      @default(0)
+  active        Boolean  @default(true)
+  /// Entra em toda resposta, independente do assunto.
+  alwaysInclude Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active, order])
+}
+
+/// Estúdio de IA: liga/desliga de cada skill nativa (sem linha = ligada) e instruções extras.
+model AiSkillConfig {
+  key          String   @id
+  enabled      Boolean  @default(true)
+  instructions String   @default("")
+  updatedAt    DateTime @updatedAt
+}
+
+/// Base de conhecimento (RAG): documento enviado (arquivo ou texto) dividido em trechos.
+model KnowledgeDocument {
+  id         String           @id @default(cuid())
+  title      String
+  /// "texto" | "pdf" | "txt" | "md"
+  source     String           @default("texto")
+  fileName   String?
+  content    String           @default("")
+  active     Boolean          @default(true)
+  /// "pendente" | "indexado" | "parcial" (sem embeddings, só busca textual) | "erro"
+  status     String           @default("pendente")
+  error      String?
+  chunkCount Int              @default(0)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  chunks     KnowledgeChunk[]
+}
+
+/// Trecho indexado da base de conhecimento, com embedding OpenAI (busca híbrida textual + vetorial).
+model KnowledgeChunk {
+  id         String            @id @default(cuid())
+  documentId String
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  index      Int
+  content    String
+  embedding  Float[]           @default([])
+  createdAt  DateTime          @default(now())
+
+  @@index([documentId, index])
+}
