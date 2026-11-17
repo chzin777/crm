@@ -28,7 +28,7 @@ import { readFile } from "@/lib/minio";
 import { analysisName, analysisPromptBlock, asksProductInfo, brandFallbackReply, brandSearchArgs, brandStockFallback, CATALOG_FOUND_RULE, explicitBrand, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { asksCustomerCity, canonicalCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, oneQualifyingQuestion, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-opening";
@@ -1000,13 +1000,15 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   if (proactiveContent && humanMode !== "route") proactiveReply = mergeProactiveReply(outcome.action === "reply" ? outcome.reply : "", proactiveContent);
   if (proactiveReply && humanMode !== "route") outcome = { ...outcome, action: "reply", reply: proactiveReply, reason: "Busca de catálogo atualizada", queue: "", trigger: "ai" };
   // Cidade desconhecida: a resposta precisa perguntar onde o cliente está (o modelo escreve; aqui só a garantia).
-  // Óculos sem tipo: também pergunta se é de grau ou de sol, na mesma mensagem (só o que ainda falta perguntar).
+  // Uma pergunta simples por vez: cidade primeiro; com a cidade conhecida, grau ou sol; valor só depois.
   if (!photoReply && outcome.action === "reply") {
-    const askCity = (cityFirst || stockGated) && !asksCustomerCity(outcome.reply);
-    const askType = (typeFirst || typeGated) && !asksGlassesType(outcome.reply);
+    const cityStep = cityFirst || stockGated;
+    const typeStep = !cityStep && (typeFirst || typeGated);
+    if (cityStep || typeStep) outcome = { ...outcome, reply: oneQualifyingQuestion(outcome.reply, cityStep ? "city" : "type") };
+    const askCity = cityStep && !asksCustomerCity(outcome.reply);
+    const askType = typeStep && !asksGlassesType(outcome.reply);
     if (askCity || askType) {
-      const askValue = askBudget && !/\b(valor|quanto|R\$|orçamento|orcamento|investir)/i.test(outcome.reply);
-      outcome = { ...outcome, reply: `${outcome.reply.trim()} ${qualifyQuestion({ askCity, askType, askBudget: askValue, variant: input.aiReplies })}`.trim() };
+      outcome = { ...outcome, reply: `${outcome.reply.trim()} ${qualifyQuestion({ askCity, askType, askBudget: false, variant: input.aiReplies })}`.trim() };
     }
   }
   // Transparência comercial: armação de grau → lentes orçadas à parte; óculos de sol → peça completa.

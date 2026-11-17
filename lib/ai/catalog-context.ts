@@ -106,19 +106,14 @@ export function isProductBrowseRequest(text: string) {
  * Pergunta de localização (e de orçamento, quando o pedido foi genérico) para quando a cidade ainda é desconhecida.
  * Variada pelo número da resposta para não soar repetida.
  */
-export function cityQuestion(input: { askBudget: boolean; variant?: number }) {
+export function cityQuestion(input: { askBudget?: boolean; variant?: number }) {
+  // Uma pergunta só, simples (a faixa de valor fica para depois de cidade e tipo: ver qualificacao.md).
   const city = [
-    "Me conta de qual cidade você fala? Assim já separo os modelos disponíveis pertinho de você.",
-    "De qual cidade (ou bairro) você é? Quero te mostrar só o que tem numa loja perto de você.",
-    "Pra eu já separar opções numa loja pertinho, de qual cidade você está falando?",
+    "De qual cidade você fala, pra eu ver as lojas mais perto de você?",
+    "De qual cidade você fala?",
+    "Me conta de qual cidade você fala, pra eu ver o que tem pertinho de você?",
   ];
-  const budget = [
-    " E tem uma faixa de valor em mente, tipo até uns R$ 200, R$ 300?",
-    " E mais ou menos quanto você quer investir? Até uns R$ 200, R$ 300?",
-    " Ah, e qual faixa de valor fica boa pra você?",
-  ];
-  const index = Math.abs(input.variant ?? 0) % city.length;
-  return `${city[index]}${input.askBudget ? budget[index] : ""}`;
+  return city[Math.abs(input.variant ?? 0) % city.length];
 }
 
 /** A resposta já pergunta onde o cliente está. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asksCustomerCity, cityQuestion, extractBudget, isProductBrowseRequest, wantsCheap } from "@/lib/ai/catalog-context";
-import { activeClosing, activeCta, asksGlassesType, asksSpecificModel, FRAME_PRICE_NOTE, isBroadStockCall, isGenericGlassesRequest, needsTypeFirst, priceTransparency, qualifyQuestion, SUN_PRICE_NOTE, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, activeCta, asksGlassesType, asksSpecificModel, FRAME_PRICE_NOTE, isBroadStockCall, isGenericGlassesRequest, needsTypeFirst, oneQualifyingQuestion, priceTransparency, qualifyQuestion, SUN_PRICE_NOTE, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { isKidsProduct, mentionsKids } from "@/lib/ai/catalog-search";
 import { FORMAT_RULES } from "@/lib/ai/bubbles";
 import { applyPriceFilter, diverseByBrand, formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
@@ -125,12 +125,16 @@ describe("óculos sem tipo: grau ou sol", () => {
     expect(needsTypeFirst({ ...base, category: "ARMACAO", texts: ["quero um óculos mais em conta", "de grau"] })).toBe(false);
     expect(needsTypeFirst({ ...base, category: "", brand: "Ray-Ban", texts: ["óculos ray-ban"] })).toBe(false);
   });
-  it("qualificação numa mensagem: cidade + grau ou sol + valor", () => {
-    const both = qualifyQuestion({ askCity: true, askType: true, askBudget: true, variant: 0 });
-    expect(both).toMatch(/cidade/);
-    expect(asksGlassesType(both)).toBe(true);
-    expect(both).toMatch(/faixa de valor/);
-    expect(qualifyQuestion({ askCity: false, askType: true, askBudget: false, variant: 1 })).toBe("Seria óculos de grau ou de sol?");
+  it("qualificação com 1 pergunta simples por vez: cidade → grau ou sol → valor", () => {
+    const city = qualifyQuestion({ askCity: true, askType: true, askBudget: true, variant: 0 });
+    expect(city).toBe("De qual cidade você fala, pra eu ver as lojas mais perto de você?");
+    expect(asksGlassesType(city)).toBe(false);
+    expect(city).not.toMatch(/valor|R\$|gastar|bairro/);
+    expect(qualifyQuestion({ askCity: false, askType: true, askBudget: true, variant: 1 })).toBe("Seria óculos de grau ou de sol?");
+    expect(qualifyQuestion({ askCity: false, askType: false, askBudget: true, variant: 0 })).toBe("Quanto você está pensando em gastar mais ou menos?");
+    expect(oneQualifyingQuestion("Que presente bonito! De qual cidade (ou bairro) você fala? E tem uma faixa de valor em mente, tipo até uns R$ 200, R$ 300?", "city")).toBe("Que presente bonito! De qual cidade você fala?");
+    expect(oneQualifyingQuestion("De qual cidade você fala, e é de grau ou de sol?", "city")).toBe("De qual cidade você fala?");
+    expect(oneQualifyingQuestion("Perfeito! Você procura óculos de grau ou de sol? E quanto pensa em gastar?", "type")).toBe("Perfeito! Você procura óculos de grau ou de sol?");
     expect(isBroadStockCall({ sortBy: "price_asc" })).toBe(true);
     expect(isBroadStockCall({ termoBusca: "Ray-Ban Justin", tipoBusca: "modelo_especifico" })).toBe(false);
   });

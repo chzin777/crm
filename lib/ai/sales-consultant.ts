@@ -13,15 +13,16 @@ import { loadPromptModule } from "@/lib/ai/prompt-composer";
 /** Regras da consultora (lib/ai/prompts/vitrine-estoque.md): entram no prompt só em busca/vitrine/orçamento. */
 export const SALES_CONSULTANT_RULES = loadPromptModule("vitrine-estoque");
 
-/** Cidade desconhecida: pergunta antes de listar (e o orçamento, se o pedido foi genérico). */
-export function cityFirstBlock(askBudget: boolean, askType = false) {
+/**
+ * Cidade desconhecida: pergunta SÓ a cidade antes de listar. Grau ou sol e faixa de valor ficam para os próximos
+ * turnos, uma pergunta de cada vez (parâmetros mantidos por compatibilidade).
+ */
+export function cityFirstBlock(_askBudget?: boolean, _askType = false) {
   return [
     "CIDADE DESCONHECIDA (regra desta resposta): o cliente quer ver produtos, mas ainda não sabemos a cidade dele.",
-    "NÃO consulte nem liste produtos agora. Responda de forma calorosa e natural, com suas palavras, perguntando de qual cidade (ou bairro/região) ele fala para separar modelos disponíveis pertinho dele.",
-    askType ? "Ele pediu \"óculos\" sem dizer o tipo: na MESMA mensagem curta, pergunte também se procura óculos de grau ou de sol (não misture os dois)." : "",
-    askBudget ? "Como o pedido foi genérico, aproveite a mesma pergunta leve para entender a faixa de valor (ex.: \"até uns R$ 200, R$ 300?\")." : "",
-    "Tudo numa mensagem só, leve e natural.",
-  ].filter(Boolean).join("\n");
+    "NÃO consulte nem liste produtos agora. Responda de forma calorosa e simples, em frase curta, perguntando SOMENTE de qual cidade ele fala (ex.: \"Que presente bonito! De qual cidade você fala, pra eu ver as lojas mais perto de você?\").",
+    "UMA PERGUNTA SÓ: não pergunte bairro, grau ou sol, nem faixa de valor nesta mensagem; isso vem depois, uma coisa de cada vez.",
+  ].join("\n");
 }
 
 /** Orçamento dito na conversa vira filtro da ferramenta (o modelo não precisa lembrar). */
@@ -168,33 +169,46 @@ export function asksGlassesType(reply: string) {
 
 /** Qualificação numa mensagem curta: cidade, grau ou sol e faixa de valor (só o que falta). */
 export function qualifyQuestion(input: { askCity: boolean; askType: boolean; askBudget: boolean; variant?: number }) {
-  if (input.askCity && !input.askType) return cityQuestion({ askBudget: input.askBudget, variant: input.variant });
+  // Uma pergunta por vez, nesta ordem: cidade → grau ou sol → quanto pensa em gastar.
   const index = Math.abs(input.variant ?? 0) % 3;
-  const both = [
-    "Pra eu separar as melhores opções pertinho de você: de qual cidade você fala, e você procura óculos de grau ou de sol?",
-    "Me conta duas coisinhas pra eu acertar na escolha: você é de qual cidade, e o óculos é de grau ou de sol?",
-    "Pra já te mostrar o que tem numa loja perto de você: de qual cidade você está falando, e seria óculos de grau ou de sol?",
-  ];
-  const typeOnly = [
-    "Você procura óculos de grau ou de sol?",
-    "Seria óculos de grau ou de sol?",
-    "Pra eu acertar nas opções: é óculos de grau ou de sol?",
-  ];
-  const budget = [
-    " E tem uma faixa de valor em mente, tipo até uns R$ 200, R$ 300?",
-    " E mais ou menos quanto você quer investir?",
-    " Ah, e qual faixa de valor fica boa pra você?",
-  ];
-  return `${(input.askCity ? both : typeOnly)[index]}${input.askBudget ? budget[index] : ""}`;
+  if (input.askCity) return cityQuestion({ variant: input.variant });
+  if (input.askType) return ["Você procura óculos de grau ou de sol?", "Seria óculos de grau ou de sol?", "É óculos de grau ou de sol?"][index];
+  if (input.askBudget) return ["Quanto você está pensando em gastar mais ou menos?", "Mais ou menos quanto você quer investir?", "Quanto você pensa em gastar, mais ou menos?"][index];
+  return "";
+}
+
+const BUDGET_QUESTION = /faixa de valor|quanto (voce )?(esta |ta )?(pensa|pensando|quer|gostaria|pretende)[^?]{0,20}(gastar|investir|pagar)|r\$ ?\d|orcamento/;
+const BAIRRO_QUESTION = /\bbairro\b|\bregiao\b/;
+
+/**
+ * Trava de 1 pergunta por vez na qualificação: com a cidade ainda desconhecida, tira da resposta as perguntas de
+ * bairro, grau/sol e valor; com só o tipo faltando, tira a de valor. Perguntas sem relação ficam.
+ */
+export function oneQualifyingQuestion(reply: string, step: "city" | "type") {
+  const sentences = reply.match(/[^.!?\n]+[.!?]*\s*|\n/g) ?? [reply];
+  const kept = sentences.filter((sentence) => {
+    if (!sentence.trim().endsWith("?")) return true;
+    const source = plainText(sentence);
+    const asksCity = /\bcidade\b/.test(source);
+    if (BUDGET_QUESTION.test(source) && !asksCity) return false;
+    if (step === "city" && !asksCity && (asksGlassesType(sentence) || BAIRRO_QUESTION.test(source))) return false;
+    return true;
+  }).map((sentence) => {
+    if (step !== "city" || !/\bcidade\b/.test(plainText(sentence))) return sentence;
+    // "De qual cidade (ou bairro) você fala, e é de grau ou de sol?" → só a cidade.
+    return sentence.replace(/\s*\((ou )?bairro[^)]*\)/i, "").replace(/,?\s*(e|ou)\s+(você procura |seria |é )?(óculos )?(de )?grau ou (de )?sol\??/i, "?").replace(/\?+/g, "?");
+  });
+  const result = kept.join("").replace(/[ \t]{2,}/g, " ").trim();
+  return result || reply;
 }
 
 /** Bloco do prompt: tipo desconhecido (e cidade conhecida) → pergunta grau ou sol antes de listar. */
 export function typeFirstBlock(askBudget: boolean) {
   return [
     "TIPO DE ÓCULOS DESCONHECIDO (regra desta resposta): o cliente pediu \"óculos\" sem dizer se é de grau ou de sol.",
-    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Pergunte de forma leve e natural, em 1 mensagem curta, se ele procura óculos de grau ou de sol.",
-    askBudget ? "Aproveite para entender a faixa de valor na mesma mensagem. No máximo 2 perguntas." : "",
-  ].filter(Boolean).join("\n");
+    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Pergunte SOMENTE, de forma simples e calorosa, se ele procura óculos de grau ou de sol (ex.: \"Você procura óculos de grau ou de sol?\").",
+    "UMA PERGUNTA SÓ: não pergunte valor nesta mensagem; isso vem depois.",
+  ].join("\n");
 }
 
 export function typeGatedResult(askBudget: boolean) {

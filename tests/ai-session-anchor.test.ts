@@ -252,12 +252,14 @@ describe("isolamento de sessão", () => {
     const ask = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
     expect(calls.stock).toHaveLength(0);
     expect(gated).toMatchObject({ cenario: "cidade_desconhecida", produtos: [] });
-    expect(ask.reply).toMatch(/cidade/i);
-    expect(ask.reply).toMatch(/R\$ ?200|faixa de valor|quanto/i);
+    // Cidade desconhecida: pergunta SÓ a cidade, simples, sem acumular orçamento na mesma frase.
+    expect(ask.reply).toMatch(/de qual cidade você fala/i);
+    expect(ask.reply).not.toMatch(/R\$|faixa de valor|quanto|gastar|investir|bairro/i);
+    expect(ask.reply.match(/\?/g)).toHaveLength(1);
     expect(ask.reply).not.toMatch(/\d\.\s/);
     expect(ask.interactiveList).toBeUndefined();
     expect(calls.prompts.at(-1)).toContain("CIDADE DESCONHECIDA");
-    expect(calls.prompts.at(-1)).toContain("faixa de valor");
+    expect(calls.prompts.at(-1)).toContain("UMA PERGUNTA SÓ");
 
     // Turno 2: cidade + teto → preferredCity salvo e busca grau/até 250/mais baratas primeiro, só em Goiânia.
     history.push({ from: "ai", text: ask.reply }, { from: "customer", text: "sou de Goiânia e queria algo até 250 reais" });
@@ -276,7 +278,7 @@ describe("isolamento de sessão", () => {
     expect(text).toMatch(/receita/);
   });
 
-  it("\"quero um óculos mais em conta\" sem cidade nem tipo → pergunta cidade, grau ou sol e faixa de valor, sem catálogo", async () => {
+  it("\"quero um óculos mais em conta\" sem cidade nem tipo → pergunta só a cidade; depois só grau ou sol, sem catálogo", async () => {
     model.script = async (tools) => {
       await tools.consultarEstoqueProduto({ sortBy: "price_asc" });
       return { reply: "Temos sim, várias opções!", action: "reply" };
@@ -284,10 +286,10 @@ describe("isolamento de sessão", () => {
     const ask = await simulateAgent(settings, [{ from: "customer", text: "quero um óculos mais em conta" }], "user-1", undefined, { contactName: "Ana" });
     expect(calls.stock).toHaveLength(0);
     expect(ask.reply).toMatch(/cidade/i);
-    expect(ask.reply).toMatch(/de grau ou de sol/);
-    expect(ask.reply).toMatch(/faixa de valor|quanto/);
+    expect(ask.reply).not.toMatch(/de grau ou de sol/);
+    expect(ask.reply).not.toMatch(/faixa de valor|quanto|R\$/);
     expect(ask.reply).not.toMatch(/\d\.\s/);
-    expect(calls.prompts.at(-1)).toContain("pergunte também se procura óculos de grau ou de sol");
+    expect(calls.prompts.at(-1)).toContain("perguntando SOMENTE de qual cidade");
 
     // Cidade conhecida, tipo ainda não: continua sem listar e pergunta só grau ou sol.
     const history: PlaygroundMessage[] = [{ from: "customer", text: "quero um óculos mais em conta" }, { from: "ai", text: ask.reply }, { from: "customer", text: "sou de Goiânia" }];
