@@ -2,8 +2,8 @@
  * Postura de consultora de vendas ópticas: localização antes de ofertar estoque, orçamento como filtro real
  * e redação livre (sem aberturas fixas). Funções puras, usadas pelo agente e pelos testes.
  */
-import { extractBudget, isProductBrowseRequest, wantsCheap, type Budget } from "@/lib/ai/catalog-context";
-import { mentionsKids } from "@/lib/ai/catalog-search";
+import { cityQuestion, extractBudget, isProductBrowseRequest, wantsCheap, type Budget } from "@/lib/ai/catalog-context";
+import { explicitBrand, mentionsKids } from "@/lib/ai/catalog-search";
 import { BUBBLE_SPLIT, splitBubbles } from "@/lib/ai/bubbles";
 import { parseShowcase } from "@/lib/ai/showcase-choice";
 import { iconicModel, expandModelNicknames } from "@/lib/ai/product-names";
@@ -16,17 +16,21 @@ export const SALES_CONSULTANT_RULES = [
   "- ARGUMENTE COMO VENDEDORA: ao sugerir 2 ou 3 opções, destaque em poucas palavras o diferencial prático de cada uma (leveza do acetato no dia a dia, discrição e resistência do metal, ótimo custo-benefício) e conduza ao próximo passo: provar na loja mais próxima ou mandar a receita para orçar as lentes junto.",
   "- FECHAMENTO ATIVO (regra fixa): depois de recomendar armações/óculos, termine SEMPRE com UMA pergunta direta e leve que avance a venda. PROIBIDO fechar de forma passiva com \"Se quiser, posso te ajudar...\", \"Se quiser, posso...\", \"Qualquer coisa estou à disposição\" ou \"Fico à disposição\". Exemplos: \"Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!\" ou \"Quer que eu verifique em qual loja de <CIDADE> fica mais fácil pra você provar?\" (troque <CIDADE> pela cidade do cliente).",
   "- PÚBLICO ADULTO POR PADRÃO: não sugira linhas infantis/juvenis (Kids, Infantil, Junior, Teen) a menos que o cliente fale de criança, filho(a), neto(a), idade juvenil ou peça infantil.",
+  "- GRAU OU SOL: se o cliente pedir \"óculos\" sem dizer se é de grau ou de sol (ex.: \"quero um óculos mais em conta\"), pergunte isso de forma leve junto com a cidade/faixa de valor, numa mensagem curta, antes de consultar o estoque; nunca despeje uma mistura de sol e grau.",
+  "- TRANSPARÊNCIA DE PREÇO: ao mostrar valores de armações de grau, deixe claro com naturalidade que o valor é da armação e que as lentes de grau são orçadas à parte conforme a receita (grau e tratamentos), convidando a mandar foto da receita para o orçamento completo. Em óculos de sol (sem grau), reforce que o valor já é da peça completa, pronta pra usar.",
   "- SEM INTERROGATÓRIO: no máximo 1 ou 2 perguntas leves por mensagem, sempre ligadas a escolher o óculos certo (cidade, faixa de valor, estilo, uso).",
   "- REDAÇÃO ÚNICA: escreva cada abertura do zero, conectada ao que o cliente disse; não repita a estrutura das suas mensagens anteriores.",
   "- PROIBIDO clichê de robô: \"Como posso ajudá-lo hoje?\", \"Aguarde um instante enquanto verifico...\", \"Aqui estão os detalhes desse modelo!\" repetido, \"Em que mais posso ser útil?\".",
 ].join("\n");
 
 /** Cidade desconhecida: pergunta antes de listar (e o orçamento, se o pedido foi genérico). */
-export function cityFirstBlock(askBudget: boolean) {
+export function cityFirstBlock(askBudget: boolean, askType = false) {
   return [
     "CIDADE DESCONHECIDA (regra desta resposta): o cliente quer ver produtos, mas ainda não sabemos a cidade dele.",
     "NÃO consulte nem liste produtos agora. Responda de forma calorosa e natural, com suas palavras, perguntando de qual cidade (ou bairro/região) ele fala para separar modelos disponíveis pertinho dele.",
-    askBudget ? "Como o pedido foi genérico, aproveite a mesma pergunta leve para entender a faixa de valor (ex.: \"até uns R$ 200, R$ 300?\") e, se couber, o estilo que ele curte. No máximo 2 perguntas." : "",
+    askType ? "Ele pediu \"óculos\" sem dizer o tipo: na MESMA mensagem curta, pergunte também se procura óculos de grau ou de sol (não misture os dois)." : "",
+    askBudget ? "Como o pedido foi genérico, aproveite a mesma pergunta leve para entender a faixa de valor (ex.: \"até uns R$ 200, R$ 300?\")." : "",
+    "Tudo numa mensagem só, leve e natural.",
   ].filter(Boolean).join("\n");
 }
 
@@ -70,14 +74,14 @@ export function isGatedStockCall(args: Record<string, unknown>, input: { knownCi
   return (budgetOnly && !asksSpecificModel(term)) || classifySearch(term, args.tipoBusca) === "marca_ampla";
 }
 
-export function gatedStockResult(askBudget: boolean) {
+export function gatedStockResult(askBudget: boolean, askType = false) {
   return {
     tipoBusca: "marca_ampla" as const,
     cenario: "cidade_desconhecida" as const,
     produtos: [] as [],
     modelos: [] as [],
     vitrineFormatada: null,
-    orientacao: `Ainda não sabemos a cidade do cliente: NÃO liste produtos. ${cityFirstBlock(askBudget)}`,
+    orientacao: `Ainda não sabemos a cidade do cliente: NÃO liste produtos. ${cityFirstBlock(askBudget, askType)}`,
   };
 }
 
@@ -147,4 +151,105 @@ export function activeClosing(reply: string, input: { city?: string | null; vari
 /** O cliente falou de criança/adolescente em algum momento da conversa. */
 export function conversationWantsKids(texts: string[]) {
   return texts.some((text) => mentionsKids(text));
+}
+
+const plainText = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** "Quero um óculos mais em conta", "tem óculos barato?": óculos sem dizer se é de grau ou de sol. */
+export function isGenericGlassesRequest(text: string) {
+  const source = plainText(text);
+  return /\boculos\b/.test(source) && !/\b(grau|sol|solar|solares|escuros?|receita|armac(ao|oes)|lentes?|leitura|multifoca(l|is)|bifoca(l|is)|perto|longe)\b/.test(source) && !explicitBrand(text);
+}
+
+/**
+ * Tipo (grau ou sol) ainda desconhecido num pedido genérico de óculos: pergunta antes de consultar o estoque,
+ * para não misturar sol e grau. Vale enquanto o cliente não disser o tipo (a categoria da sessão fica vazia).
+ */
+export function needsTypeFirst(input: { category: string; brand: string; texts: string[]; photo: boolean; selectedProduct: boolean; queued: boolean }) {
+  if (input.category || input.brand || input.photo || input.selectedProduct || input.queued) return false;
+  return input.texts.some((text) => isGenericGlassesRequest(text) && !asksSpecificModel(text));
+}
+
+/** A resposta já pergunta se é de grau ou de sol. */
+export function asksGlassesType(reply: string) {
+  const source = plainText(reply);
+  return /\bgrau\b[^?]{0,60}\bsol\b|\bsol\b[^?]{0,60}\bgrau\b/.test(source);
+}
+
+/** Qualificação numa mensagem curta: cidade, grau ou sol e faixa de valor (só o que falta). */
+export function qualifyQuestion(input: { askCity: boolean; askType: boolean; askBudget: boolean; variant?: number }) {
+  if (input.askCity && !input.askType) return cityQuestion({ askBudget: input.askBudget, variant: input.variant });
+  const index = Math.abs(input.variant ?? 0) % 3;
+  const both = [
+    "Pra eu separar as melhores opções pertinho de você: de qual cidade você fala, e você procura óculos de grau ou de sol?",
+    "Me conta duas coisinhas pra eu acertar na escolha: você é de qual cidade, e o óculos é de grau ou de sol?",
+    "Pra já te mostrar o que tem numa loja perto de você: de qual cidade você está falando, e seria óculos de grau ou de sol?",
+  ];
+  const typeOnly = [
+    "Você procura óculos de grau ou de sol?",
+    "Seria óculos de grau ou de sol?",
+    "Pra eu acertar nas opções: é óculos de grau ou de sol?",
+  ];
+  const budget = [
+    " E tem uma faixa de valor em mente, tipo até uns R$ 200, R$ 300?",
+    " E mais ou menos quanto você quer investir?",
+    " Ah, e qual faixa de valor fica boa pra você?",
+  ];
+  return `${(input.askCity ? both : typeOnly)[index]}${input.askBudget ? budget[index] : ""}`;
+}
+
+/** Bloco do prompt: tipo desconhecido (e cidade conhecida) → pergunta grau ou sol antes de listar. */
+export function typeFirstBlock(askBudget: boolean) {
+  return [
+    "TIPO DE ÓCULOS DESCONHECIDO (regra desta resposta): o cliente pediu \"óculos\" sem dizer se é de grau ou de sol.",
+    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Pergunte de forma leve e natural, em 1 mensagem curta, se ele procura óculos de grau ou de sol.",
+    askBudget ? "Aproveite para entender a faixa de valor na mesma mensagem. No máximo 2 perguntas." : "",
+  ].filter(Boolean).join("\n");
+}
+
+export function typeGatedResult(askBudget: boolean) {
+  return {
+    tipoBusca: "marca_ampla" as const,
+    cenario: "tipo_desconhecido" as const,
+    produtos: [] as [],
+    modelos: [] as [],
+    vitrineFormatada: null,
+    orientacao: `O cliente ainda não disse se é óculos de grau ou de sol: NÃO liste produtos. ${typeFirstBlock(askBudget)}`,
+  };
+}
+
+/** Busca de vitrine (marca/categoria/orçamento), não de um modelo específico. */
+export function isBroadStockCall(args: Record<string, unknown>) {
+  if (args._photo) return false;
+  const term = typeof args.termoBusca === "string" ? args.termoBusca : "";
+  const budgetOnly = typeof args.maxPrice === "number" || typeof args.minPrice === "number" || typeof args.sortBy === "string" || typeof args.tipo === "string";
+  return (budgetOnly && !asksSpecificModel(term)) || classifySearch(term, args.tipoBusca) === "marca_ampla";
+}
+
+/** Notas de transparência comercial: armação de grau sem lentes; óculos de sol já completo. */
+export const FRAME_PRICE_NOTE = "Lembrando que esses valores são da armação; as lentes de grau são orçadas à parte, conforme a sua receita (grau e tratamentos que você escolher).";
+export const SUN_PRICE_NOTE = "E o valor já é do óculos de sol completo, pronto pra usar.";
+
+/**
+ * Valores apresentados: armação de grau (👓 na vitrine ou ficha "Armação de grau") ganha o aviso de que as lentes
+ * são orçadas à parte; só óculos de sol ganha o aviso de peça completa. Se a IA já explicou, nada muda.
+ */
+export function priceTransparency(reply: string) {
+  const parts = splitBubbles(reply);
+  if (!parts.length) return reply;
+  const text = parts.join("\n");
+  const showcase = parts.flatMap((part) => part.split("\n").filter((line) => /^\s*\d{1,2}[.)]\s/.test(line) && /R\$/.test(line)));
+  const cardPrice = /💵/.test(text);
+  const frames = showcase.some((line) => line.includes("👓")) || (cardPrice && /Armação de grau/i.test(text));
+  const sun = !frames && (showcase.some((line) => line.includes("🕶️")) || (cardPrice && /Óculos de sol/i.test(text)));
+  const plain = plainText(text);
+  let note = "";
+  if (frames && !/\blentes?\b[^.?!]{0,80}\b(a parte|separad|parte|receita|orcad|orcament)/.test(plain)) note = FRAME_PRICE_NOTE;
+  else if (sun && !/\b(completo|pronto pra usar|pronto para usar|peca completa)\b/.test(plain)) note = SUN_PRICE_NOTE;
+  if (!note) return reply;
+  const lastIndex = parts.length - 1;
+  const last = parts[lastIndex];
+  // A nota abre a bolha final (antes da pergunta); se a última bolha é a própria vitrine/ficha, vira uma bolha nova.
+  if (lastIndex === 0 || showcase.some((line) => last.includes(line)) || /💵/.test(last)) return [...parts, note].join(`\n${BUBBLE_SPLIT}\n`);
+  return [...parts.slice(0, -1), `${note} ${last}`].join(`\n${BUBBLE_SPLIT}\n`);
 }

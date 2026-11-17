@@ -28,7 +28,7 @@ import { readFile } from "@/lib/minio";
 import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { asksCustomerCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { activeClosing, budgetBlock, cityFirstBlock, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
@@ -572,7 +572,9 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   const { budget, cheap } = conversationBudget([...[...(input.earlierCustomerTexts ?? [])].reverse(), customerText]);
   const wantsKids = conversationWantsKids([...(input.earlierCustomerTexts ?? []), customerText]);
   const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
-  const askBudget = cityFirst && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
+  // "Óculos" sem dizer grau ou sol: pergunta o tipo antes de listar (não mistura sol e grau).
+  const typeFirst = needsTypeFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
+  const askBudget = (cityFirst || typeFirst) && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
   const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
   const forceCatalog = !cityFirst && !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
     && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand));
@@ -607,7 +609,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SALES_CONSULTANT_RULES, cityFirst ? cityFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
+    extra: [SALES_CONSULTANT_RULES, cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -629,6 +631,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   let currentCatalogFilterHash = "";
   /** A ferramenta recusou listar produtos por falta da cidade nesta resposta. */
   let stockGated = false;
+  let typeGated = false;
   const stockTool = {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
@@ -642,7 +645,12 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       // Regra de ouro geográfica: vitrine só com a cidade do cliente conhecida.
       if (!chosen && isGatedStockCall(baseQuery, { knownCity: catalogState.preferredCity, fixedProduct: !!anchoredProduct })) {
         stockGated = true;
-        return gatedStockResult(askBudget);
+        return gatedStockResult(askBudget, typeFirst);
+      }
+      // Óculos sem tipo: nada de vitrine misturando sol e grau antes de saber qual ele procura.
+      if (!chosen && !anchoredProduct && typeFirst && isBroadStockCall(baseQuery)) {
+        typeGated = true;
+        return typeGatedResult(askBudget);
       }
       const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category }), cidade: catalogState.preferredCity || args.cidade };
       // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
@@ -940,9 +948,17 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   if (proactiveContent && humanMode !== "route") proactiveReply = mergeProactiveReply(outcome.action === "reply" ? outcome.reply : "", proactiveContent);
   if (proactiveReply && humanMode !== "route") outcome = { ...outcome, action: "reply", reply: proactiveReply, reason: "Busca de catálogo atualizada", queue: "", trigger: "ai" };
   // Cidade desconhecida: a resposta precisa perguntar onde o cliente está (o modelo escreve; aqui só a garantia).
-  if ((cityFirst || stockGated) && !photoReply && outcome.action === "reply" && !asksCustomerCity(outcome.reply)) {
-    outcome = { ...outcome, reply: `${outcome.reply.trim()} ${cityQuestion({ askBudget, variant: input.aiReplies })}`.trim() };
+  // Óculos sem tipo: também pergunta se é de grau ou de sol, na mesma mensagem (só o que ainda falta perguntar).
+  if (!photoReply && outcome.action === "reply") {
+    const askCity = (cityFirst || stockGated) && !asksCustomerCity(outcome.reply);
+    const askType = (typeFirst || typeGated) && !asksGlassesType(outcome.reply);
+    if (askCity || askType) {
+      const askValue = askBudget && !/\b(valor|quanto|R\$|orçamento|orcamento|investir)/i.test(outcome.reply);
+      outcome = { ...outcome, reply: `${outcome.reply.trim()} ${qualifyQuestion({ askCity, askType, askBudget: askValue, variant: input.aiReplies })}`.trim() };
+    }
   }
+  // Transparência comercial: armação de grau → lentes orçadas à parte; óculos de sol → peça completa.
+  if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: priceTransparency(outcome.reply) };
   // Fechamento ativo: vitrine de opções termina com pergunta direta de avanço (nunca "Se quiser, posso...").
   if (outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2)) {
     outcome = { ...outcome, reply: activeClosing(outcome.reply, { city: catalogState.preferredCity, variant: input.aiReplies }) };

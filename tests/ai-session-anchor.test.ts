@@ -244,6 +244,46 @@ describe("isolamento de sessão", () => {
     expect(text).toMatch(/receita/);
   });
 
+  it("\"quero um óculos mais em conta\" sem cidade nem tipo → pergunta cidade, grau ou sol e faixa de valor, sem catálogo", async () => {
+    model.script = async (tools) => {
+      await tools.consultarEstoqueProduto({ sortBy: "price_asc" });
+      return { reply: "Temos sim, várias opções!", action: "reply" };
+    };
+    const ask = await simulateAgent(settings, [{ from: "customer", text: "quero um óculos mais em conta" }], "user-1", undefined, { contactName: "Ana" });
+    expect(calls.stock).toHaveLength(0);
+    expect(ask.reply).toMatch(/cidade/i);
+    expect(ask.reply).toMatch(/de grau ou de sol/);
+    expect(ask.reply).toMatch(/faixa de valor|quanto/);
+    expect(ask.reply).not.toMatch(/\d\.\s/);
+    expect(calls.prompts.at(-1)).toContain("pergunte também se procura óculos de grau ou de sol");
+
+    // Cidade conhecida, tipo ainda não: continua sem listar e pergunta só grau ou sol.
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "quero um óculos mais em conta" }, { from: "ai", text: ask.reply }, { from: "customer", text: "sou de Goiânia" }];
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ sortBy: "price_asc", cidade: "Goiânia" })) as { cenario: string };
+      return { reply: result.cenario === "tipo_desconhecido" ? "Perfeito!" : "Olha essas:", action: "reply" };
+    };
+    const type = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
+    expect(calls.stock).toHaveLength(0);
+    expect(type.reply).toMatch(/^Perfeito! .*de grau ou de sol\?/);
+    expect(type.reply).not.toMatch(/cidade/i);
+
+    // "De grau": agora busca só armações, e o valor vem com o aviso das lentes à parte.
+    history.push({ from: "ai", text: type.reply }, { from: "customer", text: "de grau, até 250" });
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ tipo: "grau", maxPrice: 250, sortBy: "price_asc", cidade: "Goiânia" })) as { vitrineFormatada: string };
+      return { reply: `Separei estas em Goiânia:\n${result.vitrineFormatada}`, action: "reply" };
+    };
+    const offer = await simulateAgent(settings, history, "user-1", undefined, { contactName: "Ana" });
+    expect(calls.stock.at(-1)).toMatchObject({ tipo: "grau", maxPrice: 250 });
+    const text = offer.messages.join("\n");
+    expect(text).toMatch(/1\. 👓 \*Vogue/);
+    expect(text).toContain("esses valores são da armação; as lentes de grau são orçadas à parte, conforme a sua receita");
+    // Aviso das lentes antes do CTA ativo, que fecha a resposta.
+    const cta = text.search(/Qual desses estilos combinou mais com você\?|Quer que eu verifique em qual loja|Qual deles você quer ver de pertinho primeiro\?/);
+    expect(cta).toBeGreaterThan(text.indexOf("as lentes de grau são orçadas à parte"));
+  });
+
   it("orçamento dito antes da cidade vira filtro mesmo se a IA esquecer de passar", async () => {
     model.script = async (tools) => {
       await tools.consultarEstoqueProduto({ tipo: "grau" });

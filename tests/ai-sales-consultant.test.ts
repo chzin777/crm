@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asksCustomerCity, cityQuestion, extractBudget, isProductBrowseRequest, wantsCheap } from "@/lib/ai/catalog-context";
-import { activeClosing, activeCta, asksSpecificModel, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, activeCta, asksGlassesType, asksSpecificModel, FRAME_PRICE_NOTE, isBroadStockCall, isGenericGlassesRequest, needsTypeFirst, priceTransparency, qualifyQuestion, SUN_PRICE_NOTE, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { isKidsProduct, mentionsKids } from "@/lib/ai/catalog-search";
 import { FORMAT_RULES } from "@/lib/ai/bubbles";
 import { applyPriceFilter, diverseByBrand, formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
@@ -111,6 +111,52 @@ describe("público adulto por padrão", () => {
     for (const text of ["é pro meu filho", "armação infantil", "minha neta de 8 anos", "pra uma criança", "tem kids?", "ele tem 12 anos", "minha filha adolescente"]) expect(mentionsKids(text)).toBe(true);
     for (const text of ["armação de grau barata", "até 250 reais", "tenho 35 anos", "quero pra mim", "armação pro meu marido"]) expect(mentionsKids(text)).toBe(false);
     expect(conversationWantsKids(["oi", "é pro meu filho de 10 anos", "Goiânia"])).toBe(true);
+  });
+});
+
+describe("óculos sem tipo: grau ou sol", () => {
+  it("detecta pedido genérico de óculos", () => {
+    for (const text of ["quero um óculos mais em conta", "tem óculos barato?", "procuro um oculos"]) expect(isGenericGlassesRequest(text)).toBe(true);
+    for (const text of ["óculos de grau barato", "óculos de sol até 300", "quero uma armação", "óculos Ray-Ban", "óculos pra leitura", "tem algo barato?"]) expect(isGenericGlassesRequest(text)).toBe(false);
+  });
+  it("pergunta o tipo até o cliente dizer (categoria da sessão)", () => {
+    const base = { brand: "", photo: false, selectedProduct: false, queued: false };
+    expect(needsTypeFirst({ ...base, category: "", texts: ["quero um óculos mais em conta", "Goiânia"] })).toBe(true);
+    expect(needsTypeFirst({ ...base, category: "ARMACAO", texts: ["quero um óculos mais em conta", "de grau"] })).toBe(false);
+    expect(needsTypeFirst({ ...base, category: "", brand: "Ray-Ban", texts: ["óculos ray-ban"] })).toBe(false);
+  });
+  it("qualificação numa mensagem: cidade + grau ou sol + valor", () => {
+    const both = qualifyQuestion({ askCity: true, askType: true, askBudget: true, variant: 0 });
+    expect(both).toMatch(/cidade/);
+    expect(asksGlassesType(both)).toBe(true);
+    expect(both).toMatch(/faixa de valor/);
+    expect(qualifyQuestion({ askCity: false, askType: true, askBudget: false, variant: 1 })).toBe("Seria óculos de grau ou de sol?");
+    expect(isBroadStockCall({ sortBy: "price_asc" })).toBe(true);
+    expect(isBroadStockCall({ termoBusca: "Ray-Ban Justin", tipoBusca: "modelo_especifico" })).toBe(false);
+  });
+});
+
+describe("transparência comercial: armação x lentes", () => {
+  const grau = "Separei estas:\n1. 👓 *Vogue (Ref. VO5300)* — R$ 189,00\n2. 👓 *Atitude (Ref. AT1001)* — R$ 239,00";
+  const sol = "Olha essas:\n1. 🕶️ *Ray-Ban (Ref. RB2140)* — R$ 799,00\n2. 🕶️ *Oakley (Ref. OO9102)* — R$ 750,00";
+
+  it("armação de grau: avisa que o valor é da armação e as lentes são orçadas à parte conforme a receita", () => {
+    const reply = priceTransparency(`${grau}\n---SPLIT---\nQual combinou mais com você?`);
+    expect(reply).toContain(`---SPLIT---\n${FRAME_PRICE_NOTE} Qual combinou mais com você?`);
+    expect(priceTransparency(grau)).toBe(`${grau}\n---SPLIT---\n${FRAME_PRICE_NOTE}`);
+    // A IA já explicou: nada duplicado.
+    const explained = `${grau}\n---SPLIT---\nO valor é só da armação, as lentes são orçadas à parte pela receita. Qual te agradou?`;
+    expect(priceTransparency(explained)).toBe(explained);
+  });
+  it("óculos de sol: valor da peça completa; ficha de armação de grau também ganha o aviso", () => {
+    expect(priceTransparency(`${sol}\n---SPLIT---\nQual te agradou?`)).toContain(`${SUN_PRICE_NOTE} Qual te agradou?`);
+    const card = "Temos sim! 😊\n\n🕶️ *Vogue | Ref. VO5300*\nⓂ️ *Modelo:* Armação de grau\n💵 *Valor:* R$ 189,00\n📦 *Estoque:* 1 unidade disponível na seguinte loja:\n📍 *Loja Setor Bueno* - Goiânia — 1 unidade";
+    expect(priceTransparency(`${card}\n---SPLIT---\nGostaria de reservar?`)).toContain(`${FRAME_PRICE_NOTE} Gostaria de reservar?`);
+    expect(priceTransparency("Boa tarde! Em que posso te ajudar?")).toBe("Boa tarde! Em que posso te ajudar?");
+  });
+  it("vitrine + aviso + CTA ativo no fim", () => {
+    const final = activeClosing(priceTransparency(grau), { variant: 0 });
+    expect(final).toBe(`${grau}\n---SPLIT---\n${FRAME_PRICE_NOTE} Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!`);
   });
 });
 
