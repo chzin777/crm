@@ -458,3 +458,64 @@ export function brandFallbackReply(fallback: BrandFallback, variant = 0) {
   // Vitrine de 2+ itens ganha o fechamento ativo no agente; com 1 só, a pergunta de avanço sai aqui.
   return fallback.alternatives.length >= 2 ? showcase : `${showcase}\n\nQuer que eu peça a transferência da *${brand}* ou prefere conhecer essa opção na loja?`;
 }
+
+/** Catálogo com foto: no máximo 4 opções por vitrine (leve no celular do cliente e no envio de mídia). */
+export const VISUAL_CATALOG_MAX = 4;
+/** Opção do catálogo: foto + legenda curta (nome limpo, preço e lojas da cidade), sem código "Ref.". */
+export type CatalogPhoto = { index: number; sku: string; ref: string | null; name: string; price: string | null; priceValue: number | null; stores: string[]; imageUrl: string; caption: string };
+export type VisualCatalog = { opening: string; items: CatalogPhoto[]; closing: string };
+
+const priceNumber = (price: string | null) => {
+  if (!price) return null;
+  const value = Number(price.replace(/[^\d,]/g, "").replace(",", "."));
+  return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+/** "1. Ray-Ban Aviator — R$ 899,00" + "Lojas em Goiânia: Setor Marista, Jardim Goiás". */
+export function catalogCaption(item: { index: number; name: string; price: string | null; varies?: boolean; stores: string[] }, city: string) {
+  const price = item.price ? ` — ${item.varies ? "a partir de " : ""}${item.price}` : "";
+  const stores = item.stores.slice(0, 3);
+  const where = stores.length ? `\n${stores.length === 1 ? "Loja" : "Lojas"}${city ? ` em ${city}` : ""}: ${stores.join(", ")}${item.stores.length > 3 ? " e outras" : ""}` : "";
+  return `${item.index}. ${item.name.replace(/\s*\(Ref\.[^)]*\)/gi, "").trim()}${price}${where}`;
+}
+
+/** Mensagem curta que abre a vitrine com fotos ("Separei 3 opções de óculos de sol em Goiânia 👇"). */
+export function catalogOpening(input: { count: number; category?: string; city?: string; budget?: boolean }) {
+  const what = input.category === "SOLAR" ? "óculos de sol" : input.category === "ARMACAO" ? "armações de grau" : input.category === "LENTE_CONTATO" ? "lentes de contato" : "modelos";
+  const count = input.count === 1 ? `1 opção de ${what}` : `${input.count} opções de ${what}`;
+  return `Separei ${count}${input.city ? ` em ${input.city}` : ""}${input.budget ? " nessa faixa de valor" : ""} 👇`;
+}
+
+export const CATALOG_CLOSINGS = ["Qual dessas fotos chamou mais sua atenção?", "Qual delas você mais gostou?", "Alguma dessas te agradou? Me fala o número da foto."];
+
+/**
+ * Curadoria do catálogo visual: na ordem da vitrine, só modelos com foto válida (qualquer código da variante),
+ * até VISUAL_CATALOG_MAX. null quando nenhum tem foto (aí a vitrine sai em texto limpo).
+ */
+export function buildVisualCatalog(input: { models: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number }): VisualCatalog | null {
+  const items: CatalogPhoto[] = [];
+  for (const model of input.models) {
+    if (items.length >= (input.max ?? VISUAL_CATALOG_MAX)) break;
+    const sku = model.codigos.find((code) => !!input.images[code]);
+    if (!sku) continue;
+    const index = items.length + 1;
+    const stores = model.lojas ?? [];
+    items.push({
+      index, sku, ref: model.referencia, name: model.nomeComercial, price: model.precoVenda, priceValue: priceNumber(model.precoVenda), stores, imageUrl: input.images[sku],
+      caption: catalogCaption({ index, name: model.nomeComercial, price: model.precoVenda, varies: model.precoVaria, stores }, input.city),
+    });
+  }
+  return items.length ? { opening: input.opening, items, closing: input.closing } : null;
+}
+
+/** Ordem exibida para o aiContext (lastShownProducts): "gostei da 2ª foto" resolve sem mostrar referência. */
+export function shownProductsOf(items: { index: number; sku: string | null; ref: string | null; name: string; priceValue: number | null; stores: string[] }[]) {
+  return items.map((item) => ({ index: item.index, id: item.sku ?? "", ref: item.ref, name: item.name, price: item.priceValue, stores: item.stores }));
+}
+
+/** Vitrine em texto sem códigos internos: tira "(Ref. 921093)" / "(Ref. #921093)" das linhas numeradas. */
+export function withoutShowcaseRefs(text: string) {
+  return text.replace(/\s*\(Ref\.\s*[^)]*\)/gi, "");
+}
+
+export const NO_PHOTOS_NOTE = "(As fotos desses modelos não estão disponíveis no sistema no momento.)";

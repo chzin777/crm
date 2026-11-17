@@ -16,9 +16,11 @@ const INVENTORY = vi.hoisted(() => ({
   VERSACE: [] as { code: string; description: string; brand: string; unit: string }[],
   TIFFANY: [{ code: "t1", description: "ARM TIFFANY REF TF2200 52", brand: "TIFFANY", unit: "36" }],
   VOGUE: [{ code: "v1", description: "ARM VOGUE REF VO5300 51", brand: "VOGUE", unit: "36" }],
+  RAYBAN: [1, 2, 3, 4, 5].map((n) => ({ code: `r${n}`, description: `OCS RAY BAN REF RB910${n} 55`, brand: "RAY BAN", unit: "36" })),
 } as Record<string, { code: string; description: string; brand: string; unit: string }[]>));
 
 const calls = vi.hoisted(() => ({ stock: [] as Record<string, unknown>[], prompts: [] as string[] }));
+const photos = vi.hoisted(() => ({ byCode: {} as Record<string, string> }));
 type Tool = { definition: { function: { name: string } }; run: (args: Record<string, unknown>) => Promise<unknown> };
 const model = vi.hoisted(() => ({ script: null as null | ((tools: Record<string, Tool["run"]>) => Promise<Record<string, unknown>>) }));
 
@@ -34,7 +36,7 @@ vi.mock("@/lib/ai/store", () => ({ readAiSettings: vi.fn(), readAiStatus: vi.fn(
 vi.mock("@/lib/store-pin", () => ({ ensureStorePin: vi.fn(async () => null) }));
 vi.mock("@/lib/ai/staff-db", () => ({ activeStaff: vi.fn(async () => []) }));
 vi.mock("@/lib/ai/catalog-db", () => ({ catalogProducts: vi.fn(async () => []), searchErpCatalog: vi.fn() }));
-vi.mock("@/lib/ai/product-image-db", () => ({ imageSearchStatus: () => false, invalidateProductImage: vi.fn(), searchAndCacheProductImage: vi.fn(async () => null) }));
+vi.mock("@/lib/ai/product-image-db", () => ({ catalogImages: vi.fn(async () => photos.byCode), imageSearchStatus: () => false, invalidateProductImage: vi.fn(), searchAndCacheProductImage: vi.fn(async () => null) }));
 vi.mock("@/lib/ai/product-details-db", () => ({
   productSummary: vi.fn(async () => ({ miniDescricao: null, avaliacaoWeb: null, formato: "", acabamento: "", source: "cache" })),
   buscarDetalhesProduto: vi.fn(async () => ({ result: {}, log: { product: "", source: "cache", variations: 0, ms: 1 }, product: null })),
@@ -75,6 +77,7 @@ import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { brandFallbackReply, brandSearchArgs, equivalentBrands } from "@/lib/ai/catalog-search";
 import { updateCatalogContext, EMPTY_CATALOG_CONTEXT } from "@/lib/ai/catalog-context";
 import { singleEmoji } from "@/lib/ai/response-opening";
+import { resolveListedChoice } from "@/lib/ai/showcase-choice";
 
 const settings = { ...DEFAULT_AI_SETTINGS, sendProductImage: false, canQuotePrices: true, useStores: false, useOperatingHours: false, topics: [], aiChoosesQueue: false, maxAiReplies: 20, closeWhenResolved: false };
 const GREETING_START = /^\s*(bom dia|boa tarde|boa noite|oi|olá)\b/i;
@@ -83,6 +86,7 @@ beforeEach(() => {
   calls.stock.length = 0;
   calls.prompts.length = 0;
   model.script = null;
+  photos.byCode = {};
 });
 
 describe("higiene dos módulos de prompt (lib/ai/prompts/*.md)", () => {
@@ -217,8 +221,9 @@ describe("fluxo multi-turno: saudação única, marca ativa e cidade", () => {
     // 5) Brasília: busca a marca em Brasília na hora e mostra os modelos reais.
     const t5 = await turn("Brasilia tem ?", async () => ({ reply: "Tem sim! Separei as Miu Miu de Brasília:", action: "reply" }));
     expect(t5.stock[0]).toMatchObject({ marca: "Miu Miu", cidade: "Brasília", tipoBusca: "marca_ampla" });
-    expect(t5.result.reply).toMatch(/MU01/);
-    expect(t5.result.reply).toMatch(/MU05/);
+    // Modelos reais de Brasília, sem código "Ref." na mensagem: a ordem fica em lastShownProducts.
+    expect(t5.result.reply).not.toMatch(/Ref./);
+    expect(t5.result.catalogContext?.lastShownProducts?.map((item) => item.ref)).toEqual(["MU01", "MU05"]);
     expect(t5.result.reply).not.toMatch(/boa tarde/i);
     expect(t5.result.catalogContext).toMatchObject({ activeBrand: "Miu Miu", preferredCity: "Brasília" });
   });
@@ -241,5 +246,58 @@ describe("emoji único e sem clichê de fechamento", () => {
     const run = await simulateAgent(settings, [{ from: "customer", text: "boa tarde, tudo bem ?" }], "user-1", undefined, { contactName: "5562999998888" });
     expect(run.reply.match(/😊/g)).toHaveLength(1);
     expect(run.reply).not.toMatch(/ {2}/);
+  });
+});
+
+describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
+  const photoSettings = { ...settings, sendProductImage: true };
+
+  it("óculos de sol em Goiânia com fotos: no máximo 4 itens com imageUrl e legenda \"Nome — R$ Preço\" + lojas, sem Ref.", async () => {
+    photos.byCode = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`r${n}`, `https://img.test/r${n}.jpg`]));
+    model.script = async () => ({ reply: "Separei umas opções de sol pra você:", action: "reply" });
+    const run = await simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
+    expect(calls.stock[0]).toMatchObject({ marca: "Ray-Ban", cidade: "Goiânia", tipoBusca: "marca_ampla" });
+    const catalog = run.visualCatalog!;
+    expect(catalog.items).toHaveLength(4);
+    expect(catalog.items.map((item) => item.imageUrl)).toEqual(["https://img.test/r1.jpg", "https://img.test/r2.jpg", "https://img.test/r3.jpg", "https://img.test/r4.jpg"]);
+    for (const [position, item] of catalog.items.entries()) {
+      expect(item.caption.startsWith(`${position + 1}. `)).toBe(true);
+      expect(item.caption).toMatch(/^\d\. [^\n]+ — R\$ 999,00\nLoja em Goiânia: Setor Marista$/);
+      expect(item.caption).not.toMatch(/Ref\.|RB910/);
+    }
+    expect(catalog.opening).toMatch(/Separei 4 opções de óculos de sol em Goiânia 👇$/);
+    expect(catalog.closing).toMatch(/\?$/);
+    // O que o cliente recebe (e o /ia mostra): abertura, 1 legenda por foto, pergunta de escolha.
+    expect(run.messages).toEqual([catalog.opening, ...catalog.items.map((item) => item.caption), catalog.closing]);
+    expect(run.interactiveList).toBeUndefined();
+    expect(run.catalogContext?.lastShownProducts).toEqual(catalog.items.map((item) => ({ index: item.index, id: item.sku, ref: item.ref, name: item.name, price: 999, stores: ["Setor Marista"] })));
+
+    // "gostei da segunda": resolve o 2º item de lastShownProducts e abre a busca específica dele (com a ref interna).
+    const second = run.catalogContext!.lastShownProducts![1];
+    model.script = async () => ({ reply: "Ótima escolha!", action: "reply" });
+    await simulateAgent(photoSettings, [
+      { from: "customer", text: "quero óculos de sol ray-ban" },
+      ...run.messages.map((text, index): PlaygroundMessage => ({ from: "ai", text, ...(index === 0 ? { catalogContext: run.catalogContext } : {}) })),
+      { from: "customer", text: "gostei da segunda" },
+    ], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
+    expect(calls.stock.at(-1)).toMatchObject({ tipoBusca: "modelo_especifico" });
+    expect(String(calls.stock.at(-1)?.termoBusca)).toContain(second.ref ?? "");
+  });
+
+  it("\"gostei da segunda\" / \"2ª foto\" / \"esse primeiro\" resolvem o item indexado", () => {
+    const listed = [1, 2, 3].map((index) => ({ index, sku: `s${index}`, referencia: `RB910${index}`, nomeComercial: `Ray-Ban ${index}`, preco: 999 }));
+    expect(resolveListedChoice("gostei da segunda", listed)).toEqual({ type: "item", item: listed[1] });
+    expect(resolveListedChoice("gostei da 2ª foto", listed)).toEqual({ type: "item", item: listed[1] });
+    expect(resolveListedChoice("quero esse primeiro", listed)).toEqual({ type: "item", item: listed[0] });
+  });
+
+  it("sem nenhuma foto: vitrine em texto limpo, sem Ref., avisando que as fotos não estão disponíveis", async () => {
+    model.script = async () => ({ reply: "Separei umas opções de sol pra você:", action: "reply" });
+    const run = await simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
+    expect(run.visualCatalog).toBeUndefined();
+    const text = run.messages.join("\n");
+    expect(text).toMatch(/^1\. .*R\$ 999,00/m);
+    expect(text).not.toMatch(/Ref\.|RB910/);
+    expect(text).toContain("fotos desses modelos não estão disponíveis");
   });
 });

@@ -1,8 +1,27 @@
 import { explicitBrand, normalizeBrandQuery, normalizeTerm } from "@/lib/ai/catalog-search";
 
 /** activeBrand: marca pedida que vale nos turnos seguintes (estilo, cidade) até o cliente trocar; brand é o mesmo valor. */
-export type CatalogContext = { preferredCity: string; brand: string; activeBrand: string; category: string; lastCatalogFilterHash: string };
+/** Item do último catálogo com fotos, na ordem exibida ("gostei da 2ª foto" → index 2), sem expor a referência. */
+export type ShownProduct = { index: number; id: string; ref: string | null; name: string; price: number | null; stores: string[] };
+export type CatalogContext = { preferredCity: string; brand: string; activeBrand: string; category: string; lastCatalogFilterHash: string; lastShownProducts?: ShownProduct[] };
 export const EMPTY_CATALOG_CONTEXT: CatalogContext = { preferredCity: "", brand: "", activeBrand: "", category: "", lastCatalogFilterHash: "" };
+
+function sanitizeShown(value: unknown): ShownProduct[] {
+  if (!Array.isArray(value)) return [];
+  const text = (raw: unknown, max: number) => (typeof raw === "string" ? raw.replace(/[\r\n]+/g, " ").trim().slice(0, max) : "");
+  return value.slice(0, 8).flatMap((raw, position): ShownProduct[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const name = text(item.name, 100);
+    if (!name) return [];
+    return [{
+      index: typeof item.index === "number" && item.index >= 1 ? Math.floor(item.index) : position + 1,
+      id: text(item.id, 40), ref: text(item.ref, 40) || null, name,
+      price: typeof item.price === "number" && Number.isFinite(item.price) ? item.price : null,
+      stores: Array.isArray(item.stores) ? item.stores.map((store) => text(store, 60)).filter(Boolean).slice(0, 6) : [],
+    }];
+  });
+}
 
 const CITY_ALIASES: [string, string][] = [
   ["aparecida de goiania", "Aparecida de Goiânia"], ["caldas novas", "Caldas Novas"],
@@ -41,7 +60,8 @@ export function sanitizeCatalogContext(value: unknown): CatalogContext {
   const raw = value as Record<string, unknown>;
   const field = (key: string) => typeof raw[key] === "string" ? raw[key].slice(0, 100) : "";
   const brand = field("activeBrand") || field("brand");
-  return { preferredCity: field("preferredCity"), brand, activeBrand: brand, category: field("category"), lastCatalogFilterHash: field("lastCatalogFilterHash") };
+  const shown = sanitizeShown(raw.lastShownProducts);
+  return { preferredCity: field("preferredCity"), brand, activeBrand: brand, category: field("category"), lastCatalogFilterHash: field("lastCatalogFilterHash"), ...(shown.length ? { lastShownProducts: shown } : {}) };
 }
 
 export function isBroadBrandRequest(text: string, brand: string): boolean {

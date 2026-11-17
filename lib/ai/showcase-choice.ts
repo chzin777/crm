@@ -50,11 +50,11 @@ export function choicePosition(text: string, count: number): number | null {
   const value = norm(text).trim();
   const alone = value.match(/^(?:o|a)?\s*(\d{1,2})\s*[.!?]*$/);
   const numbered = value.match(/\b(?:o|a|n[º°o]?|numero|item|opcao|op)\s*\.?\s*(\d{1,2})(?!\s*(?:reais|,|\.\d|\d))\b/);
-  const ordinal = value.match(/\b(?:o|a|esse|essa|este|esta|do|da|no|na|pelo|pela|ver)\s+(?:ai\s+)?(primeir|segund|terceir|quart|quint|sext|setim|oitav)[oa]\b|\b(\d)\s*[º°]/);
+  const ordinal = value.match(/\b(?:o|a|esse|essa|este|esta|do|da|no|na|pelo|pela|ver)\s+(?:ai\s+)?(primeir|segund|terceir|quart|quint|sext|setim|oitav)[oa]\b|\b(\d)\s*[º°ª]|\b(?:a|da|na)\s+(\d)\s*(?:a\s+)?foto\b/);
   const last = /\b(?:o|a|esse|essa|do|da)\s+ultim[oa]\b/.test(value);
   let position: number | null = null;
   if (alone) position = Number(alone[1]);
-  else if (ordinal) position = ordinal[1] ? ORDINALS[ordinal[1]] : Number(ordinal[2]);
+  else if (ordinal) position = ordinal[1] ? ORDINALS[ordinal[1]] : Number(ordinal[2] ?? ordinal[3]);
   else if (last) position = count;
   else if (numbered) position = Number(numbered[1]);
   return position && position >= 1 && position <= count ? position : null;
@@ -101,14 +101,15 @@ function brandOf(items: ListedProduct[]) {
 /** Pergunta natural quando o preço serve para vários itens: número ou referência, sem repetir a vitrine. */
 export function ambiguousChoiceQuestion(items: ListedProduct[], price: number) {
   const brand = brandOf(items);
-  const examples = items.slice(0, 2).map((item) => `o ${item.index}${item.referencia ? ` - Ref. ${item.referencia}` : ""}`).join(", ou ");
-  return `Vários desses modelos${brand ? ` ${brand}` : ""} estão por ${brl(price)}! Qual número ou referência você quer ver primeiro? (ex.: ${examples})`;
+  // Só o número da opção/foto: o cliente nunca viu códigos internos de referência.
+  const examples = items.slice(0, 2).map((item) => `o ${item.index}`).join(" ou ");
+  return `Vários desses modelos${brand ? ` ${brand}` : ""} estão por ${brl(price)}! Qual número você quer ver primeiro? (ex.: ${examples})`;
 }
 
 /** Pergunta da trava anti-loop: a vitrine já foi enviada; escolher pelo número ou referência. */
 export function pickFromListQuestion(listed: ListedProduct[]) {
-  const examples = listed.slice(0, 2).map((item) => `o ${item.index}${item.referencia ? ` - Ref. ${item.referencia}` : ""}`).join(", ou ");
-  return `É só me dizer o número ou a referência do modelo da lista que você quer ver (ex.: ${examples}) que eu te mando a foto e os detalhes! 😊`;
+  const examples = listed.slice(0, 2).map((item) => `o ${item.index}`).join(" ou ");
+  return `É só me dizer o número do modelo que você quer ver (ex.: ${examples}) que eu te mando a foto e os detalhes! 😊`;
 }
 
 /** Termo da busca específica do item escolhido: nome comercial + referência exata da vitrine. */

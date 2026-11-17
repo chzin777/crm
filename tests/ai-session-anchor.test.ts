@@ -45,6 +45,7 @@ vi.mock("@/lib/store-pin", () => ({ ensureStorePin: vi.fn(async () => null) }));
 vi.mock("@/lib/ai/staff-db", () => ({ activeStaff: vi.fn(async () => [{ id: "u-leandro", name: "Leandro Martins", queueId: "q-vendas", queueName: "Vendas" }]) }));
 vi.mock("@/lib/ai/catalog-db",() => ({ catalogProducts: vi.fn(async () => []), searchErpCatalog: vi.fn() }));
 vi.mock("@/lib/ai/product-image-db", () => ({
+  catalogImages: vi.fn(async () => ({})),
   imageSearchStatus: () => true,
   invalidateProductImage: vi.fn(),
   searchAndCacheProductImage: vi.fn(async (product: { codigo: string }) => {
@@ -605,10 +606,13 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     };
     const history: PlaygroundMessage[] = [{ from: "customer", text: "ta, tem radda?" }];
     const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
-    expect(turn1.messages[0]).toContain("1. 👓 *Radda (Ref. JC60020)* — R$ 120,00");
-    expect(turn1.messages[0]).toContain("4. 👓 *Radda (Ref. OPBR 455)* — R$ 120,00");
-    expect(turn1.messages[0]).not.toMatch(/\*Radda\* —/);
-    history.push(...turn1.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
+    // Sem foto cadastrada: vitrine em texto limpo, sem código "Ref."; a ordem fica em lastShownProducts.
+    expect(turn1.messages[0]).toContain("1. 👓 *Radda* — R$ 120,00");
+    expect(turn1.messages[0]).toContain("4. 👓 *Radda* — R$ 120,00");
+    expect(turn1.messages[0]).not.toMatch(/Ref\./);
+    expect(turn1.messages[0]).toContain("fotos desses modelos não estão disponíveis");
+    expect(turn1.catalogContext?.lastShownProducts?.map((item) => item.ref)).toEqual(["JC60020", "JC2501", "JC60016", "OPBR 455"]);
+    history.push(...turn1.messages.map((text, index): PlaygroundMessage => ({ from: "ai", text, ...(index === 0 ? { catalogContext: turn1.catalogContext } : {}) })));
 
     // Turno 2: "esse de 120" com 4 itens a R$ 120 → o modelo tenta a busca ampla de novo; nada de vitrine repetida.
     const searchesBefore = calls.stock.length;
@@ -619,7 +623,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     history.push({ from: "customer", text: "deixa eu ver esse de 120 ai" });
     const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(calls.stock.length).toBe(searchesBefore);
-    expect(turn2.messages.join("\n")).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número ou referência você quer ver primeiro? (ex.: o 1 - Ref. JC60020, ou o 2 - Ref. JC2501)");
+    expect(turn2.messages.join("\n")).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número você quer ver primeiro? (ex.: o 1 ou o 2)");
     expect(turn2.image).toBeUndefined();
     history.push(...turn2.messages.map((text): PlaygroundMessage => ({ from: "ai", text })));
 

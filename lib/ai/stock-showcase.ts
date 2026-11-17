@@ -70,7 +70,7 @@ export function classifySearch(term: string, aiKind?: unknown, catalogBrands: It
 }
 
 export type ShowcaseCandidate = { code: string; description: string; brand: string | null };
-export type ShowcaseModel = { nomeComercial: string; referencia: string | null; categoriaModelo: string | null; precoVenda: string | null; /** Cores/lentes com preços diferentes: a vitrine mostra "a partir de" o menor. */ precoVaria?: boolean; totalDisponivelRede: number; codigos: string[] };
+export type ShowcaseModel = { nomeComercial: string; referencia: string | null; categoriaModelo: string | null; precoVenda: string | null; /** Cores/lentes com preços diferentes: a vitrine mostra "a partir de" o menor. */ precoVaria?: boolean; totalDisponivelRede: number; codigos: string[]; /** Lojas com saldo (nome curto, na cidade pedida) para a legenda do catálogo com foto. */ lojas?: string[] };
 export type ShowcaseResult = {
   tipoBusca: "marca_ampla";
   cenario: "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
@@ -259,6 +259,7 @@ export function buildShowcaseResult(input: {
       precoVaria: distinct.length > 1,
       totalDisponivelRede: Math.round(total * 100) / 100,
       codigos: withStock.map((product) => product.code),
+      lojas: [...new Set(stores.map((store) => store.loja.split(" — ")[0].replace(/^Loja\s+/i, "").replace(/\s*\([^)]*\)\s*$/, "").trim()).filter(Boolean))],
     });
     if (!naming.referencia) fallbackOnly.add(models[models.length - 1]);
   }

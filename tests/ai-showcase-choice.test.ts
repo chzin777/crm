@@ -59,12 +59,12 @@ describe("escolha na vitrine sem refazer a busca ampla", () => {
     expect(resolveListedChoice("me mostra o jc2501", listed)).toMatchObject({ type: "item", item: { index: 2 } });
   });
 
-  it("preço repetido em vários itens é ambíguo: pergunta número ou referência, sem repetir a lista", () => {
+  it("preço repetido em vários itens é ambíguo: pergunta o número (sem código de referência), sem repetir a lista", () => {
     expect(choicePrice("deixa eu ver esse de 120 ai")).toBe(120);
     const choice = resolveListedChoice("deixa eu ver esse de 120 ai", listed);
     expect(choice).toMatchObject({ type: "ambiguous", price: 120 });
     const question = choice?.type === "ambiguous" ? ambiguousChoiceQuestion(choice.items, choice.price) : "";
-    expect(question).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número ou referência você quer ver primeiro? (ex.: o 1 - Ref. JC60020, ou o 2 - Ref. JC2501)");
+    expect(question).toBe("Vários desses modelos Radda estão por R$ 120,00! Qual número você quer ver primeiro? (ex.: o 1 ou o 2)");
     expect(parseShowcase(question)).toEqual([]);
   });
 

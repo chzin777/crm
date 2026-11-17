@@ -25,16 +25,16 @@ import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, ba
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
-import { analysisName, analysisPromptBlock, asksProductInfo, brandFallbackReply, brandSearchArgs, brandStockFallback, CATALOG_FOUND_RULE, explicitBrand, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { analysisName, analysisPromptBlock, asksProductInfo, brandFallbackReply, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_CLOSINGS, CATALOG_FOUND_RULE, catalogOpening, explicitBrand, NO_PHOTOS_NOTE, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { asksCustomerCity, canonicalCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, oneQualifyingQuestion, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, FRAME_PRICE_NOTE, SUN_PRICE_NOTE, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, oneQualifyingQuestion, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-opening";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
-import { STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
-import { allowsProductPhoto, fallbackReference, showcaseReference } from "@/lib/ai/stock-showcase";
+import { formatBrl, STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
+import { allowsProductPhoto, fallbackReference, showcaseReference, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 import { ambiguousChoiceQuestion, asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, pickFromListQuestion, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
 import { buildProductCard, CARD_QUESTION, cardOpening, cardStore, cleanReference, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
@@ -49,7 +49,7 @@ import { sendSatisfactionSurvey } from "@/lib/chat/nps";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
-import { imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
+import { catalogImages, imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
 import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
 import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
@@ -413,7 +413,7 @@ export type AgentRunInput = {
   /** Consulta de parcelas no VMSet (testes injetam a sua). */
   lookupInstallments?: (cpf: string) => Promise<InstallmentLookup>;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; catalogContext?: CatalogContext; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog };
+export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; catalogContext?: CatalogContext; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog; /** Vitrine como catálogo visual: abertura → 1 foto com legenda curta por modelo → pergunta de escolha. */ visualCatalog?: VisualCatalog | null };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -594,7 +594,13 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   const anchorNumbers = anchoredProduct ? modelNumbers(`${anchoredProduct.referencia ?? ""} ${anchoredProduct.nomeComercial}`) : [];
   const sameModel = (description: string) => modelNumbers(description).some((number) => anchorNumbers.includes(number));
   // Vitrine desta sessão: "o 1", "esse primeiro", "o de 120" escolhem um item (pedido de localização não é escolha).
-  const listed = input.listedProducts ?? [];
+  // Último catálogo exibido (aiContext.lastShownProducts) vale primeiro: as legendas das fotos não levam "Ref.".
+  const shown = catalogState.lastShownProducts ?? [];
+  const listed: ListedProduct[] = shown.length
+    ? shown.map((item) => ({ index: item.index, sku: item.id || null, referencia: item.ref, nomeComercial: item.name, preco: item.price }))
+    : input.listedProducts ?? [];
+  // Modelos das vitrines desta resposta (estoque, lojas e códigos): base do catálogo com fotos.
+  const shownModels: ShowcaseModel[] = [];
   // Toque na lista interativa: escolha determinística (busca específica com foto + ficha + lojas).
   const choice: ListedChoice = photoQuery || forceCatalog ? null : input.selectedProductRef
     ? { type: "item", item: selectedListedItem(input.selectedProductRef, listed) }
@@ -706,6 +712,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       // 2+ modelos também viram Lista Interativa nativa (o texto numerado fica como fallback e histórico).
       if (result.tipoBusca === "marca_ampla") {
         const models = "modelos" in result ? result.modelos : [];
+        shownModels.push(...models);
         interactiveList = buildShowcaseList(models, result.vitrineFormatada?.split("\n")[0].match(/\*([^*]+)\*/)?.[1] ?? null);
         return result;
       }
@@ -803,6 +810,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
       if (fallback.unavailable) proactiveReply = "Não consegui consultar o estoque agora. Um atendente pode confirmar a disponibilidade.";
       else {
         proactiveReply = brandFallbackReply(fallback, input.aiReplies);
+        shownModels.push(...fallback.alternatives);
         if (fallback.alternatives.length >= 2) interactiveList = buildShowcaseList(fallback.alternatives, null);
       }
     } else {
@@ -1019,6 +1027,41 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   }
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
+  // Vitrine de opções vira catálogo visual: abertura curta → 1 foto por modelo (até 4) com legenda limpa (nome,
+  // preço, lojas da cidade, sem "Ref.") → pergunta de escolha. Sem nenhuma foto, a vitrine segue em texto limpo.
+  let visualCatalog: VisualCatalog | null = null;
+  const bubbles = outcome.action === "reply" && !close.close ? splitBubbles(outcome.reply) : [];
+  const showcaseAt = bubbles.findIndex((part) => parseShowcase(part).length >= 2);
+  if (showcaseAt >= 0) {
+    const items = parseShowcase(bubbles[showcaseAt]);
+    const key = (value: string | null | undefined) => normalizeTerm(cleanReference(value ?? "") ?? "");
+    const ordered: ShowcaseModel[] = items.map((item) => shownModels.find((model) => !!item.referencia && key(model.referencia) === key(item.referencia))
+      ?? shownModels.find((model) => normalizeTerm(model.nomeComercial) === normalizeTerm(item.nomeComercial) && (item.preco === null || parseBrl(model.precoVenda ?? "") === item.preco))
+      ?? { nomeComercial: item.nomeComercial, referencia: item.referencia, categoriaModelo: null, precoVenda: item.preco ? formatBrl(item.preco) : null, totalDisponivelRede: 0, codigos: item.sku ? [item.sku] : [] });
+    let images: Record<string, string> = {};
+    try {
+      if (settings.sendProductImage) images = await catalogImages(ordered, { want: VISUAL_CATALOG_MAX, web: !!imageSearchStatus() });
+    } catch (error) {
+      console.warn(`[ai][catalogo] fotos indisponíveis (${error instanceof Error ? error.message : error})`);
+    }
+    const priceNote = [FRAME_PRICE_NOTE, SUN_PRICE_NOTE].filter((note) => outcome.reply.includes(note)).join(" ");
+    const closing = [priceNote, CATALOG_CLOSINGS[Math.abs(input.aiReplies) % CATALOG_CLOSINGS.length]].filter(Boolean).join("\n\n");
+    visualCatalog = buildVisualCatalog({ models: ordered, images, city: catalogState.preferredCity, opening: "", closing });
+    if (visualCatalog) {
+      const opening = catalogOpening({ count: visualCatalog.items.length, category: catalogState.category, city: catalogState.preferredCity, budget: !!(budget.maxPrice || budget.minPrice) });
+      // Bolhas antes da vitrine (ex.: aviso de transferência da marca) continuam antes da abertura.
+      visualCatalog.opening = [...bubbles.slice(0, showcaseAt), opening].join("\n\n");
+      outcome = { ...outcome, reply: [visualCatalog.opening, ...visualCatalog.items.map((item) => item.caption), visualCatalog.closing].join("\n---SPLIT---\n") };
+      catalogState.lastShownProducts = shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })));
+      interactiveList = null;
+    } else {
+      // Sem foto cadastrada: texto limpo (sem código interno), avisando que as fotos não estão disponíveis.
+      const clean = withoutShowcaseRefs(bubbles[showcaseAt]);
+      bubbles[showcaseAt] = settings.sendProductImage ? `${clean}\n\n${NO_PHOTOS_NOTE}` : clean;
+      outcome = { ...outcome, reply: bubbles.join("\n---SPLIT---\n") };
+      catalogState.lastShownProducts = shownProductsOf(items.map((item, position) => ({ index: item.index, sku: item.sku ?? ordered[position].codigos[0] ?? null, ref: item.referencia, name: item.nomeComercial, priceValue: item.preco, stores: ordered[position].lojas ?? [] })));
+    }
+  }
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
   const photo = image as ProductImage | null;
   const pin = location as StoreLocation | null;
@@ -1028,7 +1071,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
   if (outcome.action === "reply" && currentCatalogFilterHash && parseShowcase(outcome.reply).length) catalogState.lastCatalogFilterHash = currentCatalogFilterHash;
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList ? list : null, imageAnalysis, singleReply: (!!photoQuery || !!proactiveReply) && outcome.action === "reply", documents, productInterest: productInterest as { name: string; price: number | null } | null };
+  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList && !visualCatalog ? list : null, imageAnalysis, singleReply: !visualCatalog && (!!photoQuery || !!proactiveReply) && outcome.action === "reply", documents, productInterest: productInterest as { name: string; price: number | null } | null, visualCatalog: visualCatalog && outcome.action === "reply" ? visualCatalog : null };
 }
 
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
@@ -1041,10 +1084,16 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
     customer: input.contactName,
     pendingText: input.pendingText,
   }));
+  // Catálogo visual: a abertura (com a saudação, se houver) e o fechamento seguem o texto final.
+  const parts = reply.split(/\s*---SPLIT---\s*/);
+  const visualCatalog = run.visualCatalog && parts.length === run.visualCatalog.items.length + 2
+    ? { ...run.visualCatalog, opening: parts[0], closing: parts[parts.length - 1] }
+    : run.visualCatalog;
   return {
     ...run,
     outcome: { ...run.outcome, reply },
     interactiveList: run.interactiveList ? listWithOpening(run.interactiveList, reply) : run.interactiveList,
+    visualCatalog,
   };
 }
 
@@ -1176,7 +1225,7 @@ async function respond(conversationId: string, messageId: string) {
   await recordSalesEvents({ contactId: conversation.contactId, conversationId, events: turnSalesEvents(run, pending.map((item) => item.text ?? "").join("\n")) });
   // Encerramento silencioso: nada é enviado e a conversa não é transferida.
   if (outcome.action === "no_reply") { console.log(`[ai] ${conversationId}: sem resposta (${outcome.reason})`); return; }
-  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply);
+  if (queued) return replyWhileQueued(conversationId, outcome, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply, run.visualCatalog);
   if (outcome.trigger === "catalog_miss" || outcome.trigger === "prescription") {
     // A própria resposta já avisa que vai encaminhar: sem a mensagem de transferência repetida.
     if (isWindowOpen(conversation.lastInboundAt)) await sendAiReply(conversation, outcome.reply, null, latest.externalId);
@@ -1216,7 +1265,7 @@ async function respond(conversationId: string, messageId: string) {
     console.log(`[ai] ${conversationId}: encerramento pela IA (${steps.join(" → ")})`);
     return;
   }
-  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply);
+  await sendAiReply(fresh, outcome.reply, run.image, latest.externalId, run.location, run.interactiveList, run.singleReply, run.visualCatalog);
 }
 
 /**
@@ -1225,7 +1274,12 @@ async function respond(conversationId: string, messageId: string) {
  * Confere de novo antes de enviar: se um atendente assumiu ou escreveu enquanto a IA pensava, não responde.
  */
 /** Resposta da IA ao cliente: com foto do produto (legenda) quando houver; se a foto falhar, segue em texto. */
-async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean) {
+async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean, catalog?: VisualCatalog | null) {
+  if (catalog?.items.length) {
+    const sent = await sendVisualCatalog(conversation, catalog, typingMessageId);
+    if (location) await sendStoreLocation(conversation, location);
+    return sent;
+  }
   if (list) {
     const sent = await sendAutomaticMessage(conversation, text, () => sendWhatsAppInteractiveList(conversation.phone, list).catch((error) => {
       console.warn(`[ai] ${conversation.id}: lista interativa recusada, enviando em texto (${error instanceof Error ? error.message : error})`);
@@ -1270,11 +1324,29 @@ async function sendStoreLocation(conversation: ChatConversation, location: Store
   }).catch((error) => console.warn(`[ai] ${conversation.id}: localização não enviada (${error instanceof Error ? error.message : error})`));
 }
 
-async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean) {
+async function replyWhileQueued(conversationId: string, outcome: AgentOutcome, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean, catalog?: VisualCatalog | null) {
   const fresh = await prisma.chatConversation.findUnique({ where: { id: conversationId } });
   if (!fresh || (await conversationMode(fresh)).mode !== "queued") return;
   if (!outcome.reply || !isWindowOpen(fresh.lastInboundAt)) return;
-  await sendAiReply(fresh, outcome.reply, image, typingMessageId, location, list, singleReply);
+  await sendAiReply(fresh, outcome.reply, image, typingMessageId, location, list, singleReply, catalog);
+}
+
+/** Espaço entre as fotos do catálogo: preserva a ordem exata no WhatsApp do cliente. */
+const CATALOG_PHOTO_GAP_MS = 500;
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Catálogo visual: abertura curta → 1 foto por modelo com legenda limpa (em ordem) → pergunta de escolha. */
+async function sendVisualCatalog(conversation: ChatConversation, catalog: VisualCatalog, typingMessageId?: string | null) {
+  let sent = await sendAutomaticMessage(conversation, catalog.opening, undefined, undefined, AI_AUTHOR);
+  for (const item of catalog.items) {
+    await wait(CATALOG_PHOTO_GAP_MS);
+    // Foto recusada (URL quebrada/Meta): a legenda sai em texto e a foto é marcada inválida no cache.
+    sent = (await sendAutomaticImage(conversation, item.imageUrl, item.caption, AI_AUTHOR, () => invalidateProductImage(item.sku), item.sku)) ?? sent;
+  }
+  await sendTypingIndicator(typingMessageId).catch(() => undefined);
+  await wait(CATALOG_PHOTO_GAP_MS);
+  if (catalog.closing.trim()) sent = await sendAutomaticMessage(conversation, catalog.closing, undefined, undefined, AI_AUTHOR);
+  return sent;
 }
 
 /** imageSku: foto de produto que acompanhou esta resposta (o teste não reenvia a mesma foto). */
@@ -1327,6 +1399,8 @@ export type PlaygroundResult = AgentOutcome & {
   /** Análise da foto enviada nesta mensagem (a tela guarda na mensagem do cliente e reenvia, como no WhatsApp). */
   imageAnalysis?: ImageAnalysis;
   catalogContext?: CatalogContext;
+  /** Catálogo com fotos como chega no WhatsApp: messages = abertura, 1 legenda por foto (na ordem) e a pergunta. */
+  visualCatalog?: VisualCatalog;
 };
 
 /**
@@ -1380,7 +1454,9 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
   const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue, outcome.staffQueueId) : null;
   return {
     ...outcome,
-    messages: run.interactiveList || run.singleReply ? [withoutSplitMarkers(outcome.reply)] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
+    messages: run.visualCatalog ? [run.visualCatalog.opening, ...run.visualCatalog.items.map((item) => item.caption), run.visualCatalog.closing].filter(Boolean)
+      : run.interactiveList || run.singleReply ? [withoutSplitMarkers(outcome.reply)] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
+    visualCatalog: run.visualCatalog ?? undefined,
     assignee: outcome.assigneeName,
     handoffQueue: target?.name ?? "",
     handoffQueueSource: target?.source,

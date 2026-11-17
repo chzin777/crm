@@ -70,6 +70,8 @@ type PlaygroundResult = AgentOutcome & {
   catalogContext?: CatalogContext;
   salesEvents?: SalesEvent[];
   financial?: PlaygroundFinancial;
+  /** Catálogo com fotos: messages[1..n] são as legendas, na ordem das fotos. */
+  visualCatalog?: { items: { sku: string; name: string; imageUrl: string; caption: string }[] };
 };
 const FINANCIAL_STEP_LABELS: Record<PlaygroundFinancial["step"], string> = {
   ask_identity: "faltou nome completo e/ou CPF, a IA pediu antes de consultar",
@@ -357,6 +359,8 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         text: part || "(nenhuma mensagem ao cliente)",
         historyText: part,
         ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image, details: data.details } : {}),
+        // Catálogo visual: cada legenda é uma foto própria, na mesma ordem do WhatsApp.
+        ...(data.visualCatalog && position >= 1 && data.visualCatalog.items[position - 1] ? { image: { url: data.visualCatalog.items[position - 1].imageUrl, source: "cache" as const, query: data.visualCatalog.items[position - 1].name, sku: data.visualCatalog.items[position - 1].sku } } : {}),
         ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff", ...(data.financial ? { financial: data.financial } : {}) } : {}),
         // A bolha da vitrine numerada é a que vira lista interativa no WhatsApp.
         ...(data.interactiveList && (part.match(/^\s*\d+\.\s/gm) ?? []).length >= 2 ? { list: data.interactiveList } : {}),
