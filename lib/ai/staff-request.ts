@@ -4,6 +4,8 @@
  * próprio cliente, a menos que ele diga "meu nome é..." / "aqui é o...".
  */
 
+import { isPureGreeting } from "@/lib/ai/greeting";
+
 /** Colaborador ativo do CRM e a fila principal dele (a primeira, na ordem das filas). */
 export type StaffMember = { id: string; name: string; queueId: string | null; queueName: string | null };
 export type StaffRequest = { name: string; staff: StaffMember | null };
@@ -54,7 +56,7 @@ function displayName(original: string, word: string) {
  */
 export function detectStaffRequest(text: string, staff: StaffMember[], contactName?: string | null): StaffRequest | null {
   const clean = plain(text);
-  if (!clean || SELF_INTRO.test(clean)) return null;
+  if (!clean || SELF_INTRO.test(clean) || isPureGreeting(text)) return null;
   const words = clean.split(" ");
   if (words.length > 10) return null;
   const asks = ASKS.test(clean);
@@ -120,6 +122,8 @@ export const STAFF_NAME_RULES = [
 /** Dica do turno: a mensagem é só um nome que não é o do cliente (vendedor de loja fora do cadastro). */
 export function bareNameHint(text: string, contactName?: string | null) {
   const clean = plain(text);
+  // "opaa", "salve", "eaí": saudação, não nome de vendedor.
+  if (isPureGreeting(text)) return "";
   const words = clean.split(" ").filter((word) => word && !FILLERS.has(word));
   if (words.length !== 1 || words[0].length < 3 || NOT_NAMES.has(words[0]) || ASKS.test(words[0]) || SELF_INTRO.test(clean)) return "";
   const contact = contactFirstName(contactName);

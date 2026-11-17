@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
 import { assertCanReceive, closeConversation } from "@/lib/chat/actions";
 import { bareNameHint, detectStaffRequest, defaultHandoffNotice, staffConfirmation } from "@/lib/ai/staff-request";
+import { isPureGreeting, PURE_GREETING_HINT } from "@/lib/ai/greeting";
 import { activeStaff } from "@/lib/ai/staff-db";
 import { savePrescriptionFromAi } from "@/lib/prescriptions-db";
 import { detectSalesEvents, isSalesQueue, parseBrl, type SalesEvent } from "@/lib/sales-pipeline";
@@ -606,7 +607,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    extra: [SALES_CONSULTANT_RULES, cityFirst ? cityFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
+    extra: [SALES_CONSULTANT_RULES, cityFirst ? cityFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];

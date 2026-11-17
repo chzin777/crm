@@ -161,6 +161,20 @@ beforeEach(() => {
   model.vision = null;
 });
 
+describe("saudação informal pura no agente", () => {
+  it.each(["opaa", "oiii", "bom diaaa", "eai"])("%j → abertura acolhedora, sem tratar como nome/loja/setor", async (text) => {
+    model.script = async () => ({ reply: "Em que posso te ajudar?", action: "reply" });
+    const run = await simulateAgent(settings, [{ from: "customer", text }], "user-1", undefined, { contactName: "Michel" });
+    expect(run.action).toBe("reply");
+    expect(run.handoffQueue).toBe("");
+    expect(run.reply).toMatch(/^(Bom dia|Boa tarde|Boa noite), Michel! 😊 Em que posso te ajudar\?$/);
+    expect(run.reply).not.toMatch(/falar com/i);
+    expect(calls.prompts.at(-1)).toContain("SAUDAÇÃO PURA NESTE TURNO");
+    expect(calls.prompts.at(-1)).not.toContain("ATENÇÃO NESTE TURNO");
+    expect(calls.stock).toHaveLength(0);
+  });
+});
+
 describe("isolamento de sessão", () => {
   it("sem cidade pergunta antes de listar; com a cidade lista só lá; a correção abre com as palavras da IA", async () => {
     // Turno 1: marca pedida, cidade desconhecida → nenhuma consulta de estoque, pergunta a cidade.
