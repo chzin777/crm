@@ -56,8 +56,9 @@ describe("saudação natural no prompt", () => {
     expect(prompt).toContain('"tudo bem?", "tudo bom?", "como vai?"');
     expect(prompt).toContain('"blz?"');
     expect(prompt).toContain('responda primeiro à gentileza de forma natural e leve (ex.: "Tudo ótimo por aqui, e com você?"');
-    expect(prompt).toContain('"Boa tarde! Tudo ótimo por aqui, e com você? Como posso te ajudar?"');
-    expect(prompt).toContain('Nunca ignore o "tudo bem?" pulando direto para "Como posso ajudar?"');
+    expect(prompt).toContain('"Boa tarde! Tudo ótimo por aqui, e com você? 😊 Me conta o que você está procurando hoje!"');
+    expect(prompt).toContain('Nunca ignore o "tudo bem?" pulando direto para a pergunta');
+    expect(prompt).toContain("no máximo 1 emoji por mensagem inteira");
     expect(prompt).toContain('(período: tarde -> use "Boa tarde")');
   });
 });

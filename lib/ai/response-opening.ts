@@ -17,6 +17,28 @@ export function welcomeReply(text: string, input: { first: boolean; returning?: 
   return `${greeting} ${welcome}${body ? ` ${body}` : ""}`;
 }
 
+/**
+ * Emojis de expressão (rostos, corações, mãos, brilhos): no máximo 1 por resposta inteira, mantendo o primeiro.
+ * Ícones da vitrine/ficha (👓 🕶️ 📍) não contam e ficam intactos.
+ */
+const EXPRESSIVE_EMOJI = /(?:[\u{1F600}-\u{1F64F}\u{1F910}-\u{1F92F}\u{1F970}-\u{1F97A}\u{1F44B}-\u{1F450}\u{1F64C}\u{1F64F}\u{1F48B}-\u{1F49F}\u{2728}\u{2764}\u{263A}\u{1F917}\u{1F929}](?:\u{FE0F}|[\u{1F3FB}-\u{1F3FF}])*)/gu;
+export function singleEmoji(text: string) {
+  if ((text.match(EXPRESSIVE_EMOJI) ?? []).length <= 1) return text;
+  let first = true;
+  return text
+    .replace(EXPRESSIVE_EMOJI, (emoji) => {
+      if (!first) return "\u0000";
+      first = false;
+      return emoji;
+    })
+    .replace(/[ \t]*\u0000[ \t]*/g, " ")
+    .replace(/ +([!?.,;:])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/^[ \t]+/gm, "")
+    .trim();
+}
+
 /** Tira a saudação de abertura ("Boa tarde, <nome>! 😊", "Oi!") de uma resposta de turno já saudado. */
 export function withoutRepeatedGreeting(text: string) {
   const body = text.replace(REPEATED_OPENING, "");

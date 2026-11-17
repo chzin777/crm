@@ -74,6 +74,7 @@ import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { brandFallbackReply, brandSearchArgs, equivalentBrands } from "@/lib/ai/catalog-search";
 import { updateCatalogContext, EMPTY_CATALOG_CONTEXT } from "@/lib/ai/catalog-context";
+import { singleEmoji } from "@/lib/ai/response-opening";
 
 const settings = { ...DEFAULT_AI_SETTINGS, sendProductImage: false, canQuotePrices: true, useStores: false, useOperatingHours: false, topics: [], aiChoosesQueue: false, maxAiReplies: 20, closeWhenResolved: false };
 const GREETING_START = /^\s*(bom dia|boa tarde|boa noite|oi|olá)\b/i;
@@ -220,5 +221,25 @@ describe("fluxo multi-turno: saudação única, marca ativa e cidade", () => {
     expect(t5.result.reply).toMatch(/MU05/);
     expect(t5.result.reply).not.toMatch(/boa tarde/i);
     expect(t5.result.catalogContext).toMatchObject({ activeBrand: "Miu Miu", preferredCity: "Brasília" });
+  });
+});
+
+describe("emoji único e sem clichê de fechamento", () => {
+  it("mantém só o primeiro emoji de expressão da resposta", () => {
+    expect(singleEmoji("Boa tarde! 😊 Tudo ótimo por aqui, e com você? 😊")).toBe("Boa tarde! 😊 Tudo ótimo por aqui, e com você?");
+    expect(singleEmoji("Boa tarde! 😊 Tudo certo, e com você? 😉 Me conta o que procura!")).toBe("Boa tarde! 😊 Tudo certo, e com você? Me conta o que procura!");
+    expect(singleEmoji("Separei estas 😍\n1. 👓 *Prada (Ref. PR12)*\n2. 👓 *Vogue (Ref. VO5300)*\n---SPLIT---\nQual curtiu mais? 😊")).toBe("Separei estas 😍\n1. 👓 *Prada (Ref. PR12)*\n2. 👓 *Vogue (Ref. VO5300)*\n---SPLIT---\nQual curtiu mais?");
+    expect(singleEmoji("Tudo certo! 😊")).toBe("Tudo certo! 😊");
+  });
+
+  it("saudacao.md e core.md não trazem o clichê \"Como posso te ajudar?\"", () => {
+    for (const name of ["saudacao", "core"] as const) expect(loadPromptModule(name)).not.toContain("Como posso te ajudar?");
+  });
+
+  it("o agente entrega a saudação com 1 emoji só, mesmo se o modelo repetir", async () => {
+    model.script = async () => ({ reply: "Boa tarde! 😊 Tudo ótimo por aqui, e com você? 😊 Me conta o que você está procurando hoje!", action: "reply" });
+    const run = await simulateAgent(settings, [{ from: "customer", text: "boa tarde, tudo bem ?" }], "user-1", undefined, { contactName: "5562999998888" });
+    expect(run.reply.match(/😊/g)).toHaveLength(1);
+    expect(run.reply).not.toMatch(/ {2}/);
   });
 });

@@ -31,7 +31,7 @@ import { asksCustomerCity, canonicalCity, cityQuestion, EMPTY_CATALOG_CONTEXT, e
 import { activeClosing, withoutRedundantStoreQuestion, asksGlassesType, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, priceTransparency, qualifyQuestion, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
-import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
+import { listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-opening";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, showcaseReference } from "@/lib/ai/stock-showcase";
@@ -1032,12 +1032,13 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   const run = await runAiAgentInternal(input);
   if (!run.outcome.reply || run.outcome.action === "no_reply") return run;
-  const reply = welcomeReply(run.outcome.reply, {
+  // Saudação do horário + no máximo 1 emoji de expressão na resposta inteira (os repetidos saem, só o 1º fica).
+  const reply = singleEmoji(welcomeReply(run.outcome.reply, {
     first: input.aiReplies === 0,
     returning: input.isReturningContact,
     customer: input.contactName,
     pendingText: input.pendingText,
-  });
+  }));
   return {
     ...run,
     outcome: { ...run.outcome, reply },
