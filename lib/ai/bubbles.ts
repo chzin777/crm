@@ -76,8 +76,13 @@ function cleanParts(text: string) {
  * separa a pergunta final (último parágrafo/linha terminando em "?") ou, se a IA não fez pergunta, acrescenta a
  * pergunta de condução padrão como segunda mensagem. Nunca deixa o separador vazar.
  */
+/** Rede de segurança: o marcador de nome dos exemplos do prompt nunca chega ao cliente ("Boa tarde, <PRIMEIRO_NOME>!" → "Boa tarde!"). */
+export function stripNamePlaceholder(text: string) {
+  return text.replace(/,?\s*<\s*PRIMEIRO_NOME\s*>/gi, "");
+}
+
 export function splitAiResponseMessages(text: string | null | undefined, max = MAX_BUBBLES): string[] {
-  const parts = splitParts(fixDoubleGreeting(text ?? ""), max).map(tidyBubble).filter(Boolean);
+  const parts = splitParts(fixDoubleGreeting(stripNamePlaceholder(text ?? "")), max).map(tidyBubble).filter(Boolean);
   // Pergunta das bolhas seguintes concorda com a quantidade de lojas listadas na 1ª (1 loja → singular).
   const stores = parts.length > 1 ? countStores(parts[0]) : 0;
   return stores === 1 ? [parts[0], ...parts.slice(1).map((part) => agreeStoreCount(part, 1))] : parts;
@@ -97,8 +102,8 @@ const PERIOD_GREETING = "(bom dia|boa tarde|boa noite)";
 const INTERJECTION = "(oi+|ol[áa]|e a[íi])";
 
 /**
- * Abertura única: corrige saudação dupla no início da resposta ("Boa tarde! Oi, Christofer 😊" → "Boa tarde,
- * Christofer 😊"; "Boa tarde! Oi! Tudo bem?" → "Boa tarde! Tudo bem?"; "Olá! Bom dia, Maria!" → "Bom dia, Maria!").
+ * Abertura única: corrige saudação dupla no início da resposta ("Boa tarde! Oi, Maria 😊" → "Boa tarde,
+ * Maria 😊"; "Boa tarde! Oi! Tudo bem?" → "Boa tarde! Tudo bem?"; "Olá! Bom dia, Maria!" → "Bom dia, Maria!").
  */
 export function fixDoubleGreeting(text: string) {
   // Fim de palavra sem \b (que não reconhece "á" de "Olá").

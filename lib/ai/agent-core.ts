@@ -2,7 +2,7 @@ import { formatBr } from "@/lib/br-time";
 import { fillVariables } from "@/lib/chat/text";
 import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { IMAGE_RULE, PRODUCT_INFO_RULE } from "@/lib/ai/catalog-search";
-import { defaultHandoffNotice, STAFF_NAME_RULES } from "@/lib/ai/staff-request";
+import { contactFirstName, defaultHandoffNotice, STAFF_NAME_RULES } from "@/lib/ai/staff-request";
 import { STOCK_RULES } from "@/lib/ai/stock";
 import { BROAD_SEARCH_RULES } from "@/lib/ai/stock-showcase";
 import { BRAND_TYPO_RULES } from "@/lib/ai/brand-resolve";
@@ -53,10 +53,22 @@ export function historyText(history: CustomerHistory | null) {
 }
 
 /** Contexto do cliente enviado à IA: cadastro, fila, histórico do ERP (se permitido) e a conversa. */
+/**
+ * Primeiro nome confiável para a saudação: vazio quando o cadastro é o telefone, emoji/símbolos, nome genérico
+ * ou apelido curto (ex.: "Ju", "Lu"), para a IA saudar sem nome em vez de inventar.
+ */
+export function greetingName(contactName: string | null | undefined) {
+  const name = (contactName ?? "").trim();
+  if (!name || /^[\d\s()+.-]+$/.test(name)) return "";
+  const first = contactFirstName(name);
+  return first.length >= 3 ? first : "";
+}
+
 export function formatContext(input: { contactName: string | null; queueName: string | null; subject: string; includeHistory: boolean; history: CustomerHistory | null; conversation: string }) {
   return [
     // O nome do contato é escolhido pelo cliente no WhatsApp: também é dado não confiável.
     `Cliente: ${input.contactName ? wrapUntrusted(input.contactName, "nome do contato", 80) : "não identificado"}`,
+    `Primeiro nome para a saudação: ${greetingName(input.contactName) || "(sem nome válido: saúde sem nome)"}`,
     `Fila: ${input.queueName ?? "sem fila"}${input.subject ? ` · Assunto: ${input.subject}` : ""}`,
     "",
     "Histórico do cliente no ERP:",
@@ -249,7 +261,8 @@ export function brasiliaGreeting(now: Date = new Date()): { time: string; hour: 
 export const GREETING_RULES = [
   "SAUDAÇÃO (regra fixa): NUNCA se apresente como \"assistente virtual\", \"robô\" ou \"IA\" e nunca use frases engessadas como \"Olá! Eu sou a assistente virtual da Óticas Brasil\".",
   "Na primeira resposta da conversa, use só uma saudação simples e acolhedora de acordo com o horário atual de Brasília (\"Bom dia!\", \"Boa tarde!\" ou \"Boa noite!\"), com o primeiro nome do cliente se ele for conhecido (ex.: \"Bom dia, Maria!\"), e vá direto ao ponto do que ele pediu. Se ele só cumprimentou, convide-o a contar o que procura com palavras suas, variando (ex.: \"Me conta o que você está procurando?\", \"Em que posso te ajudar?\"); nunca \"Como posso ajudá-lo hoje?\". Nas mensagens seguintes da mesma conversa, não repita a saudação.",
-  "SAUDAÇÃO ÚNICA (regra fixa): abra com UMA só saudação, com o primeiro nome integrado quando conhecido. Preferencial (horário de Brasília): \"Boa tarde, Christofer! 😊\" seguido direto do assunto (ou \"Bom dia, Christofer!\", \"Boa noite, Christofer!\"). Cliente só disse \"oi\": \"Boa tarde, Christofer! 😊 Em que posso te ajudar?\" ou \"Oi, Christofer! 😊 Em que posso te ajudar?\". Cliente perguntou \"tudo bem?\": \"Boa tarde, Christofer! Tudo ótimo por aqui, e com você? 😊 Como posso te ajudar?\". PROIBIDO juntar duas saudações: nunca \"Boa tarde! Oi, Christofer\", \"Olá! Bom dia\", \"Oi! Boa tarde\".",
+  "SAUDAÇÃO ÚNICA (regra fixa): abra com UMA só saudação, com o primeiro nome integrado quando conhecido. <PRIMEIRO_NOME> nos exemplos abaixo é só um marcador: troque pelo valor de \"Primeiro nome para a saudação\" do contexto, nunca escreva o marcador. Preferencial (horário de Brasília): \"Boa tarde, <PRIMEIRO_NOME>! 😊\" seguido direto do assunto (ou \"Bom dia, <PRIMEIRO_NOME>!\", \"Boa noite, <PRIMEIRO_NOME>!\"). Cliente só disse \"oi\": \"Boa tarde, <PRIMEIRO_NOME>! 😊 Em que posso te ajudar?\" ou \"Oi, <PRIMEIRO_NOME>! 😊 Em que posso te ajudar?\". Cliente perguntou \"tudo bem?\": \"Boa tarde, <PRIMEIRO_NOME>! Tudo ótimo por aqui, e com você? 😊 Como posso te ajudar?\". PROIBIDO juntar duas saudações: nunca \"Boa tarde! Oi, <PRIMEIRO_NOME>\", \"Olá! Bom dia\", \"Oi! Boa tarde\".",
+  "CONTATO SEM NOME (regra fixa): quando \"Primeiro nome para a saudação\" disser que não há nome válido (nome vazio, igual ao telefone, só apelido, emoji ou símbolos), omita o nome por completo e saúde de forma natural, sem inventar nome: \"Boa tarde! 😊 Em que posso te ajudar?\" ou \"Boa tarde! Tudo ótimo por aqui, e com você? 😊\". NUNCA copie nomes de exemplos deste prompt e nunca chame o cliente pelo nome de atendentes, da empresa ou de quem desenvolveu o sistema; só use um nome que o próprio cliente tenha dito na conversa.",
   "Se o cliente perguntar diretamente se está falando com um robô ou uma pessoa, não minta: diga que é o atendimento automático da Óticas Brasil e que pode chamar um atendente.",
   "RECIPROCIDADE: quando o cliente perguntar \"tudo bem?\", \"tudo bom?\", \"como vai?\", \"como você está?\", \"blz?\", \"td bem?\" ou variações, responda primeiro à gentileza de forma natural e leve (ex.: \"Tudo ótimo por aqui, e com você?\" ou \"Tudo sim, e por aí?\") e já engate perguntando como pode ajudar. Na primeira resposta, junte com a saudação do horário (ex.: \"Boa tarde! Tudo ótimo por aqui, e com você? Como posso te ajudar?\"). Nunca ignore o \"tudo bem?\" pulando direto para \"Como posso ajudar?\". Se o cliente já trouxe uma dúvida junto, responda à gentileza em poucas palavras (na primeira resposta, sempre depois da saudação do horário, ex.: \"Boa tarde! Tudo sim, e por aí?\") e resolva a dúvida em seguida. Mantenha curto, como numa conversa de WhatsApp.",
 ].join("\n");
