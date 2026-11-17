@@ -75,6 +75,26 @@ describe("marca falada e cidade de estoque", () => {
     expect(state.requested).not.toContain("333333");
     expect(result.modelos[0].totalDisponivelRede).toBe(1);
   });
+  it("vitrine por orçamento exclui linha infantil por padrão e inclui quando o cliente fala de criança", async () => {
+    const budgetFrames = [
+      indexProduct({ code: "700001", description: "ARM SP KIDS REF LW1839 46", brand: "SP KIDS", category: "ARMACAO", subcategory: "", sales: 9, price: 200 }),
+      indexProduct({ code: "700002", description: "ARM ATITUDE INFANTIL REF AT3000 45", brand: "ATITUDE", category: "ARMACAO", subcategory: "", sales: 8, price: 180 }),
+      indexProduct({ code: "700003", description: "ARM VOGUE REF VO5300 51", brand: "VOGUE", category: "ARMACAO", subcategory: "", sales: 5, price: 189 }),
+      indexProduct({ code: "700004", description: "ARM TECNOL TEEN REF TN1 49", brand: "TECNOL", category: "ARMACAO", subcategory: "", sales: 4, price: 150 }),
+    ];
+    state.units = { "700001": ["39"], "700002": ["39"], "700003": ["39"], "700004": ["39"] };
+    const search = (extra: Record<string, unknown> = {}) => consultarEstoqueProduto({ tipo: "grau", sortBy: "price_asc", cidade: "Goiânia", ...extra }, { products: async () => budgetFrames, withPrices: true });
+    const adult = await search();
+    if (adult.result.tipoBusca !== "marca_ampla") throw new Error("Busca deveria ser ampla");
+    expect(adult.result.modelos.flatMap((model) => model.codigos)).toEqual(["700003"]);
+    expect(state.requested).not.toContain("700001");
+    const kids = await search({ publicoInfantil: true });
+    if (kids.result.tipoBusca !== "marca_ampla") throw new Error("Busca deveria ser ampla");
+    expect(kids.result.modelos.flatMap((model) => model.codigos).sort()).toEqual(["700001", "700002", "700003", "700004"]);
+    // Pedido da própria marca infantil ("tem Sp Kids?") não é bloqueado.
+    const brand = await consultarEstoqueProduto({ termoBusca: "Sp Kids", cidade: "Goiânia" }, { products: async () => budgetFrames, withPrices: true });
+    expect(JSON.stringify(brand.result)).toContain("700001");
+  });
   it("marca sem saldo na cidade não é substituída por outra marca", async () => {
     state.units = { "111111": ["40"], "222222": ["41"], "333333": ["39"] };
     const { result } = await consultarEstoqueProduto({ termoBusca: "miumiu", cidade: "Goiânia" }, { products: async () => frames, withPrices: false });

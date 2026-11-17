@@ -211,7 +211,7 @@ export function diverseByBrand(models: ShowcaseModel[], perBrand: number) {
 }
 
 /** Orientação da vitrine de orçamento: a IA escreve a abertura e o argumento de venda (sem pergunta pronta). */
-export const BUDGET_SHOWCASE_GUIDANCE = "Busca por orçamento: comece com UMA frase sua, natural, citando a cidade e o orçamento do cliente; depois copie vitrineFormatada exatamente como veio (sem inventar material, cor ou preço). Depois de ---SPLIT---, como consultora, destaque em 1 ou 2 frases curtas por que 2 ou 3 dessas opções valem a pena (custo-benefício, marca, estilo pelo nome; nada inventado) e conduza ao próximo passo com UMA pergunta: provar na loja mais próxima ou mandar a receita para orçar as lentes junto.";
+export const BUDGET_SHOWCASE_GUIDANCE = "Busca por orçamento: comece com UMA frase sua, natural, citando a cidade e o orçamento do cliente; depois copie vitrineFormatada exatamente como veio (sem inventar material, cor ou preço). Depois de ---SPLIT---, como consultora, destaque em 1 ou 2 frases curtas por que 2 ou 3 dessas opções valem a pena (custo-benefício, marca, estilo pelo nome; nada inventado) e feche com UMA pergunta direta de avanço (nunca \"Se quiser, posso...\"), ex.: \"Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!\" ou \"Quer que eu verifique em qual loja da sua cidade fica mais fácil pra você provar?\"";
 
 const brl = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 export function priceRangeLabel(price?: PriceFilter) {

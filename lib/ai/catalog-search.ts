@@ -338,3 +338,21 @@ export function matchIconicProducts(products: IndexedProduct[], text: string, br
   }).filter((product) => !!product.code).sort((a, b) => b.sales - a.sales);
   return { model, products: matches };
 }
+
+const plainUpper = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+
+/** Linha/marca infantil ou juvenil no cadastro ("SP KIDS", "ARM INFANTIL", "JUNIOR", "TEEN"). */
+export function isKidsProduct(product: { description?: string | null; brand?: string | null }) {
+  return /\b(KIDS?|INFANTIL|INFANTIS|JUNIOR|TEEN|TEENS|BABY|BEBE|CRIANCA)\b/.test(plainUpper(`${product.brand ?? ""} ${product.description ?? ""}`));
+}
+
+/**
+ * O cliente falou de criança/adolescente ("pro meu filho", "infantil", "minha neta de 8 anos", "kids"):
+ * só assim a vitrine inclui linhas infantis; por padrão as recomendações são de adulto.
+ */
+export function mentionsKids(text: string) {
+  const source = plainUpper(text);
+  if (/\b(CRIANCAS?|FILH[OA]S?|FILHINH[OA]S?|INFANTIL|INFANTIS|KIDS?|MENIN[OA]S?|NET[OA]S?|NETINH[OA]S?|SOBRINH[OA]S?|BEBES?|ADOLESCENTES?|JUVENIL|TEEN|PRE ?ADOLESCENTE|ESCOLA|ESCOLAR)\b/.test(source)) return true;
+  // Idade juvenil dita em anos ("de 9 anos", "tem 12 anos").
+  return [...source.matchAll(/\b(\d{1,2})\s*ANOS?\b/g)].some((match) => Number(match[1]) <= 15);
+}

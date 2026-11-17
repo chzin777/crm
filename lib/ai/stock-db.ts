@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { storeErpCode } from "@/lib/stores";
-import { CATEGORY_FILTER, explicitBrand, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
+import { CATEGORY_FILTER, explicitBrand, isKidsProduct, mentionsKids, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
 import { broadCatalogMatches, catalogBrands, isBrandFamily, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
 import { expandModelNicknames } from "@/lib/ai/product-names";
 import { buildStockResult, createStockClient, STOCK_MAX_CODES, stockSearchTerms, type StockLog, type StockLookup, type StockToolResult, type StoreInfo } from "@/lib/ai/stock";
@@ -107,7 +107,7 @@ function orderByBudget(products: IndexedProduct[], price?: PriceFilter) {
  * Nunca lança erro: falha ou lentidão da API vira o cenário "unavailable_api".
  */
 export async function consultarEstoqueProduto(
-  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown },
+  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; publicoInfantil?: unknown },
   deps: { products: () => Promise<IndexedProduct[]>; withPrices: boolean },
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
@@ -120,6 +120,9 @@ export async function consultarEstoqueProduto(
   const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
   // Tipo pedido (grau/sol/lente de contato) restringe a vitrine também quando não há marca no termo.
   const inCategory = (product: IndexedProduct) => !category || product.categoryKey === CATEGORY_FILTER[category];
+  // Público adulto por padrão: linhas infantis/juvenis só entram na vitrine quando o cliente falou de criança.
+  const allowKids = args.publicoInfantil === true || mentionsKids(term);
+  const inAudience = (product: IndexedProduct) => allowKids || !isKidsProduct(product);
 
   // Marca com erro de digitação ("rada" → RADDA, "okley" → OAKLEY): marca inteira normalizada ou com 1-2 erros.
   const brands = brandsOf(all);
@@ -139,7 +142,9 @@ export async function consultarEstoqueProduto(
     const broad = requestedBrand && !brandMatch ? { products: [], brand: requestedBrand } : broadCatalogMatches(all, budgetOnly ? withoutValues : term, brands, city || price || category ? all.length : undefined);
     // Sem marca (só tipo/orçamento) o catálogo é grande: limita os candidatos consultados no saldo.
     const generic = !broad.brand && (budgetOnly || !modelWords(term).length);
-    const candidates = orderByBudget(broad.products.filter(inCategory), price);
+    // A marca inteira pedida é infantil ("tem Sp Kids?"): aí o próprio pedido já é infantil.
+    const audience = broad.brand && isKidsProduct({ brand: broad.brand }) ? broad.products : broad.products.filter(inAudience);
+    const candidates = orderByBudget(audience.filter(inCategory), price);
     const limits = generic ? { groups: GENERIC_CANDIDATES, codesPerModel: SHOWCASE_CODES_PER_MODEL } : city || price ? { groups: candidates.length, codesPerModel: candidates.length } : undefined;
     const groups = showcaseCandidates(candidates.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), limits);
     const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;

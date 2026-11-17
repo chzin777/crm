@@ -27,7 +27,7 @@ import { readFile } from "@/lib/minio";
 import { analysisName, analysisPromptBlock, asksProductInfo, CATALOG_FOUND_RULE, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { asksCustomerCity, cityQuestion, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
-import { budgetBlock, cityFirstBlock, conversationBudget, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, budgetBlock, cityFirstBlock, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
 import { listWithOpening, welcomeReply } from "@/lib/ai/response-opening";
@@ -569,6 +569,7 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   if (!catalogState.preferredCity && input.knownCity) catalogState.preferredCity = extractPreferredCity(input.knownCity, cities) ?? "";
   // Consultora: orçamento da conversa vira filtro; sem cidade, pergunta antes de listar qualquer produto.
   const { budget, cheap } = conversationBudget([...[...(input.earlierCustomerTexts ?? [])].reverse(), customerText]);
+  const wantsKids = conversationWantsKids([...(input.earlierCustomerTexts ?? []), customerText]);
   const cityFirst = needsCityFirst({ knownCity: catalogState.preferredCity, text: customerText, photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued });
   const askBudget = cityFirst && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
   const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
@@ -643,6 +644,9 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
         return gatedStockResult(askBudget);
       }
       const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category }), cidade: catalogState.preferredCity || args.cidade };
+      // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
+      if (wantsKids) query.publicoInfantil = true;
+      else delete query.publicoInfantil;
       const { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
       if (result.tipoBusca === "marca_ampla") currentCatalogFilterHash = [String(query.termoBusca ?? ""), String(query.cidade ?? ""), catalogState.category].map(normalizeTerm).join("|");
@@ -937,6 +941,10 @@ async function runAiAgentInternal(input: AgentRunInput): Promise<AgentRun> {
   // Cidade desconhecida: a resposta precisa perguntar onde o cliente está (o modelo escreve; aqui só a garantia).
   if ((cityFirst || stockGated) && !photoReply && outcome.action === "reply" && !asksCustomerCity(outcome.reply)) {
     outcome = { ...outcome, reply: `${outcome.reply.trim()} ${cityQuestion({ askBudget, variant: input.aiReplies })}`.trim() };
+  }
+  // Fechamento ativo: vitrine de opções termina com pergunta direta de avanço (nunca "Se quiser, posso...").
+  if (outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2)) {
+    outcome = { ...outcome, reply: activeClosing(outcome.reply, { city: catalogState.preferredCity, variant: input.aiReplies }) };
   }
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };

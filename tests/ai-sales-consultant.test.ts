@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { asksCustomerCity, cityQuestion, extractBudget, isProductBrowseRequest, wantsCheap } from "@/lib/ai/catalog-context";
-import { asksSpecificModel, budgetBlock, conversationBudget, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, activeCta, asksSpecificModel, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { isKidsProduct, mentionsKids } from "@/lib/ai/catalog-search";
+import { FORMAT_RULES } from "@/lib/ai/bubbles";
 import { applyPriceFilter, diverseByBrand, formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 import { STOCK_TOOL } from "@/lib/ai/stock";
 import { cardOpening } from "@/lib/ai/product-card";
@@ -90,6 +92,50 @@ describe("filtro de preço e ordenação da vitrine", () => {
     const props = STOCK_TOOL.function.parameters.properties as Record<string, unknown>;
     for (const key of ["tipo", "minPrice", "maxPrice", "sortBy"]) expect(props).toHaveProperty(key);
     expect(STOCK_TOOL.function.parameters.required).toEqual([]);
+  });
+});
+
+describe("público adulto por padrão", () => {
+  it.each([
+    ["ARM SP KIDS REF LW1839 46", "SP KIDS", true],
+    ["ARM ATITUDE INFANTIL AT3000", "ATITUDE", true],
+    ["ARM RAY BAN JUNIOR RJ9052", "RAY BAN", true],
+    ["ARM TECNOL TEEN TN1", "TECNOL", true],
+    ["ARM VOGUE REF VO5300 51", "VOGUE", false],
+    ["ARM SKINNY REF SK10", "SKINNY", false],
+  ])("%s → infantil %s", (description, brand, expected) => {
+    expect(isKidsProduct({ description, brand })).toBe(expected);
+  });
+
+  it("só libera linha infantil quando o cliente fala de criança ou idade juvenil", () => {
+    for (const text of ["é pro meu filho", "armação infantil", "minha neta de 8 anos", "pra uma criança", "tem kids?", "ele tem 12 anos", "minha filha adolescente"]) expect(mentionsKids(text)).toBe(true);
+    for (const text of ["armação de grau barata", "até 250 reais", "tenho 35 anos", "quero pra mim", "armação pro meu marido"]) expect(mentionsKids(text)).toBe(false);
+    expect(conversationWantsKids(["oi", "é pro meu filho de 10 anos", "Goiânia"])).toBe(true);
+  });
+});
+
+describe("fechamento ativo com chamada para ação", () => {
+  const vitrine = "Separei estas em Goiânia:\n1. 👓 *Vogue (Ref. VO5300)* — R$ 189,00\n2. 👓 *Atitude (Ref. AT1001)* — R$ 239,00";
+
+  it("troca o \"Se quiser, posso te ajudar...\" por pergunta direta de avanço", () => {
+    const reply = `${vitrine}\n---SPLIT---\nA Vogue é leve e a Atitude é resistente. Se quiser, posso te ajudar a pensar nas lentes junto com a armação.`;
+    const fixed = activeClosing(reply, { city: "Goiânia", variant: 0 });
+    expect(fixed).not.toMatch(/se quiser/i);
+    expect(fixed).toContain("A Vogue é leve e a Atitude é resistente. Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!");
+    expect(fixed.split("---SPLIT---")[0].trim()).toBe(vitrine);
+  });
+
+  it("CTA cita a cidade; sem pergunta no fim, acrescenta; com pergunta ativa, mantém", () => {
+    expect(activeCta({ city: "Goiânia", variant: 1 })).toBe("Quer que eu verifique em qual loja de Goiânia fica mais fácil pra você provar?");
+    expect(activeClosing(`${vitrine}\n---SPLIT---\nFico à disposição!`, { city: "Goiânia", variant: 1 })).toMatch(/---SPLIT---\nQuer que eu verifique em qual loja de Goiânia fica mais fácil pra você provar\?$/);
+    expect(activeClosing(vitrine, { variant: 0 })).toMatch(/R\$ 239,00\n---SPLIT---\nQual desses estilos combinou mais com você\?/);
+    const active = `${vitrine}\n---SPLIT---\nQual delas combina mais com você?`;
+    expect(activeClosing(active, { variant: 0 })).toBe(active);
+  });
+
+  it("regras do prompt proíbem fechamento passivo e trazem os CTAs", () => {
+    for (const piece of ["FECHAMENTO ATIVO", "PROIBIDO fechar de forma passiva", "\"Se quiser, posso te ajudar...\"", "Qual desses estilos combinou mais com você?", "PÚBLICO ADULTO POR PADRÃO"]) expect(SALES_CONSULTANT_RULES).toContain(piece);
+    expect(FORMAT_RULES).not.toMatch(/\(ex\.:[^)]*Se quiser, me diga/);
   });
 });
 

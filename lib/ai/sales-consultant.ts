@@ -3,6 +3,9 @@
  * e redação livre (sem aberturas fixas). Funções puras, usadas pelo agente e pelos testes.
  */
 import { extractBudget, isProductBrowseRequest, wantsCheap, type Budget } from "@/lib/ai/catalog-context";
+import { mentionsKids } from "@/lib/ai/catalog-search";
+import { BUBBLE_SPLIT, splitBubbles } from "@/lib/ai/bubbles";
+import { parseShowcase } from "@/lib/ai/showcase-choice";
 import { iconicModel, expandModelNicknames } from "@/lib/ai/product-names";
 import { classifySearch } from "@/lib/ai/stock-showcase";
 
@@ -11,6 +14,8 @@ export const SALES_CONSULTANT_RULES = [
   "- REGRA DE OURO GEOGRÁFICA: nunca ofereça modelos que só existem em lojas de outra cidade ou estado. Lista de produtos só depois de saber a cidade do cliente; a busca usa sempre essa cidade.",
   "- ESPELHE O ESTILO: cliente curto e direto → respostas objetivas e ágeis; cliente caloroso ou inseguro → acolhedora e didática.",
   "- ARGUMENTE COMO VENDEDORA: ao sugerir 2 ou 3 opções, destaque em poucas palavras o diferencial prático de cada uma (leveza do acetato no dia a dia, discrição e resistência do metal, ótimo custo-benefício) e conduza ao próximo passo: provar na loja mais próxima ou mandar a receita para orçar as lentes junto.",
+  "- FECHAMENTO ATIVO (regra fixa): depois de recomendar armações/óculos, termine SEMPRE com UMA pergunta direta e leve que avance a venda. PROIBIDO fechar de forma passiva com \"Se quiser, posso te ajudar...\", \"Se quiser, posso...\", \"Qualquer coisa estou à disposição\" ou \"Fico à disposição\". Exemplos: \"Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!\" ou \"Quer que eu verifique em qual loja de <CIDADE> fica mais fácil pra você provar?\" (troque <CIDADE> pela cidade do cliente).",
+  "- PÚBLICO ADULTO POR PADRÃO: não sugira linhas infantis/juvenis (Kids, Infantil, Junior, Teen) a menos que o cliente fale de criança, filho(a), neto(a), idade juvenil ou peça infantil.",
   "- SEM INTERROGATÓRIO: no máximo 1 ou 2 perguntas leves por mensagem, sempre ligadas a escolher o óculos certo (cidade, faixa de valor, estilo, uso).",
   "- REDAÇÃO ÚNICA: escreva cada abertura do zero, conectada ao que o cliente disse; não repita a estrutura das suas mensagens anteriores.",
   "- PROIBIDO clichê de robô: \"Como posso ajudá-lo hoje?\", \"Aguarde um instante enquanto verifico...\", \"Aqui estão os detalhes desse modelo!\" repetido, \"Em que mais posso ser útil?\".",
@@ -101,4 +106,45 @@ export function mergeProactiveReply(llmReply: string, content: string) {
   // Só uma frase de abertura: nada de lista ou preço inventado pelo modelo antes da vitrine real.
   const usable = opening && opening.length <= 220 && !/\n\s*\d[.)]\s|R\$/.test(opening);
   return usable ? `${opening}\n${content}` : content;
+}
+
+/** Fechamento passivo que não avança a venda ("Se quiser, posso te ajudar...", "Fico à disposição"). */
+const PASSIVE_CLOSING = /^(se (quiser|preferir|precisar)|caso (queira|prefira|precise)|qualquer (coisa|d[uú]vida)|(fico|estou|sigo|fica) (a|à) (sua )?disposi[cç][aã]o|posso te ajudar (com|em) (mais )?(alguma|algo))/i;
+
+/** CTA de avanço na venda: estilo + receita, ou a loja da cidade para provar. */
+export function activeCta(input: { city?: string | null; variant?: number }) {
+  const options = [
+    "Qual desses estilos combinou mais com você? Se já tiver a receita, pode me mandar foto aqui que eu calculo as lentes junto!",
+    input.city ? `Quer que eu verifique em qual loja de ${input.city} fica mais fácil pra você provar?` : "Quer que eu verifique qual loja fica mais fácil pra você provar?",
+    "Qual deles você quer ver de pertinho primeiro? Se tiver a receita, me manda foto que eu já calculo as lentes junto!",
+  ];
+  return options[Math.abs(input.variant ?? 0) % options.length];
+}
+
+/**
+ * Recomendação de produtos sempre termina com pergunta direta de avanço: a frase final passiva é trocada
+ * pelo CTA e, sem pergunta no fim, o CTA entra como última bolha.
+ */
+export function activeClosing(reply: string, input: { city?: string | null; variant?: number }) {
+  const parts = splitBubbles(reply);
+  if (!parts.length) return reply;
+  const last = parts[parts.length - 1];
+  const cta = activeCta(input);
+  if (parseShowcase(last).length) return [...parts, cta].join(`\n${BUBBLE_SPLIT}\n`);
+  // Última frase do último balão (depois de . ! ? … ou quebra de linha).
+  const body = last.trimEnd();
+  let start = 0;
+  for (const match of body.slice(0, -1).matchAll(/[.!?…]\s+|\n+/g)) start = (match.index ?? 0) + match[0].length;
+  const sentence = body.slice(start).replace(/^[*_~\s]+/, "");
+  if (PASSIVE_CLOSING.test(sentence)) {
+    const kept = body.slice(0, start).trimEnd();
+    return [...parts.slice(0, -1), kept ? `${kept} ${cta}` : cta].join(`\n${BUBBLE_SPLIT}\n`);
+  }
+  if (/\?\s*\S{0,4}$/u.test(body)) return reply;
+  return [...parts.slice(0, -1), `${body} ${cta}`].join(`\n${BUBBLE_SPLIT}\n`);
+}
+
+/** O cliente falou de criança/adolescente em algum momento da conversa. */
+export function conversationWantsKids(texts: string[]) {
+  return texts.some((text) => mentionsKids(text));
 }
