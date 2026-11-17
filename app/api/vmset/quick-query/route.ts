@@ -3,6 +3,7 @@ import { z } from "zod";
 import { chatError, conversationNotFound, findScopedConversation, requireChatActor } from "@/lib/chat/access";
 import { loadOperationalContext, quickQuery } from "@/lib/chat/quick-query-db";
 import { maskCpf } from "@/lib/ai/installments";
+import { reportError } from "@/lib/monitoring/error-reporter";
 
 /** Copiloto VMSet: contexto da conversa (CPF, nome, produto, intenção) e sugestões de consulta em 1 clique. */
 export async function GET(request: Request) {
@@ -35,8 +36,9 @@ export async function POST(request: Request) {
     const cpf = parsed.data.params.cpf?.replace(/\D/g, "");
     console.log(`[copiloto][consulta] ${parsed.data.kind}${cpf ? ` cpf ${maskCpf(cpf)}` : ""}: ${result.ok ? "ok" : "sem resultado"} em ${Date.now() - started} ms`);
     return NextResponse.json(result);
-  } catch {
+  } catch (error) {
     console.error(`[copiloto][consulta] ${parsed.data.kind} falhou`);
+    void reportError("vmset.quick-query", error, { kind: parsed.data.kind });
     return chatError("Não foi possível consultar agora. Tente de novo.", 503);
   }
 }

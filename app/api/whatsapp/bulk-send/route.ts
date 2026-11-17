@@ -75,10 +75,11 @@ export async function POST(request: Request) {
   if (invalidFile) return Response.json({ error: `Arquivo não permitido: ${invalidFile.name}` }, { status: 400 });
 
   const contacts = await prisma.contact.findMany({
-    where: { id: { in: contactIds } },
+    // Opt-out (SAIR/PARAR): fora de qualquer envio em massa.
+    where: { id: { in: contactIds }, marketingOptOut: false },
     select: { id: true, phone: true, name: true },
   });
-  if (contacts.length === 0) return Response.json({ error: "Nenhum contato encontrado." }, { status: 400 });
+  if (contacts.length === 0) return Response.json({ error: "Nenhum contato disponível: os selecionados não foram encontrados ou pediram para não receber campanhas." }, { status: 400 });
 
   try {
     await ensureInstance();

@@ -111,6 +111,10 @@ model Contact {
   ecommerceTotalSpent       Decimal                @default(0) @db.Decimal(14, 2)
   ecommerceLastPurchaseDate String?
   avatarUrl                 String?
+  /// Pediu para não receber campanhas (SAIR/PARAR no WhatsApp ou marcado pela equipe).
+  marketingOptOut           Boolean                @default(false)
+  marketingOptOutAt         DateTime?
+  marketingOptOutReason     String?
   createdAt                 DateTime               @default(now())
   updatedAt                 DateTime               @updatedAt
   importedSales             ImportedSale[]
@@ -125,6 +129,21 @@ model Contact {
   @@index([phone])
   @@index([email])
   @@index([name])
+  @@index([marketingOptOut])
+}
+
+/// Erros críticos recentes (webhooks, IA, campanhas, rotinas), gravados por lib/monitoring/error-reporter.ts.
+model SystemErrorLog {
+  id        String   @id @default(cuid())
+  level     String   @default("error")
+  source    String
+  message   String
+  stack     String?
+  context   Json?    @db.JsonB
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([source, createdAt])
 }
 
 model ContactNote {

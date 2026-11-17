@@ -14,6 +14,7 @@ import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
+import { reportError } from "@/lib/monitoring/error-reporter";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -48,6 +49,7 @@ export async function runClock() {
       await action();
     } catch (error) {
       summary.errors.push(`${name}: ${error instanceof Error ? error.message : "falhou"}`);
+      void reportError(`cron.${name}`, error);
     }
   };
 

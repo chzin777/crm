@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ContactPrescriptionsTab } from "@/components/ContactPrescriptionsTab";
+import { MarketingOptOutBadge } from "@/components/MarketingOptOutBadge";
 import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { BirthdayDatePicker } from "@/components/BirthdayDatePicker";
@@ -234,6 +235,7 @@ function ContactEditTabs({
                   {form.segmento.length > 0 ? form.segmento.join(", ") : contactCategoryNames[form.categoria]}
                 </span>
                 <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatBrazilianPhone(form.telefone)}</p>
+                <div className="mt-1"><MarketingOptOutBadge contactId={selectedContact.id} /></div>
               </div>
             </div>
             <label className={labelClass}>

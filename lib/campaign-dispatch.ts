@@ -5,6 +5,9 @@ import { getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate,
 import { phoneVariants } from "@/lib/chat/phone";
 import { formatBr } from "@/lib/br-time";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
+import { withoutOptedOut } from "@/lib/marketing-opt-out";
+import { loadOptOutKeys } from "@/lib/marketing-opt-out-db";
+import { reportError } from "@/lib/monitoring/error-reporter";
 
 export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string };
 
@@ -283,6 +286,8 @@ async function runJob(campaignId: string) {
     // Com a trava ignorada no lote (ou desligada por ambiente), ninguém é pulado.
     // Ao retomar, quem já recebeu este disparo nunca recebe de novo, mesmo com a trava de descanso ignorada.
     const reached = await loadRecentlyReached(campaignId, !job.ignoreCooldown && CONTACT_COOLDOWN_MS > 0);
+    // Opt-out (SAIR/PARAR): relido a cada execução, inclusive na retomada; quem saiu durante o disparo é pulado.
+    const optedOut = await loadOptOutKeys();
     let consecutiveApiFailures = 0;
     while (job.cursor < job.total) {
       const requested = control.get(campaignId);
@@ -297,7 +302,7 @@ async function runJob(campaignId: string) {
       }
 
       const recipient = recipients[job.cursor];
-      if (recipient?.telefone?.trim() && recipientKeys(recipient).some((key) => reached.has(key))) {
+      if (recipient?.telefone?.trim() && recipientKeys(recipient).some((key) => reached.has(key) || optedOut.has(key))) {
         job.skipped += 1;
         job.cursor += 1;
         await writeJob(job);
@@ -379,6 +384,7 @@ async function runJob(campaignId: string) {
     await syncCampaign(job);
   } catch (error) {
     console.error("[campaign-dispatch] falha inesperada:", error);
+    void reportError("campaign.dispatch", error, { campaignId });
     const current = (await readJob(campaignId)) ?? job;
     const paused: DispatchJob = { ...current, status: "paused", pause: { kind: "network", message: error instanceof Error ? error.message : "Erro inesperado no disparo." } };
     await writeJob(paused).catch(() => undefined);
@@ -396,7 +402,9 @@ function enqueue(campaignId: string) {
     .finally(() => running.delete(campaignId));
 }
 
-export async function startDispatch(campaignId: string, recipients: DispatchRecipient[], options: { ignoreCooldown?: boolean } = {}) {
+export async function startDispatch(campaignId: string, requested: DispatchRecipient[], options: { ignoreCooldown?: boolean } = {}) {
+  // Quem pediu para sair (marketingOptOut) nunca entra na fila de uma campanha.
+  const recipients = withoutOptedOut(requested, await loadOptOutKeys());
   const existing = await readJob(campaignId);
   if (existing && (existing.status === "running" || existing.status === "paused")) {
     throw new DispatchError("Esta campanha já tem um disparo em andamento ou pausado.", 409);

@@ -110,7 +110,8 @@ function LoginContent() {
 
       const result = await authClient.signIn.email({ email: email.trim(), password });
       if (result.error) {
-        setErrorMessage("E-mail ou senha inválidos. Confira seus dados e tente novamente.");
+        // 429: bloqueio por excesso de tentativas, com o tempo restante vindo do servidor.
+        setErrorMessage(result.error.status === 429 && result.error.message ? result.error.message : "E-mail ou senha inválidos. Confira seus dados e tente novamente.");
         return;
       }
 

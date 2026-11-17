@@ -57,6 +57,7 @@ import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
 import { buildSystemPrompt, carriesProductExtras, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
+import { reportError } from "@/lib/monitoring/error-reporter";
 
 /**
  * A IA vinha atendendo, mas deixou de poder (horário, configuração, crédito): a conversa volta para a fila humana
@@ -101,6 +102,7 @@ async function runBatch(conversationId: string, messageId: string): Promise<void
     await respond(conversationId, messageId);
   } catch (error) {
     console.error("[ai] atendimento autônomo:", error);
+    void reportError("ai.agent", error, { conversationId });
   } finally {
     const state = inFlight.get(conversationId);
     inFlight.delete(conversationId);

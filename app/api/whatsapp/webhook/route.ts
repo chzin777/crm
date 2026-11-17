@@ -6,6 +6,18 @@ import { notifyChatChange } from "@/lib/chat/events";
 import { isCustomerMessage, recordEcho, recordInbound, type MetaInboundMessage } from "@/lib/chat/inbound";
 import { phoneVariants } from "@/lib/chat/phone";
 import { markBulkItemFailed } from "@/lib/bulk-dispatch";
+import { detectOptOutCommand, OPT_IN_REPLY, OPT_OUT_REPLY, type OptOutCommand } from "@/lib/marketing-opt-out";
+import { applyOptOutCommand } from "@/lib/marketing-opt-out-db";
+import { sendAutomaticMessage } from "@/lib/chat/outbound";
+import { reportError } from "@/lib/monitoring/error-reporter";
+
+/** Descadastro/reativação de campanhas pedido pelo próprio cliente. */
+async function handleOptOutCommand(conversationId: string, phone: string, command: OptOutCommand, text: string) {
+  const updated = await applyOptOutCommand(phone, command, `WhatsApp: "${text.trim().slice(0, 60)}"`);
+  console.log(`[whatsapp/webhook] ${command === "opt_out" ? "opt-out" : "reativação"} de campanhas para ${phone} (${updated} cadastro(s))`);
+  await sendAutomaticMessage({ id: conversationId, phone }, command === "opt_out" ? OPT_OUT_REPLY : OPT_IN_REPLY);
+  return true;
+}
 
 // Verificação do webhook (a Meta chama via GET ao cadastrar a URL).
 export async function GET(request: Request) {
@@ -169,12 +181,23 @@ export async function POST(request: Request) {
           } catch (failure) {
             // Sem a conversa gravada, a mensagem se perderia: 500 faz a Meta reenviar o evento.
             console.error("[whatsapp/webhook] gravar conversa:", failure);
+            void reportError("whatsapp.webhook", failure, { messageId: msg.id });
             return new Response("Falha ao gravar", { status: 500 });
           }
           console.log(recorded ? `[whatsapp/webhook] mensagem ${msg.id} gravada na conversa ${recorded.conversationId}` : `[whatsapp/webhook] mensagem ${msg.id} ignorada (repetida ou reação)`);
           if (recorded) {
             notifyChatChange();
-            await runAutomation(recorded).catch((failure) => console.error("[whatsapp/webhook] fluxo automático:", failure));
+            // SAIR/PARAR (ou REATIVAR/VOLTAR): responde a confirmação e não segue para IA/menu.
+            const command = recorded.autoReply ? null : detectOptOutCommand(recorded.text);
+            if (command && msg.from) {
+              const handled = await handleOptOutCommand(recorded.conversationId, msg.from, command, recorded.text)
+                .catch((failure) => { void reportError("whatsapp.opt-out", failure, { phone: msg.from }); return false; });
+              if (handled) { notifyChatChange(); continue; }
+            }
+            await runAutomation(recorded).catch((failure) => {
+              console.error("[whatsapp/webhook] fluxo automático:", failure);
+              void reportError("whatsapp.automation", failure, { conversationId: recorded.conversationId });
+            });
             notifyChatChange();
           }
         }

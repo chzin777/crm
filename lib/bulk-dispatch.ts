@@ -5,6 +5,7 @@ import { listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadM
 import { readFile } from "@/lib/minio";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 import { phoneVariants } from "@/lib/chat/phone";
+import { reportError } from "@/lib/monitoring/error-reporter";
 
 export type BulkParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
 export type BulkTemplateParam = { source: BulkParamSource; value: string };
@@ -341,7 +342,10 @@ function enqueue(id: string) {
   const previous = globalState.__bulkQueue ?? Promise.resolve();
   globalState.__bulkQueue = previous
     .then(() => runJob(id))
-    .catch((error) => console.error(`[bulk-dispatch] lote ${id} interrompido:`, error))
+    .catch((error) => {
+      console.error(`[bulk-dispatch] lote ${id} interrompido:`, error);
+      void reportError("campaign.bulk", error, { jobId: id });
+    })
     .finally(() => running.delete(id));
 }
 

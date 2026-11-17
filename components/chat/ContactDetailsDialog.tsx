@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CalendarClock, Camera, Check, Copy, ExternalLink, Hourglass, ListOrdered, MessagesSquare, Send, type LucideIcon } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ContactPrescriptionsTab } from "@/components/ContactPrescriptionsTab";
+import { MarketingOptOutBadge } from "@/components/MarketingOptOutBadge";
 import { ContactOpportunityCard } from "@/components/chat/ContactOpportunityCard";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
@@ -310,6 +311,7 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
       <div ref={content} className="min-h-0 flex-1 overflow-y-auto scroll-smooth px-1 py-4 [scrollbar-gutter:stable]">
         <div role="tabpanel" id="contact-panel-cadastro" aria-labelledby="contact-tab-cadastro" hidden={tab !== "cadastro"} className="space-y-6">
           <Section title="Identificação">
+            <div className="mb-3"><MarketingOptOutBadge contactId={conversation.contactId} canWrite={canWrite} /></div>
             {form ? (
               <form id="contact-form" onSubmit={(event) => void saveContact(event)} className="grid gap-3 sm:grid-cols-2">
                 <Field label="Nome completo"><input value={form.name} onChange={(event) => setField("name", event.target.value)} disabled={!canWrite} maxLength={200} className={INPUT} /></Field>
