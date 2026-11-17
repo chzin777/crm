@@ -8,6 +8,7 @@ import { campaignOrigins, discardCampaignReplies } from "@/lib/chat/campaign-ori
 import { addAudit, isBlocked } from "@/lib/chat/conversation";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { conversationInclude, serializeConversation } from "@/lib/chat/serialize";
+import { emitTagChanges } from "@/lib/automations/engine-db";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -54,6 +55,8 @@ export async function PATCH(request: Request, context: Context) {
     before: { priority: conversation.priority, subject: conversation.subject, tags: conversation.tags },
     after: parsed.data,
   });
+  // Tag nova na conversa → automações com gatilho "Tag adicionada".
+  if (parsed.data.tags) emitTagChanges(conversation, conversation.tags, parsed.data.tags);
   return NextResponse.json({ ok: true });
 }
 

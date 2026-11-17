@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
+import { cancelAutomationsForContacts } from "@/lib/automations/engine-db";
 
 const select = { marketingOptOut: true, marketingOptOutAt: true, marketingOptOutReason: true } as const;
 
@@ -29,6 +30,8 @@ export async function PATCH(request: Request, context: RouteContext<"/api/contac
       : { marketingOptOut: false, marketingOptOutAt: null, marketingOptOutReason: null },
     select,
   });
+  // LGPD: opt-out manual também interrompe as automações ativas do contato.
+  if (body.optOut) await cancelAutomationsForContacts([id]).catch((error: unknown) => console.error("[automacoes] cancelar por opt-out:", error));
   console.log(`[contacts] opt-out de campanhas ${body.optOut ? "ativado" : "removido"} no contato ${id} por ${user.email}`);
   return Response.json(contact);
 }

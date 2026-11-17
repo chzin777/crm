@@ -65,12 +65,20 @@ async function writePipeline(tx: Tx, cards: PipelineCard[]) {
   await tx.crmWorkspaceData.upsert({ where: { key: "pipeline" }, update: { value: cards as never }, create: { key: "pipeline", value: cards as never } });
 }
 
+type PipelineWrite = { before: PipelineCard[]; after: PipelineCard[] };
+/** Depois do commit: cards que entraram numa etapa disparam as automações "Lead entrou na etapa" (em segundo plano). */
+function emitStageAutomations(write: PipelineWrite | null) {
+  if (!write) return;
+  void import("@/lib/automations/engine-db").then((engine) => engine.emitStageChanges(write.before, write.after)).catch(() => undefined);
+}
+
 /**
  * Eventos comerciais da conversa → oportunidade do contato no funil de vendas (cria uma só por contato, avança sem
  * regredir, histórico no card). Falha aqui nunca derruba o atendimento.
  */
 export async function recordSalesEvents(input: { contactId: string; conversationId?: string | null; events: SalesEvent[] }) {
   if (!input.events.length) return null;
+  let write: PipelineWrite | null = null;
   try {
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw(PIPELINE_LOCK);
@@ -90,9 +98,13 @@ export async function recordSalesEvents(input: { contactId: string; conversation
           last = applied.card;
         }
       }
-      if (changed) await writePipeline(tx, current);
+      if (changed) {
+        await writePipeline(tx, current);
+        write = { before: cards, after: current };
+      }
       return last;
     }, { maxWait: 10_000, timeout: 30_000 });
+    emitStageAutomations(write);
     if (result) await invalidateCache("dashboard").catch(() => undefined);
     return result;
   } catch (error) {
@@ -116,6 +128,7 @@ export async function contactOpportunity(contactId: string) {
  * Já existindo uma aberta, devolve a existente.
  */
 export async function createOpportunity(input: { contactId: string; conversationId?: string | null; author: string }) {
+  let write: PipelineWrite | null = null;
   const card = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw(PIPELINE_LOCK);
     const { configs, cards } = await readPipeline(tx);
@@ -136,15 +149,18 @@ export async function createOpportunity(input: { contactId: string; conversation
       next = next.map((item) => (item.id === created.id ? created : item));
     }
     await writePipeline(tx, next);
+    write = { before: cards, after: next };
     return created;
   }, { maxWait: 10_000, timeout: 30_000 });
+  emitStageAutomations(write);
   if (card) await invalidateCache("dashboard").catch(() => undefined);
   return card;
 }
 
 /** Vendedor muda a etapa pelo atendimento (ou pausa a automação do card). */
 export async function updateOpportunity(input: { contactId: string; cardId: string; column?: StageId; autoMoveEnabled?: boolean; author: string }) {
-  return prisma.$transaction(async (tx) => {
+  let write: PipelineWrite | null = null;
+  const result = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw(PIPELINE_LOCK);
     const { configs, cards } = await readPipeline(tx);
     const card = cards.find((item) => item.id === input.cardId && item.contactId === input.contactId);
@@ -158,8 +174,11 @@ export async function updateOpportunity(input: { contactId: string; cardId: stri
       next = next.map((item) => (item.id === updated!.id ? updated! : item));
     }
     await writePipeline(tx, next);
+    write = { before: cards, after: next };
     return updated;
   }, { maxWait: 10_000, timeout: 30_000 });
+  emitStageAutomations(write);
+  return result;
 }
 
 let lastWonSync = 0;

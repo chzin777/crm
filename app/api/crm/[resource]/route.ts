@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
+import { emitStageChanges } from "@/lib/automations/engine-db";
 
 const allowedResources = new Set(["segments", "campaigns", "pipeline", "pipeline-stages", "pipeline-dismissed", "settings", "criteria", "nps"]);
 
@@ -100,6 +101,8 @@ export async function PUT(request: Request, context: RouteContext<"/api/crm/[res
 
   const revision = new Date(body.revision);
   if (Number.isNaN(revision.getTime())) return Response.json({ error: "Versão dos dados inválida." }, { status: 400 });
+  // Kanban: cards antes do salvamento, para disparar as automações "Lead entrou na etapa" dos que mudaram de coluna.
+  const previousPipeline = resource === "pipeline" ? await prisma.crmWorkspaceData.findUnique({ where: { key: "pipeline" }, select: { value: true } }) : null;
   const updateResult = await prisma.crmWorkspaceData.updateMany({
     where: { key: resource, updatedAt: revision },
     data: { value: body.data },
@@ -112,5 +115,10 @@ export async function PUT(request: Request, context: RouteContext<"/api/crm/[res
     select: { value: true, updatedAt: true },
   });
   await invalidateCache("dashboard");
+  if (previousPipeline && Array.isArray(previousPipeline.value) && Array.isArray(saved.value)) {
+    emitStageChanges(previousPipeline.value as unknown as StageCard[], saved.value as unknown as StageCard[]);
+  }
   return Response.json({ data: saved.value, revision: saved.updatedAt.toISOString() });
 }
+
+type StageCard = { id: string; contactId?: string; coluna: string };

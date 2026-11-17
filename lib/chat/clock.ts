@@ -15,6 +15,7 @@ import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operat
 import { planQueuePositions } from "@/lib/chat/queue-rules";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
+import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/engine-db";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -43,7 +44,7 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 }
 
 export async function runClock() {
-  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, scheduledSent: 0, scheduledFailed: 0, followUpsDue: 0, errors: [] as string[] };
+  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, scheduledSent: 0, scheduledFailed: 0, followUpsDue: 0, automationsResumed: 0, automationsInactive: 0, errors: [] as string[] };
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -219,6 +220,13 @@ export async function runClock() {
   // Venda faturada no ERP depois da abertura da oportunidade → card em "Ganho" (no máximo 1x por hora).
   await block("oportunidades ganhas", async () => {
     await syncWonOpportunities(now);
+  });
+
+  // Automações (/automacoes): retoma delays vencidos (reserva atômica, sem duplicar entre Blue/Green) e, de hora
+  // em hora, dispara o gatilho "Cliente inativo por tempo".
+  await block("automações", async () => {
+    summary.automationsResumed = await resumeDueExecutions(new Date(now));
+    summary.automationsInactive = await checkInactiveTriggers(new Date(now));
   });
 
   return summary;

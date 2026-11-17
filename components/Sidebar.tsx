@@ -31,6 +31,7 @@ import {
   Building2,
   BookOpen,
   BarChart3,
+  Workflow,
 } from "lucide-react";
 
 const ITEM_ACTIVE = "bg-[#051647]/[0.07] text-[#051647] dark:bg-white/10 dark:text-[#C4D600]";
@@ -91,6 +92,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Campanhas e disparos", href: "/campanhas", icon: Megaphone },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
     { title: "Pesquisas NPS", href: "/nps", icon: Award },
+    { title: "Automações", href: "/automacoes", icon: Workflow },
     { title: "Usuários", href: "/usuarios", icon: UserCog },
     { title: "Cargos", href: "/cargos", icon: ShieldCheck },
     { title: "Permissões", href: "/permissoes", icon: KeyRound },
@@ -102,7 +104,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
 
   const navGroups = [
     { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/filas"), byHref("/metricas-atendimento")] },
-    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps")] },
+    { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
   ]
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))

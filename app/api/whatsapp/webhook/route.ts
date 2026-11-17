@@ -10,6 +10,7 @@ import { detectOptOutCommand, OPT_IN_REPLY, OPT_OUT_REPLY, type OptOutCommand } 
 import { applyOptOutCommand } from "@/lib/marketing-opt-out-db";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { reportError } from "@/lib/monitoring/error-reporter";
+import { emitInboundMessageById } from "@/lib/automations/engine-db";
 
 /** Descadastro/reativação de campanhas pedido pelo próprio cliente. */
 async function handleOptOutCommand(conversationId: string, phone: string, command: OptOutCommand, text: string) {
@@ -194,6 +195,8 @@ export async function POST(request: Request) {
                 .catch((failure) => { void reportError("whatsapp.opt-out", failure, { phone: msg.from }); return false; });
               if (handled) { notifyChatChange(); continue; }
             }
+            // Automações (/automacoes) com gatilho "Mensagem recebida": rodam em segundo plano, sem atrasar o atendimento.
+            if (!recorded.autoReply) void emitInboundMessageById(recorded.conversationId, recorded.text).catch((failure) => console.error("[whatsapp/webhook] automações:", failure));
             await runAutomation(recorded).catch((failure) => {
               console.error("[whatsapp/webhook] fluxo automático:", failure);
               void reportError("whatsapp.automation", failure, { conversationId: recorded.conversationId });
