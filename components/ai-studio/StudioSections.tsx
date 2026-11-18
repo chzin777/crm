@@ -327,10 +327,13 @@ export function SkillsSection() {
   }, [toast]);
 
   const patch = (id: string, change: Partial<SkillDraft>) => setSkills((current) => current?.map((skill) => (skill.id === id ? { ...skill, ...change, dirty: true } : skill)) ?? current);
-  const add = () => {
-    const id = `novo-${Date.now()}`;
-    setSkills((current) => [...(current ?? []), { id, name: "Nova skill", slug: skillSlug("Nova skill"), triggerDescription: "", instructionsMd: "## Protocolo\n1. ...\n2. ...", isActive: true, sortOrder: ((current?.length ?? 0) + 1) * 10, builtin: false, dirty: true, isNew: true }]);
-    setOpen(id);
+  // "Nova skill" abre o modal; a skill só entra na lista depois de criada no servidor.
+  const [creating, setCreating] = useState(false);
+  const closeCreate = useCallback(() => setCreating(false), []);
+  const created = (skill: AiSkill) => {
+    setSkills((current) => [...(current ?? []), skill]);
+    setCreating(false);
+    toast.success("Skill criada", "A IA já segue o novo protocolo nas próximas respostas.");
   };
   const save = async (skill: SkillDraft) => {
     setBusy(skill.id);
@@ -374,9 +377,9 @@ export function SkillsSection() {
 
   return (
     <Panel
-      title="Skills (habilidades)"
-      hint="Cada skill é um protocolo em Markdown: quando o assunto bate com o gatilho, a IA segue as instruções à risca. Nas skills nativas, desligar o toggle também desliga a ferramenta e o fluxo do CRM ligados a ela."
-      action={<button type="button" onClick={add} className={primary}><Plus className="h-3.5 w-3.5" />Nova skill</button>}
+      title="Skills da IA"
+      hint="Protocolos em Markdown ativados por gatilho. Desativar uma skill nativa também pausa sua ferramenta no CRM."
+      action={<button type="button" onClick={() => setCreating(true)} className={primary}><Plus className="h-3.5 w-3.5" />Nova skill</button>}
     >
       <p className="text-xs text-slate-500 dark:text-slate-400">{skills?.length ?? 0} skill{skills?.length === 1 ? "" : "s"} · {activeCount} ativa{activeCount === 1 ? "" : "s"}</p>
       {!skills ? <p className="flex items-center gap-2 py-6 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando skills...</p> : skills.length === 0 ? (
@@ -444,7 +447,72 @@ export function SkillsSection() {
           })}
         </ul>
       )}
+      {creating && <SkillCreateDialog nextOrder={((skills?.length ?? 0) + 1) * 10} onClose={closeCreate} onCreated={created} />}
     </Panel>
+  );
+}
+
+/** Modal de criação de skill: nome, gatilho e protocolo obrigatórios; só volta para a lista depois de criada. */
+function SkillCreateDialog({ nextOrder, onClose, onCreated }: { nextOrder: number; onClose: () => void; onCreated: (skill: AiSkill) => void }) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [trigger, setTrigger] = useState("");
+  const [instructions, setInstructions] = useState("## Protocolo\n1. \n2. ");
+  const [isActive, setIsActive] = useState(true);
+  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const missing = { name: !name.trim(), trigger: !trigger.trim(), instructions: !instructions.replace(/^#+.*$|^\s*\d+\.\s*$/gm, "").trim() };
+
+  const submit = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    setSubmitted(true);
+    if (missing.name || missing.trigger || missing.instructions) return;
+    setSaving(true);
+    setError("");
+    try {
+      const body = { name: name.trim(), slug: skillSlug(slug || name), triggerDescription: trigger.trim(), instructionsMd: instructions, isActive, sortOrder: nextOrder };
+      onCreated((await api<{ skill: AiSkill }>("/api/ai/skills", json("POST", body))).skill);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível criar a skill. Tente de novo.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const invalid = (flag: boolean) => (submitted && flag ? "border-red-400 dark:border-red-500" : "");
+  const fieldError = "mt-1 block text-[10px] font-normal text-red-600 dark:text-red-300";
+  return (
+    <EntityDialog titleId="skill-create" title="Nova skill" description="Protocolo em Markdown que a IA segue quando a conversa bate com o gatilho." onClose={onClose} size="lg">
+      <form onSubmit={(event) => void submit(event)} className="space-y-3" noValidate>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Nome *
+            <input autoFocus value={name} onChange={(event) => { setName(event.target.value); if (!slugEdited) setSlug(skillSlug(event.target.value)); }} placeholder="Ex.: Agendamento de exame" aria-invalid={submitted && missing.name} className={`${input} ${invalid(missing.name)}`} maxLength={120} />
+            {submitted && missing.name && <span className={fieldError}>Informe o nome.</span>}
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Slug
+            <input value={slug} onChange={(event) => { setSlugEdited(true); setSlug(event.target.value); }} onBlur={(event) => setSlug(skillSlug(event.target.value || name))} placeholder="gerado pelo nome" className={`${input} font-mono`} maxLength={60} />
+          </label>
+        </div>
+        <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Quando acionar (gatilho) *
+          <input value={trigger} onChange={(event) => setTrigger(event.target.value)} placeholder="Ex.: cliente pergunta como agendar exame de vista" aria-invalid={submitted && missing.trigger} className={`${input} ${invalid(missing.trigger)}`} maxLength={600} />
+          {submitted && missing.trigger && <span className={fieldError}>Descreva quando a IA deve usar esta skill.</span>}
+        </label>
+        <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Protocolo (Markdown) *
+          <textarea rows={10} value={instructions} onChange={(event) => setInstructions(event.target.value)} aria-invalid={submitted && missing.instructions} className={`${area} resize-y font-mono ${invalid(missing.instructions)}`} />
+          {submitted && missing.instructions ? <span className={fieldError}>Escreva os passos do protocolo.</span> : <span className="block text-right text-[10px] font-normal text-slate-400">{instructions.length.toLocaleString("pt-BR")} caracteres</span>}
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+          <Switch label="Skill ativa" checked={isActive} onChange={setIsActive} />Ativa
+        </label>
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <button type="button" onClick={onClose} className={ghost}>Cancelar</button>
+          <button type="submit" disabled={saving} className={primary}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Criar skill</button>
+        </div>
+      </form>
+    </EntityDialog>
   );
 }
 
