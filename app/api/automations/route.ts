@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
+import { ensureDefaultHandoffFlow } from "@/lib/automations/ai-handoff";
 import { NODE_DEF, sanitizeGraph, triggerNodes, triggerTypesOf, type FlowGraph } from "@/lib/automations/nodes";
 import { FLOW_TEMPLATES } from "@/lib/automations/templates";
 
@@ -10,6 +11,8 @@ import { FLOW_TEMPLATES } from "@/lib/automations/templates";
 export async function GET() {
   const guard = await requireModule("automacoes");
   if (guard.response) return guard.response;
+  // Fluxo padrão "Transbordo da IA" (antigo "Para onde vai" de /ia), criado uma única vez.
+  await ensureDefaultHandoffFlow().catch((error) => console.error("[automacoes] fluxo padrão de transbordo:", error));
   const [flows, counts] = await Promise.all([
     prisma.automationFlow.findMany({ orderBy: { updatedAt: "desc" }, select: { id: true, name: true, description: true, status: true, triggerType: true, nodes: true, updatedAt: true } }),
     prisma.automationExecution.groupBy({ by: ["flowId", "status"], _count: { _all: true } }),

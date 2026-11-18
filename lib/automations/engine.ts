@@ -220,7 +220,8 @@ export type TriggerEvent =
   | { type: "trigger_stage"; stage: string }
   | { type: "trigger_tag"; tag: string }
   | { type: "trigger_inactive"; nodeId: string }
-  | { type: "trigger_webhook" };
+  | { type: "trigger_webhook" }
+  | { type: "trigger_ai_handoff"; queueId: string | null };
 
 /** Este nó de gatilho casa com o evento? (sem as regras & filtros, avaliadas em pickTrigger). */
 export function triggerMatches(node: FlowNode | null, event: TriggerEvent): boolean {
@@ -235,6 +236,7 @@ export function triggerMatches(node: FlowNode | null, event: TriggerEvent): bool
   if (event.type === "trigger_stage") return String(config.stage ?? "") === event.stage;
   if (event.type === "trigger_tag") return plain(String(config.tag ?? "")) === plain(event.tag);
   if (event.type === "trigger_inactive") return node.id === event.nodeId;
+  if (event.type === "trigger_ai_handoff") return !String(config.queueId ?? "") || String(config.queueId) === event.queueId;
   return true;
 }
 

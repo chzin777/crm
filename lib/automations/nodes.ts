@@ -2,7 +2,7 @@
  * Catálogo dos nós do construtor de automações (/automacoes). Puro: usado pela tela, pelo motor e pelos testes.
  */
 
-export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook"] as const;
+export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff"] as const;
 export const ACTION_TYPES = ["send_whatsapp", "delay", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "opt_out", "condition", "http"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export type NodeType = TriggerType | (typeof ACTION_TYPES)[number];
@@ -198,6 +198,7 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "trigger_tag", category: "gatilho", label: "Tag adicionada", description: "Uma tag foi aplicada na conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text", placeholder: "vip" }], defaults: { tag: "" } },
   { type: "trigger_inactive", category: "gatilho", label: "Cliente inativo por tempo", description: "Contato sem mandar mensagem há um tempo (segundos a anos).", fields: [...DURATION_FIELDS("Tempo sem contato"), { key: "businessHours", label: "Disparar só em horário comercial", kind: "boolean" }], defaults: { amount: 90, unit: "days", businessHours: false } },
   { type: "trigger_webhook", category: "gatilho", label: "Webhook externo", description: "Sistema externo chama a URL do fluxo com { telefone } e variáveis.", fields: [], defaults: {} },
+  { type: "trigger_ai_handoff", category: "gatilho", label: "IA transferiu o atendimento", description: "A IA passou a conversa para a equipe (já na fila escolhida pelo assunto). Variáveis: {{fila}} e {{motivo}}.", fields: [{ key: "queueId", label: "Só quando a fila escolhida for (vazio = qualquer)", kind: "queue" }], defaults: { queueId: "" } },
 
   { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis e imagem opcional (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }], defaults: { text: "", mediaUrl: "" } },
   { type: "delay", category: "mensagem", label: "Aguardar", description: "Pausa o fluxo de segundos até anos.", fields: [...DURATION_FIELDS("Quanto tempo"), { key: "businessHours", label: "Retomar só em horário comercial", kind: "boolean" }], defaults: { amount: 1, unit: "hours", businessHours: false } },

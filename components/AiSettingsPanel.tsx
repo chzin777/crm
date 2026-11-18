@@ -13,12 +13,9 @@ import type { AiUsageReport } from "@/lib/ai/store";
 import type { StockLog } from "@/lib/ai/stock";
 import type { ImageAnalysis } from "@/lib/ai/catalog-search";
 import type { CatalogContext } from "@/lib/ai/catalog-context";
-import { defaultQueueHint, isGeneralQueue } from "@/lib/ai/routing";
 import { productSelectRef, selectionText, type InteractiveShowcase, type ShowcaseListRow } from "@/lib/ai/interactive-showcase";
 import type { SalesEvent, SalesTrigger } from "@/lib/sales-pipeline";
 import type { PlaygroundFinancial } from "@/lib/ai/installments";
-
-type Queue = { id: string; name: string; description?: string };
 /** Seções do Estúdio de IA (menu lateral interno). */
 type Tab = "geral" | "regras" | "skills" | "conhecimento" | "simulador";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
@@ -510,7 +507,6 @@ export function AiSettingsPanel() {
   const [tab, setTab] = useState<Tab>("geral");
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [saved, setSaved] = useState<string>("");
-  const [queues, setQueues] = useState<Queue[]>([]);
   const [configured, setConfigured] = useState(true);
   const [imageSearch, setImageSearch] = useState<string | null>(null);
   const [imageSearchFree, setImageSearchFree] = useState(true);
@@ -525,12 +521,11 @@ export function AiSettingsPanel() {
     let active = true;
     fetch("/api/ai/settings")
       .then(async (response) => {
-        const data = (await response.json()) as { settings?: AiSettings; queues?: Queue[]; configured?: boolean; imageSearch?: string | null; imageSearchFree?: boolean; error?: string };
+        const data = (await response.json()) as { settings?: AiSettings; configured?: boolean; imageSearch?: string | null; imageSearchFree?: boolean; error?: string };
         if (!active) return;
         if (!response.ok || !data.settings) throw new Error(data.error ?? "Não foi possível carregar as configurações da IA.");
         setSettings(data.settings);
         setSaved(JSON.stringify(data.settings));
-        setQueues(data.queues ?? []);
         setConfigured(data.configured !== false);
         setImageSearch(data.imageSearch ?? null);
         setImageSearchFree(data.imageSearchFree !== false);
@@ -822,49 +817,6 @@ export function AiSettingsPanel() {
             </div>
             <label className={labelCls}>Máximo de respostas da IA por conversa
               <input type="number" min={1} max={50} value={settings.maxAiReplies} onChange={(event) => set("maxAiReplies", Number(event.target.value))} className={`${input} w-28`} />
-            </label>
-          </Block>
-
-          <Block title="Para onde vai" hint="Fila que recebe a conversa transferida. Com a IA escolhendo, ela roteia pelo assunto; pedido de atendente sem assunto ganha 1 pergunta de triagem antes.">
-            <Toggle label="A IA escolhe a fila pelo assunto" description="Orçamento vai para Vendas, garantia para Pós-venda, boleto para Financeiro. A escolha é conferida no servidor." checked={settings.aiChoosesQueue} onChange={(value) => set("aiChoosesQueue", value)} />
-            <label className={labelCls}>{settings.aiChoosesQueue ? "Fila padrão (assunto não identificado ou fila inválida)" : "Fila de destino"}
-              <select value={settings.handoffQueueId} onChange={(event) => set("handoffQueueId", event.target.value)} className={`${input} cursor-pointer`}>
-                <option value="">{settings.aiChoosesQueue ? "Atendimento Geral (automático pelo nome)" : "Manter a fila atual da conversa"}</option>
-                {queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.name}</option>)}
-              </select>
-            </label>
-            {settings.aiChoosesQueue && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Filas que a IA enxerga</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Descreva quando usar cada fila. Em branco, vale a descrição da fila ou a sugestão pelo nome (mostrada em cinza).</p>
-                {queues.length === 0 ? <p className="text-xs text-slate-400">Nenhuma fila ativa cadastrada.</p> : (
-                  <ul className="divide-y divide-slate-200/70 rounded-lg border border-slate-200/70 dark:divide-slate-800 dark:border-slate-800">
-                    {queues.map((queue) => {
-                      const fallbackHint = queue.description?.trim() || defaultQueueHint(queue.name) || "Descreva os assuntos desta fila";
-                      const isDefault = settings.handoffQueueId ? settings.handoffQueueId === queue.id : isGeneralQueue(queue);
-                      return (
-                        <li key={queue.id} className="flex flex-col gap-1.5 p-3 sm:flex-row sm:items-center sm:gap-3">
-                          <span className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-[#051647] sm:w-44 dark:text-white">
-                            {queue.name}
-                            {isDefault && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300">padrão</span>}
-                          </span>
-                          <input aria-label={`Quando usar a fila ${queue.name}`} value={settings.queueHints[queue.id] ?? ""} placeholder={fallbackHint} maxLength={300}
-                            onChange={(event) => {
-                              const next = { ...settings.queueHints };
-                              if (event.target.value) next[queue.id] = event.target.value; else delete next[queue.id];
-                              set("queueHints", next);
-                            }}
-                            className={input} />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            )}
-            <label className={labelCls}>Mensagem ao transferir
-              <textarea rows={2} value={settings.handoffMessage} onChange={(event) => set("handoffMessage", event.target.value)} className={area} />
-              <span className="block text-[10px] font-normal text-slate-400">Vazia: transfere sem avisar o cliente. Aceita {"{cliente}"} e {"{fila}"}.</span>
             </label>
           </Block>
 

@@ -23,7 +23,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, Bell, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Bell, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -42,7 +42,7 @@ type Execution = { id: string; status: string; currentNodeId: string | null; res
 type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
-  trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook,
+  trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
   send_whatsapp: MessageSquare, delay: Timer, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, opt_out: ShieldOff, condition: GitBranch, http: Globe,
 };
 const HEADER: Record<NodeCategory, string> = {
@@ -84,6 +84,7 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_tag": case "add_tag": case "remove_tag": return String(config.tag || "(sem tag)");
     case "trigger_inactive": { const { amount, unit } = readDuration(config, "days"); return `${durationLabel(amount, unit)} sem contato${config.businessHours ? " · horário comercial" : ""}`; }
     case "trigger_webhook": return "POST na URL do fluxo";
+    case "trigger_ai_handoff": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "Qualquer fila";
     case "send_whatsapp": return String(config.text || "(mensagem vazia)");
     case "delay": { const { amount, unit } = readDuration(config, "hours"); return `${durationLabel(amount, unit)}${config.businessHours ? " · horário comercial" : ""}`; }
     case "ai_agent": return String(config.objective || "Atendimento pela IA");

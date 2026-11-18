@@ -27,6 +27,7 @@ import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQ
 import { readFile } from "@/lib/minio";
 import { transcribeMessageAudio } from "@/lib/chat/transcription";
 import { activeSourceNotes, type KnowledgeSourceKey } from "@/lib/ai/knowledge-sources";
+import { emitAiHandoff, hasActiveHandoffFlow } from "@/lib/automations/ai-handoff";
 import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
@@ -242,13 +243,7 @@ type QueueSource = "fixed" | "ai" | "fallback" | "current" | "none" | "staff";
 async function handoff(conversation: ChatConversation, settings: AiSettings, reason: string, queueName?: string, sendHandoffMessage = true, staffQueueId?: string) {
   const contact = await prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } });
   const target = await handoffQueue(settings, conversation.queueId, queueName, staffQueueId);
-
-  // Nunca transferência silenciosa: sem mensagem configurada, vai o aviso padrão ("Claro, Vivi! Vou te transferir...").
-  if (sendHandoffMessage && isWindowOpen(conversation.lastInboundAt)) {
-    const notice = settings.handoffMessage.trim() ? fillVariables(settings.handoffMessage, { customer: contact?.name, queue: target?.name }) : defaultHandoffNotice(contact?.name);
-    await sendAutomaticMessage(conversation, notice, undefined, undefined, AI_AUTHOR);
-  }
-  // Só agora a conversa entra na fila humana (posição contada a partir do transbordo).
+  // A conversa sai da IA e entra na fila humana já (posição contada a partir do transbordo).
   const state = readMenuState(conversation.menuState);
   state.stopped = true;
   state.aiActive = false;
@@ -261,6 +256,15 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   // Nota para o atendente: fila, como foi escolhida e o resumo do que o cliente precisa.
   const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : target?.source === "staff" ? " (fila do atendente pedido)" : "";
   await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}${how}` : ""}: ${reason}`);
+  // O que vem depois (aviso ao cliente, fila/atendente, tags, alertas) é o fluxo "IA transferiu o atendimento" em
+  // /automacoes. Sem fluxo que rode, o aviso padrão: nunca transferência silenciosa.
+  if (sendHandoffMessage) {
+    const flows = await emitAiHandoff(conversation, target, reason).catch((error) => {
+      console.error(`[ai] ${conversation.id}: automação de transbordo:`, error);
+      return 0;
+    });
+    if (!flows && isWindowOpen(conversation.lastInboundAt)) await sendAutomaticMessage(conversation, defaultHandoffNotice(contact?.name), undefined, undefined, AI_AUTHOR);
+  }
   // Transbordo para Vendas/Comercial: a oportunidade do contato vai para Orçamento com o resumo.
   if (isSalesQueue(target?.name) && skillEnabled(await loadSkills(), "pipeline_automatico")) await recordSalesEvents({ contactId: conversation.contactId, conversationId: conversation.id, events: [{ type: "transbordo_vendas", summary: reason.slice(0, 200) }] });
   console.log(`[ai] ${conversation.id}: transferida (${reason})`);
@@ -1275,8 +1279,8 @@ async function respond(conversationId: string, messageId: string) {
   if (!fresh || (await conversationMode(fresh)).mode === "paused") return;
 
   if (outcome.action === "handoff") {
-    // A resposta da IA é o aviso de transferência (sem mensagem configurada); sem resposta, handoff manda o padrão.
-    const replied = !!outcome.reply && !settings.handoffMessage.trim();
+    // Sem fluxo de transbordo ativo, a resposta da IA é o aviso; com fluxo, o aviso é o do fluxo (/automacoes).
+    const replied = !!outcome.reply && !(await hasActiveHandoffFlow().catch(() => false));
     if (replied) await sendAiReply(fresh, outcome.reply, null, latest.externalId);
     return handoff(fresh, settings, outcome.reason, outcome.queue, !replied);
   }
