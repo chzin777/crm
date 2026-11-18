@@ -42,6 +42,8 @@ import { useToast } from "@/components/ToastProvider";
 import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 import { CampaignRecipientsLog } from "@/components/CampaignRecipientsLog";
 import { BULK_STARTED_EVENT, BulkJobDetailsDialog, type BulkJobView } from "@/components/BulkDispatchTracker";
+import { AudienceOverlapNotice } from "@/components/AudienceOverlapNotice";
+import { dedupeRecipients, summarizeSegmentOverlap, type SegmentOverlapSummary } from "@/lib/campaign-audience";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
@@ -87,6 +89,8 @@ interface CampaignRecipient {
   email: string;
   dataNascimento: string;
   segmento: string;
+  /** Segmentos da campanha em que o contato aparece (ele recebe uma única mensagem). */
+  origens?: string[];
 }
 
 interface DispatchJobView {
@@ -98,6 +102,7 @@ interface DispatchJobView {
   sent: number;
   failed: number;
   skipped: number;
+  duplicatesRemoved?: number;
   errors: string[];
   pause?: { kind: string; code?: number; message: string };
 }
@@ -964,13 +969,13 @@ export function CampaignsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- roda uma vez, quando os segmentos terminam de carregar
   }, [segmentsLoading, segments, searchParams]);
 
-  /** Calcula os destinatários de cada campanha a partir dos segmentos (usado no disparo e na estimativa de custo). */
-  const buildCampaignRecipients = async (readyCampaigns: Campaign[]) => {
+  /** Busca no servidor os contatos de cada segmento das campanhas (sem unir); base do disparo e do resumo de interseção. */
+  const fetchCampaignAudience = async (readyCampaigns: Campaign[]) => {
     const groups: Record<string, AudienceCriterion[]> = {};
     const contactGroups: Record<string, string[]> = {};
     const contactCriteria: Record<string, AudienceCriterion[]> = {};
     const campaignCriteria: Record<string, { groupKeys: string[]; criteria: AudienceCriterion[] }> = {};
-    const groupKeysByCampaign = new Map<string, string[]>();
+    const groupKeysByCampaign = new Map<string, { key: string; label: string }[]>();
     for (const campaign of readyCampaigns) {
       const campaignSegments = campaign.audienceSegmentIds?.length
         ? campaign.audienceSegmentIds.map((id) => segments.find((segment) => segment.id === id))
@@ -979,10 +984,10 @@ export function CampaignsView() {
         throw new Error(`Não foi possível localizar todos os segmentos de "${campaign.nome}". Revise o público antes de disparar.`);
       }
 
-      const keys: string[] = [];
+      const keys: { key: string; label: string }[] = [];
       for (const segment of campaignSegments as CampaignAudienceSegment[]) {
         const key = `${campaign.id}:${segment.id}`;
-        keys.push(key);
+        keys.push({ key, label: segment.nome });
         const criteria = (segment.criterios ?? []).map((name) => {
           const legacyName = name.replace(/^Loja:\s*/i, "Loja ");
           const criterion = audienceCriteria.find((candidate) => candidate.nome === name || candidate.nome === legacyName);
@@ -1004,7 +1009,7 @@ export function CampaignsView() {
         groups[key] = criteria as AudienceCriterion[];
       }
       groupKeysByCampaign.set(campaign.id, keys);
-      if (campaign.criteriaFilters?.length) campaignCriteria[campaign.id] = { groupKeys: keys, criteria: campaign.criteriaFilters };
+      if (campaign.criteriaFilters?.length) campaignCriteria[campaign.id] = { groupKeys: keys.map((item) => item.key), criteria: campaign.criteriaFilters };
     }
 
     const audienceResponse = await fetch("/api/segments/audience", {
@@ -1022,22 +1027,72 @@ export function CampaignsView() {
     };
     if (!audienceResponse.ok) throw new Error(audience.error || "Não foi possível calcular o público da campanha.");
     if (!audience.recipients) throw new Error("O servidor não retornou os contatos do público.");
+    return { recipients: audience.recipients, groupKeysByCampaign };
+  };
 
+  /**
+   * Destinatários únicos de uma campanha: união dos segmentos sem repetir pessoa (mesmo contato ou mesmo celular),
+   * guardando em `origens` os segmentos em que cada um aparece. Com filtros da IA, só quem passou neles.
+   */
+  const uniqueCampaignRecipients = (campaign: Campaign, audience: Awaited<ReturnType<typeof fetchCampaignAudience>>) => {
+    const keys = audience.groupKeysByCampaign.get(campaign.id) ?? [];
+    const tagged = keys.flatMap(({ key, label }) => (audience.recipients[key] ?? []).map((recipient) => ({ ...recipient, origens: [label] })));
+    const { unique } = dedupeRecipients(tagged);
+    if (!campaign.criteriaFilters?.length) return unique;
+    const allowed = new Set((audience.recipients[campaign.id] ?? []).map((recipient) => recipient.id));
+    return unique.filter((recipient) => allowed.has(recipient.id));
+  };
+
+  /** Calcula os destinatários de cada campanha a partir dos segmentos (usado no disparo e na estimativa de custo). */
+  const buildCampaignRecipients = async (readyCampaigns: Campaign[]) => {
+    const audience = await fetchCampaignAudience(readyCampaigns);
     const recipientsByCampaign = new Map<string, CampaignRecipient[]>();
     for (const campaign of readyCampaigns) {
-      const recipients = new Map<string, CampaignRecipient>();
-      if (campaign.criteriaFilters?.length) {
-        for (const recipient of audience.recipients[campaign.id] ?? []) recipients.set(recipient.id, recipient);
-      } else {
-        for (const key of groupKeysByCampaign.get(campaign.id) ?? []) {
-          for (const recipient of audience.recipients[key] ?? []) recipients.set(recipient.id, recipient);
-        }
-      }
-      if (recipients.size === 0) throw new Error(`O público de "${campaign.nome}" não contém contatos para envio.`);
-      recipientsByCampaign.set(campaign.id, [...recipients.values()]);
+      const recipients = uniqueCampaignRecipients(campaign, audience);
+      if (recipients.length === 0) throw new Error(`O público de "${campaign.nome}" não contém contatos para envio.`);
+      recipientsByCampaign.set(campaign.id, recipients);
     }
     return recipientsByCampaign;
   };
+
+  // Resumo de interseção do público em edição (2+ segmentos): soma bruta × únicos, unificados e segmentos sem novos.
+  const [audienceOverlap, setAudienceOverlap] = useState<{ signature: string; loading: boolean; summary?: SegmentOverlapSummary; finalUnique?: number; error?: string } | null>(null);
+  const overlapEditorOpen = isCreateOpen || Boolean(selectedCampaign);
+  const overlapSignature = JSON.stringify([selectedAudienceSegments, campaignCriteriaFilters]);
+  useEffect(() => {
+    if (!overlapEditorOpen || selectedAudienceSegments.length < 2 || segmentsLoading || criteriaLoading) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setAudienceOverlap({ signature: overlapSignature, loading: true });
+      const preview: Campaign = {
+        id: "preview",
+        nome: form.nome || "Nova campanha",
+        publico: selectedAudienceSegments.join(", "),
+        audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
+        criteriaFilters: campaignCriteriaFilters,
+      } as Campaign;
+      fetchCampaignAudience([preview])
+        .then((audience) => {
+          if (!active) return;
+          const keys = audience.groupKeysByCampaign.get(preview.id) ?? [];
+          const summary = summarizeSegmentOverlap(keys.map(({ key, label }) => ({ label, recipients: audience.recipients[key] ?? [] })));
+          setAudienceOverlap({ signature: overlapSignature, loading: false, summary, finalUnique: uniqueCampaignRecipients(preview, audience).length });
+        })
+        .catch((error: unknown) => {
+          if (active) setAudienceOverlap({ signature: overlapSignature, loading: false, error: error instanceof Error ? error.message : "Não foi possível calcular o público." });
+        });
+    }, 400);
+    return () => { active = false; window.clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recalcula só quando os segmentos/filtros escolhidos mudam
+  }, [overlapEditorOpen, overlapSignature, segmentsLoading, criteriaLoading]);
+
+  // Resultado de outra seleção (ou ainda não calculado) aparece como "calculando".
+  const audienceOverlapNotice = selectedAudienceSegments.length >= 2 ? (
+    <AudienceOverlapNotice
+      state={audienceOverlap?.signature === overlapSignature ? audienceOverlap : { loading: true }}
+      hasFilters={campaignCriteriaFilters.length > 0}
+    />
+  ) : null;
 
   // Custo estimado do disparo: contatos com telefone × preço da categoria do modelo.
   const estimateDispatchCost = async (readyCampaigns: Campaign[]) => {
@@ -1516,6 +1571,7 @@ export function CampaignsView() {
                   placeholder="Selecione os segmentos"
                   required
                 />
+                {audienceOverlapNotice}
                 {campaignCriteriaFilters.length > 0 && (
                   <section className="space-y-2 rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3">
                     <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Filtros adicionais gerados pela IA (todos devem corresponder)</p><button type="button" onClick={() => setCampaignCriteriaFilters([])} className="text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600] cursor-pointer">Remover filtros</button></div>
@@ -1767,6 +1823,7 @@ export function CampaignsView() {
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         {int(selectedJob.cursor)} de {int(selectedJob.total)} contatos processados · {int(selectedJob.sent)} enviadas · {int(selectedJob.failed)} falhas
                         {selectedJob.skipped > 0 && ` · ${int(selectedJob.skipped)} pulados (receberam campanha nos últimos ${cooldownDays} dias)`}
+                        {(selectedJob.duplicatesRemoved ?? 0) > 0 && ` · ${int(selectedJob.duplicatesRemoved ?? 0)} repetidos entre segmentos unificados (1 mensagem por cliente)`}
                       </p>
                       {selectedJob.status === "paused" && selectedJob.pause && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{selectedJob.pause.message}</p>}
                       {selectedJob.errors.length > 0 && (
@@ -1840,6 +1897,7 @@ export function CampaignsView() {
                       placeholder="Selecione os segmentos"
                       required
                     />
+                    {audienceOverlapNotice}
                     <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
                     {(selectedCampaign.metaApprovalStatus === "REJECTED" || selectedCampaign.metaApprovalStatus === "SUBMISSION_FAILED") && <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/30"><p className="text-xs font-semibold text-red-800 dark:text-red-200">{selectedCampaign.metaApprovalStatus === "REJECTED" ? `Rejeitada pela Meta: ${selectedCampaign.metaApprovalReason || "motivo não informado"}` : `Não foi possível submeter: ${selectedCampaign.metaApprovalReason || "verifique a integração e tente novamente"}`}</p><div className="flex gap-2"><input value={templatePrompt} onChange={(event) => setTemplatePrompt(event.target.value)} placeholder="Orientação para uma nova versão do template" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={isGeneratingTemplate} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar nova versão"}</button></div></div>}
                     {aiTemplateDraft && <div className="space-y-2 rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/5 p-3"><p className="text-xs font-semibold text-slate-800 dark:text-white">Template para reenviar à análise</p><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label><button type="button" disabled={isSubmittingTemplate} onClick={() => void submitTemplateForMeta({ ...selectedCampaign, nome: form.nome.trim(), publico: selectedAudienceSegments.join(", "), audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id), criteriaFilters: campaignCriteriaFilters, objective: campaignObjective, audienceDescription: campaignAudienceDescription, metaCategory: campaignCategory, mensagem: form.mensagem.trim(), metaTemplateDraft: { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory } }, { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory }, false)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Send className="h-3.5 w-3.5" />{isSubmittingTemplate ? "Enviando..." : "Aprovar e reenviar para análise"}</button></div>}

@@ -6,10 +6,12 @@ import { phoneVariants } from "@/lib/chat/phone";
 import { formatBr } from "@/lib/br-time";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 import { withoutOptedOut } from "@/lib/marketing-opt-out";
+import { dedupeRecipients } from "@/lib/campaign-audience";
 import { loadOptOutKeys } from "@/lib/marketing-opt-out-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
 
-export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string };
+/** `origens`: segmentos da campanha em que o contato aparece (métrica; o envio continua sendo um só). */
+export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string; origens?: string[] };
 
 type CampaignTemplate = { name: string; language: string; params: string[]; hasImage?: boolean; buttons?: { type: string; text: string }[] };
 type CampaignRecord = {
@@ -41,6 +43,8 @@ export type DispatchJob = {
   baseDisparos: number;
   /** Envia mesmo para quem recebeu campanha dentro da janela de descanso. */
   ignoreCooldown?: boolean;
+  /** Repetidos (mesmo contato ou mesmo celular em mais de um segmento) retirados da fila antes do envio. */
+  duplicatesRemoved?: number;
   errors: string[];
   pause?: PauseReason;
   startedAt: string;
@@ -429,7 +433,9 @@ async function assertCampaignTemplateReady(campaign: CampaignRecord) {
 
 export async function startDispatch(campaignId: string, requested: DispatchRecipient[], options: { ignoreCooldown?: boolean } = {}) {
   // Quem pediu para sair (marketingOptOut) nunca entra na fila de uma campanha.
-  const recipients = withoutOptedOut(requested, await loadOptOutKeys());
+  // Cada pessoa recebe no máximo uma vez, mesmo estando em vários segmentos (por contato e por celular).
+  const { unique, removed: duplicatesRemoved } = dedupeRecipients(requested);
+  const recipients = withoutOptedOut(unique, await loadOptOutKeys());
   const existing = await readJob(campaignId);
   if (existing && (existing.status === "running" || existing.status === "paused")) {
     throw new DispatchError("Esta campanha já tem um disparo em andamento ou pausado.", 409);
@@ -462,6 +468,7 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
     skipped: 0,
     baseDisparos: campaign.disparos ?? 0,
     ignoreCooldown: options.ignoreCooldown === true,
+    duplicatesRemoved,
     errors: [],
     startedAt: new Date().toISOString(),
   };

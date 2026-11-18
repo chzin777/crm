@@ -15,6 +15,7 @@ export async function GET() {
 const isRecipient = (value: unknown): value is DispatchRecipient => {
   if (typeof value !== "object" || value === null) return false;
   const item = value as Record<string, unknown>;
+  if (item.origens !== undefined && !(Array.isArray(item.origens) && item.origens.every((origin) => typeof origin === "string"))) return false;
   return ["id", "nome", "telefone", "email", "dataNascimento", "segmento"].every((key) => typeof item[key] === "string");
 };
 
