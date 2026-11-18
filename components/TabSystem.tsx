@@ -19,6 +19,7 @@ import {
   Sparkles,
   BarChart3,
   BookOpen,
+  Workflow,
   X,
 } from "lucide-react";
 
@@ -38,6 +39,7 @@ const TABS: TabDef[] = [
   { id: "campanhas", label: "Campanhas", href: "/campanhas", icon: MessageSquare },
   { id: "modelos", label: "Modelos", href: "/modelos", icon: FileText },
   { id: "nps", label: "NPS", href: "/nps", icon: Award },
+  { id: "automacoes", label: "Automações", href: "/automacoes", icon: Workflow },
   { id: "usuarios", label: "Usuários", href: "/usuarios", icon: UserCog },
   { id: "cargos", label: "Cargos", href: "/cargos", icon: Shield },
   { id: "permissoes", label: "Permissões", href: "/permissoes", icon: KeyRound },
