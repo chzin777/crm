@@ -1,5 +1,6 @@
 "use client";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { compactCount, percent, type FlowMetrics, type NodeMetrics } from "@/lib/automations/metrics";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -25,13 +26,13 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, MousePointerClick, Gauge, Gem, PenLine, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, Shuffle, Radio, Users, TrendingUp, MousePointerClick, Gauge, Gem, PenLine, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { TIER_META, type Tier } from "@/lib/scoring";
 import { useToast } from "@/components/ToastProvider";
 import {
-  AUDIO_STORAGE_PREFIX, CONVERSION_KINDS, describeBusinessWindow, handleLabel, MAX_AB_VARIANTS, outputHandles, readVariants, variantLetter, WEEKDAY_LABELS, type ConversionKind, type FlowSettings, type OutputHandle,
+  readDistribute, MAX_ATTRIBUTION_DAYS, AUDIO_STORAGE_PREFIX, CONVERSION_KINDS, describeBusinessWindow, handleLabel, MAX_AB_VARIANTS, outputHandles, readVariants, variantLetter, WEEKDAY_LABELS, type ConversionKind, type FlowSettings, type OutputHandle,
   CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
   type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
 } from "@/lib/automations/nodes";
@@ -46,7 +47,7 @@ type Execution = { id: string; status: string; currentNodeId: string | null; res
 type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
-  trigger_link_click: MousePointerClick, trigger_score: Gauge, trigger_tier: Gem, change_score: Gauge, update_field: PenLine,
+  distribute_lead: Shuffle, trigger_link_click: MousePointerClick, trigger_score: Gauge, trigger_tier: Gem, change_score: Gauge, update_field: PenLine,
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
   trigger_erp_sale: ShoppingBag, trigger_erp_after_sale: CalendarClock, trigger_erp_return: Undo2, trigger_erp_overdue: AlertTriangle, trigger_erp_due_soon: CalendarClock,
   trigger_erp_paid: BadgeCheck, trigger_erp_good_payer: Award, trigger_erp_birthday: Cake, trigger_erp_no_purchase: UserX, trigger_erp_lab_ready: Glasses,
@@ -93,7 +94,7 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_stage": case "move_stage": return stage(config.stage);
     case "trigger_tag": case "add_tag": case "remove_tag": return String(config.tag || "(sem tag)");
     case "trigger_inactive": { const { amount, unit } = readDuration(config, "days"); return `${durationLabel(amount, unit)} sem contato${config.businessHours ? " · horário comercial" : ""}`; }
-    case "trigger_webhook": return "POST na URL do fluxo";
+    case "trigger_webhook": return config.phoneField ? `Lead externo · telefone em ${String(config.phoneField)}` : "Lead externo (Meta, Google, Typeform, landing page)";
     case "trigger_ai_handoff": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "Qualquer fila";
     case "trigger_erp_sale": case "trigger_erp_return": case "trigger_erp_after_sale": {
       const parts = [
@@ -119,6 +120,11 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "delay": { const { amount, unit } = readDuration(config, "hours"); return `${durationLabel(amount, unit)}${config.businessHours ? " · horário comercial" : ""}`; }
     case "ai_agent": return String(config.objective || "Atendimento pela IA");
     case "assign": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "(escolha a fila)";
+    case "distribute_lead": {
+      const rule = readDistribute(config);
+      const pool = rule.pool === "queue" ? options.queues.find((queue) => queue.id === rule.queueId)?.name ?? "(escolha a fila)" : `${rule.userIds.length} vendedor(es)`;
+      return `${rule.mode === "least_load" ? "Menor carga" : "Rodízio"} · ${pool}${rule.onlyOnline ? " · online" : ""}${rule.respectShift ? " · turno" : ""}${rule.maxActive ? ` · até ${rule.maxActive}` : ""}`;
+    }
     case "notify": return String(config.title || "Notificação");
     case "condition": return describeCondition(config);
     case "add_note": return `${NOTE_TARGETS.find((item) => item.value === config.target)?.label ?? NOTE_TARGETS[0].label}: ${String(config.text || "(sem texto)")}`;
@@ -137,7 +143,30 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
 const OptionsContext = { current: { queues: [], users: [] } as Options, flowId: "" };
 const queueNames = () => Object.fromEntries(OptionsContext.current.queues.map((queue) => [queue.id, queue.name]));
 
-const AutomationNode = memo(function AutomationNode({ data, selected }: NodeProps<CanvasNode>) {
+/** Métricas do fluxo para os cards do canvas (null = carregando ou oculto). */
+const MetricsContext = createContext<FlowMetrics | null>(null);
+
+const BADGE = "inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold leading-none";
+
+/** Badges compactos do nó: entraram, passaram, erros, entregues/responderam (envios) e vendas atribuídas. */
+function NodeBadges({ metrics, kind }: { metrics: NodeMetrics; kind: NodeType }) {
+  const message = kind === "send_whatsapp";
+  const money = metrics.revenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  return (
+    <div className="mx-3 mt-1.5 flex flex-wrap gap-1" aria-label="Métricas do passo">
+      <span className={`${BADGE} bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300`} title={`${metrics.entered} entraram neste passo`}><Users className="h-2.5 w-2.5" />{compactCount(metrics.entered)}</span>
+      <span className={`${BADGE} bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300`} title={`${metrics.completed} passaram (${percent(metrics.completed, metrics.entered)}%)`}><CheckCircle2 className="h-2.5 w-2.5" />{compactCount(metrics.completed)}</span>
+      {metrics.errors > 0 && <span className={`${BADGE} bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300`} title={`${metrics.errors} com erro`}><XCircle className="h-2.5 w-2.5" />{compactCount(metrics.errors)}</span>}
+      {message && <span className={`${BADGE} bg-[#002187]/10 text-[#002187] dark:bg-white/10 dark:text-[#C4D600]`} title={`${metrics.delivered} de ${metrics.sent} mensagens entregues (${percent(metrics.delivered, metrics.sent)}%)`}><CheckCircle2 className="h-2.5 w-2.5" />{percent(metrics.delivered, metrics.sent)}% entr.</span>}
+      {message && <span className={`${BADGE} bg-[#C4D600]/30 text-[#051647] dark:text-[#C4D600]`} title={`${metrics.replied} de ${metrics.sent} responderam (${percent(metrics.replied, metrics.sent)}%)`}><MessageCircle className="h-2.5 w-2.5" />{percent(metrics.replied, metrics.sent)}% resp.</span>}
+      {metrics.sales > 0 && <span className={`${BADGE} bg-[#F7915E]/20 text-[#9a4a1c] dark:text-[#F7915E]`} title={`${metrics.sales} venda(s) no VMSet atribuída(s) · ${money}`}><ShoppingBag className="h-2.5 w-2.5" />{metrics.sales} · {money}</span>}
+    </div>
+  );
+}
+
+const AutomationNode = memo(function AutomationNode({ id, data, selected }: NodeProps<CanvasNode>) {
+  const flowMetrics = useContext(MetricsContext);
+  const nodeMetrics = flowMetrics?.nodes[id] ?? null;
   const def = NODE_DEF[data.kind];
   const Icon = ICONS[data.kind] ?? Zap;
   const horizontal = data.dir === "LR";
@@ -155,6 +184,7 @@ const AutomationNode = memo(function AutomationNode({ data, selected }: NodeProp
           <Filter className="h-3 w-3 shrink-0" /><span className="truncate">{filters.rules.length} regra{filters.rules.length === 1 ? "" : "s"} ({filters.combinator === "or" ? "OU" : "E"})</span>
         </p>
       ) : null}
+      {flowMetrics && <NodeBadges metrics={nodeMetrics ?? { entered: 0, completed: 0, errors: 0, sent: 0, delivered: 0, replied: 0, sales: 0, revenue: 0 }} kind={data.kind} />}
       <div className="h-2" />
       <NodeOutputs outputs={outputHandles(data.kind, data.config)} horizontal={horizontal} />
     </div>
@@ -406,8 +436,9 @@ const VAR_TARGET: Partial<Record<NodeType, string>> = { send_whatsapp: "text", a
 
 /** Variáveis disponíveis para os passos: as do contato + as que os gatilhos do fluxo entregam (VMSet, mensagem, IA). */
 function VariablesPicker({ triggers, onPick }: { triggers: NodeType[]; onPick: (variable: string) => void }) {
-  const groups: { label: string; vars: string[] }[] = [{ label: "Contato", vars: ["nome", "nome_completo", "cidade", "telefone"] }];
+  const groups: { label: string; vars: string[] }[] = [{ label: "Contato", vars: ["nome", "nome_completo", "cidade", "telefone"] }, { label: "Roleta de vendedores", vars: ["vendedor"] }];
   for (const kind of [...new Set(triggers)]) {
+    if (kind === "trigger_webhook") groups.push({ label: NODE_DEF[kind].label, vars: ["nome_lead", "email", "origem", "telefone_lead", "utm_source", "utm_campaign"] });
     if (kind === "trigger_message") groups.push({ label: NODE_DEF[kind].label, vars: ["mensagem.texto"] });
     else if (kind === "trigger_ai_handoff") groups.push({ label: NODE_DEF[kind].label, vars: ["fila", "motivo"] });
     else if (kind === "trigger_link_click") groups.push({ label: NODE_DEF[kind].label, vars: ["link"] });
@@ -755,8 +786,10 @@ function Editor({ flowId }: { flowId: string }) {
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [settings, setSettings] = useState<FlowSettings>({ cancelOnConversion: [] });
+  const [settings, setSettings] = useState<FlowSettings>({ cancelOnConversion: [], attributionDays: 7 });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [metrics, setMetrics] = useState<FlowMetrics | null>(null);
+  const [showBadges, setShowBadges] = useState(true);
   const [saved, setSaved] = useState("");
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<"editor" | "execucoes">("editor");
@@ -771,6 +804,15 @@ function Editor({ flowId }: { flowId: string }) {
 
   useEffect(() => { latest.current = { nodes, edges }; }, [nodes, edges]);
 
+  // Métricas do canvas: carregam ao abrir e atualizam a cada 30 s.
+  useEffect(() => {
+    let active = true;
+    const load = () => fetch(`/api/automations/${flowId}/metrics`, { cache: "no-store" }).then((response) => (response.ok ? (response.json() as Promise<FlowMetrics>) : null)).then((body) => { if (active && body) setMetrics(body); }).catch(() => undefined);
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => { active = false; clearInterval(timer); };
+  }, [flowId]);
+
   useEffect(() => {
     let active = true;
     Promise.all([fetch(`/api/automations/${flowId}`).then(async (response) => { const data = (await response.json()) as { flow?: FlowData; error?: string }; if (!response.ok || !data.flow) throw new Error(data.error ?? "Automação não encontrada."); return data.flow; }), fetch("/api/automations/options").then((response) => response.json() as Promise<Options>).catch(() => ({ queues: [], users: [] }))])
@@ -781,10 +823,10 @@ function Editor({ flowId }: { flowId: string }) {
         setOptions(opts);
         setFlow(data);
         setName(data.name);
-        setSettings(data.settings ?? { cancelOnConversion: [] });
+        setSettings(data.settings ?? { cancelOnConversion: [], attributionDays: 7 });
         setNodes(data.nodes.map(toCanvas));
         setEdges(data.edges.map(toCanvasEdge));
-        setSaved(JSON.stringify({ name: data.name, nodes: data.nodes, edges: data.edges, settings: data.settings ?? { cancelOnConversion: [] } }));
+        setSaved(JSON.stringify({ name: data.name, nodes: data.nodes, edges: data.edges, settings: data.settings ?? { cancelOnConversion: [], attributionDays: 7 } }));
       })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Erro ao carregar."); });
     return () => { active = false; };
@@ -899,8 +941,8 @@ function Editor({ flowId }: { flowId: string }) {
       const data = (await response.json()) as { flow?: FlowData; error?: string; problems?: string[] };
       if (!response.ok || !data.flow) throw new Error(data.problems?.join(" ") ?? data.error ?? "Não foi possível salvar.");
       setFlow(data.flow);
-      setSettings(data.flow.settings ?? { cancelOnConversion: [] });
-      setSaved(JSON.stringify({ name: data.flow.name, nodes: data.flow.nodes, edges: data.flow.edges, settings: data.flow.settings ?? { cancelOnConversion: [] } }));
+      setSettings(data.flow.settings ?? { cancelOnConversion: [], attributionDays: 7 });
+      setSaved(JSON.stringify({ name: data.flow.name, nodes: data.flow.nodes, edges: data.flow.edges, settings: data.flow.settings ?? { cancelOnConversion: [], attributionDays: 7 } }));
       toast.success(status === "active" ? "Automação ativada" : status === "paused" ? "Automação pausada" : "Automação salva", data.flow.name);
     } catch (cause) {
       toast.error("Não foi possível salvar", cause instanceof Error ? cause.message : "Tente de novo.");
@@ -918,12 +960,13 @@ function Editor({ flowId }: { flowId: string }) {
 
   if (error) return <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error} <Link href="/automacoes" className="font-semibold underline">Voltar</Link></p>;
   if (!flow) return <p className="flex items-center gap-2 py-10 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando automação...</p>;
-  const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/automations/webhook/${flow.id}?token=${flow.webhookToken}` : "";
+  const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/automacoes/${flow.webhookToken}` : "";
   const selectedFields = selected ? NODE_DEF[selected.data.kind].fields.filter((field) => {
     if (field.key === "keywords" && selected.data.config.mode !== "keywords") return false;
     if (selected.data.kind === "condition" && (field.key === "operator" || field.key === "value") && selected.data.config.field === "none") return false;
     if (field.key === "presenceSeconds" && selected.data.config.presenceMode !== "custom") return false;
     if (field.key === "flowId" && selected.data.config.mode !== "goto") return false;
+    if (selected.data.kind === "distribute_lead" && field.key === "userIds" && selected.data.config.pool !== "users") return false;
     return true;
   }) : [];
 
@@ -947,6 +990,8 @@ function Editor({ flowId }: { flowId: string }) {
           <button type="button" onClick={exitEditor} title="Fechar editor" aria-label="Fechar editor e voltar para automações" className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-5 w-5" /></button>
         </div>
       </div>
+
+      <MetricsSummary metrics={metrics} visible={showBadges} onToggle={() => setShowBadges((value) => !value)} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40">
         {view === "execucoes" ? <div className="min-w-0 flex-1"><Executions flowId={flow.id} nodes={nodes} /></div> : (
@@ -972,6 +1017,7 @@ function Editor({ flowId }: { flowId: string }) {
                 </div>
               </div>
               <div ref={wrapper} className="relative min-h-0 flex-1" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={onDrop}>
+                <MetricsContext.Provider value={showBadges ? metrics : null}>
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
@@ -991,6 +1037,7 @@ function Editor({ flowId }: { flowId: string }) {
                   <Background variant={BackgroundVariant.Dots} gap={18} size={1.4} />
                   <MiniMap pannable zoomable className="!hidden sm:!block" nodeColor={(node) => (isTrigger((node.data as NodeData).kind) ? "#C4D600" : "#002187")} />
                 </ReactFlow>
+                </MetricsContext.Provider>
                 {nodes.length === 0 && (
                   <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
                     <p className="max-w-xs text-xs text-slate-400">Arraste um ou mais <b>gatilhos</b> da paleta (ou clique neles) para começar. Depois ligue os passos pelos pontos de conexão.</p>
@@ -1009,12 +1056,13 @@ function Editor({ flowId }: { flowId: string }) {
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">{NODE_DEF[selected.data.kind].description}</p>
                   {selected.data.kind === "trigger_webhook" && (
                     <div className="space-y-1">
-                      <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">URL do webhook (POST)</span>
+                      <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">URL única do webhook (POST)</span>
                       <div className="flex gap-1">
-                        <input readOnly value={webhookUrl} className={`${input} font-mono text-[10px]`} />
-                        <button type="button" title="Copiar URL" aria-label="Copiar URL" onClick={() => { void navigator.clipboard?.writeText(webhookUrl); toast.success("URL copiada", "Envie { \"telefone\": \"...\" } no corpo."); }} className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"><Copy className="h-4 w-4" /></button>
+                        <input readOnly value={webhookUrl} aria-label="URL do webhook" className={`${input} font-mono text-[10px]`} />
+                        <button type="button" title="Copiar URL" aria-label="Copiar URL" onClick={() => { void navigator.clipboard?.writeText(webhookUrl); toast.success("URL copiada", "Cole no Meta Ads, Google Ads, Typeform, Zapier ou na landing page."); }} className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"><Copy className="h-4 w-4" /></button>
                       </div>
-                      <span className="block text-[10px] text-slate-400">Corpo JSON: {"{ \"telefone\": \"62999990000\", \"campo\": \"valor\" }"}. Campos viram {"{{campo}}"}.</span>
+                      <span className="block text-[10px] text-slate-400">Aceita JSON ou formulário. O token na URL é o segredo: não publique. Campos viram {"{{campo}}"} ({"{{utm_source}}"}, {"{{email}}"}, {"{{origem}}"}...).</span>
+                      <WebhookListener key={selected.id} flowId={flow.id} config={selected.data.config} onMap={(key, path) => updateConfig(key, path)} />
                     </div>
                   )}
                   {selected.data.kind === "condition" ? (
@@ -1045,11 +1093,19 @@ function Editor({ flowId }: { flowId: string }) {
               const checked = settings.cancelOnConversion.includes(kind.value);
               return (
                 <label key={kind.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/5">
-                  <input type="checkbox" checked={checked} onChange={() => setSettings((current) => ({ cancelOnConversion: checked ? current.cancelOnConversion.filter((item) => item !== kind.value) : [...current.cancelOnConversion, kind.value as ConversionKind] }))} className="h-4 w-4 cursor-pointer accent-[#002187]" />
+                  <input type="checkbox" checked={checked} onChange={() => setSettings((current) => ({ ...current, cancelOnConversion: checked ? current.cancelOnConversion.filter((item) => item !== kind.value) : [...current.cancelOnConversion, kind.value as ConversionKind] }))} className="h-4 w-4 cursor-pointer accent-[#002187]" />
                   {kind.label}
                 </label>
               );
             })}
+            <div className="space-y-1 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <p className="text-xs font-semibold text-[#051647] dark:text-white">Janela de atribuição de vendas</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Uma venda faturada no VMSet conta para os passos por onde o cliente passou nos dias anteriores à compra (badge Vendas no canvas).</p>
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
+                <input type="number" min={1} max={MAX_ATTRIBUTION_DAYS} value={settings.attributionDays} onChange={(event) => setSettings((current) => ({ ...current, attributionDays: Math.min(MAX_ATTRIBUTION_DAYS, Math.max(1, Math.round(Number(event.target.value) || 1))) }))} aria-label="Dias da janela de atribuição" className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-right text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                dias após a interação na automação
+              </label>
+            </div>
             <div className="flex justify-end">
               <button type="button" onClick={() => setSettingsOpen(false)} className="h-9 cursor-pointer rounded-lg bg-[#002187] px-4 text-xs font-semibold text-white hover:bg-[#051647]">Concluir</button>
             </div>
@@ -1057,6 +1113,105 @@ function Editor({ flowId }: { flowId: string }) {
         </EntityDialog>
       )}
       {leaving && <ConfirmDialog variant="destructive" title="Sair sem salvar?" description="Há alterações no fluxo que ainda não foram salvas. Se sair agora, elas serão descartadas." confirmLabel="Descartar e sair" cancelLabel="Continuar editando" onClose={() => setLeaving(false)} onConfirm={() => { setLeaving(false); router.push("/automacoes"); }} />}
+    </div>
+  );
+}
+
+type WebhookSampleResponse = { sample: { receivedAt: string; fields: Record<string, string> } | null; guess: Record<"phone" | "name" | "email" | "source", string> | null };
+const MAP_TARGETS = [
+  { key: "phoneField", guess: "phone", label: "Telefone" },
+  { key: "nameField", guess: "name", label: "Nome" },
+  { key: "emailField", guess: "email", label: "E-mail" },
+  { key: "sourceField", guess: "source", label: "Origem / UTM" },
+] as const;
+
+/**
+ * "Escutar evento de teste": limpa a amostra, espera o próximo POST na URL (até 3 min) e mostra os campos do JSON
+ * para mapear telefone, nome, e-mail e origem com um clique (o palpite automático já vem marcado).
+ */
+function WebhookListener({ flowId, config, onMap }: { flowId: string; config: Record<string, unknown>; onMap: (key: string, path: string) => void }) {
+  const toast = useToast();
+  const [listening, setListening] = useState(false);
+  const [data, setData] = useState<WebhookSampleResponse | null>(null);
+  const latestMap = useRef({ config, onMap });
+  useEffect(() => { latestMap.current = { config, onMap }; });
+
+  useEffect(() => {
+    void fetch(`/api/automations/${flowId}/webhook-sample`, { cache: "no-store" }).then((response) => (response.ok ? (response.json() as Promise<WebhookSampleResponse>) : null)).then((body) => body && setData(body)).catch(() => undefined);
+  }, [flowId]);
+
+  useEffect(() => {
+    if (!listening) return;
+    const started = Date.now();
+    const timer = setInterval(async () => {
+      if (Date.now() - started > 3 * 60 * 1000) { setListening(false); toast.error("Nenhum evento recebido", "Envie um lead de teste para a URL e tente de novo."); return; }
+      const body = await fetch(`/api/automations/${flowId}/webhook-sample`, { cache: "no-store" }).then((response) => (response.ok ? (response.json() as Promise<WebhookSampleResponse>) : null)).catch(() => null);
+      if (!body?.sample) return;
+      setData(body);
+      setListening(false);
+      // Palpite automático só onde o campo ainda não foi mapeado.
+      for (const target of MAP_TARGETS) if (!String(latestMap.current.config[target.key] ?? "") && body.guess?.[target.guess]) latestMap.current.onMap(target.key, body.guess[target.guess]);
+      toast.success("Evento de teste recebido", `${Object.keys(body.sample.fields).length} campos. Confira o mapeamento e salve.`);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [listening, flowId, toast]);
+
+  const listen = async () => {
+    await fetch(`/api/automations/${flowId}/webhook-sample`, { method: "DELETE" }).catch(() => undefined);
+    setData(null);
+    setListening(true);
+  };
+
+  const fields = data?.sample ? Object.entries(data.sample.fields) : [];
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+      <button type="button" onClick={() => (listening ? setListening(false) : void listen())} className={`inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg text-xs font-semibold ${listening ? "bg-[#F7915E]/20 text-[#9a4a1c] dark:text-[#F7915E]" : "bg-[#002187] text-white hover:bg-[#051647]"}`}>
+        {listening ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Escutando... envie um lead de teste (parar)</> : <><Radio className="h-3.5 w-3.5" />Escutar evento de teste</>}
+      </button>
+      {data?.sample && (
+        <>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400">Último evento: {new Date(data.sample.receivedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}. Clique no rótulo para mapear o campo.</p>
+          <ul className="max-h-56 space-y-1 overflow-y-auto">
+            {fields.map(([path, value]) => (
+              <li key={path} className="min-w-0 rounded border border-slate-100 px-1.5 py-1 dark:border-slate-800">
+                <p className="break-words font-mono text-[10px] font-semibold text-[#051647] dark:text-white">{path}</p>
+                <p className="break-words text-[10px] text-slate-500 dark:text-slate-400">{value.slice(0, 120) || "(vazio)"}</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {MAP_TARGETS.map((target) => {
+                    const active = String(config[target.key] ?? "") === path;
+                    return <button key={target.key} type="button" onClick={() => onMap(target.key, active ? "" : path)} aria-pressed={active} className={`cursor-pointer rounded px-1.5 py-0.5 text-[9px] font-bold ${active ? "bg-[#C4D600] text-[#051647]" : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-300"}`}>{target.label}</button>;
+                  })}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Resumo consolidado do fluxo no topo do editor (leads, ativos, entregas, respostas, vendas e receita). */
+function MetricsSummary({ metrics, visible, onToggle }: { metrics: FlowMetrics | null; visible: boolean; onToggle: () => void }) {
+  const summary = metrics?.summary;
+  const money = (summary?.revenue ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  const items = summary ? [
+    { icon: Users, label: "Leads", value: compactCount(summary.leads), title: `${summary.leads} contatos entraram no fluxo (${summary.executions} execuções)` },
+    { icon: Hourglass, label: "Em andamento", value: compactCount(summary.active), title: "Execuções rodando ou aguardando" },
+    { icon: CheckCircle2, label: "Concluídos", value: compactCount(summary.completed), title: `${summary.failed} com erro` },
+    { icon: MessageSquare, label: "Entregues", value: compactCount(summary.delivered), title: "Mensagens do fluxo entregues no WhatsApp" },
+    { icon: MessageCircle, label: "Responderam", value: `${compactCount(summary.replied)} (${percent(summary.replied, summary.leads)}%)`, title: "Contatos que responderam a uma mensagem do fluxo" },
+    { icon: ShoppingBag, label: "Vendas", value: `${summary.sales} · ${money}`, title: `Vendas do VMSet até ${summary.attributionDays} dias após a interação` },
+  ] : [];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200/70 bg-white px-2 py-1.5 dark:border-slate-800 dark:bg-slate-900/40" aria-label="Resumo do fluxo">
+      <TrendingUp className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+      {!summary ? <span className="text-[11px] text-slate-400">Carregando métricas...</span> : items.map((item) => (
+        <span key={item.label} title={item.title} className="inline-flex min-w-0 items-center gap-1 rounded-lg bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:bg-white/5 dark:text-slate-300">
+          <item.icon className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />{item.label}<b className="text-[#051647] dark:text-white">{item.value}</b>
+        </span>
+      ))}
+      <button type="button" onClick={onToggle} aria-pressed={visible} className="ml-auto inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-[#002187] hover:bg-slate-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5">{visible ? "Ocultar badges" : "Mostrar badges"}</button>
     </div>
   );
 }

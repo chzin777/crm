@@ -75,6 +75,8 @@ async function updateChatDelivery(event: StatusEvent) {
       where: { externalId: event.id, delivery: { in: [...chatDeliveryBefore[event.status]] } },
       data: { delivery: event.status },
     });
+    // Métrica "entregue" dos nós Enviar WhatsApp das automações.
+    if (event.status !== "sent") await prisma.automationMessageTouch.updateMany({ where: { externalId: event.id, deliveredAt: null }, data: { deliveredAt: new Date() } });
   } else {
     return;
   }

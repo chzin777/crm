@@ -11,7 +11,7 @@ export const ERP_TRIGGER_TYPES = [
 export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff", "trigger_link_click", "trigger_score", "trigger_tier", ...ERP_TRIGGER_TYPES] as const;
 export type ErpTriggerType = (typeof ERP_TRIGGER_TYPES)[number];
 export const isErpTrigger = (type: string): type is ErpTriggerType => (ERP_TRIGGER_TYPES as readonly string[]).includes(type);
-export const ACTION_TYPES = ["send_whatsapp", "delay", "business_hours", "wait_reply", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "add_note", "change_score", "update_field", "opt_out", "condition", "ab_split", "end_flow", "http"] as const;
+export const ACTION_TYPES = ["send_whatsapp", "delay", "business_hours", "wait_reply", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "distribute_lead", "notify", "add_note", "change_score", "update_field", "opt_out", "condition", "ab_split", "end_flow", "http"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export type NodeType = TriggerType | (typeof ACTION_TYPES)[number];
 export type NodeCategory = "gatilho_crm" | "gatilho_whatsapp" | "erp_vendas" | "erp_financeiro" | "mensagem" | "ia" | "crm" | "logica";
@@ -348,6 +348,7 @@ export function outputHandles(type: NodeType, config: Record<string, unknown>): 
   if (type === "condition") return [{ id: "true", label: "Sim / Verdadeiro", tone: "yes" }, { id: "false", label: "Não / Falso", tone: "no" }];
   if (type === "wait_reply") return [{ id: "replied", label: "Respondeu no prazo", tone: "yes" }, { id: "timeout", label: "Não respondeu (Timeout)", tone: "warn" }];
   if (type === "ab_split") return readVariants(config).map((percent, index) => ({ id: `v${index}`, label: `Variante ${variantLetter(index)} · ${percent}%`, tone: "variant" }));
+  if (type === "distribute_lead") return [{ id: "assigned", label: "Vendedor atribuído", tone: "yes" }, { id: "unavailable", label: "Sem vendedor disponível", tone: "warn" }];
   if (type === "end_flow") return [];
   return null;
 }
@@ -358,11 +359,59 @@ export function handleLabel(handle: string | null | undefined): string | null {
   if (handle === "false") return "Não";
   if (handle === "replied") return "Respondeu";
   if (handle === "timeout") return "Timeout";
+  if (handle === "assigned") return "Atribuído";
+  if (handle === "unavailable") return "Sem vendedor";
   const variant = /^v(\d)$/.exec(handle ?? "");
   return variant ? `Variante ${variantLetter(Number(variant[1]))}` : null;
 }
 
-const HANDLE_PATTERN = /^(true|false|replied|timeout|v[0-4])$/;
+const HANDLE_PATTERN = /^(true|false|replied|timeout|assigned|unavailable|v[0-4])$/;
+
+// ---------------------------------------------------------------- Roleta de vendedores
+
+export const DISTRIBUTE_MODES = [
+  { value: "round_robin", label: "Rodízio (round-robin)" },
+  { value: "least_load", label: "Menor carga ativa" },
+];
+
+export type DistributeConfig = { pool: "queue" | "users"; queueId: string; userIds: string[]; mode: "round_robin" | "least_load"; onlyOnline: boolean; respectShift: boolean; maxActive: number; noteOnOpportunity: boolean };
+
+export function readDistribute(config: Record<string, unknown>): DistributeConfig {
+  const max = Math.round(Number(config.maxActive));
+  return {
+    pool: config.pool === "users" ? "users" : "queue",
+    queueId: String(config.queueId ?? "").trim(),
+    userIds: Array.isArray(config.userIds) ? [...new Set(config.userIds.map(String).filter(Boolean))] : [],
+    mode: config.mode === "least_load" ? "least_load" : "round_robin",
+    onlyOnline: config.onlyOnline !== false,
+    respectShift: config.respectShift === true,
+    maxActive: Number.isFinite(max) && max > 0 ? Math.min(max, 500) : 0,
+    noteOnOpportunity: config.noteOnOpportunity !== false,
+  };
+}
+
+export type SellerCandidate = { id: string; name: string; online: boolean; paused: boolean; load: number; capacity: number };
+
+/**
+ * Escolhe o vendedor: filtra online/pausado e limite (o menor entre o do nó e a capacidade do atendente),
+ * depois rodízio pela ordem da lista (cursor atômico) ou menor carga (empate: ordem da lista).
+ */
+export function pickSeller(candidates: SellerCandidate[], rule: Pick<DistributeConfig, "mode" | "onlyOnline" | "maxActive">, cursor: number): SellerCandidate | null {
+  const eligible = candidates.filter((item) => {
+    if (rule.onlyOnline && (!item.online || item.paused)) return false;
+    const limits = [rule.maxActive, item.capacity].filter((value) => value > 0);
+    return !limits.length || item.load < Math.min(...limits);
+  });
+  if (!eligible.length) return null;
+  if (rule.mode === "least_load") return eligible.reduce((best, item) => (item.load < best.load ? item : best), eligible[0]);
+  // Rodízio sobre a lista inteira: quem está fora agora perde a vez, mas a ordem se mantém.
+  const total = candidates.length;
+  for (let offset = 0; offset < total; offset += 1) {
+    const candidate = candidates[(((cursor + offset) % total) + total) % total];
+    if (eligible.includes(candidate)) return candidate;
+  }
+  return eligible[0];
+}
 
 // ---------------------------------------------------------------- Configurações globais do fluxo
 
@@ -373,13 +422,17 @@ export const CONVERSION_KINDS = [
   { value: "won", label: "Oportunidade movida para Ganho no pipeline" },
 ] as const;
 export type ConversionKind = (typeof CONVERSION_KINDS)[number]["value"];
-export type FlowSettings = { cancelOnConversion: ConversionKind[] };
+/** attributionDays: venda do VMSet conta para os nós por onde o cliente passou nos N dias anteriores. */
+export type FlowSettings = { cancelOnConversion: ConversionKind[]; attributionDays: number };
+export const DEFAULT_ATTRIBUTION_DAYS = 7;
+export const MAX_ATTRIBUTION_DAYS = 90;
 
 export function readFlowSettings(raw: unknown): FlowSettings {
   const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const kinds = CONVERSION_KINDS.map((item) => item.value as string);
   const cancel = Array.isArray(value.cancelOnConversion) ? value.cancelOnConversion.filter((item): item is ConversionKind => kinds.includes(String(item))) : [];
-  return { cancelOnConversion: [...new Set(cancel)] };
+  const days = Math.round(Number(value.attributionDays));
+  return { cancelOnConversion: [...new Set(cancel)], attributionDays: Number.isFinite(days) && days >= 1 ? Math.min(days, MAX_ATTRIBUTION_DAYS) : DEFAULT_ATTRIBUTION_DAYS };
 }
 
 // ---------------------------------------------------------------- Catálogo
@@ -437,7 +490,18 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "trigger_stage", category: "gatilho_crm", label: "Lead entrou na etapa", description: "Oportunidade entrou numa etapa do funil (Kanban, IA ou atendimento).", fields: [{ key: "stage", label: "Etapa", kind: "stage" }], defaults: { stage: "em-atendimento" } },
   { type: "trigger_tag", category: "gatilho_crm", label: "Tag adicionada", description: "Uma tag foi aplicada na conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text", placeholder: "vip" }], defaults: { tag: "" } },
   { type: "trigger_inactive", category: "gatilho_whatsapp", label: "Cliente inativo por tempo", description: "Contato sem mandar mensagem há um tempo (segundos a anos).", fields: [...DURATION_FIELDS("Tempo sem contato"), { key: "businessHours", label: "Disparar só em horário comercial", kind: "boolean" }], defaults: { amount: 90, unit: "days", businessHours: false } },
-  { type: "trigger_webhook", category: "gatilho_crm", label: "Webhook externo", description: "Sistema externo chama a URL do fluxo com { telefone } e variáveis.", fields: [], defaults: {} },
+  {
+    type: "trigger_webhook", category: "gatilho_crm", label: "Webhook recebido",
+    description: "Meta Ads, Google Ads, Typeform, Zapier ou landing page fazem POST na URL única do fluxo: o lead vira contato no CRM (cria ou atualiza) e entra aqui. Todos os campos do JSON viram variáveis ({{campo}}, {{utm_source}}...).",
+    fields: [
+      { key: "phoneField", label: "Campo do telefone", kind: "text", placeholder: "phone", hint: "Caminho no JSON (ex.: lead.phone_number). Use Escutar evento de teste para escolher clicando." },
+      { key: "nameField", label: "Campo do nome", kind: "text", placeholder: "name" },
+      { key: "emailField", label: "Campo do e-mail", kind: "text", placeholder: "email" },
+      { key: "sourceField", label: "Campo da origem / UTM", kind: "text", placeholder: "utm_source" },
+      { key: "createContact", label: "Criar o contato quando o telefone ainda não existe no CRM", kind: "boolean" },
+    ],
+    defaults: { phoneField: "", nameField: "", emailField: "", sourceField: "", createContact: true },
+  },
   { type: "trigger_ai_handoff", category: "gatilho_whatsapp", label: "IA transferiu o atendimento", description: "A IA passou a conversa para a equipe (já na fila escolhida pelo assunto). Variáveis: {{fila}} e {{motivo}}.", fields: [{ key: "queueId", label: "Só quando a fila escolhida for (vazio = qualquer)", kind: "queue" }], defaults: { queueId: "" } },
   { type: "trigger_link_click", category: "gatilho_whatsapp", label: "Clicou em link rastreado", description: "O contato abriu um link curto rastreado (/r/...) enviado por automação, campanha ou pela equipe. Variável: {{link}}.", fields: [{ key: "urlContains", label: "Só quando o destino contém (opcional)", kind: "text", placeholder: "oticasbrasil.com.br/promocao" }], defaults: { urlContains: "" } },
   { type: "trigger_score", category: "gatilho_crm", label: "Pontuação atingiu X pontos", description: "O Lead Score do contato passou a valer X ou mais (dispara uma vez a cada vez que cruza o valor). Variáveis: {{pontuacao}}, {{nivel}}.", fields: [{ key: "amount", label: "Pontuação", kind: "number" }], defaults: { amount: 100 } },
@@ -454,6 +518,21 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "add_tag", category: "crm", label: "Adicionar tag", description: "Aplica uma tag na conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text" }], defaults: { tag: "" } },
   { type: "remove_tag", category: "crm", label: "Remover tag", description: "Tira uma tag da conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text" }], defaults: { tag: "" } },
   { type: "assign", category: "crm", label: "Atribuir atendente / fila", description: "Coloca a conversa numa fila e, se quiser, com um atendente.", fields: [{ key: "queueId", label: "Fila", kind: "queue" }, { key: "assigneeId", label: "Atendente (opcional)", kind: "user" }], defaults: { queueId: "", assigneeId: "" } },
+  {
+    type: "distribute_lead", category: "crm", label: "Roleta de vendedores",
+    description: "Distribui o lead entre vendedores em rodízio (round-robin) ou para quem tem menos atendimentos abertos, só entre quem está online, no horário da fila e abaixo do limite. Saídas: Vendedor atribuído / Sem vendedor disponível. Variável: {{vendedor}}.",
+    fields: [
+      { key: "pool", label: "Distribuir entre", kind: "select", options: [{ value: "queue", label: "Membros de uma fila / loja" }, { value: "users", label: "Vendedores escolhidos" }] },
+      { key: "queueId", label: "Fila / loja", kind: "queue", hint: "A conversa entra nessa fila. Obrigatória em Membros de uma fila; opcional em Vendedores escolhidos." },
+      { key: "userIds", label: "Vendedores (em Vendedores escolhidos)", kind: "users" },
+      { key: "mode", label: "Regra", kind: "select", options: DISTRIBUTE_MODES },
+      { key: "onlyOnline", label: "Só vendedores online (e não pausados)", kind: "boolean" },
+      { key: "respectShift", label: "Respeitar o horário de atendimento da fila (turno)", kind: "boolean" },
+      { key: "maxActive", label: "Limite de atendimentos simultâneos (0 = sem limite)", kind: "number", hint: "A capacidade de cada atendente definida em Filas também é respeitada." },
+      { key: "noteOnOpportunity", label: "Registrar o vendedor na oportunidade do pipeline", kind: "boolean" },
+    ],
+    defaults: { pool: "queue", queueId: "", userIds: [], mode: "round_robin", onlyOnline: true, respectShift: false, maxActive: 0, noteOnOpportunity: true },
+  },
   { type: "notify", category: "crm", label: "Notificar usuário / equipe", description: "Notificação interna no CRM e alerta opcional no WhatsApp.", fields: [{ key: "userIds", label: "Usuários (vazio = supervisores)", kind: "users" }, { key: "title", label: "Título", kind: "text" }, { key: "message", label: "Mensagem", kind: "textarea" }, { key: "whatsappPhone", label: "Alerta no WhatsApp (telefone, opcional)", kind: "text", placeholder: "62999990000" }], defaults: { userIds: [], title: "Automação: {{nome}}", message: "", whatsappPhone: "" } },
   { type: "add_note", category: "crm", label: "Adicionar observação", description: "Registra uma nota interna na oportunidade do funil e/ou no cadastro do contato.", fields: [{ key: "target", label: "Destino", kind: "select", options: NOTE_TARGETS }, { key: "text", label: "Texto da observação", kind: "textarea", placeholder: "Cliente pediu orçamento de {{mensagem.texto}}", hint: NOTE_HINT }], defaults: { target: "opportunity", text: "" } },
   { type: "change_score", category: "crm", label: "Alterar pontuação (Lead Score)", description: "Soma ou tira pontos do contato com um motivo (histórico em Clientes VIP); o nível Bronze/Prata/Ouro/Diamante é recalculado pelas faixas.", fields: [{ key: "operation", label: "Operação", kind: "select", options: [{ value: "add", label: "Somar pontos (+)" }, { value: "subtract", label: "Tirar pontos (−)" }] }, { key: "amount", label: "Pontos", kind: "number" }, { key: "reason", label: "Motivo", kind: "text", placeholder: "Respondeu no WhatsApp" }], defaults: { operation: "add", amount: 10, reason: "" } },
@@ -538,6 +617,11 @@ export function validateGraph(graph: FlowGraph): string[] {
     if (node.type === "http" && !/^https?:\/\//i.test(String(config.url ?? ""))) problems.push("Requisição HTTP: informe uma URL http(s).");
     if ((node.type === "add_tag" || node.type === "remove_tag" || node.type === "trigger_tag") && !String(config.tag ?? "").trim()) problems.push(`${NODE_DEF[node.type].label}: informe a tag.`);
     if (node.type === "assign" && !String(config.queueId ?? "").trim()) problems.push("Atribuir: escolha a fila.");
+    if (node.type === "distribute_lead") {
+      const roulette = readDistribute(config);
+      if (roulette.pool === "queue" && !roulette.queueId) problems.push("Roleta de vendedores: escolha a fila / loja.");
+      if (roulette.pool === "users" && !roulette.userIds.length) problems.push("Roleta de vendedores: escolha ao menos um vendedor.");
+    }
     if (node.type === "trigger_inactive" && !(readDuration(config, "days").amount > 0)) problems.push("Cliente inativo: informe o tempo sem contato.");
     if (node.type === "condition" && config.field === "none" && !readFilters(config).rules.length) problems.push("Condição: adicione ao menos uma regra em Regras & Filtros.");
     if (node.type === "condition" && config.field === "variable" && !String(config.variable ?? "").trim()) problems.push("Condição: informe o nome da variável.");

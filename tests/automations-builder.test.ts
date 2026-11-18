@@ -66,7 +66,7 @@ describe("múltiplos gatilhos no mesmo fluxo", () => {
     expect((await pickTrigger(filtered, { type: "trigger_message", text: "oi" }, async () => CUSTOMER))?.id).toBe("t-msg");
     expect(validateGraph(graph)).toEqual([]);
     expect(triggerTypesOf(graph)).toEqual(["trigger_message", "trigger_tag"]);
-    expect(validateGraph({ nodes: [...graph.nodes, node("t-3", "trigger_webhook")], edges: graph.edges })).toEqual(['Conecte o gatilho "Webhook externo" ao primeiro passo.']);
+    expect(validateGraph({ nodes: [...graph.nodes, node("t-3", "trigger_webhook")], edges: graph.edges })).toEqual(['Conecte o gatilho "Webhook recebido" ao primeiro passo.']);
   });
 });
 

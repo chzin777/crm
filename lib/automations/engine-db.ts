@@ -2,9 +2,9 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { advance, inactiveSince, pickTrigger, type AdvanceResult, type EnginePorts, type ExecutionContext, type ExecutionState, type StepStatus, type TriggerEvent } from "@/lib/automations/engine";
-import { AUDIO_STORAGE_PREFIX, readFlowSettings, type ConversionKind, NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
+import { pickSeller, AUDIO_STORAGE_PREFIX, readFlowSettings, type ConversionKind, NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
 import { addedTags, stageChanges } from "@/lib/automations/events";
-import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
+import { addSystemMessage, firstDispatch, isWindowOpen, openConversationFor } from "@/lib/chat/conversation";
 import { sendAutomaticAudio, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { presenceDurationMs, simulatePresence, type PresenceKind } from "@/lib/chat/presence";
 import { readFile } from "@/lib/minio";
@@ -16,7 +16,9 @@ import { phoneVariants } from "@/lib/chat/phone";
 import { sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { changeScore } from "@/lib/scoring-db";
 import { setContactFields } from "@/lib/contact-fields-db";
-import { trackLinksInText } from "@/lib/tracked-links";import { resolveChatCapabilities } from "@/lib/permissions";
+import { trackLinksInText } from "@/lib/tracked-links";
+import { resolveChatCapabilities } from "@/lib/permissions";
+import { chooseSeller, loadSellers } from "@/lib/automations/roulette-db";
 import { notifyChatChange } from "@/lib/chat/events";
 import type { StageId } from "@/lib/pipeline-stages";
 
@@ -118,9 +120,11 @@ export function databasePorts(flowId: string): EnginePorts {
       const present = (kind: PresenceKind, detail: { text?: string; audioSeconds?: number }) =>
         simulatePresence(presenceDurationMs({ kind, ...detail, mode: presence.mode, overrideSeconds: presence.seconds }), { indicate: () => sendTypingIndicator(wamid) });
       const done: string[] = [];
+      let externalId: string | null = null;
       if (input.mediaUrl) {
         await present("composing", { text: input.text });
-        await sendAutomaticImage(conversation, input.mediaUrl, input.text, AUTHOR, async () => undefined);
+        const image = await sendAutomaticImage(conversation, input.mediaUrl, input.text, AUTHOR, async () => undefined);
+        externalId = (image as { externalId?: string | null } | null | undefined)?.externalId ?? externalId;
         notifyChatChange();
         done.push("imagem");
       } else if (input.text.trim()) {
@@ -129,6 +133,7 @@ export function databasePorts(flowId: string): EnginePorts {
         notifyChatChange();
         if (!message) throw new Error("Número bloqueado: mensagem não enviada.");
         if (message.delivery === "failed") throw new Error(message.failureReason ?? "Falha no envio pelo WhatsApp.");
+        externalId = message.externalId ?? externalId;
         done.push("mensagem");
       }
       if (input.audio) {
@@ -137,8 +142,11 @@ export function databasePorts(flowId: string): EnginePorts {
         notifyChatChange();
         if (!voice) throw new Error("Número bloqueado: áudio não enviado.");
         if (voice.delivery === "failed") throw new Error(voice.failureReason ?? "Falha no envio do áudio pelo WhatsApp.");
+        externalId = voice.externalId ?? externalId;
         done.push("nota de voz");
       }
+      // Métricas do canvas: entregue (tique da Meta pelo externalId) e respondida (próxima mensagem do cliente).
+      if (state.currentNodeId) await prisma.automationMessageTouch.create({ data: { flowId: state.flowId, nodeId: state.currentNodeId, executionId: state.id, contactId: state.contactId, conversationId: conversation.id, externalId } }).catch(() => undefined);
       return `${done.join(" + ").replace(/^./, (char) => char.toUpperCase())} enviada no WhatsApp`;
     },
     aiAgent: async (state, objective) => {
@@ -187,6 +195,44 @@ export function databasePorts(flowId: string): EnginePorts {
       notifyChatChange();
       return `Fila ${queue.name}${user ? ` · ${user.name}` : ""}`;
     },
+    distribute: async (state, input) => {
+      // Lead de webhook ainda sem conversa: abre a conversa do contato para o vendedor assumir no /chat.
+      let conversation = await conversationOf(state);
+      if (!conversation || conversation.closedAt) {
+        const contact = await prisma.contact.findUnique({ where: { id: state.contactId }, select: { phone: true } });
+        const phone = (conversation?.phone ?? contact?.phone ?? "").replace(/\D/g, "");
+        if (!phone) throw new Error("Contato sem telefone: não há conversa para distribuir.");
+        conversation = (await openConversationFor(state.contactId, phone)).conversation;
+        state.conversationId = conversation.id;
+      }
+      const outcome = await chooseSeller(flowId, state.currentNodeId ?? "", input);
+      const now = new Date();
+      if (!outcome.assigned) {
+        // Ninguém disponível: a conversa fica aguardando na fila (se houver) e o fluxo segue pela saída "Sem vendedor".
+        if (input.queueId) await prisma.chatConversation.update({ where: { id: conversation.id }, data: { queueId: input.queueId, ...(conversation.assigneeId ? {} : { status: "waiting", waitingSince: conversation.waitingSince ?? now }), closedAt: null } });
+        await addSystemMessage(conversation.id, `Roleta de vendedores: ${outcome.reason}`);
+        notifyChatChange();
+        return { assigned: false, message: outcome.reason };
+      }
+      const { seller } = outcome;
+      await prisma.chatConversation.update({ where: { id: conversation.id }, data: { ...(outcome.queueId ? { queueId: outcome.queueId } : {}), assigneeId: seller.id, status: "in_progress", waitingSince: null, closedAt: null } });
+      await addSystemMessage(conversation.id, `Roleta de vendedores: lead distribuído para ${seller.name}${outcome.queueName ? ` (fila ${outcome.queueName})` : ""}.`);
+      await prisma.chatNotification.create({ data: { userId: seller.id, conversationId: conversation.id, type: "automation", title: "Novo lead para você", detail: `A roleta de vendedores distribuiu um lead (${seller.load + 1} atendimento(s) em aberto).`, href: `/chat?c=${conversation.id}` } }).catch(() => undefined);
+      if (input.noteOnOpportunity) {
+        const { addOpportunityNote } = await import("@/lib/sales-pipeline-db");
+        await addOpportunityNote({ contactId: state.contactId, text: `Lead distribuído pela roleta para ${seller.name}.`, author: AUTHOR }).catch(() => undefined);
+      }
+      state.context.vars.vendedor = seller.name;
+      notifyChatChange();
+      return { assigned: true, message: `Distribuído para ${seller.name} (${input.mode === "least_load" ? "menor carga" : "rodízio"}, ${seller.load} em aberto antes)` };
+    },
+    count: async (state, node, kinds) => {
+      const add = (kind: "entered" | "completed" | "error") => (kinds.includes(kind) ? 1 : 0);
+      const [entered, completed, errors] = [add("entered"), add("completed"), add("error")];
+      await prisma.$executeRaw`
+        INSERT INTO "AutomationNodeStat" ("flowId", "nodeId", "entered", "completed", "errors", "updatedAt") VALUES (${state.flowId}, ${node.id}, ${entered}, ${completed}, ${errors}, now())
+        ON CONFLICT ("flowId", "nodeId") DO UPDATE SET "entered" = "AutomationNodeStat"."entered" + ${entered}, "completed" = "AutomationNodeStat"."completed" + ${completed}, "errors" = "AutomationNodeStat"."errors" + ${errors}, "updatedAt" = now()`;
+    },
     notify: async (state, input) => {
       const conversation = await conversationOf(state);
       const users = input.userIds.length ? input.userIds : await supervisorIds();
@@ -208,6 +254,7 @@ export function databasePorts(flowId: string): EnginePorts {
     },
     addNote: async (state, input) => {
       const done: string[] = [];
+      let externalId: string | null = null;
       let toContact = input.target !== "opportunity";
       if (input.target !== "contact") {
         const { addOpportunityNote } = await import("@/lib/sales-pipeline-db");
@@ -356,6 +403,8 @@ export async function startFlowFor(flowId: string, target: Target): Promise<stri
  * prazo é decidida no motor, pela mensagem recebida depois do início da espera).
  */
 export async function wakeReplyWaiters(contactId: string) {
+  // Métrica "respondeu" dos nós Enviar WhatsApp: mensagens das automações nos últimos 3 dias ainda sem resposta.
+  await prisma.automationMessageTouch.updateMany({ where: { contactId, repliedAt: null, sentAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) } }, data: { repliedAt: new Date() } }).catch(() => undefined);
   const waiting = await prisma.automationExecution.findMany({ where: { contactId, status: "waiting", flow: { status: "active" } }, select: { id: true, context: true } });
   const ids = waiting.filter((row) => { const context = (row.context ?? {}) as Partial<ExecutionContext>; return !!context.replySince && !!context.waitingNodeId; }).map((row) => row.id);
   if (!ids.length) return 0;
@@ -415,6 +464,13 @@ export async function simulateFlow(graph: FlowGraph, contactId: string, triggerN
     addTag: async (_state, tag) => `Simulado: adicionaria a tag "${tag}"`,
     removeTag: async (_state, tag) => `Simulado: removeria a tag "${tag}"`,
     assign: describe("colocaria a conversa na fila escolhida"),
+    distribute: async (_state, input) => {
+      const sellers = await loadSellers(input);
+      const seller = pickSeller(sellers, input, 0);
+      return seller
+        ? { assigned: true, message: `Simulado: distribuiria para ${seller.name} (${input.mode === "least_load" ? "menor carga" : "rodízio"}, ${seller.load} em aberto)` }
+        : { assigned: false, message: `Simulado: nenhum vendedor disponível agora entre ${sellers.length} da roleta` };
+    },
     notify: async (_state, input) => `Simulado: notificaria ${input.userIds.length || "os supervisores"} (${input.title.slice(0, 80)})`,
     optOut: describe("marcaria o contato como opt-out"),
     addNote: async (_state, input) => `Simulado: registraria a observação "${input.text.slice(0, 160)}" ${input.target === "contact" ? "no cadastro do contato" : input.target === "both" ? "na oportunidade e no cadastro do contato" : "na oportunidade (ou no contato, se não houver oportunidade aberta)"}`,

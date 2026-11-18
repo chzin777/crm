@@ -1,6 +1,6 @@
 import { isPresenceMode, type PresenceMode } from "@/lib/chat/presence";
 import { TIERS } from "@/lib/scoring";
-import { describeBusinessWindow, nextBusinessOpening, outputHandles, pickVariant, readVariants, variantLetter, describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
+import { readDistribute, describeBusinessWindow, nextBusinessOpening, outputHandles, pickVariant, readVariants, variantLetter, describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
 
@@ -67,7 +67,14 @@ export type EnginePorts = {
   updateField?: (state: ExecutionState, key: string, value: string) => Promise<string>;
   /** Sorteio do Teste A/B (0 a 1); padrão Math.random. */
   random?: () => number;
+  /** Roleta de vendedores: atribui a conversa a um vendedor elegível; assigned=false segue pela saída "Sem vendedor". */
+  distribute?: (state: ExecutionState, input: DistributeInput) => Promise<{ assigned: boolean; message: string }>;
+  /** Métricas do canvas: entrou no nó, concluiu ou falhou. */
+  count?: (state: ExecutionState, node: FlowNode, kinds: NodeCountKind[]) => Promise<void>;
 };
+
+export type NodeCountKind = "entered" | "completed" | "error";
+export type DistributeInput = { pool: "queue" | "users"; queueId: string; userIds: string[]; mode: "round_robin" | "least_load"; onlyOnline: boolean; respectShift: boolean; maxActive: number; noteOnOpportunity: boolean };
 
 export type AdvanceResult =
   | { status: "completed"; state: ExecutionState }
@@ -196,6 +203,11 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
     case "add_tag": return { message: await ports.addTag(state, text("tag").trim()) };
     case "remove_tag": return { message: await ports.removeTag(state, text("tag").trim()) };
     case "assign": return { message: await ports.assign(state, { queueId: String(config.queueId ?? ""), assigneeId: String(config.assigneeId ?? "") }) };
+    case "distribute_lead": {
+      if (!ports.distribute) throw new Error("Roleta de vendedores indisponível.");
+      const result = await ports.distribute(state, readDistribute(config));
+      return { message: result.message, branch: result.assigned ? "assigned" : "unavailable" };
+    }
     case "notify": return { message: await ports.notify(state, { userIds: Array.isArray(config.userIds) ? config.userIds.map(String) : [], title: text("title"), message: text("message"), whatsappPhone: String(config.whatsappPhone ?? "").replace(/\D/g, "") }) };
     case "add_note": {
       const note = text("text").trim();
@@ -251,6 +263,8 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
   if (!state.currentNodeId) state.currentNodeId = (state.context.triggerNodeId && graph.nodes.some((node) => node.id === state.context.triggerNodeId) ? state.context.triggerNodeId : triggerNode(graph)?.id) ?? null;
   let facts: ContactFacts | null = null;
   const loadFacts = async () => (facts ??= await ports.facts(state));
+  // Métricas do canvas nunca derrubam a execução.
+  const count = async (node: FlowNode, ...kinds: NodeCountKind[]) => { await ports.count?.(state, node, kinds).catch(() => undefined); };
   for (let step = 0; step < MAX_STEPS; step += 1) {
     const node = graph.nodes.find((item) => item.id === state.currentNodeId);
     if (!node) return { status: "completed", state: { ...state, currentNodeId: null } };
@@ -261,6 +275,7 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
     }
     if (isTrigger(node.type)) {
       await ports.log(state, node, "ok", `Gatilho: ${NODE_DEF[node.type].label}`);
+      await count(node, "entered", "completed");
       state.currentNodeId = nextNodeId(graph, node);
       continue;
     }
@@ -272,9 +287,11 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
         const rules = describeFilters(filters);
         if (filters.onFail === "stop") {
           await ports.log(state, node, "skipped", `Regras não atendidas (${rules}): ramo encerrado.`);
+          await count(node, "entered");
           return { status: "completed", state: { ...state, currentNodeId: null } };
         }
         await ports.log(state, node, "skipped", `Regras não atendidas (${rules}): passo pulado.`);
+        await count(node, "entered", "completed");
         state.currentNodeId = nextNodeId(graph, node);
         continue;
       }
@@ -285,10 +302,12 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
         if (node.data.config.businessHours === true) resumeAt = await ports.nextBusinessTime(resumeAt);
         state.context.waitingNodeId = node.id;
         await ports.log(state, node, "waiting", `Aguardando até ${resumeAt.toISOString()}`);
+        await count(node, "entered");
         return { status: "waiting", state, resumeAt };
       }
       state.context.waitingNodeId = null;
       await ports.log(state, node, "ok", "Espera concluída");
+      await count(node, "completed");
       state.currentNodeId = nextNodeId(graph, node);
       continue;
     }
@@ -298,12 +317,15 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
         if (opening) {
           state.context.waitingNodeId = node.id;
           await ports.log(state, node, "waiting", `Fora do horário útil (${describeBusinessWindow(node.data.config)}): retoma em ${opening.toISOString()}`);
+          await count(node, "entered");
           return { status: "waiting", state, resumeAt: opening };
         }
         await ports.log(state, node, "ok", "Dentro do horário útil: segue na hora");
+        await count(node, "entered", "completed");
       } else {
         state.context.waitingNodeId = null;
         await ports.log(state, node, "ok", "Horário útil aberto: fluxo retomado");
+        await count(node, "completed");
       }
       state.currentNodeId = nextNodeId(graph, node);
       continue;
@@ -315,6 +337,7 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
         state.context.waitingNodeId = node.id;
         state.context.replySince = now.toISOString();
         await ports.log(state, node, "waiting", `Aguardando resposta do cliente até ${resumeAt.toISOString()}`);
+        await count(node, "entered");
         return { status: "waiting", state, resumeAt };
       }
       const since = new Date(state.context.replySince ?? state.context.startedAt);
@@ -323,12 +346,14 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
       state.context.replySince = null;
       if (reply !== null) state.context.vars.resposta = reply;
       await ports.log(state, node, "ok", reply !== null ? "Cliente respondeu no prazo" : "Sem resposta no prazo: caminho Timeout");
+      await count(node, "completed");
       state.currentNodeId = nextNodeId(graph, node, reply !== null ? "replied" : "timeout");
       continue;
     }
     try {
       const result = await runNode(node, state, ports);
       await ports.log(state, node, "ok", result.message);
+      await count(node, "entered", "completed");
       if (result.end) return { status: "completed", state: { ...state, currentNodeId: null } };
       state.currentNodeId = nextNodeId(graph, node, result.branch);
       // Ações mudam tags/etapa/fila: as próximas regras releem os dados.
@@ -336,6 +361,7 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha no passo.";
       await ports.log(state, node, "error", message);
+      await count(node, "entered", "error");
       return { status: "failed", state, error: message };
     }
   }

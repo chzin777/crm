@@ -10,7 +10,13 @@ export type BuilderWorkspace = { queues: { id: string; name: string }[]; users: 
 
 /** Parâmetros possíveis de qualquer nó (strict exige todos; o que não se aplica vem null). */
 const PARAM_KEYS = {
-  mode: { type: ["string", "null"], enum: ["any", "keywords", "settled", "end", "goto", null] },
+  mode: { type: ["string", "null"], enum: ["any", "keywords", "settled", "end", "goto", "round_robin", "least_load", null] },
+  pool: { type: ["string", "null"], enum: ["queue", "users", null] },
+  onlyOnline: { type: ["boolean", "null"] },
+  respectShift: { type: ["boolean", "null"] },
+  maxActive: { type: ["number", "null"] },
+  noteOnOpportunity: { type: ["boolean", "null"] },
+  createContact: { type: ["boolean", "null"] },
   days: { type: ["array", "null"], items: { type: "integer" } },
   start: { type: ["string", "null"] },
   end: { type: ["string", "null"] },
@@ -107,7 +113,7 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "",
     "Regras:",
     "- steps[0] é o primeiro passo depois do gatilho. Cada passo aponta o próximo em next (id de um passo POSTERIOR na lista) ou null para encerrar.",
-    "- Só o tipo condition usa nextTrue (caminho Sim) e nextFalse (caminho Não); nos demais, nextTrue e nextFalse são null. Na condition, next é null.",
+    "- Só o tipo condition usa nextTrue (caminho Sim) e nextFalse (caminho Não); distribute_lead usa next e nextFalse (sem vendedor); nos demais, nextTrue e nextFalse são null. Na condition, next é null.",
     "- wait_reply (Aguardar resposta do cliente): amount + unit (minutes, hours ou days) é o prazo; usa nextReplied (cliente respondeu no prazo) e nextTimeout (não respondeu); next é null. Use em follow-ups: \"se não responder em 1 dia, mande outra mensagem\" = send_whatsapp → wait_reply (amount 1, unit days) com nextTimeout no follow-up e nextReplied em ai_agent, assign ou null.",
     "- business_hours (Esperar até horário útil): days = dias da semana (0 = domingo ... 6 = sábado), start e end em HH:MM (horário de Brasília). Coloque ANTES de mensagens quando o pedido falar em horário comercial, não mandar de madrugada ou só em dias úteis (padrão Seg–Sáb, 08:00–18:00: days [1,2,3,4,5,6]).",
     "- ab_split (Teste A/B): variants = percentuais inteiros (2 a 5 variantes, soma exatamente 100, ex.: [50, 50] ou [70, 30]); nextVariants = lista com o id do primeiro passo de cada variante, na mesma ordem (Variante A, B...); next é null. Cada variante segue o seu próprio caminho (ex.: duas mensagens diferentes).",
@@ -122,6 +128,8 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "- Mensagens em português do Brasil, curtas e cordiais, com variáveis {{nome}}, {{cidade}}, {{telefone}} quando fizer sentido. Sem emojis em excesso.",
     "- trigger_message com mode keywords exige keywords; tags em minúsculas e com hífen (ex.: cliente-vip).",
     "- assign exige queueId de uma fila listada; assigneeId e userIds só com ids de usuários listados. Sem fila adequada, use notify.",
+    "- distribute_lead (Roleta de vendedores): use para \"distribuir o lead entre os vendedores\", \"rodízio\", \"para quem estiver livre\". pool queue (membros da fila queueId) ou users (userIds listados); mode round_robin (rodízio) ou least_load (menor carga); onlyOnline, respectShift (horário da fila) e maxActive (0 = sem limite). next = vendedor atribuído; nextFalse = sem vendedor disponível (ex.: notify ou send_whatsapp avisando o retorno). A variável {{vendedor}} traz o nome escolhido.",
+    "- trigger_webhook (Webhook recebido): lead de Meta Ads, Google Ads, Typeform ou landing page; cria o contato (createContact true) e os campos do formulário viram variáveis ({{nome_lead}}, {{email}}, {{origem}}, {{utm_source}}).",
     "- Pipeline interno x ERP: gatilhos trigger_stage/trigger_tag reagem a movimentações DENTRO do CRM (Kanban, tags). Fatos comerciais e financeiros reais (compra, venda faturada, devolução, parcela vencida/a vencer, pagamento, aniversário, tempo sem comprar, óculos prontos no laboratório) vêm do ERP VMSet: use os gatilhos trigger_erp_*.",
     "- Ex.: \"NPS 5 minutos após a compra\" = trigger_erp_after_sale (amount 5, unit minutes, businessHours false), nunca trigger_stage. \"Cobrar quem está com parcela atrasada há 10 dias\" = trigger_erp_overdue (amount 10, unit days). \"Lembrar 3 dias antes do vencimento\" = trigger_erp_due_soon (amount 3). \"Parabéns no aniversário\" = trigger_erp_birthday (amount 0). \"Reativar quem não compra há 1 ano\" = trigger_erp_no_purchase (amount 1, unit years). \"Avisar que os óculos estão prontos\" = trigger_erp_lab_ready.",
     "- trigger_erp_sale/after_sale: customerType (any, first = primeira compra, repeat = recompra), minAmount em reais, store e category (texto contido). trigger_erp_paid: mode any ou settled (quitou o carnê). Variáveis do ERP nos textos: {{venda.valor}}, {{venda.numero}}, {{venda.loja}}, {{venda.itens}}, {{financeiro.valor_aberto}}, {{financeiro.dias_atraso}}, {{financeiro.vencimento}}, {{os.loja}}, {{cliente.idade}}.",
@@ -252,6 +260,9 @@ export function draftToGraph(draft: AutomationDraft, workspace: BuilderWorkspace
     } else if (step.type === "ab_split") {
       const variants = readVariants(nodes[index + 1].data.config);
       (Array.isArray(step.nextVariants) ? step.nextVariants : []).slice(0, variants.length).forEach((target, position) => link(target, `v${position}`));
+    } else if (step.type === "distribute_lead") {
+      link(step.next, "assigned");
+      link(step.nextFalse, "unavailable");
     } else if (step.type === "end_flow") {
       // Encerra: sem próximo passo.
     } else {

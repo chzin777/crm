@@ -874,6 +874,7 @@ model AutomationFlow {
   executions    AutomationExecution[]
 
   @@index([status, triggerType])
+  @@index([webhookToken])
 }
 
 /// Um contato percorrendo um fluxo: nó atual, quando retomar (delay) e variáveis da execução.
@@ -914,6 +915,52 @@ model AutomationTriggerEvent {
 
   @@unique([flowId, nodeId, eventKey])
   @@index([createdAt])
+}
+
+/// Contadores por nó no canvas (entradas, conclusões, erros) e cursor da Roleta de Vendedores.
+model AutomationNodeStat {
+  flowId    String
+  nodeId    String
+  entered   Int      @default(0)
+  completed Int      @default(0)
+  errors    Int      @default(0)
+  rrCursor  Int      @default(0)
+  updatedAt DateTime @default(now())
+
+  @@id([flowId, nodeId])
+}
+
+/// Mensagem enviada por um nó Enviar WhatsApp: entregue (tique da Meta) e respondida pelo cliente.
+model AutomationMessageTouch {
+  id             String    @id @default(cuid())
+  flowId         String
+  nodeId         String
+  executionId    String
+  contactId      String
+  conversationId String?
+  externalId     String?
+  sentAt         DateTime  @default(now())
+  deliveredAt    DateTime?
+  repliedAt      DateTime?
+
+  @@index([flowId, nodeId])
+  @@index([externalId])
+  @@index([contactId, sentAt])
+}
+
+/// Venda do VMSet atribuída a um nó por onde o cliente passou dentro da janela de atribuição do fluxo.
+model AutomationSaleAttribution {
+  id        String   @id
+  flowId    String
+  nodeId    String
+  contactId String
+  saleKey   String
+  amount    Float    @default(0)
+  saleDate  DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([flowId, nodeId, saleKey])
+  @@index([flowId])
 }
 
 model AutomationStepLog {

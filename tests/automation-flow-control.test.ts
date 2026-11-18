@@ -109,8 +109,8 @@ describe("encerrar / ir para outra automação", () => {
     expect(validateGraph(base({ mode: "goto", flowId: "" }))).toContain("Ir para outra automação: escolha a automação de destino.");
   });
   it("configurações globais: só conversões conhecidas", () => {
-    expect(readFlowSettings({ cancelOnConversion: ["purchase", "won", "x", "won"] })).toEqual({ cancelOnConversion: ["purchase", "won"] });
-    expect(readFlowSettings(null)).toEqual({ cancelOnConversion: [] });
+    expect(readFlowSettings({ cancelOnConversion: ["purchase", "won", "x", "won"] })).toEqual({ cancelOnConversion: ["purchase", "won"], attributionDays: 7 });
+    expect(readFlowSettings(null)).toEqual({ cancelOnConversion: [], attributionDays: 7 });
   });
 });
 

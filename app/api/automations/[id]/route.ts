@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
@@ -11,8 +12,10 @@ export async function GET(_request: Request, { params }: Context) {
   const guard = await requireModule("automacoes");
   if (guard.response) return guard.response;
   const { id } = await params;
-  const flow = await prisma.automationFlow.findUnique({ where: { id } });
-  if (!flow) return NextResponse.json({ error: "Automação não encontrada." }, { status: 404 });
+  const found = await prisma.automationFlow.findUnique({ where: { id } });
+  if (!found) return NextResponse.json({ error: "Automação não encontrada." }, { status: 404 });
+  // Fluxos antigos sem segredo: gera o token da URL do webhook de entrada na primeira abertura.
+  const flow = found.webhookToken ? found : await prisma.automationFlow.update({ where: { id }, data: { webhookToken: randomBytes(18).toString("hex") } });
   const graph = sanitizeGraph(flow);
   return NextResponse.json({ flow: { id: flow.id, name: flow.name, description: flow.description, status: flow.status, webhookToken: flow.webhookToken, updatedAt: flow.updatedAt, settings: readFlowSettings(flow.settings), ...graph } });
 }
