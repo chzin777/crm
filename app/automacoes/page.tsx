@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Clock, FilePlus2, Loader2, Pause, Play, Plus, Trash2, Workflow, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, FilePlus2, Loader2, Pause, Play, Plus, Sparkles, Trash2, Workflow, Zap } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 
@@ -16,6 +16,13 @@ const STATUS = {
   draft: { label: "Rascunho", cls: "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400", dot: "bg-slate-400" },
 } as const;
 
+const AI_EXAMPLES = [
+  "Lead em Fechamento sem resposta em 2 dias: lembrete no WhatsApp e avisar a equipe",
+  "Cliente que mandar \"receita\" ganha a tag receita e vai para a fila de vendas",
+  "Venda ganha: depois de 7 dias perguntar como estão os óculos e mover para Pós-venda",
+  "Cliente sem contato há 6 meses vai para Reativação e recebe uma mensagem",
+];
+
 /** /automacoes: lista de fluxos com status, gatilho e contadores de execuções. */
 export default function AutomationsPage() {
   const toast = useToast();
@@ -25,6 +32,8 @@ export default function AutomationsPage() {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [mode, setMode] = useState<"manual" | "ai">("manual");
+  const [prompt, setPrompt] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -49,6 +58,23 @@ export default function AutomationsPage() {
       router.push(`/automacoes/${data.id}`);
     } catch (cause) {
       toast.error("Nova automação", cause instanceof Error ? cause.message : "Tente de novo.");
+      setBusy(null);
+    }
+  };
+
+  const generate = async () => {
+    if (prompt.trim().length < 10) return;
+    setBusy("ai");
+    try {
+      const response = await fetch("/api/automations/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt }) });
+      const data = (await response.json().catch(() => ({}))) as { id?: string; name?: string; problems?: string[]; error?: string };
+      if (!response.ok || !data.id) throw new Error(data.error ?? "Não foi possível gerar a automação.");
+      const pending = data.problems?.length ?? 0;
+      toast.success("Automação criada com IA", pending ? `${data.name}: revise ${pending} ponto${pending === 1 ? "" : "s"} antes de ativar.` : `${data.name} está em rascunho. Revise e ative.`);
+      setCreating(false);
+      router.push(`/automacoes/${data.id}`);
+    } catch (cause) {
+      toast.error("Criar com IA", cause instanceof Error ? cause.message : "Tente de novo.");
       setBusy(null);
     }
   };
@@ -138,7 +164,37 @@ export default function AutomationsPage() {
       )}
 
       {creating && (
-        <EntityDialog titleId="nova-automacao" title="Nova automação" description="Comece do zero ou a partir de um modelo pronto (você ajusta tudo no editor)." onClose={() => setCreating(false)} size="md">
+        <EntityDialog titleId="nova-automacao" title="Nova automação" description="Comece do zero, por um modelo pronto ou descreva o fluxo para a IA montar (você ajusta tudo no editor)." onClose={() => { if (busy !== "ai") setCreating(false); }} size="md">
+          <div role="tablist" aria-label="Como criar" className="mb-3 flex shrink-0 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-white/5">
+            {([["manual", "Criar manualmente", FilePlus2], ["ai", "Criar com IA", Sparkles]] as const).map(([value, label, Icon]) => (
+              <button key={value} type="button" role="tab" aria-selected={mode === value} disabled={busy === "ai"} onClick={() => setMode(value)} className={`inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition disabled:cursor-not-allowed ${mode === value ? "bg-white text-[#051647] shadow-sm dark:bg-slate-900 dark:text-white" : "text-slate-500 hover:text-[#051647] dark:text-slate-400 dark:hover:text-white"}`}>
+                <Icon className="h-3.5 w-3.5" />{label}
+              </button>
+            ))}
+          </div>
+          {mode === "ai" ? (
+            <form onSubmit={(event) => { event.preventDefault(); void generate(); }} className="flex min-h-0 flex-1 flex-col gap-3">
+              <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Descreva a automação
+                <textarea autoFocus rows={6} value={prompt} disabled={busy === "ai"} onChange={(event) => setPrompt(event.target.value)} maxLength={2000} placeholder="Ex.: quando um lead entrar em Fechamento e não responder em 2 dias, mandar um lembrete no WhatsApp e avisar o vendedor" className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-[#002187] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-[#C4D600]" />
+              </label>
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">Exemplos</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {AI_EXAMPLES.map((example) => (
+                    <button key={example} type="button" disabled={busy === "ai"} onClick={() => setPrompt(example)} className="cursor-pointer rounded-full border border-slate-200 px-2.5 py-1 text-left text-[11px] text-slate-600 hover:border-[#002187] hover:text-[#002187] disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600]">{example}</button>
+                  ))}
+                </div>
+              </div>
+              {busy === "ai" && <p role="status" className="flex items-center gap-2 rounded-lg bg-[#002187]/5 px-3 py-2 text-xs text-[#002187] dark:bg-white/5 dark:text-[#C4D600]"><Loader2 className="h-3.5 w-3.5 animate-spin" />Montando gatilho, passos e conexões... isso leva alguns segundos.</p>}
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">A automação é criada como rascunho e abre no editor para você revisar antes de ativar.</p>
+              <div className="mt-auto flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <button type="button" disabled={busy === "ai"} onClick={() => setCreating(false)} className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">Cancelar</button>
+                <button type="submit" disabled={!!busy || prompt.trim().length < 10} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
+                  {busy === "ai" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{busy === "ai" ? "Gerando..." : "Gerar automação"}
+                </button>
+              </div>
+            </form>
+          ) : (
           <div className="grid gap-2 overflow-y-auto">
             <button type="button" disabled={!!busy} onClick={() => void create()} className="flex cursor-pointer items-start gap-3 rounded-xl border border-dashed border-slate-300 p-3 text-left hover:border-[#002187] disabled:opacity-50 dark:border-slate-600 dark:hover:border-[#C4D600]">
               <FilePlus2 className="mt-0.5 h-5 w-5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
@@ -153,6 +209,7 @@ export default function AutomationsPage() {
               </button>
             ))}
           </div>
+          )}
         </EntityDialog>
       )}
     </div>

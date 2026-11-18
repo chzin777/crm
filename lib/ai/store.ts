@@ -91,6 +91,7 @@ export const AI_FEATURE_LABELS: Record<string, string> = {
   transcription: "Transcrição de áudio",
   knowledge_index: "Indexação da base de conhecimento",
   knowledge_search: "Busca na base de conhecimento",
+  automation_builder: "Criação de automação com IA",
 };
 
 type Totals = { calls: number; inputTokens: number; outputTokens: number; costUsd: number };

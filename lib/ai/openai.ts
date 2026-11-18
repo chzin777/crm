@@ -25,7 +25,11 @@ export type ChatMessage =
   | { role: "tool"; tool_call_id: string; content: string };
 /** Ferramenta somente leitura que o modelo pode chamar (definição no formato da OpenAI + execução no servidor). */
 export type AiTool = { definition: { type: "function"; function: { name: string; description: string; parameters: object } }; run: (args: Record<string, unknown>) => Promise<unknown> };
-export type AiCallMeta = { feature: string; conversationId?: string | null; userId?: string | null; maxTokens?: number; settings?: AiSettings; tools?: AiTool[] };
+export type AiCallMeta = {
+  feature: string; conversationId?: string | null; userId?: string | null; maxTokens?: number; settings?: AiSettings; tools?: AiTool[];
+  /** Structured Outputs: a resposta segue exatamente este JSON Schema (strict). Sem ele, json_object livre. */
+  jsonSchema?: { name: string; schema: object };
+};
 /** Rodadas de ferramenta por resposta (evita laço e custo descontrolado). */
 const MAX_TOOL_ROUNDS = 2;
 
@@ -60,7 +64,9 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model, messages: history, response_format: { type: "json_object" }, max_completion_tokens: meta.maxTokens ?? 1200,
+        model, messages: history,
+        response_format: meta.jsonSchema ? { type: "json_schema", json_schema: { name: meta.jsonSchema.name, strict: true, schema: meta.jsonSchema.schema } } : { type: "json_object" },
+        max_completion_tokens: meta.maxTokens ?? 1200,
         ...(temperature === null ? {} : { temperature }),
         // Na última rodada as ferramentas seguem declaradas (o histórico tem chamadas), mas o modelo precisa responder.
         ...(tools.length ? { tools: tools.map((tool) => tool.definition), tool_choice: withTools ? "auto" : "none" } : {}),
