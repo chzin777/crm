@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Clock, FilePlus2, Loader2, Pause, Play, Plus, Sparkles, Trash2, Workflow, Zap } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ToastProvider";
 
 type FlowRow = { id: string; name: string; description: string; status: "draft" | "active" | "paused"; trigger: string; steps: number; running: number; completed: number; failed: number; cancelled: number; updatedAt: string };
@@ -31,9 +32,9 @@ export default function AutomationsPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
   const [mode, setMode] = useState<"manual" | "ai">("manual");
   const [prompt, setPrompt] = useState("");
+  const [deleting, setDeleting] = useState<FlowRow | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -47,7 +48,7 @@ export default function AutomationsPage() {
       })
       .catch((cause: unknown) => { if (active) { toast.error("Automações", cause instanceof Error ? cause.message : "Erro ao carregar."); setFlows([]); } });
     return () => { active = false; };
-  }, [toast, reload]);
+  }, [toast]);
 
   const create = async (templateId?: string) => {
     setBusy(templateId ?? "blank");
@@ -95,13 +96,20 @@ export default function AutomationsPage() {
   };
 
   const remove = async (flow: FlowRow) => {
-    if (!window.confirm(`Excluir a automação "${flow.name}" e o histórico de execuções?`)) return;
     setBusy(flow.id);
     try {
-      await fetch(`/api/automations/${flow.id}`, { method: "DELETE" });
-      setReload((value) => value + 1);
+      const response = await fetch(`/api/automations/${flow.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Não foi possível excluir a automação.");
+      }
+      setFlows((current) => current?.filter((item) => item.id !== flow.id) ?? current);
+      toast.success("Automação excluída com sucesso", flow.name);
+    } catch (cause) {
+      toast.error("Erro ao excluir a automação", cause instanceof Error ? cause.message : "Tente de novo.");
     } finally {
       setBusy(null);
+      setDeleting(null);
     }
   };
 
@@ -154,7 +162,7 @@ export default function AutomationsPage() {
                       <button type="button" disabled={busy === flow.id} onClick={() => void setStatus(flow, "active")} title="Ativar" aria-label={`Ativar ${flow.name}`} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-[#002187] hover:bg-slate-100 disabled:opacity-40 dark:text-[#C4D600] dark:hover:bg-white/10"><Play className="h-4 w-4" /></button>
                     )}
                     <Link href={`/automacoes/${flow.id}`} className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">Editar</Link>
-                    <button type="button" disabled={busy === flow.id} onClick={() => void remove(flow)} title="Excluir" aria-label={`Excluir ${flow.name}`} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
+                    <button type="button" disabled={busy === flow.id} onClick={() => setDeleting(flow)} title="Excluir" aria-label={`Excluir ${flow.name}`} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
                   </span>
                 </li>
               );
@@ -211,6 +219,16 @@ export default function AutomationsPage() {
           </div>
           )}
         </EntityDialog>
+      )}
+      {deleting && (
+        <ConfirmDialog
+          variant="destructive"
+          title="Excluir automação"
+          description={`A automação "${deleting.name}" e todo o histórico de execuções serão excluídos. Execuções em andamento param. Essa ação não pode ser desfeita.`}
+          confirmLabel="Excluir automação"
+          onClose={() => setDeleting(null)}
+          onConfirm={() => remove(deleting)}
+        />
       )}
     </div>
   );

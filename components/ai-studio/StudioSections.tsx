@@ -204,6 +204,7 @@ export function RulesSection() {
     try {
       if (!rule.isNew) await api(`/api/ai/rules/${rule.id}`, { method: "DELETE" });
       setRules((current) => current?.filter((item) => item.id !== rule.id) ?? current);
+      if (!rule.isNew) toast.success("Regra excluída com sucesso", rule.title);
     } catch (cause) {
       toast.error("Erro ao excluir", cause instanceof Error ? cause.message : "Tente de novo.");
     } finally {
@@ -368,6 +369,7 @@ export function SkillsSection() {
     try {
       if (!skill.isNew) await api(`/api/ai/skills/${skill.id}`, { method: "DELETE" });
       setSkills((current) => current?.filter((item) => item.id !== skill.id) ?? current);
+      if (!skill.isNew) toast.success("Skill excluída com sucesso", skill.name);
     } catch (cause) {
       toast.error("Erro ao excluir", cause instanceof Error ? cause.message : "Tente de novo.");
     } finally {
@@ -717,6 +719,7 @@ export function KnowledgeSection() {
     try {
       await api(`/api/ai/knowledge/${document.id}`, { method: "DELETE" });
       setDocuments((current) => current?.filter((item) => item.id !== document.id) ?? current);
+      toast.success("Documento excluído com sucesso", document.title);
     } catch (cause) {
       toast.error("Erro ao excluir", cause instanceof Error ? cause.message : "Tente de novo.");
     } finally {
