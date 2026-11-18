@@ -1,4 +1,15 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadBucketCommand, CreateBucketCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+  GetObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 
@@ -64,6 +75,40 @@ export async function readFileStream(key: string, range?: string) {
   const object = await client.send(new GetObjectCommand({ Bucket: BUCKET, Key: key, ...(range ? { Range: range } : {}) }));
   if (!object.Body) throw new Error("Arquivo vazio no armazenamento.");
   return { stream: object.Body.transformToWebStream(), contentLength: object.ContentLength };
+}
+
+/** Grava num caminho exato (sem o prefixo aleatório de uploadFile). */
+export async function putFile(key: string, buffer: Buffer, contentType: string): Promise<void> {
+  await client.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: buffer, ContentType: contentType }));
+}
+
+/**
+ * Envio em partes (arquivos grandes, como vídeos): cada parte passa pelo app em requisições pequenas,
+ * respeitando os limites de corpo do proxy e do Cloudflare. Partes de no mínimo 5 MB (exceto a última).
+ */
+export async function startMultipartUpload(key: string, contentType: string): Promise<string> {
+  const result = await client.send(new CreateMultipartUploadCommand({ Bucket: BUCKET, Key: key, ContentType: contentType }));
+  if (!result.UploadId) throw new Error("O armazenamento não iniciou o envio.");
+  return result.UploadId;
+}
+
+export async function uploadMultipartPart(key: string, uploadId: string, partNumber: number, body: Buffer): Promise<string> {
+  const result = await client.send(new UploadPartCommand({ Bucket: BUCKET, Key: key, UploadId: uploadId, PartNumber: partNumber, Body: body }));
+  if (!result.ETag) throw new Error("O armazenamento não confirmou a parte enviada.");
+  return result.ETag;
+}
+
+export async function completeMultipartUpload(key: string, uploadId: string, parts: { partNumber: number; etag: string }[]): Promise<void> {
+  await client.send(new CompleteMultipartUploadCommand({
+    Bucket: BUCKET,
+    Key: key,
+    UploadId: uploadId,
+    MultipartUpload: { Parts: [...parts].sort((a, b) => a.partNumber - b.partNumber).map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })) },
+  }));
+}
+
+export async function abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+  await client.send(new AbortMultipartUploadCommand({ Bucket: BUCKET, Key: key, UploadId: uploadId }));
 }
 
 export async function deleteFile(key: string): Promise<void> {

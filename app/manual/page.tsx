@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { BookOpen, ListChecks, Settings2, UsersRound } from "lucide-react";
+import { BookOpen, Clapperboard, ListChecks, Settings2, UsersRound } from "lucide-react";
 import { Bullets, Chapter, Flow, Kbd, Note, Steps, Sub, Table, WhatsApp, type ManualChapter } from "@/components/manual/ManualParts";
 import { ManualToc } from "@/components/manual/ManualToc";
+import { ManualVideos } from "@/components/manual/ManualVideos";
 
 export const metadata = {
   title: "Manual do Sistema | CRM Óticas Brasil",
@@ -63,6 +64,9 @@ const CHAPTERS: ManualChapter[] = [
     { id: "campanhas-resultados", title: "Resultados e vendas no ERP" },
     { id: "campanhas-atribuicao", title: "Como uma venda é atribuída" },
     { id: "campanhas-respostas", title: "Respostas de campanha no atendimento" },
+    { id: "campanhas-ia", title: "Criar campanha com IA" },
+    { id: "campanhas-meta", title: "Aprovação do modelo na Meta" },
+    { id: "campanhas-dedup", title: "Vários segmentos sem mensagem repetida" },
   ] },
   { id: "atendimento", title: "Atendimento (inbox do WhatsApp)", sections: [
     { id: "atendimento-tela", title: "A tela de atendimento" },
@@ -74,6 +78,7 @@ const CHAPTERS: ManualChapter[] = [
     { id: "atendimento-agenda", title: "Mensagens agendadas e lembretes" },
     { id: "atendimento-cliente", title: "Painel do cliente" },
     { id: "atendimento-nova", title: "Iniciar uma nova conversa" },
+    { id: "atendimento-transcricao", title: "Transcrição automática de áudios" },
   ] },
   { id: "filas", title: "Filas e equipe de atendimento", sections: [
     { id: "filas-papel", title: "O papel das filas" },
@@ -105,6 +110,31 @@ const CHAPTERS: ManualChapter[] = [
   { id: "configuracoes", title: "Configurações", sections: [
     { id: "config-tabela", title: "Tabela de configurações" },
     { id: "config-whatsapp", title: "Conta do WhatsApp Business" },
+  ] },
+  { id: "ia", title: "Estúdio de IA", sections: [
+    { id: "ia-config", title: "Configuração simplificada" },
+    { id: "ia-transbordo", title: "Quando a IA passa para uma pessoa" },
+    { id: "ia-conhecimento", title: "Regras, Skills e Base de Conhecimento" },
+    { id: "ia-simulador", title: "Simulador e consumo" },
+  ] },
+  { id: "automacoes", title: "Automações", sections: [
+    { id: "auto-canvas", title: "O canvas visual" },
+    { id: "auto-ia", title: "Criar automação com IA" },
+    { id: "auto-gatilhos", title: "Gatilhos (incluindo ERP VMSet)" },
+    { id: "auto-nos", title: "Passos (nós) do fluxo" },
+    { id: "auto-roleta", title: "Roleta de vendedores" },
+    { id: "auto-webhook", title: "Webhooks de entrada" },
+    { id: "auto-metricas", title: "Métricas por nó" },
+  ] },
+  { id: "clientes-vip", title: "Clientes VIP, Lead Score e RFV-P", sections: [
+    { id: "vip-score", title: "Lead Score" },
+    { id: "vip-niveis", title: "Níveis Diamante, Ouro, Prata e Bronze" },
+    { id: "vip-rfvp", title: "Matriz RFV-P (555-5)" },
+    { id: "vip-segmentos", title: "Segmentos RFV-P e uso no dia a dia" },
+  ] },
+  { id: "videos", title: "Vídeos & Treinamentos", sections: [
+    { id: "videos-assistir", title: "Assistir aos treinamentos" },
+    { id: "videos-gerenciar", title: "Publicar e gerenciar vídeos (administrador)" },
   ] },
   { id: "guias", title: "Guias passo a passo por perfil", sections: [
     { id: "guia-atendente", title: "O dia a dia do atendente" },
@@ -139,10 +169,12 @@ export default function ManualPage() {
         <h1 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight sm:text-4xl">Manual completo do CRM Óticas Brasil</h1>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-300 sm:text-base">
           Tudo o que o sistema faz, tela por tela: atendimento no WhatsApp, filas e menu automático, pipelines, contatos, segmentos,
-          campanhas com retorno em vendas do ERP, pesquisas de satisfação, permissões e configurações. Use o sumário para ir direto ao assunto.
+          campanhas com retorno em vendas do ERP, IA de atendimento, automações, clientes VIP com RFV-P, pesquisas de satisfação, permissões e configurações.
+          Use o sumário para ir direto ao assunto ou assista aos vídeos de treinamento.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           <a href="#visao-geral" className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-4 py-2 text-sm font-semibold text-[#051647] transition hover:bg-[#d4e400]"><BookOpen className="h-4 w-4" /> Iniciar leitura</a>
+          <a href="#videos" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#C4D600]/60 px-4 py-2 text-sm font-semibold text-[#C4D600] transition hover:bg-white/10"><Clapperboard className="h-4 w-4" /> Vídeos &amp; treinamentos</a>
           <a href="#config-tabela" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"><Settings2 className="h-4 w-4" /> Tabela de configurações</a>
           <a href="#guias" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"><UsersRound className="h-4 w-4" /> Guia por perfil</a>
           <a href="#perguntas" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"><ListChecks className="h-4 w-4" /> Perguntas frequentes</a>
@@ -186,9 +218,9 @@ export default function ManualPage() {
                 rows={[
                   ["Início", "Painel (visão de clientes e relacionamento)"],
                   ["Vendas", "Pipelines · Atendimento · Filas · Métricas de Atendimento"],
-                  ["Marketing", "Contatos & Clientes · Segmentos · Campanhas e disparos · Modelos WhatsApp · Pesquisas NPS"],
+                  ["Marketing", "Contatos & Clientes · Segmentos · Campanhas e disparos · Modelos WhatsApp · Pesquisas NPS · Automações · Clientes VIP & Pontuação"],
                   ["Gestão", "Lojas · Usuários · Cargos · Permissões"],
-                  ["Sistema", "Configurações · Manual do sistema (este documento)"],
+                  ["Sistema", "Inteligência Artificial · Configurações · Manual do sistema (este documento, com vídeos de treinamento)"],
                 ]}
               />
             </Sub>
@@ -390,7 +422,14 @@ export default function ManualPage() {
               <Note>Em Critérios salvos, os padrões do sistema só podem ser ligados ou desligados. Um critério desligado some das novas seleções, mas continua valendo nos segmentos que já o usam.</Note>
             </Sub>
             <Sub id="segmentos-planilha" number="6.4" title="Importar contatos por planilha">
-              <p>Na seleção de contatos é possível importar uma planilha (nome e telefone). O sistema localiza os contatos pelo telefone e cria os que ainda não existem.</p>
+              <p>Na seleção de contatos é possível importar uma planilha (.xlsx ou .csv), como as listas de clientes por loja exportadas do ERP.</p>
+              <Steps items={[
+                <>Em <Kbd>Novo segmento</Kbd>, escolha <Kbd>Importar por planilha</Kbd> e selecione o arquivo.</>,
+                "O sistema reconhece sozinho as colunas de nome, CPF/CNPJ, celular, loja e última compra (e repõe os zeros do CPF que o Excel apaga).",
+                "Quem já existe no CRM é localizado pelo CPF/CNPJ e, na falta dele, pelo celular. Quem não existe é cadastrado na hora e também entra no segmento.",
+                "Pode importar várias planilhas no mesmo segmento: as listas são somadas sem repetir pessoas.",
+              ]} />
+              <Note kind="tip">O resumo da importação mostra quantos foram encontrados por CPF, por telefone, quantos foram cadastrados e o total acumulado. Critérios adicionados depois filtram somente dentro da lista importada.</Note>
             </Sub>
             <Sub id="segmentos-dicas" number="6.5" title="Boas práticas">
               <Bullets items={[
@@ -521,6 +560,37 @@ export default function ManualPage() {
                 "Se um robô respondeu, o administrador pode excluir a conversa com o motivo “Não é resposta da campanha”: a resposta sai das métricas e novas mensagens daquele contato não contam.",
               ]} />
             </Sub>
+            <Sub id="campanhas-ia" number="9.7" title="Criar campanha com IA">
+              <p>No primeiro passo da <Kbd>Nova campanha</Kbd> há o bloco <Kbd>Criar campanha com IA</Kbd>. Descreva o objetivo em uma frase e a IA monta o rascunho completo.</p>
+              <Steps items={[
+                "Escreva o pedido, por exemplo: “recuperar clientes que não compram há 1 ano, com oferta de exame de vista”.",
+                "A IA preenche nome, objetivo, categoria do modelo (Marketing ou Utilidade), os segmentos do público e, quando fizer sentido, filtros adicionais (última compra, nível VIP, segmento RFV-P, etapa do pipeline ou tag).",
+                "Ela também redige o texto do modelo com variáveis e botões. Tudo fica editável antes de salvar.",
+                "No passo Mensagem, o botão Gerar mensagem cria só o texto, usando o nome e o público já escolhidos.",
+              ]} />
+              <Note>Os filtros adicionais refinam a união dos segmentos: só recebe quem está em algum segmento e atende a todos os filtros. Use Remover filtros para desfazer.</Note>
+            </Sub>
+            <Sub id="campanhas-meta" number="9.8" title="Aprovação do modelo na Meta">
+              <p>Um texto novo criado pela IA vira um modelo que precisa ser aprovado pela Meta antes do envio.</p>
+              <Table
+                head={["Status", "O que fazer"]}
+                rows={[
+                  ["Aguardando aprovação Meta", "Nada: o disparo fica bloqueado até a Meta responder (normalmente minutos)."],
+                  ["Pronta para envio", "Modelo aprovado. A campanha pode ser disparada."],
+                  ["Rejeitada pela Meta", "O motivo aparece nos detalhes. Use Gerar nova versão, revise e clique em Aprovar e reenviar para análise."],
+                  ["Falha na submissão", "A integração não conseguiu enviar o modelo. Confira a conta do WhatsApp e reenvie."],
+                ]}
+              />
+            </Sub>
+            <Sub id="campanhas-dedup" number="9.9" title="Vários segmentos sem mensagem repetida">
+              <p>Ao escolher dois ou mais segmentos, o sistema une os públicos e garante que cada cliente receba <Kbd>no máximo uma mensagem</Kbd>, mesmo estando em vários segmentos ou com cadastros repetidos com o mesmo celular.</p>
+              <Bullets items={[
+                "No passo Público aparece o resumo: soma dos segmentos, destinatários únicos que vão receber e quantos foram unificados por estarem em mais de um segmento.",
+                "Cada segmento mostra quantos contatos tem e quantos são só dele.",
+                "Um alerta laranja avisa quando um segmento está 100% contido nos outros e não acrescenta ninguém novo.",
+                "A fila de disparo no servidor também remove repetidos, e o acompanhamento do envio informa quantos foram unificados.",
+              ]} />
+            </Sub>
           </Chapter>
 
           {/* 10 */}
@@ -613,6 +683,14 @@ export default function ManualPage() {
                 "Se ele já tem conversa aberta, o sistema oferece abrir a existente.",
                 "Sem janela de 24 horas, escolha um modelo aprovado e preencha as variáveis. Com janela aberta, pode escrever texto livre.",
                 "Revise a prévia e envie.",
+              ]} />
+            </Sub>
+            <Sub id="atendimento-transcricao" number="10.10" title="Transcrição automática de áudios">
+              <p>Todo áudio enviado pelo cliente é transcrito automaticamente. O texto aparece logo abaixo do player, na própria conversa.</p>
+              <Bullets items={[
+                "Dá para ler o pedido do cliente sem ouvir o áudio, por exemplo no meio de outro atendimento.",
+                "A IA de atendimento usa a transcrição para entender e responder áudios.",
+                "Cada áudio é transcrito uma única vez. Se a transcrição falhar, o áudio original continua disponível normalmente.",
               ]} />
             </Sub>
           </Chapter>
@@ -816,8 +894,204 @@ export default function ManualPage() {
           </Chapter>
 
           {/* 16 */}
-          <Chapter number={16} id="guias" title="Guias passo a passo por perfil" description="Rotinas recomendadas para cada função." tags={["rotina", "boas-praticas"]}>
-            <Sub id="guia-atendente" number="16.1" title="O dia a dia do atendente">
+          <Chapter number={16} id="ia" title="Estúdio de IA" description="A assistente que atende no WhatsApp como consultora de vendas: o que ela sabe, como fala e quando chama uma pessoa." tags={["ia", "regras", "skills", "conhecimento"]}>
+            <Sub id="ia-config" number="16.1" title="Configuração simplificada">
+              <p>Em <Kbd>/ia</Kbd>, a aba <Kbd>Geral &amp; Identidade</Kbd> reúne tudo o que muda o comportamento da IA, em blocos curtos:</p>
+              <Table
+                head={["Bloco", "Para que serve"]}
+                rows={[
+                  ["Identidade e tom", "Nome da assistente e jeito de falar com o cliente."],
+                  ["Atendimento, horário e transbordo", "Atendimento autônomo ligado ou não, horários próprios e quando passar para uma pessoa."],
+                  ["Instruções e restrições", "Orientações extras e o que a IA nunca deve fazer."],
+                  ["Estilo das respostas", "Responder em vários balões, agrupar automaticamente mensagens picadas do cliente e enviar a foto do produto encontrado."],
+                ]}
+              />
+              <Note kind="tip">A IA age como consultora: busca produtos e estoque na hora, sem pedir permissão, e só oferece modelos disponíveis na cidade do cliente.</Note>
+            </Sub>
+            <Sub id="ia-transbordo" number="16.2" title="Quando a IA passa para uma pessoa">
+              <p>Em <Kbd>A IA passa para uma pessoa quando</Kbd>, marque as situações que devem ir para um atendente:</p>
+              <Bullets items={[
+                "Intenção de compra ou orçamento.",
+                "Reclamação ou cliente irritado.",
+                "O cliente enviar receita ou comprovante.",
+                "A IA não tiver certeza da resposta.",
+                "Fora do horário de atendimento (ou sempre, se preferir que a IA só faça a triagem).",
+              ]} />
+              <p>A conversa vai para a fila com o resumo do que já foi conversado. Esse transbordo também pode disparar uma automação (gatilho <Kbd>IA transferiu o atendimento</Kbd>).</p>
+            </Sub>
+            <Sub id="ia-conhecimento" number="16.3" title="Regras, Skills e Base de Conhecimento">
+              <Table
+                head={["Aba", "O que cadastrar", "Exemplo"]}
+                rows={[
+                  ["Regras da Empresa", "Políticas fixas que a IA sempre segue. Podem ser ligadas ou desligadas.", "Prazo de troca, formas de pagamento, garantia."],
+                  ["Skills da IA", "Protocolos passo a passo usados quando a conversa bate com um gatilho (palavras-chave ou intenção).", "“Agendamento de exame”: quando o cliente pergunta como agendar."],
+                  ["Base de Conhecimento", "Documentos de consulta (colados ou enviados em arquivo de até 10 MB). A IA busca o trecho relevante a cada pergunta.", "Tabela de lentes 2026, programa de indicação."],
+                ]}
+              />
+              <Steps items={[
+                <>Abra a aba e clique em <Kbd>Nova regra</Kbd>, <Kbd>Nova skill</Kbd> ou <Kbd>Adicionar conhecimento</Kbd>.</>,
+                "Preencha no modal o título, o conteúdo e, nas skills, quando a IA deve usá-la.",
+                "Salve e confira no Simulador se a IA responde como esperado.",
+              ]} />
+              <Note>Na Base de Conhecimento, o teste de busca mostra quais trechos seriam usados. “Nenhum trecho relevante” significa que a IA responderia sem consultar os documentos.</Note>
+            </Sub>
+            <Sub id="ia-simulador" number="16.4" title="Simulador e consumo">
+              <Bullets items={[
+                "Simulador: converse como se fosse o cliente (texto, imagem, áudio ou documento) antes de mudar algo em produção. “Começar outra conversa” limpa o contexto.",
+                "Consumo & Limites: gasto de hoje e do mês, custo médio por conversa, atendimentos da IA no mês e gasto por função.",
+                "Conexão & Credenciais: chaves e conexão com o provedor de IA.",
+              ]} />
+            </Sub>
+          </Chapter>
+
+          {/* 17 */}
+          <Chapter number={17} id="automacoes" title="Automações" description="Fluxos visuais que reagem a eventos do WhatsApp, do pipeline e do ERP VMSet e trabalham sozinhos." tags={["automacoes", "fluxos", "vmset", "webhook"]}>
+            <Sub id="auto-canvas" number="17.1" title="O canvas visual">
+              <p>Cada automação é um desenho: um <Kbd>gatilho</Kbd> no início e <Kbd>passos</Kbd> ligados por setas. Arraste os blocos da barra lateral para o canvas e ligue as saídas.</p>
+              <Steps items={[
+                <>Em <Kbd>/automacoes</Kbd>, crie uma automação (do zero, por modelo pronto ou com IA).</>,
+                "Escolha o gatilho e adicione os passos. Clique em um bloco para configurar.",
+                "Use Testar fluxo para simular com um contato real: regras e condições são avaliadas de verdade, as esperas são puladas, nenhuma mensagem é enviada e nada é gravado.",
+                "Salve como Rascunho enquanto ajusta e clique em Ativar para colocar no ar.",
+              ]} />
+              <Note kind="warn">Antes de ativar, o editor aponta passos incompletos (ex.: roleta sem vendedores, mensagem sem texto). Corrija os avisos para liberar a ativação.</Note>
+            </Sub>
+            <Sub id="auto-ia" number="17.2" title="Criar automação com IA">
+              <p>Clique em <Kbd>Criar com IA</Kbd> e descreva o fluxo em português, por exemplo: “quando o cliente comprar no VMSet, esperar 7 dias e mandar pesquisa de satisfação; se não responder em 2 dias, avisar a loja”.</p>
+              <p>A IA monta o rascunho no canvas usando apenas os passos que o sistema realmente executa. Revise cada bloco, ajuste textos e ative.</p>
+            </Sub>
+            <Sub id="auto-gatilhos" number="17.3" title="Gatilhos (incluindo ERP VMSet)">
+              <Table
+                head={["Grupo", "Gatilhos"]}
+                rows={[
+                  ["WhatsApp & Atendimento", "Mensagem recebida (qualquer uma ou com palavra-chave), clicou em link rastreado, IA transferiu o atendimento."],
+                  ["CRM & Pipeline", "Webhook recebido, novo lead, lead entrou na etapa, oportunidade movida para Ganho, tag adicionada, pontuação atingiu X pontos, mudou de nível (tier), mudança na matriz RFV-P, aniversário do cliente, receita cadastrada."],
+                  ["ERP VMSet — Vendas", "Comprou no VMSet (venda faturada, primeira compra ou recompra, por loja ou produto), tempo após a venda (pós-venda), OS pronta para retirada."],
+                  ["ERP VMSet — Financeiro & Ciclo de vida", "Parcela prestes a vencer, pagamento identificado, quitou o carnê/crediário, cliente adimplente ou inadimplente há X, cliente sem comprar há X (reativação)."],
+                ]}
+              />
+            </Sub>
+            <Sub id="auto-nos" number="17.4" title="Passos (nós) do fluxo">
+              <Table
+                head={["Categoria", "Passos disponíveis"]}
+                rows={[
+                  ["Mensagens & Tempo", "Enviar WhatsApp (texto, modelo ou nota de voz, com “digitando/gravando” antes e links rastreados), Aguardar, Aguardar resposta do cliente (com prazo e saída para “Não respondeu”), Esperar até horário útil."],
+                  ["CRM & Funil", "Criar oportunidade, Mover etapa no pipeline, Adicionar/Remover tag, Atualizar campo do contato, Adicionar observação, Alterar pontuação (Lead Score), Atribuir atendente/fila, Roleta de vendedores, Notificar usuário/equipe, Marcar opt-out."],
+                  ["Lógica & Webhooks", "Condição (se/senão) por tag, etapa, fila, cidade, RFV-P, nível e campos; Teste A/B; Requisição HTTP; Ir para outra automação; Encerrar."],
+                  ["Inteligência Artificial", "Acionar agente de IA com um objetivo (ex.: qualificar o lead) e seguir conforme o resultado."],
+                ]}
+              />
+              <Note kind="tip">Mensagens podem usar variáveis do contato, como {"{{nome}}"}, {"{{loja}}"} e {"{{rfvp.segmento}}"}.</Note>
+            </Sub>
+            <Sub id="auto-roleta" number="17.5" title="Roleta de vendedores">
+              <p>O passo <Kbd>Roleta de vendedores</Kbd> distribui leads entre a equipe automaticamente.</p>
+              <Bullets items={[
+                "Distribuir entre: os membros de uma fila/loja ou vendedores escolhidos.",
+                "Regra: Rodízio (um para cada, em ordem) ou Menor carga ativa (quem tem menos atendimentos abertos).",
+                "Opções: só vendedores online e não pausados, respeitar o turno da fila, limite de atendimentos simultâneos e registrar o vendedor na oportunidade do pipeline.",
+                "Quando ninguém está disponível, o fluxo segue pela saída “Sem vendedor disponível” (ex.: mandar para a fila geral ou avisar o gerente).",
+              ]} />
+            </Sub>
+            <Sub id="auto-webhook" number="17.6" title="Webhooks de entrada">
+              <p>Uma automação pode começar quando outro sistema envia dados ao CRM: Meta Ads, Google Ads, Typeform, landing pages, Zapier ou Make.</p>
+              <Steps items={[
+                <>Escolha o gatilho <Kbd>Webhook recebido</Kbd> e copie o endereço exclusivo mostrado no bloco.</>,
+                "Cole esse endereço na ferramenta de origem (formulário, anúncio ou integração).",
+                <>Clique em <Kbd>Escutar evento de teste</Kbd> e envie um teste pela origem: o CRM mostra os campos recebidos.</>,
+                "Indique quais campos são nome, telefone, e-mail e origem/UTM (o sistema sugere sozinho) e marque se deve criar o contato quando o telefone ainda não existir.",
+              ]} />
+              <Note kind="warn">O endereço do webhook funciona como uma senha. Não publique em lugares abertos.</Note>
+            </Sub>
+            <Sub id="auto-metricas" number="17.7" title="Métricas por nó">
+              <p>Com a automação ativa, cada bloco do canvas mostra um selo com os números daquele passo, e o topo do editor traz o resumo do fluxo.</p>
+              <Table
+                head={["Métrica", "Significado"]}
+                rows={[
+                  ["Entraram / concluíram / erros", "Quantos contatos passaram pelo bloco e quantos tiveram falha."],
+                  ["Enviadas / entregues / respondidas", "Resultado das mensagens enviadas naquele passo."],
+                  ["Vendas e receita", "Compras no VMSet de quem passou pelo fluxo, dentro da janela de atribuição."],
+                  ["Resumo do fluxo", "Leads, execuções ativas, concluídas e com falha, entregues, respostas, vendas e receita."],
+                ]}
+              />
+            </Sub>
+          </Chapter>
+
+          {/* 18 */}
+          <Chapter number={18} id="clientes-vip" title="Clientes VIP, Lead Score e RFV-P" description="Quem são os melhores clientes, quem está esfriando e quem paga em dia, em números simples." tags={["vip", "lead-score", "rfvp", "tier"]}>
+            <Sub id="vip-score" number="18.1" title="Lead Score">
+              <p>Cada contato tem uma <Kbd>pontuação</Kbd> que sobe ou desce conforme o relacionamento: compras, respostas, cliques e regras das automações (passo Alterar pontuação).</p>
+              <Bullets items={[
+                "A ficha do cliente (aba Pontuação, em /clientes-vip e /contatos) mostra o score, o progresso para o próximo nível e o histórico de cada movimentação com o motivo.",
+                "Na mesma aba há o ajuste manual de pontos, sempre com justificativa registrada no histórico.",
+                "Uma automação pode reagir quando a pontuação atinge um valor (gatilho Pontuação atingiu X pontos).",
+              ]} />
+            </Sub>
+            <Sub id="vip-niveis" number="18.2" title="Níveis Diamante, Ouro, Prata e Bronze">
+              <Table
+                head={["Nível", "Faixa padrão de pontos"]}
+                rows={[
+                  ["Diamante", "700 ou mais"],
+                  ["Ouro", "300 a 699"],
+                  ["Prata", "100 a 299"],
+                  ["Bronze", "Abaixo de 100"],
+                ]}
+              />
+              <p>As faixas são ajustáveis em <Kbd>Parametrizar RFV-P &amp; Níveis</Kbd> (aba Níveis). Ao salvar, todos os contatos são reclassificados. A mudança de nível pode disparar uma automação (gatilho Mudou de nível).</p>
+            </Sub>
+            <Sub id="vip-rfvp" number="18.3" title="Matriz RFV-P (555-5)">
+              <p>O RFV-P dá uma nota de 1 a 5 para quatro pilares, calculados com as vendas e o crediário do VMSet:</p>
+              <Table
+                head={["Pilar", "O que mede"]}
+                rows={[
+                  ["R — Recência", "Dias desde a última compra concluída."],
+                  ["F — Frequência", "Quantas compras na janela de análise."],
+                  ["V — Valor", "Total gasto (ou ticket médio) na janela."],
+                  ["P — Pontualidade", "Parcelas de carnê, boleto e crédito interno pagas em dia."],
+                ]}
+              />
+              <p>O código junta as notas: <Kbd>555-5</Kbd> é o cliente ideal (comprou há pouco, compra sempre, gasta bem e paga em dia). O recálculo é automático todo dia às 6h, e o botão <Kbd>Recalcular RFV-P</Kbd> atualiza na hora. As faixas de cada nota são editáveis em Parametrizar RFV-P &amp; Níveis, com a opção de restaurar o padrão recomendado.</p>
+            </Sub>
+            <Sub id="vip-segmentos" number="18.4" title="Segmentos RFV-P e uso no dia a dia">
+              <Table
+                head={["Segmento", "Quem é", "Ação sugerida"]}
+                rows={[
+                  ["Campeões Pagadores", "Compram muito, recentemente, gastam bem e pagam em dia.", "Lançamentos e convites exclusivos."],
+                  ["Fiéis em Dia", "Compram com frequência e pagam em dia.", "Programa de indicação e pós-venda."],
+                  ["Novos Promissores", "Compraram há pouco, ainda com poucas compras.", "Boas-vindas e segunda compra."],
+                  ["Alto Valor com Risco", "Gastam bem, mas atrasam ou têm parcela em aberto.", "Cobrança cuidadosa, sem oferta agressiva."],
+                  ["Em Risco / Hibernando", "Compravam com frequência, mas sumiram.", "Reativação com oferta ou exame de vista."],
+                  ["Regulares", "Compraram no último semestre, sem destaque.", "Campanhas sazonais."],
+                  ["Inadimplentes", "Pontualidade baixa ou título vencido há muito tempo.", "Fluxo de cobrança (financeiro)."],
+                  ["Inativos / Perdidos", "Sem compras recentes ou nunca compraram.", "Reconquista com baixo custo."],
+                ]}
+              />
+              <Bullets items={[
+                "Em /clientes-vip: KPIs por nível, segmentos clicáveis, busca, filtros por nível, segmento e nota de cada pilar. Clique na linha para abrir a ficha completa.",
+                "O badge RFV-P aparece também no /chat e em /contatos.",
+                "Segmentos de público e filtros de campanha aceitam condições de RFV-P; automações têm o gatilho Mudança na matriz RFV-P e variáveis {{rfvp.*}}.",
+              ]} />
+            </Sub>
+          </Chapter>
+
+          {/* 19 */}
+          <Chapter number={19} id="videos" title="Vídeos & Treinamentos" description="Treinamentos em vídeo da equipe, para assistir direto nesta página." tags={["videos", "treinamento", "tutorial"]}>
+            <Sub id="videos-assistir" number="19.1" title="Assistir aos treinamentos">
+              <p>Escolha um vídeo na lista ao lado do player. Use a busca ou o filtro de categoria para encontrar um assunto. O player permite pausar, avançar, mudar a velocidade e ver em tela cheia.</p>
+              <ManualVideos />
+            </Sub>
+            <Sub id="videos-gerenciar" number="19.2" title="Publicar e gerenciar vídeos (administrador)">
+              <Steps items={[
+                <>Clique em <Kbd>Adicionar vídeo</Kbd>, informe o título e, se quiser, uma descrição e a categoria (ex.: Atendimento, Campanhas).</>,
+                "Escolha o arquivo (.mp4, .webm ou .mov, até 2 GB) e clique em Publicar vídeo. A barra mostra o progresso; mantenha a janela aberta até terminar.",
+                "Use o lápis para editar título, descrição ou categoria, as setas para mudar a ordem e a lixeira para excluir.",
+              ]} />
+              <Note kind="tip">Prefira vídeos curtos (até 10 minutos) em .mp4: carregam mais rápido e funcionam em qualquer navegador e no celular.</Note>
+            </Sub>
+          </Chapter>
+
+          {/* 20 */}
+          <Chapter number={20} id="guias" title="Guias passo a passo por perfil" description="Rotinas recomendadas para cada função." tags={["rotina", "boas-praticas"]}>
+            <Sub id="guia-atendente" number="20.1" title="O dia a dia do atendente">
               <Steps items={[
                 "Ao chegar, abra o Atendimento e confira a aba Lembretes (vencidos em vermelho).",
                 "Atenda a aba Aguardando pela ordem, priorizando as conversas em alerta (mais de 10 min).",
@@ -829,7 +1103,7 @@ export default function ManualPage() {
                 "Saindo para intervalo, peça ao supervisor para pausar sua distribuição.",
               ]} />
             </Sub>
-            <Sub id="guia-supervisor" number="16.2" title="O dia a dia do supervisor">
+            <Sub id="guia-supervisor" number="20.2" title="O dia a dia do supervisor">
               <Steps items={[
                 "Acompanhe em Filas quem está esperando, a maior espera e a carga de cada pessoa.",
                 "Ajuste limites e pausas conforme a escala do dia.",
@@ -839,29 +1113,32 @@ export default function ManualPage() {
                 "Mantenha respostas prontas e o menu atualizados.",
               ]} />
             </Sub>
-            <Sub id="guia-marketing" number="16.3" title="O dia a dia do marketing">
+            <Sub id="guia-marketing" number="20.3" title="O dia a dia do marketing">
               <Steps items={[
                 "Monte o público em Segmentos, preferindo critérios.",
                 "Crie ou confirme um modelo aprovado em Modelos WhatsApp.",
                 "Crie a campanha, confira o custo estimado e dispare.",
                 "Acompanhe entregues, lidos e respostas ao vivo e reenvie falhas quando fizer sentido.",
                 "Após a janela de conversão, avalie Vendido, ROI e conversões e crie a segunda onda com “receberam e não compraram”.",
+                "Use os segmentos RFV-P de /clientes-vip para campanhas certeiras (ex.: reativar “Em Risco / Hibernando”) e confira no passo Público quantos clientes únicos vão receber.",
               ]} />
             </Sub>
-            <Sub id="guia-admin" number="16.4" title="O dia a dia do administrador">
+            <Sub id="guia-admin" number="20.4" title="O dia a dia do administrador">
               <Steps items={[
                 "Cadastre usuários e atribua cargos. Bloqueie acessos de quem saiu.",
                 "Revise em Permissões as telas e ações de cada cargo.",
                 "Mantenha as lojas cadastradas com número correto, bairro e raio.",
                 "Revise em Configurações os preços da Meta e a janela de conversão.",
                 "Configure filas, horário de atendimento e menu automático.",
+                "Mantenha atualizadas as Regras, Skills e a Base de Conhecimento da IA e acompanhe o consumo em /ia.",
+                "Revise as métricas por nó das automações ativas e publique vídeos de treinamento para novos colaboradores.",
               ]} />
             </Sub>
           </Chapter>
 
-          {/* 17 */}
-          <Chapter number={17} id="faq" title="Glossário e perguntas frequentes" description="Termos usados no sistema e respostas para as dúvidas mais comuns." tags={["glossario", "faq", "suporte"]}>
-            <Sub id="glossario" number="17.1" title="Glossário">
+          {/* 21 */}
+          <Chapter number={21} id="faq" title="Glossário e perguntas frequentes" description="Termos usados no sistema e respostas para as dúvidas mais comuns." tags={["glossario", "faq", "suporte"]}>
+            <Sub id="glossario" number="21.1" title="Glossário">
               <Table
                 head={["Termo", "Significado"]}
                 rows={[
@@ -876,10 +1153,16 @@ export default function ManualPage() {
                   ["NPS", "Pesquisa de satisfação (1 a 5 no atendimento; 0 a 10 em loja e produto)."],
                   ["Nota interna", "Mensagem visível só para a equipe."],
                   ["Fila", "Grupo de assunto e pessoas que atendem conversas."],
+                  ["Lead Score", "Pontuação de relacionamento do contato, que define o nível (Bronze, Prata, Ouro, Diamante)."],
+                  ["RFV-P", "Notas de 1 a 5 para Recência, Frequência, Valor e Pontualidade. Ex.: 555-5."],
+                  ["Automação", "Fluxo visual com gatilho e passos que roda sozinho."],
+                  ["Roleta", "Distribuição automática de leads entre vendedores."],
+                  ["Webhook", "Endereço que recebe dados de outro sistema (anúncios, formulários) e inicia uma automação."],
+                  ["Skill", "Protocolo que a IA segue quando a conversa trata de um assunto específico."],
                 ]}
               />
             </Sub>
-            <Sub id="perguntas" number="17.2" title="Perguntas frequentes">
+            <Sub id="perguntas" number="21.2" title="Perguntas frequentes">
               <div className="space-y-4">
                 {[
                   { q: "Não consigo responder um cliente: aparece que só posso enviar modelo.", a: "A janela de 24 horas está fechada. Envie um modelo aprovado; quando o cliente responder, a janela reabre e o texto livre volta a ser permitido." },
@@ -891,6 +1174,11 @@ export default function ManualPage() {
                   { q: "O menu não respondeu o cliente.", a: "A conversa pode ter dono (o robô não responde conversas atribuídas), estar fora do horário (vai direto para a fila) ou a mensagem foi reconhecida como resposta automática." },
                   { q: "A mensagem ficou com “Falha no envio”.", a: "Passe o mouse no aviso para ver o motivo. Os motivos mais comuns são número inválido, janela fechada ou arquivo fora do formato aceito pela Meta." },
                   { q: "O total geral de campanhas é diferente da soma que eu fiz.", a: "O total não conta duas vezes o mesmo pedido ou cliente. Cada pedido pertence a uma única campanha, a última entregue antes da compra." },
+                  { q: "Escolhi dois segmentos e o total de destinatários é menor que a soma.", a: "Quem está nos dois segmentos (ou tem dois cadastros com o mesmo celular) recebe uma única mensagem. O resumo no passo Público mostra quantos foram unificados." },
+                  { q: "A campanha criada com IA não deixa disparar.", a: "O modelo novo está aguardando aprovação da Meta. Assim que for aprovado, a campanha fica Pronta para envio. Se for rejeitado, gere nova versão e reenvie." },
+                  { q: "A IA respondeu algo errado sobre uma política da loja.", a: "Cadastre ou corrija a informação em /ia › Regras da Empresa (ou na Base de Conhecimento) e teste no Simulador." },
+                  { q: "O RFV-P de um cliente está desatualizado.", a: "O cálculo roda todo dia às 6h com os dados do VMSet. Para atualizar na hora, use Recalcular RFV-P em /clientes-vip." },
+                  { q: "Minha automação não está disparando.", a: "Confira se ela está Ativa (não em Rascunho), se o gatilho e os filtros batem com o contato e veja as métricas por nó para saber onde os contatos param. Use Testar fluxo para simular." },
                 ].map((item) => (
                   <div key={item.q} className="rounded-xl border border-[#e2e6ee] p-4 dark:border-slate-800">
                     <p className="font-semibold text-[#051647] dark:text-white"><span className="mr-1.5 text-[#F7915E]">P:</span>{item.q}</p>

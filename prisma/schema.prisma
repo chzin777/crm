@@ -996,3 +996,23 @@ model VmsetPunctuality {
   maxOverdueDays Int      @default(0)
   syncedAt       DateTime @default(now())
 }
+
+/// Vídeos de treinamento do /manual. O arquivo fica no armazenamento de mídia (MinIO), nunca no repositório.
+model ManualVideo {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  category     String?
+  storageKey   String
+  mimeType     String
+  sizeBytes    BigInt
+  /// Duração em segundos (lida do arquivo no navegador no envio).
+  duration     Int?
+  thumbnailKey String?
+  order        Int      @default(0)
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([order])
+}
