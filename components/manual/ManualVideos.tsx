@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Clapperboard, FileVideo, Loader2, Pencil, PlayCircl
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ToastProvider";
+import { FormSelect } from "@/components/FormSelect";
 
 type Video = {
   id: string;
@@ -18,7 +19,25 @@ type Video = {
   order: number;
 };
 
-const ACCEPT = ".mp4,.webm,.mov,.m4v,video/mp4,video/webm,video/quicktime";
+/** Categorias dos treinamentos (acompanham os módulos do CRM). */
+const VIDEO_CATEGORIES = [
+  "Primeiros passos",
+  "Atendimento",
+  "Filas e equipe",
+  "Pipelines",
+  "Contatos e segmentos",
+  "Campanhas",
+  "Modelos WhatsApp",
+  "Automações",
+  "Inteligência Artificial",
+  "Clientes VIP e pontuação",
+  "NPS e métricas",
+  "Lojas",
+  "Administração",
+];
+const NO_CATEGORY = "Sem categoria";
+
+const ACCEPT =".mp4,.webm,.mov,.m4v,video/mp4,video/webm,video/quicktime";
 const ALLOWED_EXTENSIONS = ["mp4", "webm", "mov", "m4v"];
 const MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const CHUNK_BYTES = 8 * 1024 * 1024;
@@ -294,6 +313,8 @@ function VideoFormDialog({ mode, video, categories, onClose, onSaved }: { mode: 
   const [progress, setProgress] = useState<number | null>(null);
   const cancelled = useRef(false);
   const uploading = progress !== null;
+  // Lista fixa; uma categoria antiga fora da lista continua aparecendo para não se perder ao editar.
+  const categoryOptions = [NO_CATEGORY, ...VIDEO_CATEGORIES, ...categories.filter((item) => !VIDEO_CATEGORIES.includes(item))];
 
   useEffect(() => () => { cancelled.current = true; }, []);
 
@@ -398,11 +419,14 @@ function VideoFormDialog({ mode, video, categories, onClose, onSaved }: { mode: 
           <span>Título do vídeo <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
           <input value={title} maxLength={150} onChange={(event) => { setTitle(event.target.value); setError(""); }} disabled={uploading} className={inputClass} placeholder="Ex.: Como atender pelo /chat" />
         </label>
-        <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-          <span>Categoria (opcional)</span>
-          <input value={category} maxLength={60} list="manual-video-categories" onChange={(event) => setCategory(event.target.value)} disabled={uploading} className={inputClass} placeholder="Ex.: Atendimento, Campanhas, Automações" />
-          <datalist id="manual-video-categories">{categories.map((item) => <option key={item} value={item} />)}</datalist>
-        </label>
+        <div className={uploading ? "pointer-events-none opacity-60" : ""}>
+          <FormSelect
+            label="Categoria"
+            value={category || NO_CATEGORY}
+            options={categoryOptions}
+            onChange={(value) => setCategory(value === NO_CATEGORY ? "" : value)}
+          />
+        </div>
         <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
           <span>Descrição (opcional)</span>
           <textarea value={description} maxLength={2000} rows={3} onChange={(event) => setDescription(event.target.value)} disabled={uploading} className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
