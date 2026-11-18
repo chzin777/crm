@@ -62,6 +62,77 @@ const RULE_TEMPLATES: { title: string; keywords: string; content: string }[] = [
   { title: "Informações Gerais", keywords: "", content: "## Sobre a empresa\n- Informações que valem para qualquer conversa." },
 ];
 const toDraft = (rule: BusinessRule): RuleDraft => ({ ...rule, keywordsText: rule.keywords.join(", ") });
+const splitKeywords = (text: string) => text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+
+type RuleFormValue = { title: string; slug: string; keywordsText: string; content: string; order: number; active: boolean; alwaysInclude: boolean };
+
+/** Modal de criação: valida título e conteúdo, cria pela API e só então devolve a regra para a lista. */
+function RuleCreateDialog({ initial, onClose, onCreated }: { initial: RuleFormValue; onClose: () => void; onCreated: (rule: BusinessRule) => void }) {
+  const [form, setForm] = useState(initial);
+  const [slugEdited, setSlugEdited] = useState(!!initial.slug && initial.slug !== slugify(initial.title));
+  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const set = (change: Partial<RuleFormValue>) => setForm((current) => ({ ...current, ...change }));
+  const titleMissing = !form.title.trim();
+  const contentMissing = !form.content.trim();
+
+  const submit = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    setSubmitted(true);
+    if (titleMissing || contentMissing) return;
+    setSaving(true);
+    setError("");
+    try {
+      const body = { title: form.title.trim(), slug: slugify(form.slug || form.title), keywords: splitKeywords(form.keywordsText), content: form.content, order: form.order, active: form.active, alwaysInclude: form.alwaysInclude };
+      onCreated((await api<{ rule: BusinessRule }>("/api/ai/rules", json("POST", body))).rule);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível criar a regra. Tente de novo.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fieldError = "mt-1 block text-[10px] font-normal text-red-600 dark:text-red-300";
+  return (
+    <EntityDialog titleId="rule-create" title="Nova regra" description="Uma regra em Markdown por assunto. A IA carrega a regra quando uma palavra-chave (ou o título) aparece na conversa, ou sempre, se marcada." onClose={onClose} size="lg">
+      <form onSubmit={(event) => void submit(event)} className="space-y-3" noValidate>
+        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_100px]">
+          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Título *
+            <input autoFocus value={form.title} onChange={(event) => set({ title: event.target.value, ...(slugEdited ? {} : { slug: slugify(event.target.value) }) })} placeholder="Ex.: Programa de Indicação" aria-invalid={submitted && titleMissing} className={`${input} ${submitted && titleMissing ? "border-red-400 dark:border-red-500" : ""}`} maxLength={120} />
+            {submitted && titleMissing && <span className={fieldError}>Informe o título.</span>}
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Slug
+            <input value={form.slug} onChange={(event) => { setSlugEdited(true); set({ slug: event.target.value }); }} onBlur={(event) => set({ slug: slugify(event.target.value || form.title) })} placeholder="gerado pelo título" className={`${input} font-mono`} maxLength={60} />
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Ordem
+            <input type="number" value={form.order} onChange={(event) => set({ order: Number(event.target.value) || 0 })} className={input} />
+          </label>
+        </div>
+        <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Palavras-chave / gatilho do assunto
+          <input value={form.keywordsText} onChange={(event) => set({ keywordsText: event.target.value })} placeholder="Separadas por vírgula (ex.: indicação, indicar, bônus)" className={input} />
+        </label>
+        <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Conteúdo (Markdown) *
+          <textarea rows={10} value={form.content} onChange={(event) => set({ content: event.target.value })} placeholder={"## Como funciona\n- ..."} aria-invalid={submitted && contentMissing} className={`${area} resize-y font-mono ${submitted && contentMissing ? "border-red-400 dark:border-red-500" : ""}`} />
+          {submitted && contentMissing ? <span className={fieldError}>Escreva o conteúdo da regra.</span> : <span className="block text-right text-[10px] font-normal text-slate-400">{form.content.length.toLocaleString("pt-BR")} caracteres</span>}
+        </label>
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+            <Switch label="Regra ativa" checked={form.active} onChange={(value) => set({ active: value })} />Ativa
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+            <Switch label="Sempre incluir" checked={form.alwaysInclude} onChange={(value) => set({ alwaysInclude: value })} />Sempre incluir (independe do assunto)
+          </label>
+        </div>
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <button type="button" onClick={onClose} className={ghost}>Cancelar</button>
+          <button type="submit" disabled={saving} className={primary}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Criar regra</button>
+        </div>
+      </form>
+    </EntityDialog>
+  );
+}
 
 export function RulesSection() {
   const toast = useToast();
@@ -83,11 +154,24 @@ export function RulesSection() {
   }, [toast]);
 
   const patch = (id: string, change: Partial<RuleDraft>) => setRules((current) => current?.map((rule) => (rule.id === id ? { ...rule, ...change, dirty: true } : rule)) ?? current);
+  // "Nova regra" (ou um modelo) abre o modal; a regra só entra na lista depois de criada no servidor.
+  const [creating, setCreating] = useState<RuleFormValue | null>(null);
+  const closeCreate = useCallback(() => setCreating(null), []);
   const add = (template?: (typeof RULE_TEMPLATES)[number]) => {
-    const id = `novo-${Date.now()}`;
-    const title = template?.title ?? "Nova regra";
-    setRules((current) => [...(current ?? []), { id, title, slug: slugify(title), keywords: [], keywordsText: template?.keywords ?? "", content: template?.content ?? "", order: (current?.length ?? 0) * 10, active: true, alwaysInclude: template?.title === "Informações Gerais", dirty: true, isNew: true }]);
-    setOpen(id);
+    setCreating({
+      title: template?.title ?? "",
+      slug: template ? slugify(template.title) : "",
+      keywordsText: template?.keywords ?? "",
+      content: template?.content ?? "",
+      order: (rules?.length ?? 0) * 10,
+      active: true,
+      alwaysInclude: template?.title === "Informações Gerais",
+    });
+  };
+  const created = (rule: BusinessRule) => {
+    setRules((current) => [...(current ?? []), toDraft(rule)]);
+    setCreating(null);
+    toast.success("Regra criada", "A IA já usa a nova regra nas próximas respostas.");
   };
   const save = async (rule: RuleDraft) => {
     setBusy(rule.id);
@@ -212,6 +296,7 @@ export function RulesSection() {
           {visible.length === 0 && <li className="px-3 py-6 text-center text-xs text-slate-500 dark:text-slate-400">Nenhuma regra encontrada para essa busca.</li>}
         </ul>
       )}
+      {creating && <RuleCreateDialog initial={creating} onClose={closeCreate} onCreated={created} />}
     </Panel>
   );
 }
