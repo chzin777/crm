@@ -580,18 +580,100 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   erro: { label: "Erro", cls: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
 };
 
+/** Modal "Adicionar conhecimento": texto (título + conteúdo) ou arquivo (.pdf, .txt, .md); indexa e devolve o documento. */
+function KnowledgeCreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (document: KnowledgeDoc) => void }) {
+  const [mode, setMode] = useState<"texto" | "arquivo">("texto");
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const tooBig = !!file && file.size > 10 * 1024 * 1024;
+  const missing = mode === "texto" ? { title: !title.trim(), body: !content.trim() } : { title: false, body: !file || tooBig };
+
+  const submit = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    setSubmitted(true);
+    if (missing.title || missing.body) return;
+    setSaving(true);
+    setError("");
+    try {
+      let init: RequestInit;
+      if (mode === "arquivo" && file) {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        if (title.trim()) form.append("title", title.trim());
+        init = { method: "POST", body: form };
+      } else {
+        init = json("POST", { title: title.trim(), content });
+      }
+      onCreated((await api<{ document: KnowledgeDoc }>("/api/ai/knowledge", init)).document);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível adicionar. Tente de novo.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const invalid = (flag: boolean) => (submitted && flag ? "border-red-400 dark:border-red-500" : "");
+  const fieldError = "mt-1 block text-[10px] font-normal text-red-600 dark:text-red-300";
+  const tab = (value: "texto" | "arquivo", label: string, Icon: typeof FileText) => (
+    <button type="button" role="tab" aria-selected={mode === value} disabled={saving} onClick={() => { setMode(value); setSubmitted(false); setError(""); }} className={`inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition ${mode === value ? "bg-white text-[#051647] shadow-sm dark:bg-slate-900 dark:text-white" : "text-slate-500 hover:text-[#051647] dark:text-slate-400 dark:hover:text-white"}`}>
+      <Icon className="h-3.5 w-3.5" />{label}
+    </button>
+  );
+
+  return (
+    <EntityDialog titleId="knowledge-create" title="Adicionar conhecimento" description="O conteúdo é dividido em trechos e indexado (busca textual + vetorial) para a IA consultar nas respostas." onClose={saving ? () => undefined : onClose} size="lg">
+      <form onSubmit={(event) => void submit(event)} className="space-y-3" noValidate>
+        <div role="tablist" aria-label="Tipo de conteúdo" className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-white/5">
+          {tab("texto", "Texto / Markdown", FileText)}
+          {tab("arquivo", "Arquivo (.pdf, .txt, .md)", FileUp)}
+        </div>
+        <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Título {mode === "texto" ? "*" : "(opcional: usa o nome do arquivo)"}
+          <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: Tabela de lentes 2026" aria-invalid={submitted && missing.title} className={`${input} ${invalid(missing.title)}`} maxLength={160} />
+          {submitted && missing.title && <span className={fieldError}>Informe o título.</span>}
+        </label>
+        {mode === "texto" ? (
+          <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Conteúdo *
+            <textarea rows={10} value={content} onChange={(event) => setContent(event.target.value)} placeholder="Cole aqui o conteúdo (Markdown ou texto simples)" aria-invalid={submitted && missing.body} className={`${area} resize-y ${invalid(missing.body)}`} />
+            {submitted && missing.body ? <span className={fieldError}>Cole o conteúdo do documento.</span> : <span className="block text-right text-[10px] font-normal text-slate-400">{content.length.toLocaleString("pt-BR")} caracteres</span>}
+          </label>
+        ) : (
+          <div className="space-y-1">
+            <button type="button" disabled={saving} onClick={() => fileRef.current?.click()} className={`flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed px-4 py-6 text-center text-xs transition hover:border-[#002187] dark:hover:border-[#C4D600] ${submitted && missing.body ? "border-red-400 dark:border-red-500" : "border-slate-300 dark:border-slate-700"}`}>
+              <FileUp className="h-5 w-5 text-[#002187] dark:text-[#C4D600]" />
+              <span className="font-semibold text-[#051647] dark:text-white">{file ? file.name : "Escolher arquivo"}</span>
+              <span className="text-[10px] text-slate-400">{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · clique para trocar` : ".pdf, .txt ou .md até 10 MB. PDF é lido pela IA (conta no consumo)."}</span>
+            </button>
+            <input ref={fileRef} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" className="hidden" onChange={(event) => { setFile(event.target.files?.[0] ?? null); event.target.value = ""; }} />
+            {submitted && !file && <span className={fieldError}>Escolha um arquivo.</span>}
+            {tooBig && <span className={fieldError}>Arquivo acima de 10 MB.</span>}
+          </div>
+        )}
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <button type="button" disabled={saving} onClick={onClose} className={ghost}>Cancelar</button>
+          <button type="submit" disabled={saving} className={primary}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{saving ? (mode === "arquivo" ? "Lendo e indexando..." : "Indexando...") : "Adicionar"}</button>
+        </div>
+      </form>
+    </EntityDialog>
+  );
+}
+
 export function KnowledgeSection() {
   const toast = useToast();
   const [documents, setDocuments] = useState<KnowledgeDoc[] | null>(null);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<KnowledgeChunkHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [editing, setEditing] = useState<KnowledgeDoc | null>(null);
   const closeEditor = useCallback(() => setEditing(null), []);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [adding, setAdding] = useState(false);
+  const closeAdd = useCallback(() => setAdding(false), []);
 
   useEffect(() => {
     let active = true;
@@ -606,35 +688,14 @@ export function KnowledgeSection() {
   }, [toast]);
 
   const created = (document: KnowledgeDoc) => {
-    setDocuments((current) => [document, ...(current ?? [])]);
+    // Depois das fontes automáticas (que ficam no topo), o mais recente primeiro.
+    setDocuments((current) => {
+      const list = current ?? [];
+      const sources = list.filter((item) => item.systemKey);
+      return [...sources, document, ...list.filter((item) => !item.systemKey)];
+    });
+    setAdding(false);
     toast.success("Documento indexado", `${document.chunkCount} trecho${document.chunkCount === 1 ? "" : "s"} gerado${document.chunkCount === 1 ? "" : "s"}.`);
-  };
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy("upload");
-    try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      if (title.trim()) form.append("title", title.trim());
-      created((await api<{ document: KnowledgeDoc }>("/api/ai/knowledge", { method: "POST", body: form })).document);
-      setTitle("");
-    } catch (cause) {
-      toast.error("Erro ao enviar o arquivo", cause instanceof Error ? cause.message : "Tente de novo.");
-    } finally {
-      setBusy(null);
-    }
-  };
-  const addText = async () => {
-    setBusy("text");
-    try {
-      created((await api<{ document: KnowledgeDoc }>("/api/ai/knowledge", json("POST", { title, content }))).document);
-      setTitle("");
-      setContent("");
-    } catch (cause) {
-      toast.error("Erro ao cadastrar o texto", cause instanceof Error ? cause.message : "Tente de novo.");
-    } finally {
-      setBusy(null);
-    }
   };
   const update = async (document: KnowledgeDoc, body: { active?: boolean; reindex?: boolean }) => {
     setBusy(document.id);
@@ -674,24 +735,12 @@ export function KnowledgeSection() {
 
   return (
     <div className="space-y-6">
-      <Panel title="Adicionar à base de conhecimento" hint="Tabelas de lentes, manuais, catálogos e textos longos. O conteúdo é dividido em trechos e, a cada pergunta, a IA recebe só os mais relevantes (busca textual + vetorial com embeddings OpenAI).">
-        <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Título
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: Tabela de lentes 2026 (opcional para arquivo)" className={input} maxLength={160} />
-        </label>
-        <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-          <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Texto longo
-            <textarea rows={6} value={content} onChange={(event) => setContent(event.target.value)} placeholder="Cole aqui o conteúdo (Markdown ou texto simples)" className={`${area} resize-y`} />
-          </label>
-          <div className="flex flex-col gap-2 lg:pt-5">
-            <button type="button" disabled={!title.trim() || !content.trim() || !!busy} onClick={() => void addText()} className={primary}>{busy === "text" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Cadastrar texto</button>
-            <button type="button" disabled={!!busy} onClick={() => fileRef.current?.click()} className={ghost}>{busy === "upload" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}{busy === "upload" ? "Lendo e indexando..." : "Enviar arquivo (.pdf, .txt, .md)"}</button>
-            <input ref={fileRef} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" className="hidden" onChange={(event) => { void upload(event.target.files?.[0]); event.target.value = ""; }} />
-            <p className="text-[10px] text-slate-400">Até 10 MB. PDF é lido pela IA (conta no consumo).</p>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel title="Documentos indexados" hint={`${documents?.length ?? 0} documento${documents?.length === 1 ? "" : "s"} · ${totalChunks} trecho${totalChunks === 1 ? "" : "s"} ativos para a IA`}>
+      <Panel
+        title="Base de conhecimento"
+        hint="Manuais, tabelas e textos longos. A cada pergunta, a IA recebe só os trechos mais relevantes."
+        action={<button type="button" onClick={() => setAdding(true)} className={primary}><Plus className="h-3.5 w-3.5" />Adicionar conhecimento</button>}
+      >
+        <p className="text-xs text-slate-500 dark:text-slate-400">{documents?.length ?? 0} documento{documents?.length === 1 ? "" : "s"} · {totalChunks} trecho{totalChunks === 1 ? "" : "s"} ativos para a IA</p>
         {!documents ? <p className="flex items-center gap-2 py-6 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</p> : documents.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">Nenhum documento ainda.</p>
         ) : (
@@ -731,6 +780,7 @@ export function KnowledgeSection() {
         )}
       </Panel>
 
+      {adding && <KnowledgeCreateDialog onClose={closeAdd} onCreated={created} />}
       {editing && <KnowledgeEditor document={editing} onClose={closeEditor} onSaved={(saved) => setDocuments((current) => current?.map((item) => (item.id === saved.id ? saved : item)) ?? current)} />}
 
       <Panel title="Testar busca RAG" hint="Escreva uma pergunta como o cliente faria e veja quais trechos a IA recuperaria (os mais relevantes entram na resposta).">
