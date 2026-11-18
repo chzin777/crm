@@ -19,6 +19,7 @@ import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/en
 import { checkConversions, checkErpTriggers } from "@/lib/automations/erp-sync";
 import { ensureScoringFlows } from "@/lib/automations/scoring-seed";
 import { attributeSales } from "@/lib/automations/attribution";
+import { scheduleDailyRfvp } from "@/lib/rfvp-db";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -230,6 +231,8 @@ export async function runClock() {
   await block("automações", async () => {
     // Automações padrão do Lead Score: criadas uma única vez (editáveis em /automacoes).
     await ensureScoringFlows();
+    // Matriz RFV-P: recálculo diário a partir das 6h (em segundo plano, numa réplica só).
+    await scheduleDailyRfvp(new Date(now)).catch((error: unknown) => console.error("[rfvp] agendamento:", error));
     // Vendas do VMSet atribuídas aos nós por onde o cliente passou (badges do canvas), a cada 5 min.
     await attributeSales(new Date(now)).catch((error: unknown) => console.error("[automacoes] atribuição de vendas:", error));
     summary.automationsResumed = await resumeDueExecutions(new Date(now));

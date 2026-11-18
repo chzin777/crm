@@ -15,6 +15,7 @@ import { isOpenAt } from "@/lib/chat/hours";
 import { phoneVariants } from "@/lib/chat/phone";
 import { sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { changeScore } from "@/lib/scoring-db";
+import { rfvpVars } from "@/lib/rfvp";
 import { setContactFields } from "@/lib/contact-fields-db";
 import { trackLinksInText } from "@/lib/tracked-links";
 import { resolveChatCapabilities } from "@/lib/permissions";
@@ -79,7 +80,7 @@ async function setTags(state: ExecutionState, change: (tags: string[]) => string
 async function contactFacts(state: Pick<ExecutionState, "contactId" | "conversationId">) {
   const [conversation, contact, prescriptions, { contactOpportunity, classifyCustomerRecurrence }] = await Promise.all([
     conversationOf(state as ExecutionState),
-    prisma.contact.findUnique({ where: { id: state.contactId }, select: { city: true } }),
+    prisma.contact.findUnique({ where: { id: state.contactId }, select: { city: true, rfvpR: true, rfvpF: true, rfvpV: true, rfvpP: true, rfvpCode: true, rfvpSegment: true } }),
     prisma.customerPrescription.count({ where: { contactId: state.contactId } }).catch(() => 0),
     import("@/lib/sales-pipeline-db"),
   ]);
@@ -91,6 +92,7 @@ async function contactFacts(state: Pick<ExecutionState, "contactId" | "conversat
     queueId: conversation?.queueId ?? null,
     isCustomer: recurrence ? recurrence.type === "recorrente" : null,
     hasPrescription: prescriptions > 0,
+    rfvp: contact?.rfvpCode ? { r: contact.rfvpR ?? 1, f: contact.rfvpF ?? 1, v: contact.rfvpV ?? 1, p: contact.rfvpP ?? 1, code: contact.rfvpCode, segment: contact.rfvpSegment ?? "" } : null,
   };
 }
 
@@ -342,10 +344,10 @@ export async function runExecution(executionId: string, ports?: EnginePorts) {
 }
 
 async function contactVars(contactId: string): Promise<Record<string, string> | null> {
-  const contact = await prisma.contact.findUnique({ where: { id: contactId }, select: { name: true, city: true, phone: true, marketingOptOut: true } });
+  const contact = await prisma.contact.findUnique({ where: { id: contactId }, select: { name: true, city: true, phone: true, marketingOptOut: true, rfvpCode: true, rfvpSegment: true } });
   if (!contact || contact.marketingOptOut) return null;
   const full = contact.name?.trim() ?? "";
-  return { nome: full.split(/\s+/)[0] ?? "", nome_completo: full, cidade: contact.city ?? "", telefone: contact.phone ?? "" };
+  return { nome: full.split(/\s+/)[0] ?? "", nome_completo: full, cidade: contact.city ?? "", telefone: contact.phone ?? "", ...rfvpVars({ code: contact.rfvpCode, segment: contact.rfvpSegment }) };
 }
 
 /**

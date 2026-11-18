@@ -1,6 +1,7 @@
 /**
  * Catálogo dos nós do construtor de automações (/automacoes). Puro: usado pela tela, pelo motor e pelos testes.
  */
+import { PILLARS, RFVP_SEGMENTS, RFVP_TRIGGER_MODES, segmentLabel } from "@/lib/rfvp";
 
 /** Gatilhos do ERP VMSet: vendas (espelho do ERP, ~1 min), financeiro e laboratório (consulta ao Oracle) e ciclo de vida. */
 export const ERP_TRIGGER_TYPES = [
@@ -8,7 +9,7 @@ export const ERP_TRIGGER_TYPES = [
   "trigger_erp_overdue", "trigger_erp_good_payer", "trigger_erp_due_soon", "trigger_erp_paid",
   "trigger_erp_birthday", "trigger_erp_no_purchase", "trigger_erp_lab_ready",
 ] as const;
-export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff", "trigger_link_click", "trigger_score", "trigger_tier", ...ERP_TRIGGER_TYPES] as const;
+export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff", "trigger_link_click", "trigger_score", "trigger_tier", "trigger_rfvp", ...ERP_TRIGGER_TYPES] as const;
 export type ErpTriggerType = (typeof ERP_TRIGGER_TYPES)[number];
 export const isErpTrigger = (type: string): type is ErpTriggerType => (ERP_TRIGGER_TYPES as readonly string[]).includes(type);
 export const ACTION_TYPES = ["send_whatsapp", "delay", "business_hours", "wait_reply", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "distribute_lead", "notify", "add_note", "change_score", "update_field", "opt_out", "condition", "ab_split", "end_flow", "http"] as const;
@@ -156,6 +157,8 @@ export type ContactFacts = {
   /** Cliente recorrente (compra no VMSet/ERP ou venda ganha). null = não consultado. */
   isCustomer?: boolean | null;
   hasPrescription?: boolean;
+  /** Matriz RFV-P atual do contato (null = ainda sem cálculo). */
+  rfvp?: { r: number; f: number; v: number; p: number; code: string; segment: string } | null;
 };
 
 const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
@@ -210,8 +213,10 @@ export function describeFilters(filters: NodeFilters, names: { queues?: Record<s
 
 // ---------------------------------------------------------------- Condição (se / senão)
 
-export type ConditionField = "none" | "reply" | "message" | "tag" | "stage" | "city" | "hour" | "variable";
-export type ConditionOperator = "equals" | "not_equals" | "contains" | "not_contains" | "exists" | "empty" | "gte" | "lt";
+export type ConditionField = "none" | "reply" | "message" | "tag" | "stage" | "city" | "hour" | "variable" | "rfvp_r" | "rfvp_f" | "rfvp_v" | "rfvp_p" | "rfvp_code" | "rfvp_segment";
+/** Pilares do RFV-P comparados como número (1 a 5). */
+export const RFVP_NUMERIC_FIELDS = ["rfvp_r", "rfvp_f", "rfvp_v", "rfvp_p"];
+export type ConditionOperator = "equals" | "not_equals" | "contains" | "not_contains" | "exists" | "empty" | "gte" | "lt" | "lte";
 /** Campos que a condição verifica; "variable" lê qualquer variável da execução (campos do webhook, {{fila}}...). */
 export const CONDITION_FIELDS: { value: ConditionField; label: string; short: string }[] = [
   { value: "reply", label: "Resposta do cliente (após o início)", short: "Resposta do cliente" },
@@ -221,6 +226,12 @@ export const CONDITION_FIELDS: { value: ConditionField; label: string; short: st
   { value: "city", label: "Cidade do contato", short: "Cidade" },
   { value: "hour", label: "Hora atual (0 a 23)", short: "Hora" },
   { value: "variable", label: "Variável / campo personalizado", short: "Variável" },
+  { value: "rfvp_r", label: "RFV-P · Recência (nota 1 a 5)", short: "rfvp.r" },
+  { value: "rfvp_f", label: "RFV-P · Frequência (nota 1 a 5)", short: "rfvp.f" },
+  { value: "rfvp_v", label: "RFV-P · Valor (nota 1 a 5)", short: "rfvp.v" },
+  { value: "rfvp_p", label: "RFV-P · Pontualidade (nota 1 a 5)", short: "rfvp.p" },
+  { value: "rfvp_code", label: "RFV-P · Código (ex.: 555-5)", short: "rfvp.codigo" },
+  { value: "rfvp_segment", label: "RFV-P · Segmento", short: "rfvp.segmento" },
   { value: "none", label: "Só as Regras & Filtros", short: "Regras & Filtros" },
 ];
 export const CONDITION_OPERATORS: { value: ConditionOperator; label: string; symbol: string; needsValue: boolean; numeric?: boolean }[] = [
@@ -232,11 +243,14 @@ export const CONDITION_OPERATORS: { value: ConditionOperator; label: string; sym
   { value: "empty", label: "Está vazio / não respondeu", symbol: "está vazio", needsValue: false },
   { value: "gte", label: "Maior ou igual a", symbol: "≥", needsValue: true, numeric: true },
   { value: "lt", label: "Menor que", symbol: "<", needsValue: true, numeric: true },
+  { value: "lte", label: "Menor ou igual a", symbol: "≤", needsValue: true, numeric: true },
 ];
 
 /** Operadores que fazem sentido para o campo (hora: só comparação numérica). */
 export function operatorsFor(field: string) {
   if (field === "hour") return CONDITION_OPERATORS.filter((item) => ["equals", "not_equals", "gte", "lt"].includes(item.value));
+  if (RFVP_NUMERIC_FIELDS.includes(field)) return CONDITION_OPERATORS.filter((item) => ["equals", "not_equals", "gte", "lte", "lt"].includes(item.value));
+  if (field === "rfvp_segment") return CONDITION_OPERATORS.filter((item) => ["equals", "not_equals"].includes(item.value));
   return CONDITION_OPERATORS.filter((item) => !item.numeric || field === "variable");
 }
 
@@ -250,7 +264,7 @@ export function describeCondition(config: Record<string, unknown>): string {
   // "exists" com valor (fluxos antigos) funciona como "contém".
   if (operator.value === "exists" && raw) return `${subject} contém "${raw}"`;
   if (!operator.needsValue) return `${subject} ${operator.symbol}`;
-  const value = field.value === "stage" ? STAGE_OPTIONS.find((item) => item.value === raw)?.label ?? raw : field.value === "hour" && raw ? `${raw}h` : raw;
+  const value = field.value === "stage" ? STAGE_OPTIONS.find((item) => item.value === raw)?.label ?? raw : field.value === "rfvp_segment" ? segmentLabel(raw) : field.value === "hour" && raw ? `${raw}h` : raw;
   return `${subject} ${operator.symbol} ${value ? `"${value}"` : "(defina o valor)"}`;
 }
 
@@ -506,6 +520,19 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "trigger_link_click", category: "gatilho_whatsapp", label: "Clicou em link rastreado", description: "O contato abriu um link curto rastreado (/r/...) enviado por automação, campanha ou pela equipe. Variável: {{link}}.", fields: [{ key: "urlContains", label: "Só quando o destino contém (opcional)", kind: "text", placeholder: "oticasbrasil.com.br/promocao" }], defaults: { urlContains: "" } },
   { type: "trigger_score", category: "gatilho_crm", label: "Pontuação atingiu X pontos", description: "O Lead Score do contato passou a valer X ou mais (dispara uma vez a cada vez que cruza o valor). Variáveis: {{pontuacao}}, {{nivel}}.", fields: [{ key: "amount", label: "Pontuação", kind: "number" }], defaults: { amount: 100 } },
   { type: "trigger_tier", category: "gatilho_crm", label: "Mudou de nível (tier)", description: "O contato mudou de nível (Bronze, Prata, Ouro, Diamante) pelas faixas configuradas. Variáveis: {{nivel}}, {{nivel_anterior}}, {{pontuacao}}.", fields: [{ key: "tier", label: "Novo nível", kind: "select", options: TIER_OPTIONS }, { key: "direction", label: "Direção", kind: "select", options: [{ value: "any", label: "Subiu ou caiu" }, { value: "up", label: "Só quando sobe" }, { value: "down", label: "Só quando cai" }] }], defaults: { tier: "any", direction: "up" } },
+  {
+    type: "trigger_rfvp", category: "gatilho_crm", label: "Mudança na matriz RFV-P",
+    description: "O recálculo diário (ou o Recalcular agora) mudou a matriz RFV-P do cliente: entrou num segmento, uma nota cruzou o limite (ex.: P caiu para 2 ou menos) ou atingiu um código (ex.: 555-5). Variáveis: {{rfvp.codigo}}, {{rfvp.r}}, {{rfvp.f}}, {{rfvp.v}}, {{rfvp.p}}, {{rfvp.segmento}} e {{rfvp.anterior.codigo}}.",
+    fields: [
+      { key: "mode", label: "Quando disparar", kind: "select", options: RFVP_TRIGGER_MODES },
+      { key: "segment", label: "Segmento", kind: "select", options: [{ value: "any", label: "Qualquer segmento" }, ...RFVP_SEGMENTS.map((item) => ({ value: item.key, label: item.label }))] },
+      { key: "pillar", label: "Pilar", kind: "select", options: PILLARS.map((item) => ({ value: item.key, label: `${item.letter} · ${item.label}` })) },
+      { key: "operator", label: "Comparação", kind: "select", options: [{ value: "lte", label: "Passou a ser menor ou igual a" }, { value: "gte", label: "Passou a ser maior ou igual a" }] },
+      { key: "value", label: "Nota (1 a 5)", kind: "number" },
+      { key: "code", label: "Código RFV-P", kind: "text", placeholder: "555-5" },
+    ],
+    defaults: { mode: "segment", segment: "em_risco", pillar: "p", operator: "lte", value: 2, code: "555-5" },
+  },
 
   { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis, imagem e nota de voz opcionais, com digitando/gravando antes de cada bloco (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }, { key: "audio", label: "Nota de voz (opcional)", kind: "audio", placeholder: "https://.../audio.mp3", hint: "Envie .mp3, .ogg ou .opus (ou cole a URL): chega como áudio gravado na hora, depois da mensagem." }, { key: "trackLinks", label: "Rastrear links (encurta e identifica quem clicou)", kind: "boolean" }, { key: "presenceMode", label: "Digitando / gravando antes do envio", kind: "select", options: PRESENCE_MODE_OPTIONS }, { key: "presenceSeconds", label: "Tempo de digitando/gravando (segundos)", kind: "number", hint: "De 0 a 20 s, aplicado a cada bloco (texto e áudio)." }], defaults: { text: "", mediaUrl: "", audio: "", trackLinks: false, presenceMode: "auto", presenceSeconds: 5 } },
   { type: "delay", category: "mensagem", label: "Aguardar", description: "Pausa o fluxo de segundos até anos.", fields: [...DURATION_FIELDS("Quanto tempo"), { key: "businessHours", label: "Retomar só em horário comercial", kind: "boolean" }], defaults: { amount: 1, unit: "hours", businessHours: false } },
@@ -642,6 +669,8 @@ export function validateGraph(graph: FlowGraph): string[] {
     if (node.type === "change_score" && !(Number(config.amount) > 0)) problems.push("Alterar pontuação: informe quantos pontos.");
     if (node.type === "update_field" && !String(config.fieldKey ?? "").trim()) problems.push("Atualizar campo do contato: escolha o campo.");
     if (node.type === "trigger_score" && !(Number(config.amount) > 0)) problems.push("Pontuação atingiu X: informe a pontuação.");
+    if (node.type === "trigger_rfvp" && config.mode === "code" && !/^[1-5]{3}-[1-5]$/.test(String(config.code ?? "").trim())) problems.push("Mudança RFV-P: informe o código no formato 555-5.");
+    if (node.type === "trigger_rfvp" && config.mode === "pillar" && !(Number(config.value) >= 1 && Number(config.value) <= 5)) problems.push("Mudança RFV-P: a nota vai de 1 a 5.");
     if (node.type === "end_flow" && config.mode === "goto" && !String(config.flowId ?? "").trim()) problems.push("Ir para outra automação: escolha a automação de destino.");
     if ((node.type === "trigger_erp_after_sale" || node.type === "trigger_erp_overdue" || node.type === "trigger_erp_good_payer" || node.type === "trigger_erp_no_purchase") && !(Number(config.amount) > 0)) problems.push(`${NODE_DEF[node.type].label}: informe o tempo.`);
     if ((node.type === "trigger_erp_due_soon" || node.type === "trigger_erp_birthday") && !(Number(config.amount) >= 0)) problems.push(`${NODE_DEF[node.type].label}: informe os dias.`);

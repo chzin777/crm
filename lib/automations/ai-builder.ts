@@ -1,3 +1,4 @@
+import { RFVP_SEGMENTS } from "@/lib/rfvp";
 import { CONVERSION_KINDS, MAX_AB_VARIANTS, readFlowSettings, readVariants, type FlowSettings, ACTION_TYPES, CONDITION_FIELDS, CONDITION_OPERATORS, FILTER_KINDS, NODE_DEF, NOTE_TARGETS, sanitizeGraph, STAGE_OPTIONS, TIME_UNITS, TRIGGER_TYPES, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@/lib/automations/nodes";
 
 /**
@@ -10,7 +11,10 @@ export type BuilderWorkspace = { queues: { id: string; name: string }[]; users: 
 
 /** Parâmetros possíveis de qualquer nó (strict exige todos; o que não se aplica vem null). */
 const PARAM_KEYS = {
-  mode: { type: ["string", "null"], enum: ["any", "keywords", "settled", "end", "goto", "round_robin", "least_load", null] },
+  mode: { type: ["string", "null"], enum: ["any", "keywords", "settled", "end", "goto", "round_robin", "least_load", "segment", "pillar", "code", null] },
+  segment: { type: ["string", "null"], enum: ["any", ...RFVP_SEGMENTS.map((item) => item.key), null] },
+  pillar: { type: ["string", "null"], enum: ["r", "f", "v", "p", null] },
+  code: { type: ["string", "null"] },
   pool: { type: ["string", "null"], enum: ["queue", "users", null] },
   onlyOnline: { type: ["boolean", "null"] },
   respectShift: { type: ["boolean", "null"] },
@@ -129,6 +133,7 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "- trigger_message com mode keywords exige keywords; tags em minúsculas e com hífen (ex.: cliente-vip).",
     "- assign exige queueId de uma fila listada; assigneeId e userIds só com ids de usuários listados. Sem fila adequada, use notify.",
     "- distribute_lead (Roleta de vendedores): use para \"distribuir o lead entre os vendedores\", \"rodízio\", \"para quem estiver livre\". pool queue (membros da fila queueId) ou users (userIds listados); mode round_robin (rodízio) ou least_load (menor carga); onlyOnline, respectShift (horário da fila) e maxActive (0 = sem limite). next = vendedor atribuído; nextFalse = sem vendedor disponível (ex.: notify ou send_whatsapp avisando o retorno). A variável {{vendedor}} traz o nome escolhido.",
+    `- trigger_rfvp (Mudança na matriz RFV-P: Recência, Frequência, Valor e Pontualidade, notas 1 a 5, código 555-5): mode segment (segment = ${RFVP_SEGMENTS.map((item) => `${item.key} (${item.label})`).join(", ")}), mode pillar (pillar r/f/v/p, operator lte ou gte, value 1 a 5; ex.: \"P caiu para 2 ou menos\" = pillar p, operator lte, value 2), mode code (code \"555-5\") ou mode any. Na condition use field rfvp_r, rfvp_f, rfvp_v, rfvp_p (operator gte, lte, equals; value 1 a 5), rfvp_code ou rfvp_segment (value = chave do segmento). Variáveis: {{rfvp.codigo}}, {{rfvp.segmento}}, {{rfvp.r}}, {{rfvp.f}}, {{rfvp.v}}, {{rfvp.p}}.`,
     "- trigger_webhook (Webhook recebido): lead de Meta Ads, Google Ads, Typeform ou landing page; cria o contato (createContact true) e os campos do formulário viram variáveis ({{nome_lead}}, {{email}}, {{origem}}, {{utm_source}}).",
     "- Pipeline interno x ERP: gatilhos trigger_stage/trigger_tag reagem a movimentações DENTRO do CRM (Kanban, tags). Fatos comerciais e financeiros reais (compra, venda faturada, devolução, parcela vencida/a vencer, pagamento, aniversário, tempo sem comprar, óculos prontos no laboratório) vêm do ERP VMSet: use os gatilhos trigger_erp_*.",
     "- Ex.: \"NPS 5 minutos após a compra\" = trigger_erp_after_sale (amount 5, unit minutes, businessHours false), nunca trigger_stage. \"Cobrar quem está com parcela atrasada há 10 dias\" = trigger_erp_overdue (amount 10, unit days). \"Lembrar 3 dias antes do vencimento\" = trigger_erp_due_soon (amount 3). \"Parabéns no aniversário\" = trigger_erp_birthday (amount 0). \"Reativar quem não compra há 1 ano\" = trigger_erp_no_purchase (amount 1, unit years). \"Avisar que os óculos estão prontos\" = trigger_erp_lab_ready.",

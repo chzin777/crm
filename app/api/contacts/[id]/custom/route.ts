@@ -2,19 +2,21 @@ import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
 import { readCustomFields } from "@/lib/contact-fields";
 import { listFieldDefinitions, setContactFields } from "@/lib/contact-fields-db";
+import { contactRfvp } from "@/lib/rfvp-db";
 
 /** Pontuação, nível, últimas movimentações e campos personalizados do contato (ficha no /chat e em /contatos). */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const guard = await requireModule("contatos", "chat", "pontuacao");
   if (guard.response) return guard.response;
   const { id } = await context.params;
-  const [contact, definitions, logs] = await Promise.all([
+  const [contact, definitions, rfvp, logs] = await Promise.all([
     prisma.contact.findUnique({ where: { id }, select: { score: true, tier: true, scoreUpdatedAt: true, customFields: true } }),
     listFieldDefinitions(),
+    contactRfvp(id).catch(() => null),
     prisma.contactScoreLog.findMany({ where: { contactId: id }, orderBy: { createdAt: "desc" }, take: 10, select: { id: true, delta: true, scoreAfter: true, tierAfter: true, reason: true, createdAt: true } }),
   ]);
   if (!contact) return Response.json({ error: "Contato não encontrado." }, { status: 404 });
-  return Response.json({ score: contact.score, tier: contact.tier, scoreUpdatedAt: contact.scoreUpdatedAt, fields: readCustomFields(contact.customFields), definitions, logs });
+  return Response.json({ score: contact.score, tier: contact.tier, scoreUpdatedAt: contact.scoreUpdatedAt, fields: readCustomFields(contact.customFields), definitions, logs, rfvp });
 }
 
 /** Grava os campos personalizados (só chaves definidas; valor vazio limpa). */

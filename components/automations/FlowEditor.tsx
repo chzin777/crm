@@ -26,10 +26,11 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, Shuffle, Radio, Users, TrendingUp, MousePointerClick, Gauge, Gem, PenLine, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, Shuffle, Radio, Grid3x3, Users, TrendingUp, MousePointerClick, Gauge, Gem, PenLine, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { TIER_META, type Tier } from "@/lib/scoring";
+import { describeRfvpTrigger, RFVP_SEGMENTS } from "@/lib/rfvp";
 import { useToast } from "@/components/ToastProvider";
 import {
   readDistribute, MAX_ATTRIBUTION_DAYS, AUDIO_STORAGE_PREFIX, CONVERSION_KINDS, describeBusinessWindow, handleLabel, MAX_AB_VARIANTS, outputHandles, readVariants, variantLetter, WEEKDAY_LABELS, type ConversionKind, type FlowSettings, type OutputHandle,
@@ -47,7 +48,7 @@ type Execution = { id: string; status: string; currentNodeId: string | null; res
 type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
-  distribute_lead: Shuffle, trigger_link_click: MousePointerClick, trigger_score: Gauge, trigger_tier: Gem, change_score: Gauge, update_field: PenLine,
+  trigger_rfvp: Grid3x3, distribute_lead: Shuffle, trigger_link_click: MousePointerClick, trigger_score: Gauge, trigger_tier: Gem, change_score: Gauge, update_field: PenLine,
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
   trigger_erp_sale: ShoppingBag, trigger_erp_after_sale: CalendarClock, trigger_erp_return: Undo2, trigger_erp_overdue: AlertTriangle, trigger_erp_due_soon: CalendarClock,
   trigger_erp_paid: BadgeCheck, trigger_erp_good_payer: Award, trigger_erp_birthday: Cake, trigger_erp_no_purchase: UserX, trigger_erp_lab_ready: Glasses,
@@ -133,6 +134,7 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "opt_out": return "Fora das campanhas (LGPD)";
     case "trigger_link_click": return config.urlContains ? `Destino contém "${String(config.urlContains)}"` : "Qualquer link rastreado";
     case "trigger_score": return `Chegou a ${Number(config.amount) || 0} pontos`;
+    case "trigger_rfvp": return describeRfvpTrigger(config);
     case "trigger_tier": return `${config.tier === "any" || !config.tier ? "Qualquer nível" : TIER_META[config.tier as Tier]?.label ?? String(config.tier)} · ${config.direction === "down" ? "caiu" : config.direction === "any" ? "subiu ou caiu" : "subiu"}`;
     case "change_score": return `${config.operation === "subtract" ? "−" : "+"}${Number(config.amount) || 0} pts${config.reason ? ` · ${String(config.reason)}` : ""}`;
     case "update_field": return config.fieldKey ? `${options.fields?.find((item) => item.key === config.fieldKey)?.label ?? String(config.fieldKey)} = ${String(config.value || "(vazio)")}` : "(escolha o campo)";
@@ -436,8 +438,9 @@ const VAR_TARGET: Partial<Record<NodeType, string>> = { send_whatsapp: "text", a
 
 /** Variáveis disponíveis para os passos: as do contato + as que os gatilhos do fluxo entregam (VMSet, mensagem, IA). */
 function VariablesPicker({ triggers, onPick }: { triggers: NodeType[]; onPick: (variable: string) => void }) {
-  const groups: { label: string; vars: string[] }[] = [{ label: "Contato", vars: ["nome", "nome_completo", "cidade", "telefone"] }, { label: "Roleta de vendedores", vars: ["vendedor"] }];
+  const groups: { label: string; vars: string[] }[] = [{ label: "Contato", vars: ["nome", "nome_completo", "cidade", "telefone"] }, { label: "Matriz RFV-P", vars: ["rfvp.codigo", "rfvp.segmento", "rfvp.r", "rfvp.f", "rfvp.v", "rfvp.p"] }, { label: "Roleta de vendedores", vars: ["vendedor"] }];
   for (const kind of [...new Set(triggers)]) {
+    if (kind === "trigger_rfvp") groups.push({ label: NODE_DEF[kind].label, vars: ["rfvp.anterior.codigo", "rfvp.anterior.segmento"] });
     if (kind === "trigger_webhook") groups.push({ label: NODE_DEF[kind].label, vars: ["nome_lead", "email", "origem", "telefone_lead", "utm_source", "utm_campaign"] });
     if (kind === "trigger_message") groups.push({ label: NODE_DEF[kind].label, vars: ["mensagem.texto"] });
     else if (kind === "trigger_ai_handoff") groups.push({ label: NODE_DEF[kind].label, vars: ["fila", "motivo"] });
@@ -502,8 +505,18 @@ function ConditionEditor({ config, onChange }: { config: Record<string, unknown>
                 <select value={String(config.value ?? "")} onChange={(event) => onChange("value", event.target.value)} className={`${input} cursor-pointer`}>
                   {STAGE_OPTIONS.map((stage) => <option key={stage.value} value={stage.value}>{stage.label}</option>)}
                 </select>
+              ) : field === "rfvp_segment" ? (
+                <select value={String(config.value ?? "")} onChange={(event) => onChange("value", event.target.value)} className={`${input} cursor-pointer`}>
+                  <option value="">Escolha o segmento</option>
+                  {RFVP_SEGMENTS.map((segment) => <option key={segment.key} value={segment.key}>{segment.label}</option>)}
+                </select>
+              ) : field.startsWith("rfvp_") && field !== "rfvp_code" ? (
+                <select value={String(config.value ?? "")} onChange={(event) => onChange("value", event.target.value)} className={`${input} cursor-pointer`}>
+                  <option value="">Nota</option>
+                  {[1, 2, 3, 4, 5].map((score) => <option key={score} value={String(score)}>{score}</option>)}
+                </select>
               ) : (
-                <input type={field === "hour" ? "number" : "text"} min={field === "hour" ? 0 : undefined} max={field === "hour" ? 23 : undefined} value={String(config.value ?? "")} placeholder={field === "hour" ? "18" : field === "tag" ? "vip" : field === "city" ? "Goiânia" : "texto"} onChange={(event) => onChange("value", event.target.value)} className={input} />
+                <input type={field === "hour" ? "number" : "text"} min={field === "hour" ? 0 : undefined} max={field === "hour" ? 23 : undefined} value={String(config.value ?? "")} placeholder={field === "hour" ? "18" : field === "rfvp_code" ? "555-5" : field === "tag" ? "vip" : field === "city" ? "Goiânia" : "texto"} onChange={(event) => onChange("value", event.target.value)} className={input} />
               )}
             </label>
           )}
@@ -967,6 +980,12 @@ function Editor({ flowId }: { flowId: string }) {
     if (field.key === "presenceSeconds" && selected.data.config.presenceMode !== "custom") return false;
     if (field.key === "flowId" && selected.data.config.mode !== "goto") return false;
     if (selected.data.kind === "distribute_lead" && field.key === "userIds" && selected.data.config.pool !== "users") return false;
+    if (selected.data.kind === "trigger_rfvp") {
+      const mode = String(selected.data.config.mode ?? "segment");
+      if (field.key === "segment" && mode !== "segment") return false;
+      if (["pillar", "operator", "value"].includes(field.key) && mode !== "pillar") return false;
+      if (field.key === "code" && mode !== "code") return false;
+    }
     return true;
   }) : [];
 

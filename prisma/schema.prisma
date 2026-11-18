@@ -120,6 +120,14 @@ model Contact {
   /// Nível pelas faixas configuradas em /clientes-vip: BRONZE | PRATA | OURO | DIAMANTE.
   tier                      String                 @default("BRONZE")
   scoreUpdatedAt            DateTime?
+  /// Matriz RFV-P (nota 1 a 5 por pilar), código "RFV-P" (ex.: 435-2), segmento e quando mudou.
+  rfvpR                     Int?
+  rfvpF                     Int?
+  rfvpV                     Int?
+  rfvpP                     Int?
+  rfvpCode                  String?
+  rfvpSegment               String?
+  rfvpUpdatedAt             DateTime?
   /// Campos personalizados (chave da ContactFieldDef → valor em texto).
   customFields              Json                   @default("{}")
   createdAt                 DateTime               @default(now())
@@ -140,6 +148,8 @@ model Contact {
   @@index([marketingOptOut])
   @@index([score])
   @@index([tier])
+  @@index([rfvpSegment])
+  @@index([rfvpCode])
 }
 
 /// Movimentação de pontos do Lead Score (motivo, delta, saldo e nível depois).
@@ -975,4 +985,14 @@ model AutomationStepLog {
   createdAt   DateTime            @default(now())
 
   @@index([executionId, createdAt])
+}
+
+/// Pontualidade por CPF vinda do VMSet (parcelas de carnê/boleto/crédito interno vencidas na janela do RFV-P).
+model VmsetPunctuality {
+  cpf            String   @id
+  due            Int      @default(0)
+  onTime         Int      @default(0)
+  avgDelay       Float    @default(0)
+  maxOverdueDays Int      @default(0)
+  syncedAt       DateTime @default(now())
 }

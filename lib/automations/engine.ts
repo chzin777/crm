@@ -1,5 +1,6 @@
 import { isPresenceMode, type PresenceMode } from "@/lib/chat/presence";
 import { TIERS } from "@/lib/scoring";
+import { rfvpTriggerMatches, type RfvpSnapshot } from "@/lib/rfvp";
 import { readDistribute, describeBusinessWindow, nextBusinessOpening, outputHandles, pickVariant, readVariants, variantLetter, describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
@@ -135,6 +136,24 @@ export function evaluateCondition(config: Record<string, unknown>, input: { fact
     return input.hour === value;
   }
   const vars = input.vars ?? {};
+  // Matriz RFV-P (dados atuais do contato): notas comparadas como número, código e segmento como texto.
+  if (field.startsWith("rfvp_")) {
+    const rfvp = input.facts.rfvp;
+    if (!rfvp) return operator === "not_equals" || operator === "empty";
+    const key = field.slice(5);
+    if (key === "code" || key === "segment") {
+      const actual = plain(key === "code" ? rfvp.code : rfvp.segment);
+      return operator === "not_equals" ? actual !== expected : operator === "contains" ? actual.includes(expected) : actual === expected;
+    }
+    const score = rfvp[key as "r" | "f" | "v" | "p"];
+    const limit = Number(expected);
+    if (Number.isNaN(limit)) return false;
+    if (operator === "gte") return score >= limit;
+    if (operator === "lte") return score <= limit;
+    if (operator === "lt") return score < limit;
+    if (operator === "not_equals") return score !== limit;
+    return score === limit;
+  }
   const values = field === "tag" ? input.facts.tags
     : field === "stage" ? [input.facts.stage ?? ""]
     : field === "city" ? [input.facts.city ?? ""]
@@ -149,11 +168,11 @@ export function evaluateCondition(config: Record<string, unknown>, input: { fact
   if (operator === "not_equals") return !present.some((item) => item === expected);
   if (operator === "contains") return present.some((item) => item.includes(expected));
   if (operator === "not_contains") return !present.some((item) => item.includes(expected));
-  if (operator === "gte" || operator === "lt") {
+  if (operator === "gte" || operator === "lt" || operator === "lte") {
     const number = Number(String(present[0] ?? "").replace(",", "."));
     const limit = Number(expected.replace(",", "."));
     if (!present.length || Number.isNaN(number) || Number.isNaN(limit)) return false;
-    return operator === "gte" ? number >= limit : number < limit;
+    return operator === "gte" ? number >= limit : operator === "lte" ? number <= limit : number < limit;
   }
   return false;
 }
@@ -380,6 +399,8 @@ export type TriggerEvent =
   /** Lead Score mudou de previous para score: dispara nos nós cujo valor foi cruzado para cima. */
   | { type: "trigger_score"; score: number; previous: number }
   | { type: "trigger_tier"; tier: string; previous: string }
+  /** Matriz RFV-P recalculada: código e segmento antes e depois. */
+  | { type: "trigger_rfvp"; before: RfvpSnapshot; after: RfvpSnapshot }
   /** Gatilhos do VMSet: o sincronizador já filtrou pelo nó (tempo, valor, loja); aqui só confere o nó. */
   | { type: ErpTriggerType; nodeId: string };
 
@@ -398,6 +419,7 @@ export function triggerMatches(node: FlowNode | null, event: TriggerEvent): bool
   if (event.type === "trigger_inactive" || isErpTrigger(event.type)) return "nodeId" in event && node.id === event.nodeId;
   if (event.type === "trigger_ai_handoff") return !String(config.queueId ?? "") || String(config.queueId) === event.queueId;
   if (event.type === "trigger_link_click") return !plain(String(config.urlContains ?? "")) || plain(event.url).includes(plain(String(config.urlContains)));
+  if (event.type === "trigger_rfvp") return rfvpTriggerMatches(config, event.before, event.after);
   if (event.type === "trigger_score") {
     const target = Number(config.amount) || 0;
     return target > 0 && event.previous < target && event.score >= target;

@@ -11,6 +11,8 @@ GET /installments?cpf=12345678901  (cabeçalho x-api-key)  ->  {"found", "name",
   - títulos a receber (carnê/boleto) do CPF, últimos 3 anos, sem cancelados;
 GET /events?kind=overdue|due|paid|good_payer|lab_ready&date=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"items": [...]}
   - eventos do dia para os gatilhos de /automacoes (parcela vencida/a vencer, baixa, bom pagador, OS pronta no laboratório);
+GET /punctuality?months=24&grace=0  (cabeçalho x-api-key)  ->  {"items": [{"cpf", "due", "onTime", "avgDelay", "maxOverdueDays"}]}
+  - pontualidade por CPF (carnê/boleto/crédito interno vencidos na janela) para a matriz RFV-P do CRM;
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -187,6 +189,42 @@ def money(value):
     return round(float(value), 2) if value is not None else None
 
 
+# Pontualidade por CPF para a matriz RFV-P do CRM: parcelas de carnê/boleto/crédito interno vencidas na janela
+# (:months meses até hoje). "Em dia" = quitada até o vencimento + :grace dias. Também o maior atraso em aberto hoje.
+PUNCTUALITY_SQL = """
+SELECT P.PRCR_CGC_CPF,
+       COUNT(*),
+       SUM(CASE WHEN T.TITL_POSICAO = 'Quitado' AND TRUNC(T.TITL_DT_PAGTO) <= TRUNC(T.TITL_DT_VENCTO) + :grace THEN 1 ELSE 0 END),
+       AVG(CASE WHEN T.TITL_POSICAO = 'Quitado' AND T.TITL_DT_PAGTO IS NOT NULL THEN GREATEST(TRUNC(T.TITL_DT_PAGTO) - TRUNC(T.TITL_DT_VENCTO), 0)
+                WHEN T.TITL_POSICAO IN ('Aberto', 'Recebendo') THEN TRUNC(SYSDATE) - TRUNC(T.TITL_DT_VENCTO) END),
+       MAX(CASE WHEN T.TITL_POSICAO IN ('Aberto', 'Recebendo') THEN TRUNC(SYSDATE) - TRUNC(T.TITL_DT_VENCTO) ELSE 0 END)
+FROM TITULO T
+JOIN FATURA F ON F.FATURA_ID = T.FATURA_ID AND F.FTRA_TIPO = 'Recebimento'
+JOIN PARCEIRO P ON P.PARCEIRO_ID = T.PARCEIRO_ID
+JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = T.TIPO_DOCUMENTO_ID AND D.TPDC_DESCRICAO IN ('CARNE', 'BOLETO BANCARIO', 'CREDITO INTERNO')
+WHERE T.STATUS LIKE 'Ativo%' AND T.TITL_POSICAO <> 'Cancelado'
+  AND T.TITL_DT_VENCTO >= ADD_MONTHS(TRUNC(SYSDATE), -:months) AND T.TITL_DT_VENCTO < TRUNC(SYSDATE)
+  AND P.PRCR_CGC_CPF IS NOT NULL
+GROUP BY P.PRCR_CGC_CPF
+"""
+
+
+def punctuality(months, grace):
+    with pool.acquire() as conn:
+        conn.call_timeout = 120000
+        cur = conn.cursor()
+        cur.arraysize = 5000
+        cur.execute(PUNCTUALITY_SQL, months=months, grace=grace)
+        items = []
+        for cpf, due, on_time, avg_delay, max_overdue in cur:
+            digits = re.sub(r"\D", "", cpf or "").lstrip("0")
+            if len(digits) < 9:
+                continue
+            items.append({"cpf": digits, "due": int(due or 0), "onTime": int(on_time or 0),
+                          "avgDelay": round(float(avg_delay or 0), 1), "maxOverdueDays": max(int(max_overdue or 0), 0)})
+        return items
+
+
 def events(kind, date):
     import datetime as dt
     day_value = dt.datetime.strptime(date, "%Y-%m-%d")
@@ -220,10 +258,25 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path not in ("/stock", "/installments", "/events"):
+        if url.path not in ("/stock", "/installments", "/events", "/punctuality"):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
+        if url.path == "/punctuality":
+            query = parse_qs(url.query)
+            try:
+                months = min(max(int(query.get("months", ["24"])[0]), 1), 120)
+                grace = min(max(int(query.get("grace", ["0"])[0]), 0), 30)
+            except ValueError:
+                return self._send(400, {"error": "months e grace precisam ser números"})
+            started = time.monotonic()
+            try:
+                items = punctuality(months, grace)
+            except Exception as error:
+                log(f"ERRO pontualidade: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+            log(f"pontualidade {months}m +{grace}d: {len(items)} CPFs em {time.monotonic() - started:.2f}s")
+            return self._send(200, {"items": items})
         if url.path == "/events":
             query = parse_qs(url.query)
             kind = (query.get("kind", [""])[0]).strip()

@@ -5,17 +5,19 @@ import Link from "next/link";
 import { ArrowDownUp, ChevronLeft, ChevronRight, Copy, ExternalLink, Gauge, Gem, Link2, Loader2, MessageSquare, Search, SlidersHorizontal, Workflow } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { TierBadge } from "@/components/TierBadge";
+import { RfvpPanel, EMPTY_RFVP_FILTER, type RfvpFilter } from "@/components/RfvpPanel";
+import { RfvpBadge, RfvpSegmentChip } from "@/components/RfvpBadge";
 import { useToast } from "@/components/ToastProvider";
 import { TIER_META, TIERS, tierRangeLabel, thresholdProblems, type Tier, type TierThresholds } from "@/lib/scoring";
 
 type Log = { id: string; delta: number; reason: string; createdAt: string };
-type Row = { id: string; name: string; phone: string | null; city: string | null; score: number; tier: string; lastActivity: string | null; conversationId: string | null; logs: Log[] };
+type Row = { id: string; name: string; phone: string | null; city: string | null; score: number; tier: string; rfvpCode: string | null; rfvpSegment: string | null; lastActivity: string | null; conversationId: string | null; logs: Log[] };
 type Data = { thresholds: TierThresholds; summary: { tier: Tier; count: number; avgScore: number }[]; total: number; page: number; pageSize: number; contacts: Row[] };
 type LinkRow = { id: string; shortUrl: string; url: string; label: string; clicks: number; lastClickAt: string | null; contactName: string | null; source: string; createdAt: string };
 
 const INPUT = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 const BUTTON = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-[#002187] hover:bg-slate-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5";
-const SORTS = [{ value: "score_desc", label: "Maior pontuação" }, { value: "score_asc", label: "Menor pontuação" }, { value: "recent", label: "Atividade mais recente" }, { value: "name", label: "Nome (A–Z)" }];
+const SORTS = [{ value: "score_desc", label: "Maior pontuação" }, { value: "score_asc", label: "Menor pontuação" }, { value: "recent", label: "Atividade mais recente" }, { value: "name", label: "Nome (A–Z)" }, { value: "rfvp_desc", label: "Maior RFV-P" }, { value: "rfvp_asc", label: "Menor RFV-P" }];
 const when = (value: string | null) => (value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }) : "—");
 
 /** /clientes-vip: níveis Diamante, Ouro, Prata e Bronze, ranking por Lead Score, faixas e links rastreados. */
@@ -32,6 +34,7 @@ export default function ClientesVipPage() {
   const [editingThresholds, setEditingThresholds] = useState(false);
   const [adjusting, setAdjusting] = useState<Row | null>(null);
   const [linksOpen, setLinksOpen] = useState(false);
+  const [rfvpFilter, setRfvpFilter] = useState<RfvpFilter>(EMPTY_RFVP_FILTER);
 
   useEffect(() => {
     const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300);
@@ -44,6 +47,7 @@ export default function ClientesVipPage() {
     if (query) params.set("q", query);
     if (tier) params.set("tier", tier);
     if (includeAll) params.set("all", "1");
+    for (const [key, value] of Object.entries(rfvpFilter)) if (value) params.set(key, value);
     try {
       const response = await fetch(`/api/scoring?${params.toString()}`, { cache: "no-store" });
       const body = (await response.json()) as Data & { error?: string };
@@ -54,7 +58,7 @@ export default function ClientesVipPage() {
     } finally {
       setLoading(false);
     }
-  }, [includeAll, page, query, sort, tier, toast]);
+  }, [includeAll, page, query, rfvpFilter, sort, tier, toast]);
   useEffect(() => { void load(); }, [load]);
 
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
@@ -72,6 +76,8 @@ export default function ClientesVipPage() {
           <button type="button" onClick={() => setEditingThresholds(true)} disabled={!data} className={`${BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}><SlidersHorizontal className="h-4 w-4" />Faixas dos níveis</button>
         </div>
       </div>
+
+      <RfvpPanel filter={rfvpFilter} onFilter={(next) => { setRfvpFilter(next); setPage(1); }} onRecalculated={() => void load()} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[...TIERS].reverse().map((item) => {
@@ -113,12 +119,13 @@ export default function ClientesVipPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1000px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 <th className="w-12 px-3 py-2 font-semibold">#</th>
                 <th className="px-3 py-2 font-semibold">Cliente</th>
                 <th className="px-3 py-2 font-semibold">Nível</th>
+                <th className="px-3 py-2 font-semibold">RFV-P</th>
                 <th className="px-3 py-2 text-right font-semibold">Pontos</th>
                 <th className="px-3 py-2 font-semibold">Última atividade</th>
                 <th className="px-3 py-2 font-semibold">Histórico recente</th>
@@ -127,9 +134,9 @@ export default function ClientesVipPage() {
             </thead>
             <tbody>
               {loading && !data ? (
-                <tr><td colSpan={7} className="px-3 py-10 text-center text-xs text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-xs text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
               ) : !data?.contacts.length ? (
-                <tr><td colSpan={7} className="px-3 py-10 text-center text-xs text-slate-500 dark:text-slate-400">Nenhum cliente com pontuação{query || tier ? " nesse filtro" : " ainda"}. As automações de Lead Score somam pontos a cada evento.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-xs text-slate-500 dark:text-slate-400">Nenhum cliente com pontuação{query || tier ? " nesse filtro" : " ainda"}. As automações de Lead Score somam pontos a cada evento.</td></tr>
               ) : data.contacts.map((row, index) => (
                 <tr key={row.id} className="border-b border-slate-50 align-top last:border-0 hover:bg-slate-50/60 dark:border-slate-800/60 dark:hover:bg-white/5">
                   <td className="px-3 py-2.5 text-xs font-bold text-slate-400">{(data.page - 1) * data.pageSize + index + 1}</td>
@@ -138,6 +145,7 @@ export default function ClientesVipPage() {
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">{[row.phone, row.city].filter(Boolean).join(" · ") || "—"}</p>
                   </td>
                   <td className="px-3 py-2.5"><TierBadge tier={row.tier} /></td>
+                  <td className="px-3 py-2.5"><div className="flex min-w-0 flex-col items-start gap-1"><RfvpBadge code={row.rfvpCode} segment={row.rfvpSegment} /><RfvpSegmentChip segment={row.rfvpSegment} /></div></td>
                   <td className="px-3 py-2.5 text-right font-bold text-[#051647] dark:text-white">{row.score.toLocaleString("pt-BR")}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600 dark:text-slate-300">{when(row.lastActivity)}</td>
                   <td className="px-3 py-2.5">
