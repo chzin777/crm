@@ -192,25 +192,6 @@ function Block({ title, hint, action, children }: { title: string; hint?: string
   );
 }
 
-/** Bloco que pode ser recolhido (conteúdo de consulta, não de configuração frequente). */
-function Collapsible({ title, hint, defaultOpen = false, children }: { title: string; hint?: string; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="rounded-xl border border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40">
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex w-full cursor-pointer items-center justify-between gap-3 p-4 text-left sm:px-5">
-        <span className="min-w-0">
-          <span className="block text-sm font-semibold text-[#051647] dark:text-white">{title}</span>
-          {hint && <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>}
-        </span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-        <div className="overflow-hidden">{open && <div className="space-y-4 px-4 pb-4 sm:px-5 sm:pb-5">{children}</div>}</div>
-      </div>
-    </section>
-  );
-}
-
 /** Negrito do WhatsApp (*texto*) como o cliente vê. */
 function WhatsAppText({ text }: { text: string }) {
   return <>{text.split(/(\*[^*\n]+\*)/g).map((part, index) => (/^\*[^*\n]+\*$/.test(part) ? <strong key={index}>{part.slice(1, -1)}</strong> : part))}</>;
@@ -236,12 +217,40 @@ function Kpi({ icon: Icon, label, value, detail, percent, tone = "default" }: { 
   );
 }
 
-function Stat({ label, value, detail, tone = "default" }: { label: string; value: string; detail?: string; tone?: "default" | "warn" }) {
+/** Cabeçalho de seção dentro de um cartão (sem moldura própria). */
+function SectionHead({ icon: Icon, title, hint, action }: { icon: typeof Bot; title: string; hint?: string; action?: ReactNode }) {
   return (
-    <div className={`rounded-xl border p-3 ${tone === "warn" ? "border-[#F7915E]/60 bg-[#F7915E]/10" : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/40"}`}>
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex min-w-0 items-start gap-2.5">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><Icon className="h-3.5 w-3.5" /></span>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-[#051647] dark:text-white">{title}</h2>
+          {hint && <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+        </div>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+const PILL_TONES = {
+  ok: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  error: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+  warn: "bg-[#F7915E]/15 text-[#9a4a1c] dark:text-[#F7915E]",
+  muted: "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400",
+} as const;
+
+function StatusPill({ tone, children }: { tone: keyof typeof PILL_TONES; children: ReactNode }) {
+  return <span className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ${PILL_TONES[tone]}`}>{children}</span>;
+}
+
+/** Métrica sem moldura (dentro do cartão de consumo). */
+function MiniStat({ label, value, detail, warn = false }: { label: string; value: string; detail?: string; warn?: boolean }) {
+  return (
+    <div className="min-w-0">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
-      <p className="mt-1 text-lg font-bold tabular-nums text-[#051647] dark:text-white">{value}</p>
-      {detail && <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{detail}</p>}
+      <p className={`mt-1 text-lg font-bold tabular-nums ${warn ? "text-[#c2410c] dark:text-[#F7915E]" : "text-[#051647] dark:text-white"}`}>{value}</p>
+      {detail && <p className="mt-0.5 break-words text-[10px] text-slate-500 dark:text-slate-400">{detail}</p>}
     </div>
   );
 }
@@ -516,6 +525,7 @@ export function AiSettingsPanel() {
   const [usageError, setUsageError] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [check, setCheck] = useState<CheckState>({ state: "idle" });
+  const [showUsageDetails, setShowUsageDetails] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -581,6 +591,8 @@ export function AiSettingsPanel() {
 
   const set = <K extends keyof AiSettings>(key: K, value: AiSettings[K]) => setSettings((current) => (current ? { ...current, [key]: value } : current));
   const dirty = JSON.stringify(settings) !== saved;
+  // Último uso deu certo (mais recente que o último erro)?
+  const lastOkNewer = !!usage?.status.lastOkAt && (!usage.status.lastErrorAt || usage.status.lastOkAt > usage.status.lastErrorAt);
   /** Pausa dos balões digitada em segundos, guardada em ms (nunca negativa, até 15 s). */
   const setBubbleDelay = (key: "bubbleDelayMinMs" | "bubbleDelayMaxMs", value: string) => set(key, Math.round(Math.min(15, Math.max(0, Number(value) || 0)) * 1000));
 
@@ -820,48 +832,6 @@ export function AiSettingsPanel() {
             </label>
           </Block>
 
-          <GroupTitle icon={PlugZap} title="Modelo, conexão e consumo" />
-          <Block title="Conexão" hint="A chave da API fica só no servidor (arquivo .env) e nunca aparece na tela.">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Provedor</p>
-                <p className="mt-1 text-sm font-bold text-[#051647] dark:text-white">OpenAI</p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Chave da API</p>
-                <p className={`mt-1 flex items-center gap-1.5 text-sm font-bold ${configured ? "text-emerald-700 dark:text-emerald-400" : "text-red-600"}`}>
-                  {configured ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}{configured ? "Configurada" : "Não configurada"}
-                </p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Créditos na OpenAI</p>
-                {!usage ? <p className="mt-1 text-xs text-slate-400">{usageError || "Carregando..."}</p> : usage.status.creditExhausted ? (
-                  <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[#c2410c] dark:text-[#F7915E]"><AlertTriangle className="h-4 w-4" />Sem créditos</p>
-                ) : usage.status.lastOkAt && (!usage.status.lastErrorAt || usage.status.lastOkAt > usage.status.lastErrorAt) ? (
-                  <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" />Funcionando</p>
-                ) : usage.status.lastErrorAt ? (
-                  <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-red-600"><XCircle className="h-4 w-4" />Com erro</p>
-                ) : (
-                  <p className="mt-1 text-sm font-bold text-slate-500">Não verificado</p>
-                )}
-                {usage && (usage.status.lastOkAt || usage.status.lastErrorAt) && (
-                  <p className="mt-0.5 text-[10px] text-slate-400">Último uso: {when(usage.status.lastOkAt && (!usage.status.lastErrorAt || usage.status.lastOkAt > usage.status.lastErrorAt) ? usage.status.lastOkAt : usage.status.lastErrorAt)}</p>
-                )}
-              </div>
-            </div>
-            {usage?.status.lastError && usage.status.lastErrorAt && (!usage.status.lastOkAt || usage.status.lastErrorAt > usage.status.lastOkAt) && (
-              <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{usage.status.lastError}</p>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="button" disabled={!configured || check.state === "checking"} onClick={() => void verifyConnection()} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
-                <RefreshCw className={`h-3.5 w-3.5 ${check.state === "checking" ? "animate-spin" : ""}`} />{check.state === "checking" ? "Verificando..." : "Verificar conexão e créditos"}
-              </button>
-              {check.state === "ok" && <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" />Chave, modelo e créditos OK</span>}
-              {check.state === "error" && <span role="alert" className="flex items-center gap-1 text-xs font-semibold text-red-600"><XCircle className="h-4 w-4" />{check.message}</span>}
-            </div>
-            <p className="text-[10px] text-slate-400">A OpenAI não informa o saldo em dinheiro pela chave do projeto. A verificação faz um pedido mínimo (frações de centavo) e diz se a chave, o modelo e os créditos estão funcionando. O valor em R$ do saldo é calculado em Consumo e créditos.</p>
-          </Block>
-
           <Block title="Foto do produto" hint="O ERP não tem fotos: a IA busca a foto do modelo na web (com cache de 30 dias por produto) e envia junto com as informações de estoque.">
             <Toggle label="Enviar foto do produto encontrada na web junto com as informações" description="Só quando o modelo é confirmado no estoque. Se a foto falhar, a resposta segue em texto." checked={settings.sendProductImage} onChange={(value) => set("sendProductImage", value)} />
             <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
@@ -874,90 +844,146 @@ export function AiSettingsPanel() {
               </p>
             </div>
           </Block>
-          <Block title="Modelo e criatividade">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className={labelCls}>Modelo
-                <input value={settings.model} list="ai-models" onChange={(event) => changeModel(event.target.value)} className={input} />
-                <datalist id="ai-models">{["gpt-5.4-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"].map((model) => <option key={model} value={model} />)}</datalist>
-                <span className="block text-[10px] font-normal text-slate-400">Nome exato do modelo na OpenAI. Modelos da lista já preenchem os preços abaixo.</span>
-              </label>
-              <div className="space-y-1.5">
-                <Toggle label="Usar a criatividade padrão do modelo" description="Recomendado. Alguns modelos só aceitam o padrão." checked={settings.temperature === null} onChange={(value) => set("temperature", value ? null : 0.4)} />
-                {settings.temperature !== null && (
-                  <label className={labelCls}>Criatividade: {settings.temperature.toFixed(1)} {settings.temperature <= 0.3 ? "(mais previsível)" : settings.temperature >= 0.8 ? "(mais variada)" : "(equilibrada)"}
-                    <input type="range" min={0} max={1} step={0.1} value={settings.temperature} onChange={(event) => set("temperature", Number(event.target.value))} className="w-full cursor-pointer accent-[#002187] dark:accent-[#C4D600]" />
-                    <span className="flex justify-between text-xs font-normal text-slate-400"><span>Preciso</span><span>Equilibrado</span><span>Criativo</span></span>
-                  </label>
-                )}
-              </div>
-            </div>
-          </Block>
-
-          <Block title="Preços do modelo" hint="Usados para converter os tokens em R$ no consumo.">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className={labelCls}>US$ por 1 milhão de tokens de entrada
-                <input type="number" min={0} step="0.01" value={settings.priceInputPerMillionUsd} onChange={(event) => set("priceInputPerMillionUsd", Number(event.target.value))} className={input} />
-              </label>
-              <label className={labelCls}>US$ por 1 milhão de tokens de saída
-                <input type="number" min={0} step="0.01" value={settings.priceOutputPerMillionUsd} onChange={(event) => set("priceOutputPerMillionUsd", Number(event.target.value))} className={input} />
-              </label>
-              <label className={labelCls}>Cotação do dólar (R$)
-                <input type="number" min={0.01} step="0.01" value={settings.usdToBrl} onChange={(event) => set("usdToBrl", Number(event.target.value))} className={input} />
-              </label>
-            </div>
-            <p className="flex items-center gap-1.5 text-[10px] text-slate-400"><Coins className="h-3 w-3" />Confira os preços do modelo em platform.openai.com/docs/pricing.</p>
-          </Block>
-
-          <Collapsible title="Consumo detalhado" hint="Saldo, atendimentos, gasto por função e últimos 30 dias, registrados pelo CRM a cada uso da IA.">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-slate-500 dark:text-slate-400">Valores convertidos em R$ pela cotação informada acima.</p>
-            <button type="button" onClick={() => void loadUsage()} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RefreshCw className="h-3.5 w-3.5" />Atualizar</button>
-          </div>
-          {usageError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{usageError}</p>}
-          {!usage ? <div className="space-y-3"><Skeleton className="h-24" /><Skeleton className="h-40" /></div> : (
-            <>
-              {usage.status.creditExhausted && (
-                <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />A OpenAI recusou o último pedido por falta de créditos. A IA fica parada até a recarga.
-                </p>
-              )}
-              <div className={`space-y-2 rounded-xl border p-4 ${usage.balance.low ? "border-[#F7915E]/60 bg-[#F7915E]/10" : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/40"}`}>
-                <div className="flex flex-wrap items-end justify-between gap-2">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{usage.balance.mode === "budget" ? "Disponível no orçamento do mês" : "Crédito disponível"}</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums text-[#051647] dark:text-white">{usage.balance.mode === "none" ? "Não informado" : brl(usage.balance.remainingBrl)}</p>
+          <GroupTitle icon={PlugZap} title="Modelo, conexão e consumo" />
+          <section className="overflow-hidden rounded-xl border border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40">
+            <div className="divide-y divide-slate-200/70 dark:divide-slate-800">
+              {/* Provedor & Modelo */}
+              <div className="space-y-4 p-4 sm:p-5">
+                <SectionHead icon={Bot} title="Provedor & Modelo" hint="O modelo responde ao cliente; os preços convertem os tokens em R$ no consumo." />
+                <div className="grid gap-4 md:grid-cols-[160px_minmax(0,1fr)] xl:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]">
+                  <div className={labelCls}>
+                    <span className="block">Provedor</span>
+                    <span className="flex h-9 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-[#051647] dark:border-slate-700 dark:bg-white/5 dark:text-white">OpenAI</span>
                   </div>
-                  <p className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                  <label className={labelCls}>Modelo
+                    <input value={settings.model} list="ai-models" onChange={(event) => changeModel(event.target.value)} className={input} />
+                    <datalist id="ai-models">{["gpt-5.4-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"].map((model) => <option key={model} value={model} />)}</datalist>
+                    <span className="block text-[10px] font-normal text-slate-400">Nome exato na OpenAI. Modelos da lista já preenchem os preços.</span>
+                  </label>
+                  <div className="min-w-0 md:col-span-2 xl:col-span-1">
+                    <Toggle label="Criatividade padrão do modelo" description="Recomendado. Alguns modelos só aceitam o padrão." checked={settings.temperature === null} onChange={(value) => set("temperature", value ? null : 0.4)} />
+                    {settings.temperature !== null && (
+                      <label className={labelCls}>Criatividade: {settings.temperature.toFixed(1)} {settings.temperature <= 0.3 ? "(mais previsível)" : settings.temperature >= 0.8 ? "(mais variada)" : "(equilibrada)"}
+                        <input type="range" min={0} max={1} step={0.1} value={settings.temperature} onChange={(event) => set("temperature", Number(event.target.value))} className="w-full cursor-pointer accent-[#002187] dark:accent-[#C4D600]" />
+                        <span className="flex justify-between text-[10px] font-normal text-slate-400"><span>Preciso</span><span>Equilibrado</span><span>Criativo</span></span>
+                      </label>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className={labelCls}>US$ por 1 mi tokens de entrada
+                    <input type="number" min={0} step="0.01" value={settings.priceInputPerMillionUsd} onChange={(event) => set("priceInputPerMillionUsd", Number(event.target.value))} className={input} />
+                  </label>
+                  <label className={labelCls}>US$ por 1 mi tokens de saída
+                    <input type="number" min={0} step="0.01" value={settings.priceOutputPerMillionUsd} onChange={(event) => set("priceOutputPerMillionUsd", Number(event.target.value))} className={input} />
+                  </label>
+                  <label className={labelCls}>Cotação do dólar (R$)
+                    <input type="number" min={0.01} step="0.01" value={settings.usdToBrl} onChange={(event) => set("usdToBrl", Number(event.target.value))} className={input} />
+                  </label>
+                </div>
+                <p className="flex items-center gap-1.5 text-[10px] text-slate-400"><Coins className="h-3 w-3 shrink-0" />Confira os preços do modelo em platform.openai.com/docs/pricing.</p>
+              </div>
+
+              {/* Conexão & Credenciais */}
+              <div className="space-y-3 p-4 sm:p-5">
+                <SectionHead icon={PlugZap} title="Conexão & Credenciais" hint="A chave da API fica só no servidor (arquivo .env) e nunca aparece na tela." />
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusPill tone={configured ? "ok" : "error"}>{configured ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}Chave {configured ? "configurada" : "não configurada"}</StatusPill>
+                  {!usage ? <StatusPill tone="muted">{usageError ? "Status indisponível" : "Carregando status..."}</StatusPill> : usage.status.creditExhausted ? (
+                    <StatusPill tone="warn"><AlertTriangle className="h-3.5 w-3.5" />Sem créditos</StatusPill>
+                  ) : lastOkNewer ? (
+                    <StatusPill tone="ok"><CheckCircle2 className="h-3.5 w-3.5" />Funcionando</StatusPill>
+                  ) : usage.status.lastErrorAt ? (
+                    <StatusPill tone="error"><XCircle className="h-3.5 w-3.5" />Com erro</StatusPill>
+                  ) : (
+                    <StatusPill tone="muted">Não verificado</StatusPill>
+                  )}
+                  {usage && (usage.status.lastOkAt || usage.status.lastErrorAt) && (
+                    <span className="text-[10px] text-slate-400">Último uso: {when(lastOkNewer ? usage.status.lastOkAt : usage.status.lastErrorAt)}</span>
+                  )}
+                  <button type="button" disabled={!configured || check.state === "checking"} onClick={() => void verifyConnection()} className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 sm:ml-auto">
+                    <RefreshCw className={`h-3.5 w-3.5 ${check.state === "checking" ? "animate-spin" : ""}`} />{check.state === "checking" ? "Verificando..." : "Testar conexão"}
+                  </button>
+                </div>
+                {check.state === "ok" && <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" />Chave, modelo e créditos OK</p>}
+                {check.state === "error" && <p role="alert" className="flex items-center gap-1 text-xs font-semibold text-red-600"><XCircle className="h-4 w-4 shrink-0" />{check.message}</p>}
+                {usage?.status.lastError && usage.status.lastErrorAt && !lastOkNewer && (
+                  <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{usage.status.lastError}</p>
+                )}
+                <p className="text-[10px] text-slate-400">O teste faz um pedido mínimo (frações de centavo) e confere chave, modelo e créditos. A OpenAI não informa o saldo pela chave: ele é calculado abaixo, em Consumo & Limites.</p>
+              </div>
+
+              {/* Consumo & Limites */}
+              <div className="space-y-4 p-4 sm:p-5">
+                <SectionHead icon={Wallet} title="Consumo & Limites" hint="Registrado pelo CRM a cada uso da IA, em R$ pela cotação acima." action={
+                  <button type="button" onClick={() => void loadUsage()} className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><RefreshCw className="h-3.5 w-3.5" />Atualizar</button>
+                } />
+                {usageError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{usageError}</p>}
+                {!usage ? <Skeleton className="h-24" /> : (
+                  <>
+                    {usage.status.creditExhausted && (
+                      <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />A OpenAI recusou o último pedido por falta de créditos. A IA fica parada até a recarga.
+                      </p>
+                    )}
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+                      <div className="min-w-0 space-y-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{usage.balance.mode === "budget" ? "Disponível no orçamento do mês" : "Crédito disponível"}</p>
+                        <p className={`text-2xl font-bold tabular-nums ${usage.balance.low ? "text-[#c2410c] dark:text-[#F7915E]" : "text-[#051647] dark:text-white"}`}>{usage.balance.mode === "none" ? "Não informado" : brl(usage.balance.remainingBrl)}</p>
+                        {usage.balance.mode !== "none" && (
+                          <>
+                            <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10" role="progressbar" aria-label="Crédito restante" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usage.balance.percentLeft}>
+                              <div className={`h-full rounded-full transition-all ${usage.balance.low ? "bg-[#F7915E]" : "bg-[#C4D600]"}`} style={{ width: `${Math.min(100, Math.max(0, usage.balance.percentLeft))}%` }} />
+                            </div>
+                            <p className={`text-[11px] font-semibold ${usage.balance.low ? "text-[#9a4a1c] dark:text-[#F7915E]" : "text-slate-500 dark:text-slate-400"}`}>
+                              {usage.balance.percentLeft.toLocaleString("pt-BR")}% restante{usage.balance.low ? " · abaixo de 20%: recarregue para a IA não parar" : ""}
+                            </p>
+                          </>
+                        )}
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     {usage.balance.mode === "credit" && <>Gasto {brl(usage.balance.spentBrl)} de {brl(usage.balance.totalBrl)} carregados{usage.credit.loadedAt ? ` em ${usage.credit.loadedAt.split("-").reverse().join("/")}` : ""}{usage.credit.remainingUsd !== null ? ` · ${usd(usage.credit.remainingUsd)}` : ""}</>}
                     {usage.balance.mode === "budget" && <>Gasto {brl(usage.balance.spentBrl)} de {brl(usage.balance.totalBrl)} no mês</>}
                     {usage.balance.mode === "none" && <>Informe abaixo o crédito carregado na OpenAI (ou um orçamento mensal) para acompanhar o saldo.</>}
-                  </p>
-                </div>
-                {usage.balance.mode !== "none" && (
-                  <>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10" role="progressbar" aria-label="Crédito restante" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usage.balance.percentLeft}>
-                      <div className={`h-full rounded-full transition-all ${usage.balance.low ? "bg-[#F7915E]" : "bg-[#C4D600]"}`} style={{ width: `${Math.min(100, Math.max(0, usage.balance.percentLeft))}%` }} />
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-x-4 gap-y-3 min-[420px]:grid-cols-3">
+                        <MiniStat label="Gasto hoje" value={brl(usage.today.costBrl)} detail={`${int(usage.today.inputTokens + usage.today.outputTokens)} tokens · ${int(usage.today.calls)} usos`} />
+                        <MiniStat label="Gasto no mês" value={brl(usage.month.costBrl)} detail={`${int(usage.month.inputTokens + usage.month.outputTokens)} tokens${usage.monthlyBudgetBrl > 0 ? ` · ${Math.round((usage.month.costBrl / usage.monthlyBudgetBrl) * 100)}% do orçamento` : ""}`} warn={usage.monthlyBudgetBrl > 0 && usage.month.costBrl >= usage.monthlyBudgetBrl} />
+                        <MiniStat label="Custo médio por conversa" value={brl(usage.activity.avgCostPerConversationBrl)} detail="Atendimento autônomo no mês" />
+                      </div>
                     </div>
-                    <p className={`text-[11px] font-semibold ${usage.balance.low ? "text-[#9a4a1c] dark:text-[#F7915E]" : "text-slate-500 dark:text-slate-400"}`}>
-                      {usage.balance.percentLeft.toLocaleString("pt-BR")}% restante{usage.balance.low ? " · abaixo de 20%: recarregue para a IA não parar" : ""}
-                    </p>
                   </>
                 )}
-              </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="Conversas atendidas pela IA (mês)" value={int(usage.activity.conversations)} detail="No atendimento autônomo" />
-                <Stat label="Mensagens enviadas pela IA (mês)" value={int(usage.activity.messages)} detail="Respostas ao cliente" />
-                <Stat label="Custo médio por conversa" value={brl(usage.activity.avgCostPerConversationBrl)} detail="Atendimento autônomo no mês" />
-              </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className={labelCls}>Crédito carregado (US$)
+                    <input type="number" min={0} step="0.01" value={settings.creditLoadedUsd} onChange={(event) => set("creditLoadedUsd", Number(event.target.value))} className={input} />
+                  </label>
+                  <label className={labelCls}>Data da recarga
+                    <input type="date" value={settings.creditLoadedAt} onChange={(event) => set("creditLoadedAt", event.target.value)} className={input} />
+                  </label>
+                  <label className={labelCls}>Orçamento mensal (R$)
+                    <input type="number" min={0} step="1" value={settings.monthlyBudgetBrl} onChange={(event) => set("monthlyBudgetBrl", Number(event.target.value))} className={input} />
+                  </label>
+                </div>
+                <p className="text-[10px] text-slate-400">Informe o valor carregado na OpenAI e a data: o CRM desconta o que foi gasto desde então.</p>
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Stat label="Gasto hoje" value={brl(usage.today.costBrl)} detail={`${int(usage.today.inputTokens + usage.today.outputTokens)} tokens · ${int(usage.today.calls)} usos`} />
-                <Stat label="Gasto no mês" value={brl(usage.month.costBrl)} detail={`${int(usage.month.inputTokens + usage.month.outputTokens)} tokens${usage.monthlyBudgetBrl > 0 ? ` · ${Math.round((usage.month.costBrl / usage.monthlyBudgetBrl) * 100)}% do orçamento` : ""}`} tone={usage.monthlyBudgetBrl > 0 && usage.month.costBrl >= usage.monthlyBudgetBrl ? "warn" : "default"} />
-                <Stat label="Total desde o início" value={brl(usage.allTime.costBrl)} detail={`${int(usage.allTime.inputTokens)} de entrada · ${int(usage.allTime.outputTokens)} de saída`} />
-              </div>
+                {usage && (
+                  <div className="border-t border-slate-200/70 pt-3 dark:border-slate-800">
+                    <button type="button" aria-expanded={showUsageDetails} onClick={() => setShowUsageDetails((open) => !open)} className="flex w-full cursor-pointer items-center justify-between gap-2 text-left text-xs font-semibold text-[#002187] dark:text-[#C4D600]">
+                      Consumo detalhado: atendimentos, gasto por função e últimos 30 dias
+                      <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showUsageDetails ? "rotate-180" : ""}`} />
+                    </button>
+                    <Collapse open={showUsageDetails}>
+                      <div className="space-y-5 pt-4">
+                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 min-[420px]:grid-cols-3">
+                          <MiniStat label="Conversas atendidas (mês)" value={int(usage.activity.conversations)} detail="No atendimento autônomo" />
+                          <MiniStat label="Mensagens enviadas (mês)" value={int(usage.activity.messages)} detail="Respostas ao cliente" />
+                          <MiniStat label="Total desde o início" value={brl(usage.allTime.costBrl)} detail={`${int(usage.allTime.inputTokens)} de entrada · ${int(usage.allTime.outputTokens)} de saída`} />
+                        </div>
 
-              <Block title="Gasto por função no mês">
+              <div className="space-y-2">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Gasto por função no mês</h4>
                 {usage.byFeature.length === 0 ? <p className="text-[11px] text-slate-400">Nenhum uso registrado neste mês.</p> : (
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[420px] text-left text-xs">
@@ -970,9 +996,10 @@ export function AiSettingsPanel() {
                     </table>
                   </div>
                 )}
-              </Block>
+              </div>
 
-              <Block title="Últimos 30 dias">
+              <div className="space-y-2">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Últimos 30 dias</h4>
                 {usage.daily.length === 0 ? <p className="text-[11px] text-slate-400">Sem uso nos últimos 30 dias.</p> : (
                   <div className="flex h-28 items-end gap-1" role="img" aria-label="Gasto diário da IA nos últimos 30 dias">
                     {usage.daily.map((row) => {
@@ -981,24 +1008,14 @@ export function AiSettingsPanel() {
                     })}
                   </div>
                 )}
-              </Block>
-            </>
-          )}
-          </Collapsible>
-
-          <Block title="Créditos e orçamento" hint="A OpenAI não informa o saldo pela chave do projeto: informe o valor carregado e a data, e o CRM desconta o que foi gasto desde então.">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className={labelCls}>Crédito carregado (US$)
-                <input type="number" min={0} step="0.01" value={settings.creditLoadedUsd} onChange={(event) => set("creditLoadedUsd", Number(event.target.value))} className={input} />
-              </label>
-              <label className={labelCls}>Data da recarga
-                <input type="date" value={settings.creditLoadedAt} onChange={(event) => set("creditLoadedAt", event.target.value)} className={input} />
-              </label>
-              <label className={labelCls}>Orçamento mensal (R$)
-                <input type="number" min={0} step="1" value={settings.monthlyBudgetBrl} onChange={(event) => set("monthlyBudgetBrl", Number(event.target.value))} className={input} />
-              </label>
+              </div>
+                      </div>
+                    </Collapse>
+                  </div>
+                )}
+              </div>
             </div>
-          </Block>
+          </section>
         </div>
       )}
 
