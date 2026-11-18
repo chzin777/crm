@@ -51,7 +51,7 @@ import { sendSatisfactionSurvey } from "@/lib/chat/nps";
 import { applySkillsToSettings, filterToolsBySkills, skillEnabled } from "@/lib/ai/studio";
 import { loadSkills, loadStudioContext } from "@/lib/ai/studio-db";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
-import { sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
 import { catalogImages, imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
 import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
@@ -60,7 +60,7 @@ import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext, sessionStartedAt } from "@/lib/ai/assist";
 import { anchorPromptBlock, asksStoreLocation, EMPTY_ANCHOR, extractSessionAnchor, isProductFollowUp, isStoreFollowUp, storesIn, modelNumbers, SESSION_ANCHOR_RULES, type AnchorMessage, type SessionAnchor } from "@/lib/ai/session-anchor";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
-import { aiShouldAttend, asksForHuman, type AiSettings } from "@/lib/ai/settings";
+import { aiShouldAttend, asksForHuman, bubbleDelayFor, type AiSettings } from "@/lib/ai/settings";
 import { buildSystemPrompt, carriesProductExtras, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 import { reportError } from "@/lib/monitoring/error-reporter";
@@ -1337,10 +1337,14 @@ async function sendAiReply(conversation: ChatConversation, text: string, image?:
     }), toChatInteractive(list), AI_AUTHOR)
     : sendAutomaticMessage(conversation, part, undefined, undefined, AI_AUTHOR));
   // Bolhas separadas por ---SPLIT---: a 1ª pode ser foto com legenda; as seguintes saem em texto, com "digitando..." e pausa curta.
-  const sent = await sendBubbles(splitBubbles(text), {
+  // Cadência configurada em /ia › Mensagens picadas (desligado: tudo numa mensagem só).
+  const cadence = await readAiSettings();
+  const parts = cadence.splitReplies ? splitBubbles(text, cadence.maxBubbles) : [joinBubbles(text)].filter(Boolean);
+  const sent = await sendBubbles(parts, {
     sendFirst: (part) => (image ? sendAutomaticImage(conversation, image.url, part, AI_AUTHOR, () => invalidateProductImage(image.sku), image.sku) : sendText_(part)),
     sendNext: (part) => sendText_(part),
     typing: () => sendTypingIndicator(typingMessageId),
+    delay: (next) => bubbleDelayFor(cadence, next),
   });
   if (location) await sendStoreLocation(conversation, location);
   return sent;

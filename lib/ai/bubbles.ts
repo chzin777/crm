@@ -170,14 +170,14 @@ export const bubbleDelay = (random = Math.random) => Math.round(BUBBLE_DELAY_MIN
  */
 export async function sendBubbles(
   parts: string[],
-  deps: { sendFirst: (text: string) => Promise<unknown>; sendNext: (text: string) => Promise<unknown>; typing?: () => Promise<unknown>; sleep?: (ms: number) => Promise<void>; delay?: () => number },
+  deps: { sendFirst: (text: string) => Promise<unknown>; sendNext: (text: string) => Promise<unknown>; typing?: () => Promise<unknown>; sleep?: (ms: number) => Promise<void>; delay?: (next: string) => number },
 ) {
   if (!parts.length) return 0;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   await deps.sendFirst(parts[0]);
   for (const part of parts.slice(1)) {
     await Promise.resolve().then(() => deps.typing?.()).catch(() => undefined);
-    await sleep((deps.delay ?? bubbleDelay)());
+    await sleep(deps.delay ? deps.delay(part) : bubbleDelay());
     await deps.sendNext(part);
   }
   return parts.length;

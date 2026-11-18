@@ -36,7 +36,7 @@ function Switch({ label, checked, onChange, disabled }: { label: string; checked
 }
 
 /** Expande/recolhe com transição suave de altura (grid 0fr → 1fr); recolhido fica fora do foco do teclado. */
-function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
   return (
     <div className={`grid transition-all duration-200 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`} aria-hidden={!open} inert={!open}>
       <div className="min-h-0 overflow-hidden">{children}</div>

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, Coins, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
-import { KnowledgeSection, RulesSection, SkillsSection } from "@/components/ai-studio/StudioSections";
+import { Collapse, KnowledgeSection, RulesSection, SkillsSection } from "@/components/ai-studio/StudioSections";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
@@ -586,8 +586,14 @@ export function AiSettingsPanel() {
 
   const set = <K extends keyof AiSettings>(key: K, value: AiSettings[K]) => setSettings((current) => (current ? { ...current, [key]: value } : current));
   const dirty = JSON.stringify(settings) !== saved;
+  /** Pausa dos balões digitada em segundos, guardada em ms (nunca negativa, até 15 s). */
+  const setBubbleDelay = (key: "bubbleDelayMinMs" | "bubbleDelayMaxMs", value: string) => set(key, Math.round(Math.min(15, Math.max(0, Number(value) || 0)) * 1000));
 
   const save = async () => {
+    if (settings.bubbleDelayMaxMs < settings.bubbleDelayMinMs) {
+      toast.error("Revise as mensagens picadas", "A pausa máxima entre balões não pode ser menor que a mínima.");
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch("/api/ai/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings }) });
@@ -731,6 +737,26 @@ export function AiSettingsPanel() {
           <GroupTitle icon={UserRoundCheck} title="Atendimento, horário e transbordo" />
           <Block title="Mensagens picadas" hint="Quando o cliente manda várias mensagens seguidas (“Oi” / “queria saber” / “se tem ray ban” / “no bueno”), a IA espera ele terminar e responde tudo de uma vez.">
             <Toggle label="Agrupar mensagens picadas automaticamente" description="Pergunta completa é respondida em cerca de 2 s; saudação ou frase cortada espera até ~5 s; nunca mais de 12 s desde a primeira mensagem. Desligado: responde cada mensagem em ~1,5 s." checked={settings.groupMessages} onChange={(value) => set("groupMessages", value)} />
+            <Toggle label="Responder em vários balões" description="A IA separa a informação da pergunta final em balões seguidos, com “digitando...” antes de cada um. Desligado: a resposta sai numa mensagem só." checked={settings.splitReplies} onChange={(value) => set("splitReplies", value)} />
+            <Collapse open={settings.splitReplies}>
+              <div className="grid gap-3 rounded-lg border border-slate-200/70 p-3 sm:grid-cols-2 dark:border-slate-700">
+                <label className="block space-y-1 text-xs font-semibold text-slate-700 dark:text-slate-200">Pausa mínima entre balões (s)
+                  <input type="number" min={0} max={15} step={0.1} value={settings.bubbleDelayMinMs / 1000} onChange={(event) => setBubbleDelay("bubbleDelayMinMs", event.target.value)} className={input} />
+                </label>
+                <label className="block space-y-1 text-xs font-semibold text-slate-700 dark:text-slate-200">Pausa máxima entre balões (s)
+                  <input type="number" min={settings.bubbleDelayMinMs / 1000} max={15} step={0.1} value={settings.bubbleDelayMaxMs / 1000} onChange={(event) => setBubbleDelay("bubbleDelayMaxMs", event.target.value)} className={input} />
+                </label>
+                <label className="block space-y-1 text-xs font-semibold text-slate-700 dark:text-slate-200">Digitação por caractere (ms)
+                  <input type="number" min={0} max={200} step={1} value={settings.bubbleMsPerChar} onChange={(event) => set("bubbleMsPerChar", Math.min(200, Math.max(0, Math.round(Number(event.target.value) || 0))))} className={input} />
+                  <span className="block text-[10px] font-normal text-slate-400">Soma ao tempo de pausa conforme o tamanho do próximo balão (0 = só a pausa).</span>
+                </label>
+                <label className="block space-y-1 text-xs font-semibold text-slate-700 dark:text-slate-200">Máximo de balões por resposta
+                  <input type="number" min={1} max={5} step={1} value={settings.maxBubbles} onChange={(event) => set("maxBubbles", Math.min(5, Math.max(1, Math.round(Number(event.target.value) || 1))))} className={input} />
+                </label>
+                {settings.bubbleDelayMaxMs < settings.bubbleDelayMinMs && <p className="flex items-center gap-1.5 text-[11px] text-[#9a4a1c] sm:col-span-2 dark:text-[#F7915E]"><AlertTriangle className="h-3.5 w-3.5" />A pausa máxima não pode ser menor que a mínima.</p>}
+                <p className="text-[10px] text-slate-400 sm:col-span-2">Pausa sorteada entre o mínimo e o máximo a cada balão, limitada a 15 s no total. Padrão: 0,6 s a 1 s, sem tempo por caractere, até 3 balões.</p>
+              </div>
+            </Collapse>
           </Block>
           <Block title="Onde a IA atende" hint="A IA só responde conversas sem atendente. Assim que alguém assume, ela para.">
             <Toggle label="Na entrada, no lugar do menu automático" description="Toda conversa nova é recebida pela IA, que resolve ou transfere para a fila certa." checked={settings.attendAtEntry} onChange={(value) => set("attendAtEntry", value)} />

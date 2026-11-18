@@ -42,6 +42,15 @@ export type AiSettings = {
   sendProductImage: boolean;
   /** Agrupa mensagens picadas do cliente e responde uma vez só (espera adaptativa, até 12 s). */
   groupMessages: boolean;
+  /** Resposta longa da IA em vários balões (---SPLIT---); desligado, sai numa mensagem só. */
+  splitReplies: boolean;
+  /** Pausa entre os balões (ms), sorteada entre mínimo e máximo, com "digitando..." antes de cada um. */
+  bubbleDelayMinMs: number;
+  bubbleDelayMaxMs: number;
+  /** Tempo extra de digitação por caractere do balão seguinte (ms; 0 = só a pausa). */
+  bubbleMsPerChar: number;
+  /** Máximo de balões por resposta. */
+  maxBubbles: number;
   topics: AiKnowledgeTopic[];
   extraInstructions: string;
 
@@ -99,6 +108,11 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   requireApprovalForFinancialQueries: true,
   sendProductImage: true,
   groupMessages: true,
+  splitReplies: true,
+  bubbleDelayMinMs: 600,
+  bubbleDelayMaxMs: 1000,
+  bubbleMsPerChar: 0,
+  maxBubbles: 3,
   topics: DEFAULT_AI_TOPICS,
   extraInstructions: "Nunca ofereça descontos nem condições especiais. Não faça diagnóstico de saúde ocular: oriente procurar um oftalmologista.",
   handoffKeywords: ["atendente", "humano", "pessoa", "falar com alguém", "vendedor", "gerente", "reclamação", "procon"],
@@ -169,6 +183,8 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     requireApprovalForFinancialQueries: bool(raw.requireApprovalForFinancialQueries, d.requireApprovalForFinancialQueries),
     sendProductImage: bool(raw.sendProductImage, d.sendProductImage),
     groupMessages: bool(raw.groupMessages, d.groupMessages),
+    splitReplies: bool(raw.splitReplies, d.splitReplies),
+    ...bubbleTiming(raw),
     topics,
     extraInstructions: str(raw.extraInstructions, d.extraInstructions),
     handoffKeywords: Array.isArray(raw.handoffKeywords) ? raw.handoffKeywords.map((item) => String(item).trim()).filter(Boolean).slice(0, 50) : d.handoffKeywords,
@@ -191,6 +207,33 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     creditLoadedAt: typeof raw.creditLoadedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.creditLoadedAt) ? raw.creditLoadedAt : "",
     monthlyBudgetBrl: num(raw.monthlyBudgetBrl, d.monthlyBudgetBrl, 0, 10_000_000),
   };
+}
+
+/** Limites da cadência dos balões: nunca negativo, máximo nunca abaixo do mínimo, pausa total até 15 s. */
+export const BUBBLE_DELAY_LIMIT_MS = 15_000;
+export const BUBBLE_MS_PER_CHAR_LIMIT = 200;
+export const MAX_BUBBLES_LIMIT = 5;
+
+function bubbleTiming(raw: Record<string, unknown>) {
+  const d = DEFAULT_AI_SETTINGS;
+  const whole = (value: unknown, fallback: number, max: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.round(Math.min(max, Math.max(0, parsed))) : fallback;
+  };
+  const min = whole(raw.bubbleDelayMinMs, d.bubbleDelayMinMs, BUBBLE_DELAY_LIMIT_MS);
+  const max = Math.max(min, whole(raw.bubbleDelayMaxMs, Math.max(min, d.bubbleDelayMaxMs), BUBBLE_DELAY_LIMIT_MS));
+  return {
+    bubbleDelayMinMs: min,
+    bubbleDelayMaxMs: max,
+    bubbleMsPerChar: whole(raw.bubbleMsPerChar, d.bubbleMsPerChar, BUBBLE_MS_PER_CHAR_LIMIT),
+    maxBubbles: Math.max(1, whole(raw.maxBubbles, d.maxBubbles, MAX_BUBBLES_LIMIT)),
+  };
+}
+
+/** Pausa antes do próximo balão: sorteio entre mínimo e máximo + digitação por caractere (até 15 s). */
+export function bubbleDelayFor(settings: Pick<AiSettings, "bubbleDelayMinMs" | "bubbleDelayMaxMs" | "bubbleMsPerChar">, nextText: string, random = Math.random) {
+  const base = settings.bubbleDelayMinMs + random() * Math.max(0, settings.bubbleDelayMaxMs - settings.bubbleDelayMinMs);
+  return Math.round(Math.min(BUBBLE_DELAY_LIMIT_MS, base + settings.bubbleMsPerChar * nextText.length));
 }
 
 /** Custo em US$ de uma chamada pelos preços por milhão de tokens. */
