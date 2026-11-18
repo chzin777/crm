@@ -723,14 +723,6 @@ export function AiSettingsPanel() {
             </div>
           </Block>
 
-          <Block title="Fontes automáticas" hint="Dados que o sistema já tem e a IA pode usar nas respostas.">
-            <Toggle label="Lojas e endereços" description="Usa o cadastro de Lojas (lojas ativas)." checked={settings.useStores} onChange={(value) => set("useStores", value)} />
-            <Toggle label="Horário de atendimento" description="Usa os horários cadastrados em Filas › Horário de atendimento." checked={settings.useOperatingHours} onChange={(value) => set("useOperatingHours", value)} />
-            <Toggle label="Pedidos do próprio cliente" description="Pode informar data, loja e situação dos pedidos do cliente no ERP." checked={settings.useCustomerOrders} onChange={(value) => set("useCustomerOrders", value)} />
-            <Toggle label="Pode citar preços" description="Usa o preço médio dos mais vendidos como referência “a partir de”. Desligado, a IA diz que a loja passa o orçamento." checked={settings.canQuotePrices} onChange={(value) => set("canQuotePrices", value)} />
-            <Toggle label="Aprovação de parcelas/crediário" description="Exigir confirmação do operador antes de enviar dados de parcelas/crediário ao cliente. A IA pede nome completo e CPF, consulta o VMSet e deixa a resposta pronta no /chat para o operador conferir e enviar." checked={settings.requireApprovalForFinancialQueries} onChange={(value) => set("requireApprovalForFinancialQueries", value)} />
-          </Block>
-
           <Block title="Instruções e restrições" hint="Regras de comportamento que valem para todas as respostas (ex.: o que nunca prometer). Segurança, estoque e imagens têm regras fixas no sistema que estas instruções não substituem.">
             <textarea aria-label="Instruções adicionais" rows={Math.min(18, Math.max(6, settings.extraInstructions.split("\n").length + 1))} value={settings.extraInstructions} onChange={(event) => set("extraInstructions", event.target.value)} className={`${area} resize-y text-sm`} />
             <p className="text-right text-xs text-slate-400">{settings.extraInstructions.length.toLocaleString("pt-BR")} caracteres</p>

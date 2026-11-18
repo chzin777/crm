@@ -3,16 +3,19 @@ import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { AiError } from "@/lib/ai/openai";
 import { extractPdfText, indexKnowledgeDocument } from "@/lib/ai/studio-db";
+import { readAiSettings } from "@/lib/ai/store";
 
 const MAX_FILE = 10 * 1024 * 1024;
 const MAX_TEXT = 400_000;
-const select = { id: true, title: true, source: true, fileName: true, active: true, status: true, error: true, chunkCount: true, createdAt: true, updatedAt: true } as const;
+const select = { id: true, title: true, source: true, fileName: true, active: true, status: true, error: true, chunkCount: true, systemKey: true, createdAt: true, updatedAt: true } as const;
 
 /** Base de conhecimento (RAG): lista de documentos com o status da indexação. */
 export async function GET() {
   const guard = await requireModule("ia", "configuracoes");
   if (guard.response) return guard.response;
-  return NextResponse.json({ documents: await prisma.knowledgeDocument.findMany({ orderBy: { createdAt: "desc" }, select }) });
+  // Garante os documentos das fontes automáticas (criados a partir dos antigos toggles da aba Geral).
+  await readAiSettings();
+  return NextResponse.json({ documents: await prisma.knowledgeDocument.findMany({ orderBy: [{ systemKey: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }], select }) });
 }
 
 /** Novo documento: JSON { title, content } ou multipart com "file" (.pdf, .txt, .md) e "title" opcional. */

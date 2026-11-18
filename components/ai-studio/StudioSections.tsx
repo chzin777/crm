@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, Boxes, Calculator, ChevronDown, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { BookOpenText, Boxes, Calculator, ChevronDown, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
+import { EntityDialog } from "@/components/EntityDialog";
 import { skillSlug, slugify, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type SkillKey } from "@/lib/ai/studio";
 
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
@@ -364,7 +365,61 @@ export function SkillsSection() {
 
 // ---------------------------------------------------------------- Base de conhecimento (RAG)
 
-type KnowledgeDoc = { id: string; title: string; source: string; fileName: string | null; active: boolean; status: string; error: string | null; chunkCount: number; createdAt: string };
+type KnowledgeDoc = { id: string; title: string; source: string; fileName: string | null; active: boolean; status: string; error: string | null; chunkCount: number; systemKey?: string | null; createdAt: string };
+
+/** Edição do Markdown de um documento (fonte automática ou texto cadastrado). */
+function KnowledgeEditor({ document, onClose, onSaved }: { document: KnowledgeDoc; onClose: () => void; onSaved: (document: KnowledgeDoc) => void }) {
+  const toast = useToast();
+  const [title, setTitle] = useState(document.title);
+  const [content, setContent] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api<{ document: KnowledgeDoc & { content: string } }>(`/api/ai/knowledge/${document.id}`)
+      .then((data) => { if (active) setContent(data.document.content); })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        toast.error("Base de conhecimento", cause instanceof Error ? cause.message : "Não foi possível abrir o documento.");
+        onClose();
+      });
+    return () => { active = false; };
+  }, [document.id, toast, onClose]);
+
+  const save = async () => {
+    if (content === null) return;
+    setSaving(true);
+    try {
+      const data = await api<{ document: KnowledgeDoc }>(`/api/ai/knowledge/${document.id}`, json("PATCH", { title, content }));
+      onSaved(data.document);
+      toast.success("Documento salvo", document.systemKey ? "A IA usa o novo texto na próxima resposta." : "Texto reindexado para a busca da IA.");
+      onClose();
+    } catch (cause) {
+      toast.error("Erro ao salvar", cause instanceof Error ? cause.message : "Tente de novo.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <EntityDialog titleId="knowledge-editor" title="Editar documento" description={document.systemKey ? "Fonte automática: o texto orienta a IA e os dados do sistema (lojas, horários, preços) entram atualizados logo abaixo." : "Conteúdo em Markdown usado pela busca da IA."} onClose={onClose} size="lg">
+      {content === null ? <p className="flex items-center gap-2 py-6 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</p> : (
+        <div className="space-y-3">
+          <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Título
+            <input value={title} onChange={(event) => setTitle(event.target.value)} className={input} maxLength={160} />
+          </label>
+          <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Conteúdo (Markdown)
+            <textarea rows={14} value={content} onChange={(event) => setContent(event.target.value)} className={`${area} resize-y font-mono`} />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className={ghost}>Cancelar</button>
+            <button type="button" disabled={saving || !title.trim() || !content.trim()} onClick={() => void save()} className={primary}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}Salvar</button>
+          </div>
+        </div>
+      )}
+    </EntityDialog>
+  );
+}
 const STATUS: Record<string, { label: string; cls: string }> = {
   indexado: { label: "Indexado", cls: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" },
   parcial: { label: "Só busca textual", cls: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" },
@@ -381,6 +436,8 @@ export function KnowledgeSection() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<KnowledgeChunkHit[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [editing, setEditing] = useState<KnowledgeDoc | null>(null);
+  const closeEditor = useCallback(() => setEditing(null), []);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -494,20 +551,34 @@ export function KnowledgeSection() {
                   <div className="min-w-0 flex-1">
                     <p className={`break-words text-sm font-medium ${document.active ? "text-[#051647] dark:text-white" : "text-slate-400 line-through"}`}>{document.title}</p>
                     <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      {document.systemKey ? (
+                        <>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#C4D600]/25 px-2 py-0.5 text-[10px] font-semibold text-[#051647] dark:text-[#C4D600]"><Zap className="h-3 w-3" />Fonte automática</span>
+                          MD · entra inteira no atendimento, com os dados do sistema atualizados
+                        </>
+                      ) : <>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${status.cls}`}>{status.label}</span>
                       {document.chunkCount} trecho{document.chunkCount === 1 ? "" : "s"} · {document.source.toUpperCase()}{document.fileName ? ` · ${document.fileName}` : ""}
+                      </>}
                       {document.error && <span className="text-red-600 dark:text-red-300">· {document.error}</span>}
                     </p>
                   </div>
                   <Switch label={`Documento ${document.title} ativo`} checked={document.active} disabled={busy === document.id} onChange={(value) => void update(document, { active: value })} />
+                  {(document.systemKey || document.source === "texto" || document.source === "md" || document.source === "txt") && (
+                    <button type="button" title="Editar" aria-label={`Editar ${document.title}`} disabled={busy === document.id} onClick={() => setEditing(document)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><Pencil className="h-4 w-4" /></button>
+                  )}
+                  {!document.systemKey && <>
                   <button type="button" title="Reindexar" aria-label={`Reindexar ${document.title}`} disabled={busy === document.id} onClick={() => void update(document, { reindex: true })} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><RefreshCw className={`h-4 w-4 ${busy === document.id ? "animate-spin" : ""}`} /></button>
                   <button type="button" title="Excluir" aria-label={`Excluir ${document.title}`} disabled={busy === document.id} onClick={() => void remove(document)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
+                  </>}
                 </li>
               );
             })}
           </ul>
         )}
       </Panel>
+
+      {editing && <KnowledgeEditor document={editing} onClose={closeEditor} onSaved={(saved) => setDocuments((current) => current?.map((item) => (item.id === saved.id ? saved : item)) ?? current)} />}
 
       <Panel title="Testar busca RAG" hint="Escreva uma pergunta como o cliente faria e veja quais trechos a IA recuperaria (os mais relevantes entram na resposta).">
         <div className="flex gap-2">

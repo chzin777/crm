@@ -26,6 +26,7 @@ import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, sticke
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
 import { transcribeMessageAudio } from "@/lib/chat/transcription";
+import { activeSourceNotes, type KnowledgeSourceKey } from "@/lib/ai/knowledge-sources";
 import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
@@ -190,23 +191,27 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
 
 async function knowledge(settings: AiSettings) {
   const parts: string[] = [];
+  // Fontes automáticas: documentos Markdown ligados na Base de Conhecimento (instrução editável + dados ao vivo).
+  const notes = await activeSourceNotes().catch(() => ({} as Awaited<ReturnType<typeof activeSourceNotes>>));
+  const note = (key: KnowledgeSourceKey) => (notes[key] ? `${notes[key]}\n\n` : "");
+  for (const key of ["pedidos", "crediario"] as const) if (notes[key]) parts.push(notes[key]);
   if (settings.useStores) {
     const stores = await prisma.store.findMany({ where: { active: true }, orderBy: { number: "asc" }, select: { name: true, address: true, addressNumber: true, city: true, state: true, neighborhoods: true } });
     if (stores.length) {
-      parts.push(`Lojas:\n${stores.map((store) => `- ${store.name}: ${[store.address && `${store.address}${store.addressNumber ? `, ${store.addressNumber}` : ""}`, store.neighborhoods[0], store.city && `${store.city}${store.state ? `/${store.state}` : ""}`].filter(Boolean).join(" · ") || "endereço não cadastrado"}`).join("\n")}`);
+      parts.push(`${note("lojas")}Lojas:\n${stores.map((store) => `- ${store.name}: ${[store.address && `${store.address}${store.addressNumber ? `, ${store.addressNumber}` : ""}`, store.neighborhoods[0], store.city && `${store.city}${store.state ? `/${store.state}` : ""}`].filter(Boolean).join(" · ") || "endereço não cadastrado"}`).join("\n")}`);
     }
   }
   if (settings.useOperatingHours) {
     const rows = await prisma.operatingHours.findMany({ where: { enabled: true }, select: { scope: true, schedule: true } });
     const queues = await prisma.chatQueue.findMany({ where: { id: { in: rows.map((row) => row.scope) } }, select: { id: true, name: true } });
     const lines = rows.map((row) => `- ${row.scope === GLOBAL_HOURS_SCOPE ? "Atendimento" : `Fila ${queues.find((queue) => queue.id === row.scope)?.name ?? "?"}`}: ${describeSchedule(sanitizeSchedule(row.schedule))}`);
-    if (lines.length) parts.push(`Horário de atendimento (Brasília):\n${lines.join("\n")}`);
+    if (lines.length) parts.push(`${note("horarios")}Horário de atendimento (Brasília):\n${lines.join("\n")}`);
   }
   // Os antigos "Assuntos rápidos" (settings.topics) foram unificados nas Regras da empresa (AiBusinessRule) e entram
   // pelo bloco de regras do composeSystemPrompt.
   if (settings.canQuotePrices) {
     const products = await catalog();
-    if (products) parts.push(`Preços médios praticados (use só como referência "a partir de", confirmando na loja):\n${products}`);
+    if (products) parts.push(`${note("precos")}Preços médios praticados (use só como referência "a partir de", confirmando na loja):\n${products}`);
   }
   return parts.join("\n\n");
 }

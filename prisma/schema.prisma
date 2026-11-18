@@ -763,6 +763,8 @@ model KnowledgeDocument {
   status     String           @default("pendente")
   error      String?
   chunkCount Int              @default(0)
+  /// Fonte automática (lojas, horarios, pedidos, precos, crediario): ligar/desligar substitui o antigo toggle; não vira trechos de RAG.
+  systemKey  String?          @unique
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
   chunks     KnowledgeChunk[]

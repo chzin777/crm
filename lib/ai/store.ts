@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { addDays, brDay, brStartOfDay } from "@/lib/br-time";
 import { AI_SETTINGS_KEY, creditSummary, sanitizeAiSettings, usageCostUsd, type AiSettings } from "@/lib/ai/settings";
+import { applyKnowledgeSources } from "@/lib/ai/knowledge-sources";
 
 /** Mesmo nome de AI_AUTHOR (lib/ai/agent), repetido aqui para não importar o agente no painel. */
 const AI_AUTHOR_NAME = "Assistente IA";
@@ -11,20 +12,34 @@ const STATUS_KEY = "ai-status";
 const CACHE_MS = 30_000;
 let cache: { at: number; value: AiSettings } | null = null;
 
+/** Fontes automáticas (lojas, horários, pedidos, preços, crediário) valem pelo documento da Base de Conhecimento. */
+async function withSources(value: AiSettings) {
+  return applyKnowledgeSources(value).catch((error) => {
+    console.error("[ai] fontes automáticas da base de conhecimento:", error);
+    return value;
+  });
+}
+
 export async function readAiSettings(): Promise<AiSettings> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
   const row = await prisma.crmWorkspaceData.findUnique({ where: { key: AI_SETTINGS_KEY }, select: { value: true } });
-  const value = sanitizeAiSettings(row?.value ?? {});
+  const value = await withSources(sanitizeAiSettings(row?.value ?? {}));
   cache = { at: Date.now(), value };
   return value;
+}
+
+/** Documento de fonte automática ligado/desligado: vale na próxima resposta. */
+export function invalidateAiSettingsCache() {
+  cache = null;
 }
 
 export async function saveAiSettings(input: unknown) {
   const value = sanitizeAiSettings(input);
   const json = value as unknown as Prisma.InputJsonValue;
   await prisma.crmWorkspaceData.upsert({ where: { key: AI_SETTINGS_KEY }, create: { key: AI_SETTINGS_KEY, value: json }, update: { value: json } });
-  cache = { at: Date.now(), value };
-  return value;
+  const effective = await withSources(value);
+  cache = { at: Date.now(), value: effective };
+  return effective;
 }
 
 export type AiStatus = { lastOkAt: string | null; lastErrorAt: string | null; lastError: string | null; creditExhausted: boolean };

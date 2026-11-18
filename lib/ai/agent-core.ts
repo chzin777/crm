@@ -200,7 +200,8 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = [], mo
     `Seu nome no atendimento é ${settings.agentName}: use-o só se o cliente perguntar com quem está falando.`,
     `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
     "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",
-    settings.useCustomerOrders ? "Você pode informar ao cliente dados dos pedidos dele que aparecem no histórico do ERP (data, loja, situação)." : "Não comente pedidos ou compras anteriores do cliente.",
+    // Ligado: a instrução vem do documento "Pedidos do próprio cliente" da Base de Conhecimento.
+    settings.useCustomerOrders ? "" : "Não comente pedidos ou compras anteriores do cliente.",
     settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
     handoff.join("\n"),
     settings.closeWhenResolved ? `${CLOSE_RULES}\nAo encerrar, use action "resolved" com a despedida curta em reply (a mesma mensagem, sem pergunta).` : "",
