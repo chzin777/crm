@@ -1,14 +1,21 @@
 import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
-import { changeScore } from "@/lib/scoring-db";
+import { changeScore, readScoringSettings } from "@/lib/scoring-db";
+import { contactRfvp } from "@/lib/rfvp-db";
 
-/** Histórico completo de pontos do contato (últimas 100 movimentações). */
+/** Aba "Pontuação" do contato: saldo, nível, faixas (para o próximo nível), RFV-P com o porquê de cada nota e histórico (últimas 100). */
 export async function GET(_request: Request, context: { params: Promise<{ contactId: string }> }) {
   const guard = await requireModule("pontuacao", "contatos", "chat");
   if (guard.response) return guard.response;
   const { contactId } = await context.params;
-  const logs = await prisma.contactScoreLog.findMany({ where: { contactId }, orderBy: { createdAt: "desc" }, take: 100 });
-  return Response.json({ logs });
+  const [contact, logs, { thresholds }, rfvp] = await Promise.all([
+    prisma.contact.findUnique({ where: { id: contactId }, select: { score: true, tier: true, scoreUpdatedAt: true } }),
+    prisma.contactScoreLog.findMany({ where: { contactId }, orderBy: { createdAt: "desc" }, take: 100 }),
+    readScoringSettings(),
+    contactRfvp(contactId).catch(() => null),
+  ]);
+  if (!contact) return Response.json({ error: "Contato não encontrado." }, { status: 404 });
+  return Response.json({ score: contact.score, tier: contact.tier, scoreUpdatedAt: contact.scoreUpdatedAt, thresholds, rfvp, logs });
 }
 
 /** Ajuste manual da equipe (+/− pontos com motivo), registrado como "equipe" no histórico. */

@@ -5,8 +5,8 @@ import { isTier, readThresholds, thresholdProblems, TIERS } from "@/lib/scoring"
 import { readScoringSettings, saveThresholds } from "@/lib/scoring-db";
 import { RFVP_SEGMENT_BY_KEY } from "@/lib/rfvp";
 
-const PAGE_SIZE = 50;
-const SORTS = { score_desc: { score: "desc" }, score_asc: { score: "asc" }, name: { name: "asc" }, recent: { scoreUpdatedAt: { sort: "desc", nulls: "last" } }, rfvp_desc: { rfvpCode: { sort: "desc", nulls: "last" } }, rfvp_asc: { rfvpCode: { sort: "asc", nulls: "last" } } } as const;
+const PAGE_SIZES = [15, 25, 50];
+const SORTS = { score_desc: { score: "desc" }, score_asc: { score: "asc" }, name: { name: "asc" }, recent: { scoreUpdatedAt: { sort: "desc", nulls: "last" } }, rfvp_desc: { rfvpCode: { sort: "desc", nulls: "last" } }, rfvp_asc: { rfvpCode: { sort: "asc", nulls: "last" } }, value_desc: { totalSpent: "desc" } } as const;
 const PILLAR_COLUMNS = { r: "rfvpR", f: "rfvpF", v: "rfvpV", p: "rfvpP" } as const;
 
 /** Filtros por nota mínima/máxima de cada pilar do RFV-P (?rMin=4&pMax=2) e por segmento. */
@@ -35,6 +35,7 @@ export async function GET(request: Request) {
   const tier = params.get("tier");
   const sort = (params.get("sort") ?? "score_desc") as keyof typeof SORTS;
   const page = Math.max(1, Number(params.get("page")) || 1);
+  const pageSize = PAGE_SIZES.includes(Number(params.get("pageSize"))) ? Number(params.get("pageSize")) : 25;
   const rfvpFilters = rfvpWhere(params);
   // Filtro de RFV-P olha a base toda (não só quem tem Lead Score).
   const onlyScored = params.get("all") !== "1" && !rfvpFilters.length;
@@ -46,27 +47,27 @@ export async function GET(request: Request) {
   };
   const [{ thresholds }, groups, total, rows] = await Promise.all([
     readScoringSettings(),
-    prisma.contact.groupBy({ by: ["tier"], _count: { _all: true }, _avg: { score: true }, where: onlyScored ? { OR: [{ score: { gt: 0 } }, { scoreUpdatedAt: { not: null } }] } : {} }),
+    prisma.contact.groupBy({ by: ["tier"], _count: { _all: true }, _avg: { score: true, totalSpent: true }, where: onlyScored ? { OR: [{ score: { gt: 0 } }, { scoreUpdatedAt: { not: null } }] } : {} }),
     prisma.contact.count({ where }),
     prisma.contact.findMany({
-      where, orderBy: [SORTS[sort] ?? SORTS.score_desc, { id: "asc" }], skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE,
+      where, orderBy: [SORTS[sort] ?? SORTS.score_desc, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize,
       select: {
-        id: true, name: true, phone: true, city: true, score: true, tier: true, scoreUpdatedAt: true, rfvpCode: true, rfvpSegment: true, rfvpUpdatedAt: true,
+        id: true, name: true, phone: true, city: true, score: true, tier: true, scoreUpdatedAt: true, totalSpent: true, rfvpCode: true, rfvpSegment: true, rfvpUpdatedAt: true,
         chatConversations: { orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } }, take: 1, select: { id: true, lastMessageAt: true } },
-        scoreLogs: { orderBy: { createdAt: "desc" }, take: 3, select: { id: true, delta: true, reason: true, createdAt: true } },
+
       },
     }),
   ]);
   const summary = TIERS.map((item) => {
     const group = groups.find((row) => row.tier === item);
-    return { tier: item, count: group?._count._all ?? 0, avgScore: Math.round(group?._avg.score ?? 0) };
+    return { tier: item, count: group?._count._all ?? 0, avgScore: Math.round(group?._avg.score ?? 0), avgSpent: Math.round(Number(group?._avg.totalSpent ?? 0)) };
   });
   return Response.json({
-    thresholds, summary, total, page, pageSize: PAGE_SIZE,
+    thresholds, summary, base: summary.reduce((sum, item) => sum + item.count, 0), total, page, pageSize,
     contacts: rows.map((row) => {
       const conversation = row.chatConversations[0] ?? null;
       const activity = [row.scoreUpdatedAt, conversation?.lastMessageAt].filter((value): value is Date => !!value).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
-      return { id: row.id, name: row.name, phone: row.phone, city: row.city, score: row.score, tier: row.tier, rfvpCode: row.rfvpCode, rfvpSegment: row.rfvpSegment, lastActivity: activity, conversationId: conversation?.id ?? null, logs: row.scoreLogs };
+      return { id: row.id, name: row.name, phone: row.phone, city: row.city, score: row.score, tier: row.tier, totalSpent: row.totalSpent.toNumber(), rfvpCode: row.rfvpCode, rfvpSegment: row.rfvpSegment, lastActivity: activity, conversationId: conversation?.id ?? null };
     }),
   });
 }

@@ -4,8 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Settings2 } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
-import { RfvpBadge, RfvpSegmentChip, SCORE_TONE } from "@/components/RfvpBadge";
-import { PILLARS } from "@/lib/rfvp";
+import { RfvpDetail, type ContactRfvpView } from "@/components/RfvpBadge";
 import { ContactFieldsManager } from "@/components/ContactFieldsManager";
 import { useToast } from "@/components/ToastProvider";
 import { displayFieldValue, type ContactFieldDefinition } from "@/lib/contact-fields";
@@ -20,7 +19,7 @@ const when = (value: string) => new Date(value).toLocaleString("pt-BR", { dateSt
  * Lead Score (nível, pontos e últimas movimentações) e campos personalizados do contato, editáveis aqui.
  * Usado na ficha de /contatos e no "Dados do cliente" do /chat.
  */
-export function ContactCustomFields({ contactId, canWrite = true, canManage = false }: { contactId: string; canWrite?: boolean; canManage?: boolean }) {
+export function ContactCustomFields({ contactId, canWrite = true, canManage = false, showScore = true }: { contactId: string; canWrite?: boolean; canManage?: boolean; showScore?: boolean }) {
   const toast = useToast();
   const [data, setData] = useState<Data | null>(null);
   const [failed, setFailed] = useState(false);
@@ -67,14 +66,16 @@ export function ContactCustomFields({ contactId, canWrite = true, canManage = fa
 
   return (
     <div className="min-w-0 space-y-4">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <TierBadge tier={data.tier} score={data.score} size="md" />
-          <Link href="/clientes-vip" className="text-xs font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">Ranking de clientes</Link>
+      {showScore && (
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <TierBadge tier={data.tier} score={data.score} size="md" />
+            <Link href="/clientes-vip" className="text-xs font-semibold text-[#002187] hover:underline dark:text-[#C4D600]">Ranking de clientes</Link>
+          </div>
         </div>
-      </div>
-      {data.rfvp && <RfvpDetail rfvp={data.rfvp} />}
-      {data.logs.length > 0 && (
+      )}
+      {showScore && data.rfvp && <RfvpDetail rfvp={data.rfvp} />}
+      {showScore && data.logs.length > 0 && (
         <ul className="space-y-1">
           {data.logs.slice(0, 5).map((log) => (
             <li key={log.id} className="flex min-w-0 items-center gap-2 text-xs">
@@ -125,40 +126,3 @@ export function ContactCustomFields({ contactId, canWrite = true, canManage = fa
   );
 }
 
-type ContactRfvpView = {
-  code: string | null; segment: string | null; updatedAt: string | null;
-  scores: { r: number; f: number; v: number; p: number } | null;
-  metrics: { daysSinceLastPurchase: number | null; purchases: number; value: number; valueMetric: "total" | "avg"; months: { f: number; v: number; p: number }; punctuality: { due: number; onTime: number; avgDelay: number; maxOverdueDays: number } | null };
-};
-
-/** Matriz RFV-P do contato: código, segmento e as 4 notas com o número por trás de cada uma. */
-function RfvpDetail({ rfvp }: { rfvp: ContactRfvpView }) {
-  const m = rfvp.metrics;
-  const money = m.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
-  const p = m.punctuality;
-  const detail: Record<"r" | "f" | "v" | "p", string> = {
-    r: m.daysSinceLastPurchase === null ? "Nunca comprou" : `Última compra há ${m.daysSinceLastPurchase} dia(s)`,
-    f: `${m.purchases} compra(s) em ${m.months.f} meses`,
-    v: `${money} ${m.valueMetric === "avg" ? "de ticket médio" : "gastos"} em ${m.months.v} meses`,
-    p: !p || p.due === 0 ? "Sem crediário na janela (à vista/PIX/cartão)" : `${Math.round((p.onTime / p.due) * 100)}% em dia de ${p.due} parcela(s) · atraso médio ${p.avgDelay} dia(s)${p.maxOverdueDays > 0 ? ` · em aberto há ${p.maxOverdueDays} dia(s)` : ""}`,
-  };
-  return (
-    <div className="min-w-0 space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">RFV-P</span>
-        <RfvpBadge code={rfvp.code} segment={rfvp.segment} size="md" />
-        <RfvpSegmentChip segment={rfvp.segment} />
-      </div>
-      {rfvp.scores ? (
-        <ul className="grid gap-1.5 sm:grid-cols-2">
-          {PILLARS.map((pillar) => (
-            <li key={pillar.key} className="flex min-w-0 items-start gap-2">
-              <span className={`grid h-5 w-5 shrink-0 place-items-center rounded text-[10px] font-bold ${SCORE_TONE[rfvp.scores![pillar.key]]}`}>{rfvp.scores![pillar.key]}</span>
-              <span className="min-w-0 break-words text-[11px] text-slate-600 dark:text-slate-300"><b className="text-[#051647] dark:text-white">{pillar.label}:</b> {detail[pillar.key]}</span>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="text-[11px] text-slate-500 dark:text-slate-400">Ainda não calculado. O recálculo roda todo dia às 6h ou em Clientes VIP & Pontuação.</p>}
-    </div>
-  );
-}

@@ -1,26 +1,50 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDownUp, ChevronLeft, ChevronRight, Copy, ExternalLink, Gauge, Gem, Link2, Loader2, MessageSquare, Search, SlidersHorizontal, Workflow } from "lucide-react";
+import { ArrowDownUp, ChevronLeft, ChevronRight, Copy, Filter, Gem, Grid3x3, Link2, Loader2, RefreshCw, Search, SlidersHorizontal, Workflow, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { TierBadge } from "@/components/TierBadge";
-import { RfvpPanel, EMPTY_RFVP_FILTER, type RfvpFilter } from "@/components/RfvpPanel";
+import { EMPTY_RFVP_FILTER, RfvpSegmentsStrip, useRfvpStatus, type RfvpFilter } from "@/components/RfvpPanel";
 import { RfvpBadge, RfvpSegmentChip } from "@/components/RfvpBadge";
+import { ScoringSettingsDialog } from "@/components/ScoringSettingsDialog";
+import { ContactDetailModal } from "@/components/contacts/ContactDetailModal";
 import { useToast } from "@/components/ToastProvider";
-import { TIER_META, TIERS, tierRangeLabel, thresholdProblems, type Tier, type TierThresholds } from "@/lib/scoring";
+import { PILLARS, segmentLabel } from "@/lib/rfvp";
+import { TIER_META, TIERS, tierRangeLabel, type Tier, type TierThresholds } from "@/lib/scoring";
 
-type Log = { id: string; delta: number; reason: string; createdAt: string };
-type Row = { id: string; name: string; phone: string | null; city: string | null; score: number; tier: string; rfvpCode: string | null; rfvpSegment: string | null; lastActivity: string | null; conversationId: string | null; logs: Log[] };
-type Data = { thresholds: TierThresholds; summary: { tier: Tier; count: number; avgScore: number }[]; total: number; page: number; pageSize: number; contacts: Row[] };
+type Row = { id: string; name: string; phone: string | null; city: string | null; score: number; tier: string; totalSpent: number; rfvpCode: string | null; rfvpSegment: string | null; lastActivity: string | null; conversationId: string | null };
+type Summary = { tier: Tier; count: number; avgScore: number; avgSpent: number };
+type Data = { thresholds: TierThresholds; summary: Summary[]; base: number; total: number; page: number; pageSize: number; contacts: Row[] };
 type LinkRow = { id: string; shortUrl: string; url: string; label: string; clicks: number; lastClickAt: string | null; contactName: string | null; source: string; createdAt: string };
 
-const INPUT = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
-const BUTTON = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-[#002187] hover:bg-slate-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5";
-const SORTS = [{ value: "score_desc", label: "Maior pontuação" }, { value: "score_asc", label: "Menor pontuação" }, { value: "recent", label: "Atividade mais recente" }, { value: "name", label: "Nome (A–Z)" }, { value: "rfvp_desc", label: "Maior RFV-P" }, { value: "rfvp_asc", label: "Menor RFV-P" }];
+const INPUT = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/10 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/15";
+const GHOST = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#002187] dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-[#C4D600]";
+const SECONDARY = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-[#051647] shadow-sm transition-colors hover:border-[#002187]/40 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-white/5 dark:text-white dark:hover:bg-white/10";
+const PRIMARY = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-105";
+const SORTS = [
+  { value: "score_desc", label: "Maior score" },
+  { value: "rfvp_desc", label: "Melhor RFV-P" },
+  { value: "recent", label: "Mais recente" },
+  { value: "value_desc", label: "Maior valor" },
+];
+const PAGE_SIZES = [15, 25, 50];
 const when = (value: string | null) => (value ? new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }) : "—");
+const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "?";
 
-/** /clientes-vip: níveis Diamante, Ouro, Prata e Bronze, ranking por Lead Score, faixas e links rastreados. */
+/** Números de página com reticências: 1 … 4 5 6 … 20. */
+function pageList(page: number, pages: number): (number | "…")[] {
+  if (pages <= 7) return Array.from({ length: pages }, (_, index) => index + 1);
+  const set = new Set([1, pages, page - 1, page, page + 1].filter((item) => item >= 1 && item <= pages));
+  const sorted = [...set].sort((a, b) => a - b);
+  return sorted.flatMap((item, index) => (index > 0 && item - sorted[index - 1] > 1 ? (["…", item] as const) : ([item] as const)));
+}
+
+/**
+ * /clientes-vip: KPIs por nível, segmentos RFV-P, ranking com filtros e paginação real. Clique na linha abre a ficha
+ * completa do cliente na aba Pontuação; parâmetros do RFV-P e dos níveis ficam num modal próprio.
+ */
 export default function ClientesVipPage() {
   const toast = useToast();
   const [data, setData] = useState<Data | null>(null);
@@ -28,13 +52,15 @@ export default function ClientesVipPage() {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [tier, setTier] = useState<Tier | "">("");
+  const [segment, setSegment] = useState("");
   const [sort, setSort] = useState("score_desc");
   const [includeAll, setIncludeAll] = useState(false);
-  const [page, setPage] = useState(1);
-  const [editingThresholds, setEditingThresholds] = useState(false);
-  const [adjusting, setAdjusting] = useState<Row | null>(null);
-  const [linksOpen, setLinksOpen] = useState(false);
   const [rfvpFilter, setRfvpFilter] = useState<RfvpFilter>(EMPTY_RFVP_FILTER);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [openContact, setOpenContact] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300);
@@ -43,9 +69,10 @@ export default function ClientesVipPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams({ sort, page: String(page) });
+    const params = new URLSearchParams({ sort, page: String(page), pageSize: String(pageSize) });
     if (query) params.set("q", query);
     if (tier) params.set("tier", tier);
+    if (segment) params.set("segment", segment);
     if (includeAll) params.set("all", "1");
     for (const [key, value] of Object.entries(rfvpFilter)) if (value) params.set(key, value);
     try {
@@ -58,221 +85,264 @@ export default function ClientesVipPage() {
     } finally {
       setLoading(false);
     }
-  }, [includeAll, page, query, rfvpFilter, sort, tier, toast]);
+  }, [includeAll, page, pageSize, query, rfvpFilter, segment, sort, tier, toast]);
   useEffect(() => { void load(); }, [load]);
 
-  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const { status, reload: reloadRfvp, recalculate } = useRfvpStatus(() => void load());
+
+  const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
+  const advancedCount = Object.values(rfvpFilter).filter(Boolean).length + (includeAll ? 1 : 0);
+  const clearAll = () => { setSearch(""); setTier(""); setSegment(""); setRfvpFilter(EMPTY_RFVP_FILTER); setIncludeAll(false); setPage(1); };
+  const hasFilters = !!(query || tier || segment || advancedCount);
+
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total ? (page - 1) * pageSize + 1 : 0;
+  const to = Math.min(total, page * pageSize);
+  const run = status?.lastRun;
 
   return (
     <div className="min-w-0 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-[#051647] dark:text-white">Clientes VIP & Pontuação</h1>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Lead Score dos clientes, ranking e níveis Diamante, Ouro, Prata e Bronze. Os pontos de cada evento são definidos nas automações (nó Alterar pontuação).</p>
+          <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">Ranking por Lead Score e matriz RFV-P (Recência, Frequência, Valor e Pontualidade) para priorizar quem atender.</p>
+          <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+            <Grid3x3 className="h-3.5 w-3.5" aria-hidden />
+            {status?.running ? "Recalculando RFV-P agora..." : run?.finishedAt ? `RFV-P atualizado em ${when(run.finishedAt)} · recalcula todo dia às 6h` : "RFV-P recalcula todo dia às 6h"}
+          </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href="/automacoes" className={BUTTON}><Workflow className="h-4 w-4" />Regras de pontuação</Link>
-          <button type="button" onClick={() => setLinksOpen(true)} className={BUTTON}><Link2 className="h-4 w-4" />Links rastreados</button>
-          <button type="button" onClick={() => setEditingThresholds(true)} disabled={!data} className={`${BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}><SlidersHorizontal className="h-4 w-4" />Faixas dos níveis</button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Link href="/automacoes" className={GHOST}><Workflow className="h-4 w-4" />Regras de pontuação</Link>
+          <button type="button" onClick={() => setLinksOpen(true)} className={GHOST}><Link2 className="h-4 w-4" />Links rastreados</button>
+          <button type="button" onClick={() => setSettingsOpen(true)} disabled={!data || !status} className={SECONDARY}><SlidersHorizontal className="h-4 w-4" />Parametrizar RFV-P & Níveis</button>
+          <button type="button" onClick={() => void recalculate()} disabled={!status || status.running} className={PRIMARY}>
+            {status?.running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}{status?.running ? "Recalculando..." : "Recalcular RFV-P"}
+          </button>
         </div>
-      </div>
+      </header>
 
-      <RfvpPanel filter={rfvpFilter} onFilter={(next) => { setRfvpFilter(next); setPage(1); }} onRecalculated={() => void load()} />
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section aria-label="Clientes por nível" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {[...TIERS].reverse().map((item) => {
           const info = data?.summary.find((row) => row.tier === item);
           const active = tier === item;
+          const share = data?.base ? Math.round(((info?.count ?? 0) / data.base) * 1000) / 10 : 0;
           return (
-            <button key={item} type="button" onClick={() => { setTier(active ? "" : item); setPage(1); }} aria-pressed={active} className={`min-w-0 cursor-pointer rounded-2xl border bg-white p-4 text-left shadow-sm transition-colors dark:bg-[#07194f] ${active ? "border-[#002187] ring-2 ring-[#002187]/20 dark:border-[#C4D600] dark:ring-[#C4D600]/30" : "border-slate-200 hover:border-slate-300 dark:border-slate-800"}`}>
+            <button key={item} type="button" onClick={() => { setTier(active ? "" : item); setPage(1); }} aria-pressed={active}
+              className={`group min-w-0 cursor-pointer rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-[#07194f] ${active ? "border-[#002187] ring-2 ring-[#002187]/15 dark:border-[#C4D600] dark:ring-[#C4D600]/25" : "border-slate-200 dark:border-slate-800"}`}>
               <div className="flex items-center justify-between gap-2">
                 <TierBadge tier={item} size="md" />
-                <Gem className="h-4 w-4 text-slate-300 dark:text-slate-600" aria-hidden />
+                <span className="text-[11px] font-semibold tabular-nums text-slate-400">{data ? `${share.toLocaleString("pt-BR")}%` : ""}</span>
               </div>
-              <p className="mt-3 text-2xl font-bold text-[#051647] dark:text-white">{info ? info.count.toLocaleString("pt-BR") : "—"}</p>
-              <p className="mt-0.5 break-words text-[11px] text-slate-500 dark:text-slate-400">{data ? `${tierRangeLabel(item, data.thresholds)} · média ${info?.avgScore ?? 0}` : "Carregando..."}</p>
+              <p className="mt-3 text-2xl font-bold tabular-nums text-[#051647] dark:text-white">{info ? info.count.toLocaleString("pt-BR") : "—"}</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{data ? tierRangeLabel(item, data.thresholds) : "Carregando..."}</p>
+              <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10"><div className="h-full rounded-full bg-[#C4D600]" style={{ width: `${Math.min(100, share)}%` }} /></div>
+              <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+                <div className="min-w-0"><dt className="text-[10px] text-slate-400">Score médio</dt><dd className="truncate text-xs font-bold tabular-nums text-[#051647] dark:text-white">{info ? `${info.avgScore.toLocaleString("pt-BR")} pts` : "—"}</dd></div>
+                <div className="min-w-0"><dt className="text-[10px] text-slate-400">Gasto médio</dt><dd className="truncate text-xs font-bold tabular-nums text-[#051647] dark:text-white">{info ? money(info.avgSpent) : "—"}</dd></div>
+              </dl>
             </button>
           );
         })}
-      </div>
+      </section>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#07194f]">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-3 dark:border-slate-800">
-          <div className="relative min-w-[200px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, telefone ou CPF" aria-label="Buscar cliente" className={`${INPUT} pl-8`} />
-          </div>
-          <select value={tier} onChange={(event) => { setTier(event.target.value as Tier | ""); setPage(1); }} aria-label="Filtrar por nível" className={`${INPUT} w-auto cursor-pointer`}>
-            <option value="">Todos os níveis</option>
-            {[...TIERS].reverse().map((item) => <option key={item} value={item}>{TIER_META[item].label}</option>)}
-          </select>
-          <label className="relative">
-            <ArrowDownUp className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-            <select value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }} aria-label="Ordenar" className={`${INPUT} w-auto cursor-pointer pl-8`}>
-              {SORTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+      <section aria-label="Segmentos RFV-P" className="space-y-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Segmentos RFV-P</p>
+        <RfvpSegmentsStrip segments={status?.segments ?? null} selected={segment} onSelect={resetPage(setSegment)} />
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#07194f]" aria-label="Ranking de clientes">
+        <div className="space-y-3 border-b border-slate-100 p-3 dark:border-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, telefone ou CPF" aria-label="Buscar cliente" className={`${INPUT} pl-8`} />
+            </div>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-white/5" role="radiogroup" aria-label="Filtrar por nível">
+              {(["", ...[...TIERS].reverse()] as (Tier | "")[]).map((item) => (
+                <button key={item || "all"} type="button" role="radio" aria-checked={tier === item} onClick={() => { setTier(item); setPage(1); }}
+                  className={`cursor-pointer rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${tier === item ? "bg-white text-[#051647] shadow-sm dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+                  {item ? TIER_META[item].label : "Todos"}
+                </button>
+              ))}
+            </div>
+            <select value={segment} onChange={(event) => { setSegment(event.target.value); setPage(1); }} aria-label="Segmento RFV-P" className={`${INPUT} w-auto max-w-[240px] cursor-pointer`}>
+              <option value="">Todos os segmentos</option>
+              {(status?.segments ?? []).map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
             </select>
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 px-1 text-xs text-slate-600 dark:text-slate-300">
-            <input type="checkbox" checked={includeAll} onChange={(event) => { setIncludeAll(event.target.checked); setPage(1); }} className="h-4 w-4 cursor-pointer accent-[#002187]" />
-            Incluir contatos sem pontos
-          </label>
+            <label className="relative">
+              <ArrowDownUp className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+              <select value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }} aria-label="Ordenar" className={`${INPUT} w-auto cursor-pointer pl-8`}>
+                {SORTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <AdvancedFilters filter={rfvpFilter} includeAll={includeAll} count={advancedCount} onChange={(next, all) => { setRfvpFilter(next); setIncludeAll(all); setPage(1); }} />
+          </div>
+          {hasFilters && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {query && <Chip label={`Busca: ${query}`} onRemove={() => setSearch("")} />}
+              {tier && <Chip label={`Nível: ${TIER_META[tier].label}`} onRemove={() => { setTier(""); setPage(1); }} />}
+              {segment && <Chip label={`Segmento: ${segmentLabel(segment)}`} onRemove={() => { setSegment(""); setPage(1); }} />}
+              {PILLARS.map((pillar) => {
+                const min = rfvpFilter[`${pillar.key}Min`];
+                const max = rfvpFilter[`${pillar.key}Max`];
+                if (!min && !max) return null;
+                const label = min && max ? `${min} ≤ ${pillar.letter} ≤ ${max}` : min ? `${pillar.letter} ≥ ${min}` : `${pillar.letter} ≤ ${max}`;
+                return <Chip key={pillar.key} label={label} onRemove={() => { setRfvpFilter({ ...rfvpFilter, [`${pillar.key}Min`]: "", [`${pillar.key}Max`]: "" }); setPage(1); }} />;
+              })}
+              {includeAll && <Chip label="Inclui contatos sem pontos" onRemove={() => { setIncludeAll(false); setPage(1); }} />}
+              <button type="button" onClick={clearAll} className="cursor-pointer px-1.5 text-xs font-semibold text-slate-500 hover:text-red-600">Limpar tudo</button>
+            </div>
+          )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] border-collapse text-left text-sm">
+        <div className="relative overflow-x-auto">
+          {loading && data && <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-[#C4D600]" aria-hidden />}
+          <table className="w-full min-w-[860px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                <th className="w-12 px-3 py-2 font-semibold">#</th>
-                <th className="px-3 py-2 font-semibold">Cliente</th>
-                <th className="px-3 py-2 font-semibold">Nível</th>
-                <th className="px-3 py-2 font-semibold">RFV-P</th>
-                <th className="px-3 py-2 text-right font-semibold">Pontos</th>
-                <th className="px-3 py-2 font-semibold">Última atividade</th>
-                <th className="px-3 py-2 font-semibold">Histórico recente</th>
-                <th className="px-3 py-2 text-right font-semibold">Ações</th>
+                <th className="w-12 px-4 py-2.5 font-semibold">#</th>
+                <th className="px-3 py-2.5 font-semibold">Cliente</th>
+                <th className="px-3 py-2.5 font-semibold">Nível</th>
+                <th className="px-3 py-2.5 font-semibold">RFV-P</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Pontos</th>
+                <th className="px-3 py-2.5 text-right font-semibold">Total gasto</th>
+                <th className="px-4 py-2.5 font-semibold">Última atividade</th>
               </tr>
             </thead>
             <tbody>
               {loading && !data ? (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-xs text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
+                <tr><td colSpan={7} className="px-3 py-14 text-center text-xs text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>
               ) : !data?.contacts.length ? (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-xs text-slate-500 dark:text-slate-400">Nenhum cliente com pontuação{query || tier ? " nesse filtro" : " ainda"}. As automações de Lead Score somam pontos a cada evento.</td></tr>
+                <tr><td colSpan={7} className="px-3 py-14 text-center">
+                  <Gem className="mx-auto h-6 w-6 text-slate-300 dark:text-slate-600" aria-hidden />
+                  <p className="mt-2 text-sm font-semibold text-slate-600 dark:text-slate-300">Nenhum cliente encontrado</p>
+                  <p className="mt-0.5 text-xs text-slate-400">{hasFilters ? "Ajuste ou limpe os filtros." : "As automações de Lead Score somam pontos a cada evento."}</p>
+                </td></tr>
               ) : data.contacts.map((row, index) => (
-                <tr key={row.id} className="border-b border-slate-50 align-top last:border-0 hover:bg-slate-50/60 dark:border-slate-800/60 dark:hover:bg-white/5">
-                  <td className="px-3 py-2.5 text-xs font-bold text-slate-400">{(data.page - 1) * data.pageSize + index + 1}</td>
-                  <td className="min-w-0 px-3 py-2.5">
-                    <p className="max-w-[220px] truncate font-semibold text-[#051647] dark:text-white">{row.name}</p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{[row.phone, row.city].filter(Boolean).join(" · ") || "—"}</p>
-                  </td>
-                  <td className="px-3 py-2.5"><TierBadge tier={row.tier} /></td>
-                  <td className="px-3 py-2.5"><div className="flex min-w-0 flex-col items-start gap-1"><RfvpBadge code={row.rfvpCode} segment={row.rfvpSegment} /><RfvpSegmentChip segment={row.rfvpSegment} /></div></td>
-                  <td className="px-3 py-2.5 text-right font-bold text-[#051647] dark:text-white">{row.score.toLocaleString("pt-BR")}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600 dark:text-slate-300">{when(row.lastActivity)}</td>
-                  <td className="px-3 py-2.5">
-                    {row.logs.length ? (
-                      <ul className="max-w-[280px] space-y-0.5">
-                        {row.logs.map((log) => (
-                          <li key={log.id} className="flex min-w-0 gap-1.5 text-[11px]">
-                            <span className={`shrink-0 font-bold ${log.delta >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-red-600 dark:text-red-300"}`}>{log.delta > 0 ? "+" : ""}{log.delta}</span>
-                            <span className="min-w-0 truncate text-slate-500 dark:text-slate-400" title={log.reason}>{log.reason || "Ajuste"}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : <span className="text-[11px] text-slate-400">—</span>}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex justify-end gap-1">
-                      <button type="button" onClick={() => setAdjusting(row)} title="Ajustar pontos" aria-label={`Ajustar pontos de ${row.name}`} className="cursor-pointer rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><Gauge className="h-4 w-4" /></button>
-                      <Link href={`/contatos?busca=${encodeURIComponent(row.phone?.replace(/^55/, "") || row.name)}`} title="Abrir contato" aria-label={`Abrir contato ${row.name}`} className="cursor-pointer rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><ExternalLink className="h-4 w-4" /></Link>
-                      {row.conversationId ? (
-                        <Link href={`/chat?c=${row.conversationId}`} title="Abrir conversa" aria-label={`Abrir conversa com ${row.name}`} className="cursor-pointer rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><MessageSquare className="h-4 w-4" /></Link>
-                      ) : <span className="p-1.5 text-slate-200 dark:text-slate-700" title="Sem conversa"><MessageSquare className="h-4 w-4" /></span>}
+                <tr key={row.id} tabIndex={0} onClick={() => setOpenContact(row.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setOpenContact(row.id); } }}
+                  aria-label={`Abrir ficha de ${row.name}`}
+                  className="cursor-pointer border-b border-slate-50 transition-colors last:border-0 hover:bg-[#002187]/[0.03] focus-visible:bg-[#002187]/5 focus-visible:outline-none dark:border-slate-800/60 dark:hover:bg-white/5 dark:focus-visible:bg-white/10">
+                  <td className="px-4 py-3 text-xs font-bold tabular-nums text-slate-400">{(page - 1) * pageSize + index + 1}</td>
+                  <td className="min-w-0 px-3 py-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#051647] text-[10px] font-bold text-white dark:bg-[#C4D600] dark:text-[#051647]">{initials(row.name)}</span>
+                      <div className="min-w-0">
+                        <p className="max-w-[240px] truncate font-semibold text-[#051647] dark:text-white">{row.name}</p>
+                        <p className="max-w-[240px] truncate text-[11px] text-slate-500 dark:text-slate-400">{[row.phone, row.city].filter(Boolean).join(" · ") || "—"}</p>
+                      </div>
                     </div>
                   </td>
+                  <td className="px-3 py-3"><TierBadge tier={row.tier} /></td>
+                  <td className="px-3 py-3"><div className="flex min-w-0 flex-col items-start gap-1"><RfvpBadge code={row.rfvpCode} segment={row.rfvpSegment} /><RfvpSegmentChip segment={row.rfvpSegment} /></div></td>
+                  <td className="px-3 py-3 text-right font-bold tabular-nums text-[#051647] dark:text-white">{row.score.toLocaleString("pt-BR")}</td>
+                  <td className="px-3 py-3 text-right text-xs tabular-nums text-slate-600 dark:text-slate-300">{money(row.totalSpent)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{when(row.lastActivity)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          <span>{data ? `${data.total.toLocaleString("pt-BR")} cliente(s)` : ""}{loading && data ? " · atualizando..." : ""}</span>
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1} aria-label="Página anterior" className="cursor-pointer rounded-lg p-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10"><ChevronLeft className="h-4 w-4" /></button>
-            <span>{page} / {pages}</span>
-            <button type="button" onClick={() => setPage((value) => Math.min(pages, value + 1))} disabled={page >= pages} aria-label="Próxima página" className="cursor-pointer rounded-lg p-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10"><ChevronRight className="h-4 w-4" /></button>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="tabular-nums">{data ? `Mostrando ${from.toLocaleString("pt-BR")}–${to.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")} clientes` : "Carregando..."}</span>
+            <label className="inline-flex items-center gap-1.5">Por página
+              <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} aria-label="Itens por página" className="h-8 cursor-pointer rounded-lg border border-slate-200 bg-white px-1.5 text-xs text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
           </div>
-        </div>
-      </div>
+          <nav className="flex items-center gap-1" aria-label="Paginação">
+            <button type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || loading} className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10"><ChevronLeft className="h-4 w-4" />Anterior</button>
+            {pageList(page, pages).map((item, index) => item === "…" ? (
+              <span key={`gap-${index}`} className="px-1 text-slate-400">…</span>
+            ) : (
+              <button key={item} type="button" onClick={() => setPage(item)} aria-current={item === page ? "page" : undefined} disabled={loading}
+                className={`h-8 min-w-8 cursor-pointer rounded-lg px-2 font-semibold tabular-nums transition-colors ${item === page ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "hover:bg-slate-100 dark:hover:bg-white/10"}`}>{item}</button>
+            ))}
+            <button type="button" onClick={() => setPage((value) => Math.min(pages, value + 1))} disabled={page >= pages || loading} className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10">Próxima<ChevronRight className="h-4 w-4" /></button>
+          </nav>
+        </footer>
+      </section>
 
-      {editingThresholds && data && <ThresholdsDialog current={data.thresholds} onClose={() => setEditingThresholds(false)} onSaved={() => { setEditingThresholds(false); void load(); }} />}
-      {adjusting && <AdjustDialog row={adjusting} onClose={() => setAdjusting(null)} onSaved={() => { setAdjusting(null); void load(); }} />}
+      {settingsOpen && data && status && (
+        <ScoringSettingsDialog rfvp={status.settings} thresholds={data.thresholds} onClose={() => setSettingsOpen(false)}
+          onSaved={(recalc) => { setSettingsOpen(false); void reloadRfvp(); void load(); if (recalc) void recalculate(); }} />
+      )}
       {linksOpen && <LinksDialog onClose={() => setLinksOpen(false)} />}
+      {openContact && <ContactDetailModal contactId={openContact} initialTab="pontuacao" onClose={() => setOpenContact(null)} onChanged={() => void load()} />}
     </div>
   );
 }
 
-/** Faixas dos níveis: pontuação mínima de Prata, Ouro e Diamante (Bronze = abaixo de Prata). */
-function ThresholdsDialog({ current, onClose, onSaved }: { current: TierThresholds; onClose: () => void; onSaved: () => void }) {
-  const toast = useToast();
-  const [values, setValues] = useState<Record<string, string>>({ PRATA: String(current.PRATA), OURO: String(current.OURO), DIAMANTE: String(current.DIAMANTE) });
-  const [saving, setSaving] = useState(false);
-  const problems = thresholdProblems(Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === "" ? NaN : Number(value)])));
-  const save = async () => {
-    setSaving(true);
-    try {
-      const response = await fetch("/api/scoring", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thresholds: Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Number(value)])) }) });
-      const body = (await response.json().catch(() => ({}))) as { error?: string; moved?: number };
-      if (!response.ok) throw new Error(body.error ?? "Não foi possível salvar.");
-      toast.success("Faixas salvas", body.moved ? `${body.moved} cliente(s) mudaram de nível.` : "Nenhum cliente mudou de nível.");
-      onSaved();
-    } catch (error) {
-      toast.error("Faixas dos níveis", error instanceof Error ? error.message : "Tente de novo.");
-    } finally {
-      setSaving(false);
-    }
-  };
+function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <EntityDialog titleId="faixas-niveis" title="Faixas dos níveis" description="Pontuação mínima de cada nível. Ao salvar, todos os clientes são reclassificados na hora." onClose={onClose} size="md">
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">
-          <TierBadge tier="BRONZE" size="md" />
-          <span className="text-xs text-slate-500 dark:text-slate-400">abaixo de Prata</span>
-        </div>
-        {(["PRATA", "OURO", "DIAMANTE"] as const).map((key) => (
-          <label key={key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">
-            <TierBadge tier={key} size="md" />
-            <span className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">a partir de<input type="number" min={0} value={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))} aria-label={`Pontuação mínima ${TIER_META[key].label}`} className={`${INPUT} w-28 text-right`} />pts</span>
-          </label>
-        ))}
-        {problems.length > 0 && <p role="alert" className="text-xs text-red-600">{problems[0]}</p>}
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-9 cursor-pointer rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">Cancelar</button>
-          <button type="button" onClick={() => void save()} disabled={saving || problems.length > 0} className="h-9 cursor-pointer rounded-lg bg-[#C4D600] px-4 text-sm font-semibold text-[#051647] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">{saving ? "Salvando..." : "Salvar faixas"}</button>
-        </div>
-      </div>
-    </EntityDialog>
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-[#002187]/10 py-0.5 pl-2.5 pr-1 text-[11px] font-semibold text-[#002187] dark:bg-white/10 dark:text-[#C4D600]">
+      <span className="truncate">{label}</span>
+      <button type="button" onClick={onRemove} aria-label={`Remover filtro ${label}`} className="grid h-4 w-4 cursor-pointer place-items-center rounded-full hover:bg-[#002187]/15 dark:hover:bg-white/15"><X className="h-3 w-3" /></button>
+    </span>
   );
 }
 
-/** Ajuste manual de pontos (+/−) com motivo: vai para o histórico como ajuste da equipe. */
-function AdjustDialog({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
-  const toast = useToast();
-  const [delta, setDelta] = useState("");
-  const [reason, setReason] = useState("");
-  const [saving, setSaving] = useState(false);
-  const valid = Number.isInteger(Number(delta)) && Number(delta) !== 0 && reason.trim().length > 0;
-  const save = async () => {
-    setSaving(true);
-    try {
-      const response = await fetch(`/api/scoring/${row.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: Number(delta), reason }) });
-      const body = (await response.json().catch(() => ({}))) as { error?: string; change?: { score: number; tier: string } };
-      if (!response.ok || !body.change) throw new Error(body.error ?? "Não foi possível ajustar.");
-      toast.success("Pontos ajustados", `${row.name}: ${body.change.score} pts (${TIER_META[body.change.tier as Tier]?.label ?? body.change.tier})`);
-      onSaved();
-    } catch (error) {
-      toast.error("Ajustar pontos", error instanceof Error ? error.message : "Tente de novo.");
-    } finally {
-      setSaving(false);
-    }
-  };
+/** Popover "Filtros avançados": nota mínima/máxima de R, F, V e P e contatos sem pontos. */
+function AdvancedFilters({ filter, includeAll, count, onChange }: { filter: RfvpFilter; includeAll: boolean; count: number; onChange: (next: RfvpFilter, includeAll: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(filter);
+  const [all, setAll] = useState(includeAll);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => { if (box.current && !box.current.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
+  }, [open]);
+
+  const toggle = () => { if (!open) { setDraft(filter); setAll(includeAll); } setOpen(!open); };
+  const apply = (next = draft, nextAll = all) => { onChange(next, nextAll); setOpen(false); };
+  const select = "h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-1.5 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white";
+
   return (
-    <EntityDialog titleId="ajustar-pontos" title={`Ajustar pontos: ${row.name}`} description={`Saldo atual: ${row.score} pts. Use número negativo para tirar pontos.`} onClose={onClose} size="md">
-      <div className="space-y-3">
-        <label className="block space-y-1">
-          <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Pontos (+ soma, − tira)</span>
-          <input type="number" value={delta} onChange={(event) => setDelta(event.target.value)} placeholder="50 ou -20" className={INPUT} />
-        </label>
-        <label className="block space-y-1">
-          <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Motivo</span>
-          <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Indicou um amigo" maxLength={200} className={INPUT} />
-        </label>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-9 cursor-pointer rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">Cancelar</button>
-          <button type="button" onClick={() => void save()} disabled={!valid || saving} className="h-9 cursor-pointer rounded-lg bg-[#C4D600] px-4 text-sm font-semibold text-[#051647] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">{saving ? "Salvando..." : "Ajustar"}</button>
+    <div ref={box} className="relative">
+      <button type="button" onClick={toggle} aria-expanded={open} aria-haspopup="dialog" className={`inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${count ? "border-[#002187] bg-[#002187]/5 text-[#002187] dark:border-[#C4D600] dark:bg-[#C4D600]/10 dark:text-[#C4D600]" : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"}`}>
+        <Filter className="h-4 w-4" />Filtros avançados{count > 0 && <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#002187] px-1 text-[10px] text-white dark:bg-[#C4D600] dark:text-[#051647]">{count}</span>}
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Filtros avançados" className="absolute right-0 top-11 z-30 w-[min(92vw,340px)] space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-[#07194f]">
+          <div>
+            <p className="text-xs font-bold text-[#051647] dark:text-white">Notas RFV-P</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Nota mínima e máxima de cada pilar (1 a 5).</p>
+          </div>
+          <div className="space-y-2">
+            {PILLARS.map((pillar) => (
+              <div key={pillar.key} className="grid grid-cols-[1fr_72px_72px] items-center gap-2">
+                <span className="min-w-0 truncate text-xs text-slate-700 dark:text-slate-200" title={pillar.hint}><b className="font-mono text-[#002187] dark:text-[#C4D600]">{pillar.letter}</b> {pillar.label}</span>
+                <select value={draft[`${pillar.key}Min`]} onChange={(event) => setDraft({ ...draft, [`${pillar.key}Min`]: event.target.value })} aria-label={`${pillar.label} mínima`} className={select}>
+                  <option value="">mín</option>{[1, 2, 3, 4, 5].map((score) => <option key={score} value={score}>≥ {score}</option>)}
+                </select>
+                <select value={draft[`${pillar.key}Max`]} onChange={(event) => setDraft({ ...draft, [`${pillar.key}Max`]: event.target.value })} aria-label={`${pillar.label} máxima`} className={select}>
+                  <option value="">máx</option>{[1, 2, 3, 4, 5].map((score) => <option key={score} value={score}>≤ {score}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => apply({ ...EMPTY_RFVP_FILTER, vMin: "4", pMax: "2" }, all)} className="w-full cursor-pointer rounded-lg bg-[#F7915E]/15 px-3 py-2 text-left text-[11px] font-semibold text-[#9a3d12] hover:bg-[#F7915E]/25 dark:text-[#F7915E]">
+            Atalho: alto valor com atraso (V ≥ 4 e P ≤ 2)
+          </button>
+          <label className="flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-300">
+            <input type="checkbox" checked={all} onChange={(event) => setAll(event.target.checked)} className="h-4 w-4 cursor-pointer accent-[#002187]" />
+            Incluir contatos sem Lead Score
+          </label>
+          <div className="flex justify-between gap-2">
+            <button type="button" onClick={() => apply(EMPTY_RFVP_FILTER, false)} className="cursor-pointer rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-500 hover:text-red-600">Limpar</button>
+            <button type="button" onClick={() => apply()} className="h-8 cursor-pointer rounded-lg bg-[#051647] px-4 text-xs font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">Aplicar filtros</button>
+          </div>
         </div>
-      </div>
-    </EntityDialog>
+      )}
+    </div>
   );
 }
 
