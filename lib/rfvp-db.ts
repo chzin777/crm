@@ -160,7 +160,12 @@ export const rfvpRunning = () => !!running;
 /** Relógio: uma vez por dia, a partir das 6h (Brasília), numa única réplica. Não bloqueia o relógio. */
 export async function scheduleDailyRfvp(now = new Date()) {
   if (brHour(now) < 6 || running) return false;
-  if (!(await firstDispatch(`rfvp-daily:${brDay(now)}`))) return false;
+  // Já concluiu hoje, ou outra réplica está calculando agora: nada a fazer. Se uma execução foi interrompida
+  // (troca blue/green no meio), tenta de novo na hora seguinte.
+  const { lastRun } = await readStored();
+  if (lastRun?.finishedAt && brDay(new Date(lastRun.finishedAt)) === brDay(now)) return false;
+  if (lastRun && !lastRun.finishedAt && now.getTime() - new Date(lastRun.at).getTime() < 20 * 60_000) return false;
+  if (!(await firstDispatch(`rfvp-daily:${brDay(now)}:${brHour(now)}`))) return false;
   void runRfvp("agendado");
   return true;
 }
