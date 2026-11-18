@@ -1,6 +1,8 @@
 "use client";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   addEdge,
   Background,
@@ -564,6 +566,8 @@ function Editor({ flowId }: { flowId: string }) {
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<"editor" | "execucoes">("editor");
   const [testing, setTesting] = useState(false);
+  const router = useRouter();
+  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
   // Desfazer/refazer: fotos do canvas antes de cada mudança (edições seguidas no mesmo campo viram uma só).
   const latest = useRef<Snapshot>({ nodes: [], edges: [] });
@@ -707,6 +711,13 @@ function Editor({ flowId }: { flowId: string }) {
     }
   };
 
+  // Voltar / fechar o editor: volta para a lista na mesma guia "Automações"; com alterações não salvas, confirma antes.
+  const exitEditor = () => (dirty ? setLeaving(true) : router.push("/automacoes"));
+  const closePanel = () => {
+    setSelectedId(null);
+    setNodes((current) => current.map((node) => (node.selected ? { ...node, selected: false } : node)));
+  };
+
   if (error) return <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/15 dark:text-red-300">{error} <Link href="/automacoes" className="font-semibold underline">Voltar</Link></p>;
   if (!flow) return <p className="flex items-center gap-2 py-10 text-xs text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Carregando automação...</p>;
   const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/automations/webhook/${flow.id}?token=${flow.webhookToken}` : "";
@@ -719,8 +730,8 @@ function Editor({ flowId }: { flowId: string }) {
   return (
     <div className="flex h-[calc(100dvh-7rem)] min-h-[560px] flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Link href="/automacoes" title="Voltar" aria-label="Voltar para automações" className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><ArrowLeft className="h-4 w-4" /></Link>
-        <Workflow className="h-5 w-5 text-[#002187] dark:text-[#C4D600]" />
+        <button type="button" onClick={exitEditor} title="Voltar para a lista de automações" aria-label="Voltar para automações" className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"><ArrowLeft className="h-4 w-4" /><span className="hidden sm:inline">Automações</span></button>
+        <Workflow className="h-5 w-5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
         <input value={name} onChange={(event) => setName(event.target.value)} aria-label="Nome da automação" className="h-9 min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 text-lg font-bold text-[#051647] outline-none hover:border-slate-200 focus:border-[#002187] sm:max-w-md dark:text-white dark:hover:border-slate-700" maxLength={120} />
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${flow.status === "active" ? "bg-[#C4D600]/25 text-[#051647] dark:text-[#C4D600]" : flow.status === "paused" ? "bg-[#F7915E]/15 text-[#9a4a1c] dark:text-[#F7915E]" : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400"}`}>{STATUS_LABEL[flow.status]}</span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -733,6 +744,7 @@ function Editor({ flowId }: { flowId: string }) {
           ) : (
             <button type="button" disabled={saving} onClick={() => void save("active")} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-bold text-[#051647] hover:brightness-105 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}Salvar e ativar</button>
           )}
+          <button type="button" onClick={exitEditor} title="Fechar editor" aria-label="Fechar editor e voltar para automações" className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-5 w-5" /></button>
         </div>
       </div>
 
@@ -790,7 +802,7 @@ function Editor({ flowId }: { flowId: string }) {
                 <div className={`flex items-center gap-2 px-3 py-2 text-xs font-bold ${HEADER[NODE_DEF[selected.data.kind].category]}`}>
                   {(() => { const Icon = ICONS[selected.data.kind]; return <Icon className="h-4 w-4" />; })()}
                   <span className="min-w-0 flex-1 truncate">{NODE_DEF[selected.data.kind].label}</span>
-                  <button type="button" onClick={() => setSelectedId(null)} aria-label="Fechar painel" className="grid h-6 w-6 cursor-pointer place-items-center rounded hover:bg-white/20"><X className="h-4 w-4" /></button>
+                  <button type="button" onClick={closePanel} aria-label="Fechar painel do passo" title="Fechar painel" className="grid h-6 w-6 cursor-pointer place-items-center rounded hover:bg-white/20"><X className="h-4 w-4" /></button>
                 </div>
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">{NODE_DEF[selected.data.kind].description}</p>
@@ -820,6 +832,7 @@ function Editor({ flowId }: { flowId: string }) {
         )}
       </div>
       {testing && <TestDialog flowId={flow.id} graph={graph} triggers={triggers} onClose={() => setTesting(false)} />}
+      {leaving && <ConfirmDialog variant="destructive" title="Sair sem salvar?" description="Há alterações no fluxo que ainda não foram salvas. Se sair agora, elas serão descartadas." confirmLabel="Descartar e sair" cancelLabel="Continuar editando" onClose={() => setLeaving(false)} onConfirm={() => { setLeaving(false); router.push("/automacoes"); }} />}
     </div>
   );
 }
