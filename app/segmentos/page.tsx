@@ -718,7 +718,7 @@ export default function SegmentosPage() {
     const format = (value: number) => value.toLocaleString("pt-BR");
     toast.success(
       "Planilha importada",
-      `${format(summary.added)} contatos novos adicionados ao segmento | ${format(summary.alreadyIn)} já estavam na lista (duplicados ignorados) | ${format(result.notFound)} não encontrados na base do CRM | Total acumulado: ${format(summary.total)} contatos.`,
+      `${format(summary.added)} contatos novos adicionados ao segmento | ${format(summary.alreadyIn)} já estavam na lista (duplicados ignorados) | ${format(result.created ?? 0)} cadastrados agora no CRM${result.notFound > 0 ? ` | ${format(result.notFound)} não puderam ser cadastrados` : ""} | Total acumulado: ${format(summary.total)} contatos.`,
     );
     return summary;
   };

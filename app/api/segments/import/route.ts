@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { parseSpreadsheet } from "@/lib/spreadsheet";
+import { invalidateCache } from "@/lib/cache";
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_ROWS = 50_000;
@@ -33,7 +34,18 @@ function phoneKeys(ddd: string | undefined, phone: string | undefined) {
   return keys;
 }
 
-type Columns = { document: number; ddd: number; phone: number; name: number };
+/** Data da planilha ("23/07/2025", "2025-07-23" ou serial do Excel) em "AAAA-MM-DD"; null se não reconhecer. */
+function isoDay(value: string | undefined) {
+  const text = (value ?? "").trim();
+  const br = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(text);
+  if (br) return `${br[3]}-${br[2].padStart(2, "0")}-${br[1].padStart(2, "0")}`;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  if (iso) return iso[0];
+  if (/^\d{5}(\.\d+)?$/.test(text)) return new Date(Date.UTC(1899, 11, 30) + Math.floor(Number(text)) * 86_400_000).toISOString().slice(0, 10);
+  return null;
+}
+
+type Columns = { document: number; ddd: number; phone: number; name: number; store: number; lastPurchase: number };
 
 function detectColumns(header: string[]): Columns {
   const keys = header.map(normalizeHeader);
@@ -49,13 +61,16 @@ function detectColumns(header: string[]): Columns {
     document: find((key) => key.includes("cpf") || key.includes("cnpj") || key === "documento"),
     ddd: dddCandidates.find((index) => keys[index].includes("celular")) ?? dddCandidates[0] ?? -1,
     phone,
-    name: find((key) => key === "nome" || key === "nomecliente" || key === "cliente"),
+    name: find((key) => key === "nome" || key === "nomecliente" || key === "cliente" || key === "nomecompleto"),
+    store: find((key) => key === "loja" || key === "ultimaloja" || key === "codloja" || key === "unidade"),
+    lastPurchase: find((key) => key.startsWith("ultimacompra") || key.startsWith("dataultimacompra")),
   };
 }
 
 /**
- * Cruza uma planilha (.xlsx/.csv) com os contatos que JÁ existem no CRM, por CPF/CNPJ e, na falta, telefone.
- * Não cria nem altera contatos: só devolve os ids encontrados para vincular ao segmento.
+ * Cruza uma planilha (.xlsx/.csv) com os contatos do CRM, por CPF/CNPJ e, na falta, telefone.
+ * Quem não existe na base é cadastrado na hora (nome, CPF, celular, loja e última compra) e entra no segmento.
+ * Contatos já existentes não são alterados.
  */
 export async function POST(request: Request) {
   const user = await requireApiSession();
@@ -85,9 +100,13 @@ export async function POST(request: Request) {
   const columns = detectColumns(rows[headerIndex]);
   const dataRows = rows.slice(headerIndex + 1, headerIndex + 1 + MAX_ROWS);
 
+  const cell = (row: string[], index: number) => (index >= 0 ? (row[index] ?? "").toString().trim() : "");
   const parsed = dataRows.map((row) => ({
     document: columns.document >= 0 ? documentKey(row[columns.document]) : null,
     phones: columns.phone >= 0 ? phoneKeys(columns.ddd >= 0 ? row[columns.ddd] : undefined, row[columns.phone]) : [],
+    name: cell(row, columns.name).replace(/\s+/g, " "),
+    store: cell(row, columns.store).replace(/^0+(?=\d)/, "") || null,
+    lastPurchase: isoDay(cell(row, columns.lastPurchase)),
   }));
   const documents = [...new Set(parsed.flatMap((row) => (row.document ? [row.document] : [])))];
   const phones = [...new Set(parsed.flatMap((row) => row.phones))];
@@ -113,18 +132,59 @@ export async function POST(request: Request) {
   const contactIds = new Set<string>();
   let matchedByDocument = 0;
   let matchedByPhone = 0;
-  let notFound = 0;
   let withoutKey = 0;
+  // Linhas sem cadastro, uma por cliente: chave "cpf:<cpf>" (mesma do ERP, para a sincronização reaproveitar) ou "planilha:<celular>".
+  const missing = new Map<string, (typeof parsed)[number]>();
+  const missingRows: string[] = [];
   for (const row of parsed) {
     if (!row.document && row.phones.length === 0) { withoutKey++; continue; }
     const documentId = row.document ? byDocument.get(row.document) : undefined;
     const phoneId = documentId ? undefined : row.phones.map((phone) => byPhone.get(phone)).find(Boolean);
     const id = documentId ?? phoneId;
-    if (!id) { notFound++; continue; }
+    if (!id) {
+      const key = row.document ? `cpf:${row.document}` : `planilha:${row.phones[0]}`;
+      if (!missing.has(key)) missing.set(key, row);
+      missingRows.push(key);
+      continue;
+    }
     if (documentId) matchedByDocument++;
     else matchedByPhone++;
     contactIds.add(id);
   }
+
+  // Cadastra quem não existe; skipDuplicates evita erro se o ERP criou o mesmo cliente nesse meio-tempo.
+  const newKeys = [...missing.keys()];
+  let created = 0;
+  for (let start = 0; start < newKeys.length; start += 2000) {
+    const chunk = newKeys.slice(start, start + 2000);
+    const result = await prisma.contact.createMany({
+      data: chunk.map((sourceKey) => {
+        const row = missing.get(sourceKey)!;
+        return {
+          sourceKey,
+          name: row.name || (row.phones[0] ? `Cliente ${row.phones[0]}` : "Cliente da planilha"),
+          cpf: row.document,
+          phone: row.phones[0] ?? null,
+          store: row.store,
+          lastPurchaseDate: row.lastPurchase,
+        };
+      }),
+      skipDuplicates: true,
+    });
+    created += result.count;
+  }
+  const createdIds = new Map<string, string>();
+  for (let start = 0; start < newKeys.length; start += 5000) {
+    const rowsFound = await prisma.contact.findMany({ where: { sourceKey: { in: newKeys.slice(start, start + 5000) } }, select: { id: true, sourceKey: true } });
+    for (const row of rowsFound) createdIds.set(row.sourceKey, row.id);
+  }
+  let notFound = 0;
+  for (const key of missingRows) {
+    const id = createdIds.get(key);
+    if (id) contactIds.add(id);
+    else notFound++;
+  }
+  if (created > 0) await invalidateCache("dashboard", "audience:store:");
 
   return NextResponse.json({
     fileName: file.name,
@@ -133,6 +193,7 @@ export async function POST(request: Request) {
     linked: contactIds.size,
     matchedByDocument,
     matchedByPhone,
+    created,
     notFound,
     withoutKey,
     columns: {

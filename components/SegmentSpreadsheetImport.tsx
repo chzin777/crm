@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CheckCircle2, Copy, FileSpreadsheet, Loader2, Users, UserX } from "lucide-react";
+import { CheckCircle2, Copy, FileSpreadsheet, Loader2, UserPlus, Users, UserX } from "lucide-react";
 
 export type SpreadsheetImportResult = {
   fileName: string;
@@ -10,6 +10,8 @@ export type SpreadsheetImportResult = {
   linked: number;
   matchedByDocument: number;
   matchedByPhone: number;
+  /** Contatos que não existiam na base e foram cadastrados pela importação. */
+  created?: number;
   notFound: number;
   withoutKey: number;
 };
@@ -22,7 +24,7 @@ export const segmentNameFromFile = (fileName: string) => fileName.replace(/\.[^.
 
 /**
  * Importa contatos por planilha (.xlsx/.csv): cruza CPF/CNPJ e telefone com a base do CRM.
- * Só vincula quem já existe; quem não está na base é ignorado e contado no resumo.
+ * Quem não está na base é cadastrado na hora e também entra no segmento.
  */
 export function SegmentSpreadsheetImport({ onImported }: { onImported: (result: SpreadsheetImportResult) => SpreadsheetMergeSummary }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,7 +72,7 @@ export function SegmentSpreadsheetImport({ onImported }: { onImported: (result: 
         </span>
         <span className="min-w-0">
           <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">{loading ? "Cruzando planilha com a base..." : "Importar por planilha (.xlsx ou .csv)"}</span>
-          <span className="block text-[10px] text-slate-500 dark:text-slate-400">Vincula só contatos que já existem no CRM, por CPF/CNPJ ou telefone celular.</span>
+          <span className="block text-[10px] text-slate-500 dark:text-slate-400">Cruza por CPF/CNPJ ou celular; quem não existe no CRM é cadastrado e incluído.</span>
         </span>
       </button>
       {error && <p role="alert" className="text-[11px] font-medium text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
@@ -89,10 +91,18 @@ export function SegmentSpreadsheetImport({ onImported }: { onImported: (result: 
                   <span><b className="text-slate-900 dark:text-white">{item.alreadyIn.toLocaleString("pt-BR")}</b> já estavam na lista (duplicados ignorados)</span>
                 </p>
               )}
-              <p className="flex items-center gap-1.5">
-                <UserX className="h-3.5 w-3.5 shrink-0 text-[#F7915E]" />
-                <span><b className="text-slate-900 dark:text-white">{item.notFound.toLocaleString("pt-BR")}</b> contatos da planilha não foram encontrados na base do CRM</span>
-              </p>
+              {(item.created ?? 0) > 0 && (
+                <p className="flex items-center gap-1.5">
+                  <UserPlus className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+                  <span><b className="text-slate-900 dark:text-white">{(item.created ?? 0).toLocaleString("pt-BR")}</b> contatos novos cadastrados no CRM a partir da planilha</span>
+                </p>
+              )}
+              {item.notFound > 0 && (
+                <p className="flex items-center gap-1.5">
+                  <UserX className="h-3.5 w-3.5 shrink-0 text-[#F7915E]" />
+                  <span><b className="text-slate-900 dark:text-white">{item.notFound.toLocaleString("pt-BR")}</b> linhas não puderam ser cadastradas</span>
+                </p>
+              )}
               <p className="text-[10px] text-slate-400">
                 {item.rows.toLocaleString("pt-BR")} linhas lidas · {item.matchedByDocument.toLocaleString("pt-BR")} por CPF/CNPJ · {item.matchedByPhone.toLocaleString("pt-BR")} por telefone
                 {item.withoutKey > 0 ? ` · ${item.withoutKey.toLocaleString("pt-BR")} sem CPF nem telefone` : ""}
