@@ -57,5 +57,7 @@ describe("criação de automação com IA", () => {
     expect(prompt).toContain("q-vendas (Vendas)");
     expect(prompt).toContain("send_whatsapp");
     expect(prompt).toContain("fechamento (Fechamento)");
+    expect(prompt).toContain("trigger_erp_after_sale (amount 5, unit minutes");
+    expect(JSON.stringify(AUTOMATION_DRAFT_SCHEMA)).toContain("trigger_erp_overdue");
   });
 });

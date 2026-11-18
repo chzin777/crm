@@ -9,6 +9,8 @@ GET /stock?codes=146011,145644  (cabeçalho x-api-key)  ->  {"items": [{"code", 
   - unidades virtuais (100-199, 1000-2999) ficam de fora; o filtro de varejo (ADM, CD, fábrica) é feito no CRM.
 GET /installments?cpf=12345678901  (cabeçalho x-api-key)  ->  {"found", "name", "items": [{"numero", "parcela", "vencimento", "valor", "posicao", "pagamento", "valorPago", "tipo", "loja"}]}
   - títulos a receber (carnê/boleto) do CPF, últimos 3 anos, sem cancelados;
+GET /events?kind=overdue|due|paid|good_payer|lab_ready&date=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"items": [...]}
+  - eventos do dia para os gatilhos de /automacoes (parcela vencida/a vencer, baixa, bom pagador, OS pronta no laboratório);
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -137,6 +139,74 @@ def installments(cpf):
         return {"found": bool(name), "name": (name or "").strip() or None, "items": items}
 
 
+# Eventos do ERP para os gatilhos de /automacoes (só leitura). Cada linha: cliente (CPF, nome, celular) + dados do evento.
+TITLE_BASE = """
+FROM TITULO T
+JOIN FATURA F ON F.FATURA_ID = T.FATURA_ID AND F.FTRA_TIPO = 'Recebimento'
+JOIN PARCEIRO P ON P.PARCEIRO_ID = T.PARCEIRO_ID
+LEFT JOIN PARCEIRO LJ ON LJ.PARCEIRO_ID = T.UNIDADE_MANTENEDORA_ID
+WHERE T.STATUS LIKE 'Ativo%'
+"""
+TITLE_COLS = """SELECT T.TITULO_ID, P.PRCR_CGC_CPF, P.PRCR_NOME, P.PRCR_CELULAR, P.PRCR_FONE, T.TITL_NUMERO, T.TITL_PARCELA,
+       T.TITL_DT_VENCTO, T.TITL_VALOR, T.TITL_DT_PAGTO, T.TITL_VLR_PAGTO, LJ.PRCR_NOME, T.FATURA_ID"""
+OPEN = "T.TITL_POSICAO IN ('Aberto', 'Recebendo')"
+OVERDUE_ELSEWHERE = """NOT EXISTS (
+  SELECT 1 FROM TITULO T3 JOIN FATURA F3 ON F3.FATURA_ID = T3.FATURA_ID AND F3.FTRA_TIPO = 'Recebimento'
+  WHERE T3.PARCEIRO_ID = T.PARCEIRO_ID AND T3.STATUS LIKE 'Ativo%' AND T3.TITL_POSICAO IN ('Aberto', 'Recebendo')
+    AND T3.TITL_DT_VENCTO < TRUNC(SYSDATE))"""
+REMAINING = """(SELECT COUNT(*) FROM TITULO T2 WHERE T2.FATURA_ID = T.FATURA_ID AND T2.STATUS LIKE 'Ativo%'
+  AND T2.TITL_POSICAO IN ('Aberto', 'Recebendo'))"""
+EVENT_SQL = {
+    # Parcela vencida no dia :d e ainda em aberto (inadimplente há N dias/meses).
+    "overdue": f"{TITLE_COLS}, 0 {TITLE_BASE} AND {OPEN} AND T.TITL_DT_VENCTO >= :d AND T.TITL_DT_VENCTO < :d + 1",
+    # Parcela que vence no dia :d (lembrete preventivo).
+    "due": f"{TITLE_COLS}, 0 {TITLE_BASE} AND {OPEN} AND T.TITL_DT_VENCTO >= :d AND T.TITL_DT_VENCTO < :d + 1",
+    # Baixa/quitação no dia :d; a última coluna diz quantas parcelas da mesma fatura (carnê) seguem em aberto.
+    "paid": f"{TITLE_COLS}, {REMAINING} {TITLE_BASE} AND T.TITL_POSICAO = 'Quitado' AND T.TITL_DT_PAGTO >= :d AND T.TITL_DT_PAGTO < :d + 1",
+    # Pagou em dia no dia :d e hoje não tem nenhuma parcela vencida em aberto (adimplente há N).
+    "good_payer": f"{TITLE_COLS}, 0 {TITLE_BASE} AND T.TITL_POSICAO = 'Quitado' AND T.TITL_DT_PAGTO >= :d AND T.TITL_DT_PAGTO < :d + 1 AND T.TITL_DT_PAGTO <= T.TITL_DT_VENCTO AND {OVERDUE_ELSEWHERE}",
+}
+LAB_SQL = """
+SELECT PS.PEDIDO_SAIDA_ID, P.PRCR_CGC_CPF, P.PRCR_NOME, P.PRCR_CELULAR, P.PRCR_FONE, MAX(PL.PRLA_NR_PROTOCOLO),
+       MAX(PL.PRLA_DT_TERMINO), MAX(LJ.PRCR_NOME)
+FROM PRODUCAO_LABORATORIO PL
+JOIN INFO_OTICA_ITEM_PEDSAI IO ON IO.INFO_OTICA_ITEM_PEDSAI_ID = PL.INFO_OTICA_ITEM_PEDSAI_ID
+JOIN PEDIDO_SAIDA PS ON PS.PEDIDO_SAIDA_ID = IO.PEDIDO_SAIDA_ID
+JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
+LEFT JOIN PARCEIRO LJ ON LJ.PARCEIRO_ID = PL.UNIDADE_EMPRESARIAL_ID
+WHERE PL.PRLA_SITUACAO = 'Produzido' AND PL.PRLA_DT_TERMINO >= :d AND PL.PRLA_DT_ENTREGA_CLIE IS NULL
+  AND NVL(PL.STATUS, 'Ativo') LIKE 'Ativo%'
+GROUP BY PS.PEDIDO_SAIDA_ID, P.PRCR_CGC_CPF, P.PRCR_NOME, P.PRCR_CELULAR, P.PRCR_FONE
+"""
+EVENT_KINDS = set(EVENT_SQL) | {"lab_ready"}
+MAX_EVENTS = 2000
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def money(value):
+    return round(float(value), 2) if value is not None else None
+
+
+def events(kind, date):
+    import datetime as dt
+    day_value = dt.datetime.strptime(date, "%Y-%m-%d")
+    with pool.acquire() as conn:
+        conn.call_timeout = 30000
+        cur = conn.cursor()
+        if kind == "lab_ready":
+            cur.execute(LAB_SQL, d=day_value)
+            return [{
+                "id": str(order), "cpf": re.sub(r"\D", "", cpf or ""), "name": (name or "").strip(), "phone": (cel or fone or "").strip(),
+                "protocol": str(protocol or ""), "date": day(done), "store": (store or "").strip(),
+            } for order, cpf, name, cel, fone, protocol, done, store in cur.fetchmany(MAX_EVENTS)]
+        cur.execute(EVENT_SQL[kind], d=day_value)
+        return [{
+            "id": str(title_id), "cpf": re.sub(r"\D", "", cpf or ""), "name": (name or "").strip(), "phone": (cel or fone or "").strip(),
+            "number": str(number or ""), "installment": str(installment or ""), "due": day(due), "amount": money(amount),
+            "paidAt": day(paid_at), "paid": money(paid), "store": (store or "").strip(), "invoice": str(invoice or ""), "remaining": int(remaining or 0),
+        } for title_id, cpf, name, cel, fone, number, installment, due, amount, paid_at, paid, store, invoice, remaining in cur.fetchmany(MAX_EVENTS)]
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -150,10 +220,24 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path not in ("/stock", "/installments"):
+        if url.path not in ("/stock", "/installments", "/events"):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
+        if url.path == "/events":
+            query = parse_qs(url.query)
+            kind = (query.get("kind", [""])[0]).strip()
+            date = (query.get("date", [""])[0]).strip()
+            if kind not in EVENT_KINDS or not DATE.match(date):
+                return self._send(400, {"error": "informe kind e date (YYYY-MM-DD)"})
+            started = time.monotonic()
+            try:
+                items = events(kind, date)
+            except Exception as error:
+                log(f"ERRO eventos {kind} {date}: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+            log(f"eventos {kind} {date}: {len(items)} em {time.monotonic() - started:.2f}s")
+            return self._send(200, {"items": items})
         if url.path == "/installments":
             cpf = re.sub(r"\D", "", (parse_qs(url.query).get("cpf", [""])[0]))
             if not CPF.match(cpf):

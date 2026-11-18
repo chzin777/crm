@@ -25,12 +25,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Bell, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
-  CONDITION_FIELDS, describeCondition, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
+  CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
   type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
 } from "@/lib/automations/nodes";
 
@@ -45,10 +45,15 @@ type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
+  trigger_erp_sale: ShoppingBag, trigger_erp_after_sale: CalendarClock, trigger_erp_return: Undo2, trigger_erp_overdue: AlertTriangle, trigger_erp_due_soon: CalendarClock,
+  trigger_erp_paid: BadgeCheck, trigger_erp_good_payer: Award, trigger_erp_birthday: Cake, trigger_erp_no_purchase: UserX, trigger_erp_lab_ready: Glasses,
   send_whatsapp: MessageSquare, delay: Timer, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, add_note: StickyNote, opt_out: ShieldOff, condition: GitBranch, http: Globe,
 };
 const HEADER: Record<NodeCategory, string> = {
-  gatilho: "bg-[#C4D600] text-[#051647]",
+  gatilho_crm: "bg-[#C4D600] text-[#051647]",
+  gatilho_whatsapp: "bg-[#C4D600] text-[#051647]",
+  erp_vendas: "bg-[#F7915E] text-[#051647]",
+  erp_financeiro: "bg-[#F7915E] text-[#051647]",
   mensagem: "bg-[#002187] text-white",
   ia: "bg-[#002187] text-[#C4D600]",
   crm: "bg-[#051647] text-white",
@@ -87,6 +92,22 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_inactive": { const { amount, unit } = readDuration(config, "days"); return `${durationLabel(amount, unit)} sem contato${config.businessHours ? " · horário comercial" : ""}`; }
     case "trigger_webhook": return "POST na URL do fluxo";
     case "trigger_ai_handoff": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "Qualquer fila";
+    case "trigger_erp_sale": case "trigger_erp_return": case "trigger_erp_after_sale": {
+      const parts = [
+        kind === "trigger_erp_after_sale" ? `${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "days")} após a venda` : kind === "trigger_erp_return" ? "Devolução no VMSet" : "Venda no VMSet",
+        config.customerType === "first" ? "primeira compra" : config.customerType === "repeat" ? "recompra" : "",
+        Number(config.minAmount) > 0 ? `a partir de R$ ${Number(config.minAmount).toLocaleString("pt-BR")}` : "",
+        String(config.store || ""), String(config.category || ""),
+      ];
+      return parts.filter(Boolean).join(" · ");
+    }
+    case "trigger_erp_overdue": return `Parcela vencida há ${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "days")}${Number(config.minAmount) > 0 ? ` · a partir de R$ ${Number(config.minAmount).toLocaleString("pt-BR")}` : ""}`;
+    case "trigger_erp_due_soon": return Number(config.amount) > 0 ? `${Number(config.amount)} dia(s) antes do vencimento` : "No dia do vencimento";
+    case "trigger_erp_paid": return config.mode === "settled" ? "Quitou o carnê / crediário" : "Qualquer parcela paga";
+    case "trigger_erp_good_payer": return `Em dia há ${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "months")}`;
+    case "trigger_erp_birthday": return Number(config.amount) > 0 ? `${Number(config.amount)} dia(s) antes do aniversário` : "No dia do aniversário";
+    case "trigger_erp_no_purchase": return `Sem comprar há ${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "months")}`;
+    case "trigger_erp_lab_ready": return String(config.store || "Todas as lojas");
     case "send_whatsapp": return String(config.text || "(mensagem vazia)");
     case "delay": { const { amount, unit } = readDuration(config, "hours"); return `${durationLabel(amount, unit)}${config.businessHours ? " · horário comercial" : ""}`; }
     case "ai_agent": return String(config.objective || "Atendimento pela IA");
@@ -237,6 +258,35 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
     );
   }
   return <label className="block space-y-1">{label}<input type={field.kind === "number" ? "number" : "text"} min={field.kind === "number" ? 0 : undefined} value={String(value ?? "")} placeholder={"placeholder" in field ? field.placeholder : undefined} onChange={(event) => onChange(field.kind === "number" ? Number(event.target.value) : event.target.value)} className={input} />{hint}</label>;
+}
+
+/** Campo de texto que recebe a variável clicada, por tipo de nó. */
+const VAR_TARGET: Partial<Record<NodeType, string>> = { send_whatsapp: "text", add_note: "text", notify: "message", ai_agent: "objective" };
+
+/** Variáveis disponíveis para os passos: as do contato + as que os gatilhos do fluxo entregam (VMSet, mensagem, IA). */
+function VariablesPicker({ triggers, onPick }: { triggers: NodeType[]; onPick: (variable: string) => void }) {
+  const groups: { label: string; vars: string[] }[] = [{ label: "Contato", vars: ["nome", "nome_completo", "cidade", "telefone"] }];
+  for (const kind of [...new Set(triggers)]) {
+    if (kind === "trigger_message") groups.push({ label: NODE_DEF[kind].label, vars: ["mensagem.texto"] });
+    else if (kind === "trigger_ai_handoff") groups.push({ label: NODE_DEF[kind].label, vars: ["fila", "motivo"] });
+    else if (isErpTrigger(kind)) groups.push({ label: `VMSet · ${NODE_DEF[kind].label}`, vars: ERP_TRIGGER_VARIABLES[kind] });
+  }
+  return (
+    <div className="space-y-1.5 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
+      <p className="text-[11px] font-bold text-[#051647] dark:text-white">Variáveis disponíveis</p>
+      <p className="text-[10px] text-slate-500 dark:text-slate-400">Clique para inserir no texto. Variável sem valor no evento fica vazia.</p>
+      {groups.map((group) => (
+        <div key={group.label} className="space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group.label}</p>
+          <div className="flex flex-wrap gap-1">
+            {group.vars.map((variable) => (
+              <button key={variable} type="button" onClick={() => onPick(variable)} className="cursor-pointer rounded bg-[#002187]/10 px-1.5 py-0.5 font-mono text-[10px] text-[#002187] hover:bg-[#002187]/20 dark:bg-white/10 dark:text-[#C4D600] dark:hover:bg-white/20">{`{{${variable}}}`}</button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** Painel da Condição: Campo/variável → Operador → Valor, com a frase final e os dois caminhos explicados. */
@@ -821,6 +871,9 @@ function Editor({ flowId }: { flowId: string }) {
                   ) : selectedFields.map((field) => (
                     <Field key={field.key} field={field} value={selected.data.config[field.key]} options={options} onChange={(value) => updateConfig(field.key, value)} />
                   ))}
+                  {VAR_TARGET[selected.data.kind] && (
+                    <VariablesPicker triggers={triggers.map((node) => node.data.kind)} onPick={(variable) => { const key = VAR_TARGET[selected.data.kind]!; const current = String(selected.data.config[key] ?? ""); updateConfig(key, `${current}${current && !current.endsWith(" ") ? " " : ""}{{${variable}}}`); }} />
+                  )}
                   <FiltersEditor key={selected.id} kind={selected.data.kind} filters={readFilters(selected.data.config)} options={options} onChange={(filters) => updateConfig("filters", filters)} />
                 </div>
                 <div className="border-t border-slate-200/70 p-3 dark:border-slate-800">

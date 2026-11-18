@@ -16,6 +16,7 @@ import { planQueuePositions } from "@/lib/chat/queue-rules";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/engine-db";
+import { checkErpTriggers } from "@/lib/automations/erp-sync";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -44,7 +45,7 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 }
 
 export async function runClock() {
-  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, scheduledSent: 0, scheduledFailed: 0, followUpsDue: 0, automationsResumed: 0, automationsInactive: 0, errors: [] as string[] };
+  const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, scheduledSent: 0, scheduledFailed: 0, followUpsDue: 0, automationsResumed: 0, automationsInactive: 0, automationsErp: 0, errors: [] as string[] };
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -227,6 +228,11 @@ export async function runClock() {
   await block("automações", async () => {
     summary.automationsResumed = await resumeDueExecutions(new Date(now));
     summary.automationsInactive = await checkInactiveTriggers(new Date(now));
+  });
+
+  // Gatilhos do ERP VMSet (vendas, financeiro, OS, aniversário, sem comprar): deduplicados por fluxo + nó + evento.
+  await block("automações ERP", async () => {
+    summary.automationsErp = await checkErpTriggers(new Date(now));
   });
 
   return summary;

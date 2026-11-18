@@ -2,14 +2,25 @@
  * Catálogo dos nós do construtor de automações (/automacoes). Puro: usado pela tela, pelo motor e pelos testes.
  */
 
-export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff"] as const;
+/** Gatilhos do ERP VMSet: vendas (espelho do ERP, ~1 min), financeiro e laboratório (consulta ao Oracle) e ciclo de vida. */
+export const ERP_TRIGGER_TYPES = [
+  "trigger_erp_sale", "trigger_erp_after_sale", "trigger_erp_return",
+  "trigger_erp_overdue", "trigger_erp_good_payer", "trigger_erp_due_soon", "trigger_erp_paid",
+  "trigger_erp_birthday", "trigger_erp_no_purchase", "trigger_erp_lab_ready",
+] as const;
+export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff", ...ERP_TRIGGER_TYPES] as const;
+export type ErpTriggerType = (typeof ERP_TRIGGER_TYPES)[number];
+export const isErpTrigger = (type: string): type is ErpTriggerType => (ERP_TRIGGER_TYPES as readonly string[]).includes(type);
 export const ACTION_TYPES = ["send_whatsapp", "delay", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "add_note", "opt_out", "condition", "http"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export type NodeType = TriggerType | (typeof ACTION_TYPES)[number];
-export type NodeCategory = "gatilho" | "mensagem" | "ia" | "crm" | "logica";
+export type NodeCategory = "gatilho_crm" | "gatilho_whatsapp" | "erp_vendas" | "erp_financeiro" | "mensagem" | "ia" | "crm" | "logica";
 
 export const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
-  { id: "gatilho", label: "Gatilhos" },
+  { id: "gatilho_crm", label: "Gatilhos · CRM & Pipeline" },
+  { id: "gatilho_whatsapp", label: "Gatilhos · WhatsApp & Atendimento" },
+  { id: "erp_vendas", label: "Gatilhos · ERP VMSet — Vendas" },
+  { id: "erp_financeiro", label: "Gatilhos · ERP VMSet — Financeiro & Ciclo de Vida" },
   { id: "mensagem", label: "Mensagens & Tempo" },
   { id: "ia", label: "Inteligência Artificial" },
   { id: "crm", label: "CRM & Funil" },
@@ -248,13 +259,54 @@ const DURATION_FIELDS = (amountLabel: string): FieldDef[] => [
   { key: "unit", label: "Unidade", kind: "select", options: TIME_UNIT_OPTIONS },
 ];
 
+const DAY_UNIT_OPTIONS = TIME_UNIT_OPTIONS.filter((item) => item.value === "days" || item.value === "months" || item.value === "years");
+const DAY_DURATION_FIELDS = (amountLabel: string): FieldDef[] => [
+  { key: "amount", label: amountLabel, kind: "number" },
+  { key: "unit", label: "Unidade", kind: "select", options: DAY_UNIT_OPTIONS },
+];
+const SALE_FILTER_FIELDS: FieldDef[] = [
+  { key: "customerType", label: "Tipo de cliente", kind: "select", options: [{ value: "any", label: "Qualquer cliente" }, { value: "first", label: "Primeira compra" }, { value: "repeat", label: "Recompra (cliente recorrente)" }] },
+  { key: "minAmount", label: "Valor mínimo da venda (R$)", kind: "number", hint: "0 = qualquer valor." },
+  { key: "store", label: "Loja / filial (contém)", kind: "text", placeholder: "vazio = todas" },
+  { key: "category", label: "Categoria ou produto (contém)", kind: "text", placeholder: "lente, armação, solar..." },
+];
+const SALE_DEFAULTS = { customerType: "any", minAmount: 0, store: "", category: "" };
+const SALE_VARS = "Variáveis: {{venda.numero}}, {{venda.valor}}, {{venda.loja}}, {{venda.data}}, {{venda.itens}}, {{venda.vendedor}}, {{venda.tipo_cliente}}.";
+const FIN_VARS = "Variáveis: {{financeiro.titulo}}, {{financeiro.parcela}}, {{financeiro.vencimento}}, {{financeiro.valor_aberto}}, {{financeiro.dias_atraso}}, {{financeiro.loja}}.";
+
+/** Rótulos dos gatilhos do ERP com as variáveis que cada um entrega (painel e prompt da IA). */
+export const ERP_TRIGGER_VARIABLES: Record<ErpTriggerType, string[]> = {
+  trigger_erp_sale: ["venda.numero", "venda.valor", "venda.loja", "venda.data", "venda.itens", "venda.vendedor", "venda.tipo_cliente"],
+  trigger_erp_after_sale: ["venda.numero", "venda.valor", "venda.loja", "venda.data", "venda.itens", "venda.vendedor", "venda.tipo_cliente"],
+  trigger_erp_return: ["venda.numero", "venda.valor", "venda.loja", "venda.data", "venda.itens"],
+  trigger_erp_overdue: ["financeiro.titulo", "financeiro.parcela", "financeiro.vencimento", "financeiro.valor_aberto", "financeiro.dias_atraso", "financeiro.loja"],
+  trigger_erp_due_soon: ["financeiro.titulo", "financeiro.parcela", "financeiro.vencimento", "financeiro.valor_aberto", "financeiro.dias_para_vencer", "financeiro.loja"],
+  trigger_erp_paid: ["financeiro.titulo", "financeiro.parcela", "financeiro.valor_pago", "financeiro.data_pagamento", "financeiro.parcelas_restantes", "financeiro.loja"],
+  trigger_erp_good_payer: ["financeiro.data_pagamento", "financeiro.valor_pago", "financeiro.loja"],
+  trigger_erp_birthday: ["cliente.aniversario", "cliente.idade"],
+  trigger_erp_no_purchase: ["cliente.ultima_compra", "cliente.dias_sem_comprar"],
+  trigger_erp_lab_ready: ["os.numero", "os.protocolo", "os.loja", "os.data_pronta"],
+};
+
 export const NODE_DEFS: NodeDef[] = [
-  { type: "trigger_message", category: "gatilho", label: "Mensagem recebida", description: "Cliente mandou mensagem no WhatsApp (qualquer uma ou com palavra-chave).", fields: [{ key: "mode", label: "Quando", kind: "select", options: [{ value: "any", label: "Qualquer mensagem" }, { value: "keywords", label: "Contém palavra-chave" }] }, { key: "keywords", label: "Palavras-chave / intenção", kind: "list", placeholder: "orçamento, preço, receita" }], defaults: { mode: "keywords", keywords: [] } },
-  { type: "trigger_stage", category: "gatilho", label: "Lead entrou na etapa", description: "Oportunidade entrou numa etapa do funil (Kanban, IA ou atendimento).", fields: [{ key: "stage", label: "Etapa", kind: "stage" }], defaults: { stage: "em-atendimento" } },
-  { type: "trigger_tag", category: "gatilho", label: "Tag adicionada", description: "Uma tag foi aplicada na conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text", placeholder: "vip" }], defaults: { tag: "" } },
-  { type: "trigger_inactive", category: "gatilho", label: "Cliente inativo por tempo", description: "Contato sem mandar mensagem há um tempo (segundos a anos).", fields: [...DURATION_FIELDS("Tempo sem contato"), { key: "businessHours", label: "Disparar só em horário comercial", kind: "boolean" }], defaults: { amount: 90, unit: "days", businessHours: false } },
-  { type: "trigger_webhook", category: "gatilho", label: "Webhook externo", description: "Sistema externo chama a URL do fluxo com { telefone } e variáveis.", fields: [], defaults: {} },
-  { type: "trigger_ai_handoff", category: "gatilho", label: "IA transferiu o atendimento", description: "A IA passou a conversa para a equipe (já na fila escolhida pelo assunto). Variáveis: {{fila}} e {{motivo}}.", fields: [{ key: "queueId", label: "Só quando a fila escolhida for (vazio = qualquer)", kind: "queue" }], defaults: { queueId: "" } },
+  { type: "trigger_erp_sale", category: "erp_vendas", label: "Venda concluída / faturada", description: `Nova venda detectada no VMSet (espelho atualizado a cada minuto). ${SALE_VARS}`, fields: SALE_FILTER_FIELDS, defaults: SALE_DEFAULTS },
+  { type: "trigger_erp_after_sale", category: "erp_vendas", label: "Tempo após a venda", description: `Minutos a anos depois de uma venda no VMSet: NPS, adaptação das lentes, recompra, renovação. ${SALE_VARS}`, fields: [...DURATION_FIELDS("Quanto tempo depois"), { key: "businessHours", label: "Disparar só em horário comercial", kind: "boolean" }, ...SALE_FILTER_FIELDS], defaults: { amount: 7, unit: "days", businessHours: true, ...SALE_DEFAULTS } },
+  { type: "trigger_erp_return", category: "erp_vendas", label: "Venda devolvida", description: `Devolução de venda lançada no VMSet. ${SALE_VARS}`, fields: SALE_FILTER_FIELDS.filter((field) => field.key !== "customerType"), defaults: { minAmount: 0, store: "", category: "" } },
+
+  { type: "trigger_erp_overdue", category: "erp_financeiro", label: "Cliente inadimplente há X", description: `Parcela do crediário/carnê vencida há exatamente X dias (ou meses) e ainda em aberto. Uma vez por parcela. ${FIN_VARS}`, fields: [...DAY_DURATION_FIELDS("Vencida há"), { key: "minAmount", label: "Valor mínimo da parcela (R$)", kind: "number" }, { key: "store", label: "Loja / filial (contém)", kind: "text", placeholder: "vazio = todas" }], defaults: { amount: 5, unit: "days", minAmount: 0, store: "" } },
+  { type: "trigger_erp_due_soon", category: "erp_financeiro", label: "Parcela prestes a vencer", description: `Parcela em aberto que vence daqui a X dias (lembrete preventivo). ${FIN_VARS}`, fields: [{ key: "amount", label: "Dias antes do vencimento", kind: "number", hint: "0 = no dia do vencimento." }, { key: "minAmount", label: "Valor mínimo da parcela (R$)", kind: "number" }, { key: "store", label: "Loja / filial (contém)", kind: "text", placeholder: "vazio = todas" }], defaults: { amount: 3, minAmount: 0, store: "" } },
+  { type: "trigger_erp_paid", category: "erp_financeiro", label: "Pagamento identificado", description: "Baixa de parcela no VMSet (ou quitação do carnê inteiro). Variáveis: {{financeiro.valor_pago}}, {{financeiro.data_pagamento}}, {{financeiro.parcelas_restantes}}, {{financeiro.titulo}}.", fields: [{ key: "mode", label: "Quando", kind: "select", options: [{ value: "any", label: "Qualquer parcela paga" }, { value: "settled", label: "Quitou o carnê / crediário inteiro" }] }, { key: "minAmount", label: "Valor mínimo pago (R$)", kind: "number" }], defaults: { mode: "any", minAmount: 0 } },
+  { type: "trigger_erp_good_payer", category: "erp_financeiro", label: "Cliente adimplente há X", description: "X depois de pagar uma parcela em dia, sem nenhuma parcela vencida em aberto: campanhas VIP, limite de crédito, fidelidade.", fields: DAY_DURATION_FIELDS("Pagando em dia há"), defaults: { amount: 6, unit: "months" } },
+  { type: "trigger_erp_birthday", category: "erp_financeiro", label: "Aniversário do cliente", description: "Data de nascimento do cadastro (VMSet): no dia ou X dias antes. Variáveis: {{cliente.aniversario}}, {{cliente.idade}}.", fields: [{ key: "amount", label: "Dias antes", kind: "number", hint: "0 = no dia do aniversário." }], defaults: { amount: 0 } },
+  { type: "trigger_erp_no_purchase", category: "erp_financeiro", label: "Cliente sem comprar há X", description: "Última compra no VMSet foi há exatamente X dias, meses ou anos (reativação de base). Variáveis: {{cliente.ultima_compra}}, {{cliente.dias_sem_comprar}}.", fields: DAY_DURATION_FIELDS("Sem comprar há"), defaults: { amount: 12, unit: "months" } },
+  { type: "trigger_erp_lab_ready", category: "erp_financeiro", label: "OS pronta para retirada", description: "Laboratório concluiu a produção dos óculos (OS) e o cliente ainda não retirou. Variáveis: {{os.numero}}, {{os.protocolo}}, {{os.loja}}, {{os.data_pronta}}.", fields: [{ key: "store", label: "Loja / filial (contém)", kind: "text", placeholder: "vazio = todas" }], defaults: { store: "" } },
+
+  { type: "trigger_message", category: "gatilho_whatsapp", label: "Mensagem recebida", description: "Cliente mandou mensagem no WhatsApp (qualquer uma ou com palavra-chave).", fields: [{ key: "mode", label: "Quando", kind: "select", options: [{ value: "any", label: "Qualquer mensagem" }, { value: "keywords", label: "Contém palavra-chave" }] }, { key: "keywords", label: "Palavras-chave / intenção", kind: "list", placeholder: "orçamento, preço, receita" }], defaults: { mode: "keywords", keywords: [] } },
+  { type: "trigger_stage", category: "gatilho_crm", label: "Lead entrou na etapa", description: "Oportunidade entrou numa etapa do funil (Kanban, IA ou atendimento).", fields: [{ key: "stage", label: "Etapa", kind: "stage" }], defaults: { stage: "em-atendimento" } },
+  { type: "trigger_tag", category: "gatilho_crm", label: "Tag adicionada", description: "Uma tag foi aplicada na conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text", placeholder: "vip" }], defaults: { tag: "" } },
+  { type: "trigger_inactive", category: "gatilho_whatsapp", label: "Cliente inativo por tempo", description: "Contato sem mandar mensagem há um tempo (segundos a anos).", fields: [...DURATION_FIELDS("Tempo sem contato"), { key: "businessHours", label: "Disparar só em horário comercial", kind: "boolean" }], defaults: { amount: 90, unit: "days", businessHours: false } },
+  { type: "trigger_webhook", category: "gatilho_crm", label: "Webhook externo", description: "Sistema externo chama a URL do fluxo com { telefone } e variáveis.", fields: [], defaults: {} },
+  { type: "trigger_ai_handoff", category: "gatilho_whatsapp", label: "IA transferiu o atendimento", description: "A IA passou a conversa para a equipe (já na fila escolhida pelo assunto). Variáveis: {{fila}} e {{motivo}}.", fields: [{ key: "queueId", label: "Só quando a fila escolhida for (vazio = qualquer)", kind: "queue" }], defaults: { queueId: "" } },
 
   { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis e imagem opcional (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }], defaults: { text: "", mediaUrl: "" } },
   { type: "delay", category: "mensagem", label: "Aguardar", description: "Pausa o fluxo de segundos até anos.", fields: [...DURATION_FIELDS("Quanto tempo"), { key: "businessHours", label: "Retomar só em horário comercial", kind: "boolean" }], defaults: { amount: 1, unit: "hours", businessHours: false } },
@@ -343,6 +395,8 @@ export function validateGraph(graph: FlowGraph): string[] {
     if (node.type === "condition" && config.field === "variable" && !String(config.variable ?? "").trim()) problems.push("Condição: informe o nome da variável.");
     if (node.type === "condition" && config.field !== "none" && CONDITION_OPERATORS.find((item) => item.value === config.operator)?.needsValue && !String(config.value ?? "").trim()) problems.push("Condição: informe o valor da comparação.");
     if (node.type === "add_note" && !String(config.text ?? "").trim()) problems.push("Adicionar observação: escreva o texto da nota.");
+    if ((node.type === "trigger_erp_after_sale" || node.type === "trigger_erp_overdue" || node.type === "trigger_erp_good_payer" || node.type === "trigger_erp_no_purchase") && !(Number(config.amount) > 0)) problems.push(`${NODE_DEF[node.type].label}: informe o tempo.`);
+    if ((node.type === "trigger_erp_due_soon" || node.type === "trigger_erp_birthday") && !(Number(config.amount) >= 0)) problems.push(`${NODE_DEF[node.type].label}: informe os dias.`);
     const filters = readFilters(config);
     if (filters.rules.some((rule) => FILTER_KIND[rule.kind].ops.find((op) => op.value === rule.op)?.needsValue && !String((rule as { value?: string }).value ?? "").trim())) problems.push(`${NODE_DEF[node.type].label}: complete o valor das regras & filtros.`);
   }

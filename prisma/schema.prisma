@@ -830,6 +830,20 @@ model AutomationExecution {
 }
 
 /// Log passo a passo de uma execução (histórico na tela).
+/// Evento do ERP (venda, parcela, OS...) já entregue a um gatilho: nunca dispara duas vezes o mesmo evento no mesmo nó.
+model AutomationTriggerEvent {
+  id        String   @id @default(cuid())
+  flowId    String
+  nodeId    String
+  /// Ex.: "venda:12-34567", "titulo:ABC:5days", "aniversario:<contato>:2026".
+  eventKey  String
+  contactId String
+  createdAt DateTime @default(now())
+
+  @@unique([flowId, nodeId, eventKey])
+  @@index([createdAt])
+}
+
 model AutomationStepLog {
   id          String              @id @default(cuid())
   executionId String

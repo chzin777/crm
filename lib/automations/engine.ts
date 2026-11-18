@@ -1,4 +1,4 @@
-import { describeFilters, evaluateFilters, isTrigger, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
+import { describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
 
@@ -257,7 +257,9 @@ export type TriggerEvent =
   | { type: "trigger_tag"; tag: string }
   | { type: "trigger_inactive"; nodeId: string }
   | { type: "trigger_webhook" }
-  | { type: "trigger_ai_handoff"; queueId: string | null };
+  | { type: "trigger_ai_handoff"; queueId: string | null }
+  /** Gatilhos do VMSet: o sincronizador já filtrou pelo nó (tempo, valor, loja); aqui só confere o nó. */
+  | { type: ErpTriggerType; nodeId: string };
 
 /** Este nó de gatilho casa com o evento? (sem as regras & filtros, avaliadas em pickTrigger). */
 export function triggerMatches(node: FlowNode | null, event: TriggerEvent): boolean {
@@ -271,7 +273,7 @@ export function triggerMatches(node: FlowNode | null, event: TriggerEvent): bool
   }
   if (event.type === "trigger_stage") return String(config.stage ?? "") === event.stage;
   if (event.type === "trigger_tag") return plain(String(config.tag ?? "")) === plain(event.tag);
-  if (event.type === "trigger_inactive") return node.id === event.nodeId;
+  if (event.type === "trigger_inactive" || isErpTrigger(event.type)) return "nodeId" in event && node.id === event.nodeId;
   if (event.type === "trigger_ai_handoff") return !String(config.queueId ?? "") || String(config.queueId) === event.queueId;
   return true;
 }
