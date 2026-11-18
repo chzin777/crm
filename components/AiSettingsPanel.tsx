@@ -629,7 +629,6 @@ export function AiSettingsPanel() {
     setSettings((current) => (current ? { ...current, model, ...(price ? { priceInputPerMillionUsd: price.input, priceOutputPerMillionUsd: price.output } : {}) } : current));
   };
 
-  const toggleQueue = (id: string) => set("queueIds", settings.queueIds.includes(id) ? settings.queueIds.filter((item) => item !== id) : [...settings.queueIds, id]);
   const toggleDay = (day: number) => {
     const has = settings.schedule.some((slot) => slot.day === day);
     const first = settings.schedule[0];
@@ -758,26 +757,6 @@ export function AiSettingsPanel() {
               </div>
             </Collapse>
           </Block>
-          <Block title="Onde a IA atende" hint="A IA só responde conversas sem atendente. Assim que alguém assume, ela para.">
-            <Toggle label="Na entrada, no lugar do menu automático" description="Toda conversa nova é recebida pela IA, que resolve ou transfere para a fila certa." checked={settings.attendAtEntry} onChange={(value) => set("attendAtEntry", value)} />
-            <div>
-              <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Nas filas (clientes aguardando)</p>
-              <p className="mb-2 text-[10px] text-slate-400">A IA conversa com quem está na fila enquanto ninguém assume.</p>
-              {queues.length === 0 ? <p className="text-[11px] text-slate-400">Nenhuma fila cadastrada.</p> : (
-                <div className="flex flex-wrap gap-1.5">
-                  {queues.map((queue) => {
-                    const on = settings.queueIds.includes(queue.id);
-                    return (
-                      <button key={queue.id} type="button" aria-pressed={on} onClick={() => toggleQueue(queue.id)} className={`cursor-pointer rounded-full border px-3 py-1 text-[11px] font-semibold transition ${on ? "border-[#C4D600] bg-[#C4D600] text-[#051647]" : "border-slate-200 text-slate-600 hover:border-[#002187] dark:border-slate-700 dark:text-slate-300"}`}>
-                        {queue.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </Block>
-
           <Block title="Quando a IA atende" hint="Horário de Brasília.">
             <div className="grid gap-2 sm:grid-cols-3">
               {([

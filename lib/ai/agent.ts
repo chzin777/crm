@@ -155,7 +155,7 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
   const queued = mode === "queued";
   const rule = await hoursFor(conversation.queueId);
   const storeOpen = !rule || isOpenAt(rule, now);
-  if (!aiShouldAttend(settings, conversation, now, storeOpen, queued)) return false;
+  if (!aiShouldAttend(settings, conversation, now, storeOpen)) return false;
 
   // Sem crédito, a conversa segue o fluxo normal em vez de ficar sem resposta.
   const status = await readAiStatus();

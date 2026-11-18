@@ -23,10 +23,6 @@ export type AiSettings = {
   agentName: string;
   /** Tom de voz das respostas ao cliente. */
   tone: AiTone;
-  /** Atende na entrada, no lugar do menu automático. */
-  attendAtEntry: boolean;
-  /** Filas em que a IA atende quem está aguardando, enquanto ninguém assume. */
-  queueIds: string[];
   /** Quando atende: sempre, só fora do horário de atendimento ou em faixas próprias. */
   scheduleMode: "always" | "off_hours" | "custom";
   schedule: AiScheduleSlot[];
@@ -97,8 +93,6 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   autonomousEnabled: false,
   agentName: "Assistente Óticas Brasil",
   tone: "acolhedor",
-  attendAtEntry: false,
-  queueIds: [],
   scheduleMode: "off_hours",
   schedule: [1, 2, 3, 4, 5].map((day) => ({ day, start: "18:00", end: "23:59" })),
   useStores: true,
@@ -172,8 +166,6 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     autonomousEnabled: bool(raw.autonomousEnabled, d.autonomousEnabled),
     agentName: str(raw.agentName, d.agentName, 60).trim() || d.agentName,
     tone: AI_TONES.some((tone) => tone.id === raw.tone) ? (raw.tone as AiTone) : d.tone,
-    attendAtEntry: bool(raw.attendAtEntry, d.attendAtEntry),
-    queueIds: Array.isArray(raw.queueIds) ? raw.queueIds.filter((id): id is string => typeof id === "string").slice(0, 50) : d.queueIds,
     scheduleMode: raw.scheduleMode === "always" || raw.scheduleMode === "custom" || raw.scheduleMode === "off_hours" ? raw.scheduleMode : d.scheduleMode,
     schedule,
     useStores: bool(raw.useStores, d.useStores),
@@ -253,22 +245,17 @@ export function inAiSchedule(schedule: AiScheduleSlot[], date: Date) {
 
 /**
  * A IA assume esta conversa agora? `storeOpen` é o horário de atendimento da fila (null = sem regra, sempre aberto).
- * Entrada (status bot) só com "atender na entrada"; aguardando só nas filas escolhidas.
+ * Fluxo padrão (sem o antigo "Onde a IA atende"): toda conversa sem atendente, na entrada (status bot, no lugar
+ * do menu) ou aguardando em qualquer fila, inclusive a que a própria IA transferiu.
  */
 export function aiShouldAttend(
   settings: AiSettings,
   conversation: { status: string; queueId: string | null; assigneeId: string | null; closedAt: Date | null },
   date: Date,
   storeOpen: boolean,
-  /** Já transferida pela IA e aguardando na fila sem atendente: a IA ajuda na espera em qualquer fila. */
-  queued = false,
 ) {
   if (!settings.autonomousEnabled || conversation.assigneeId || conversation.closedAt) return false;
-  const inScope =
-    (queued && conversation.status === "waiting") ||
-    (conversation.status === "bot" && settings.attendAtEntry) ||
-    ((conversation.status === "waiting" || conversation.status === "bot") && !!conversation.queueId && settings.queueIds.includes(conversation.queueId));
-  if (!inScope) return false;
+  if (conversation.status !== "bot" && conversation.status !== "waiting") return false;
   if (settings.scheduleMode === "always") return true;
   if (settings.scheduleMode === "off_hours") return !storeOpen;
   return inAiSchedule(settings.schedule, date);

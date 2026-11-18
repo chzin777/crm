@@ -3,7 +3,7 @@ import { buildSystemPrompt, preAgentOutcome } from "@/lib/ai/agent-core";
 import { aiShouldAttend, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { aiConversationMode } from "@/lib/chat/queue-rules";
 
-const settings = { ...DEFAULT_AI_SETTINGS, autonomousEnabled: true, scheduleMode: "always" as const, attendAtEntry: true, queueIds: [] as string[], aiChoosesQueue: true, handoffKeywords: ["atendente"] };
+const settings = { ...DEFAULT_AI_SETTINGS, autonomousEnabled: true, scheduleMode: "always" as const, aiChoosesQueue: true, handoffKeywords: ["atendente"] };
 const waiting = { status: "waiting", queueId: "q-comercial", assigneeId: null as string | null, closedAt: null as Date | null, menuState: { stopped: true } };
 const handedOff = { handedOff: true, humanReplied: false };
 
@@ -11,8 +11,7 @@ describe("espera assistida: IA ajuda enquanto o cliente aguarda na fila", () => 
   it("transferida para Comercial sem atendente → IA responde a nova dúvida e não transfere de novo", () => {
     expect(aiConversationMode(waiting, handedOff)).toBe("queued");
     // A fila de destino não precisa estar entre as filas da IA: ela ajuda na espera de qualquer fila.
-    expect(aiShouldAttend(settings, waiting, new Date(), true, true)).toBe(true);
-    expect(aiShouldAttend(settings, waiting, new Date(), true, false)).toBe(false);
+    expect(aiShouldAttend(settings, waiting, new Date(), true)).toBe(true);
     // Pedido de atendente na espera não gera transbordo duplicado: a IA tranquiliza o cliente.
     const queued = { queueName: "Comercial" };
     expect(preAgentOutcome(settings, { pendingText: "e o atendente?", hasMedia: false, aiReplies: 0, queued })).toBeNull();
@@ -24,7 +23,7 @@ describe("espera assistida: IA ajuda enquanto o cliente aguarda na fila", () => 
   it("atendente humano assume (assignedUserId preenchido) → IA em silêncio", () => {
     expect(aiConversationMode({ ...waiting, assigneeId: "user-1" }, handedOff)).toBe("paused");
     expect(aiConversationMode({ ...waiting, status: "in_progress", assigneeId: "user-1" }, handedOff)).toBe("paused");
-    expect(aiShouldAttend(settings, { ...waiting, assigneeId: "user-1" }, new Date(), true, true)).toBe(false);
+    expect(aiShouldAttend(settings, { ...waiting, assigneeId: "user-1" }, new Date(), true)).toBe(false);
   });
 
   it("atendente escreveu ao cliente depois do transbordo, IA pausada pelo operador ou conversa encerrada → silêncio", () => {

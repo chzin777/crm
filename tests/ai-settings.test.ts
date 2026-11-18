@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aiShouldAttend, asksForHuman, DEFAULT_AI_SETTINGS, inAiSchedule, sanitizeAiSettings, usageCostUsd } from "@/lib/ai/settings";
 
-const base = { ...DEFAULT_AI_SETTINGS, autonomousEnabled: true, attendAtEntry: true, scheduleMode: "always" as const };
+const base = { ...DEFAULT_AI_SETTINGS, autonomousEnabled: true, scheduleMode: "always" as const };
 const entry = { status: "bot", queueId: null, assigneeId: null, closedAt: null };
 const now = new Date("2026-11-12T15:00:00Z"); // quinta 12:00 BRT
 
@@ -10,17 +10,17 @@ describe("quando a IA assume a conversa", () => {
     expect(aiShouldAttend({ ...base, autonomousEnabled: false }, entry, now, true)).toBe(false);
   });
 
-  it("na entrada só com a opção ligada; conversa com atendente ou encerrada nunca", () => {
+  it("na entrada sempre; conversa com atendente ou encerrada nunca", () => {
     expect(aiShouldAttend(base, entry, now, true)).toBe(true);
-    expect(aiShouldAttend({ ...base, attendAtEntry: false }, entry, now, true)).toBe(false);
     expect(aiShouldAttend(base, { ...entry, assigneeId: "u1" }, now, true)).toBe(false);
     expect(aiShouldAttend(base, { ...entry, closedAt: now }, now, true)).toBe(false);
   });
 
-  it("na fila só nas filas escolhidas", () => {
+  it("aguardando em qualquer fila sem atendente; em atendimento humano nunca", () => {
     const waiting = { status: "waiting", queueId: "vendas", assigneeId: null, closedAt: null };
-    expect(aiShouldAttend({ ...base, attendAtEntry: false, queueIds: ["vendas"] }, waiting, now, true)).toBe(true);
-    expect(aiShouldAttend({ ...base, attendAtEntry: false, queueIds: ["financeiro"] }, waiting, now, true)).toBe(false);
+    expect(aiShouldAttend(base, waiting, now, true)).toBe(true);
+    expect(aiShouldAttend(base, { ...waiting, queueId: "financeiro" }, now, true)).toBe(true);
+    expect(aiShouldAttend(base, { ...waiting, status: "in_progress" }, now, true)).toBe(false);
   });
 
   it("'fora do horário' segue o horário de atendimento", () => {
