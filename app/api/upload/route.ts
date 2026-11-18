@@ -7,6 +7,7 @@ const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const ALLOWED = (type: string) =>
   type.startsWith("image/") ||
   type.startsWith("video/") ||
+  type.startsWith("audio/") ||
   type === "application/pdf";
 
 let bucketReady = false;

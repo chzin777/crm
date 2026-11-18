@@ -28,11 +28,21 @@ export const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
 ];
 
 export type FieldDef =
-  | { key: string; label: string; kind: "text" | "textarea" | "number" | "url"; placeholder?: string; hint?: string }
+  | { key: string; label: string; kind: "text" | "textarea" | "number" | "url" | "audio"; placeholder?: string; hint?: string }
   | { key: string; label: string; kind: "select"; options: { value: string; label: string }[]; hint?: string }
   | { key: string; label: string; kind: "boolean"; hint?: string }
   | { key: string; label: string; kind: "list"; placeholder?: string; hint?: string }
   | { key: string; label: string; kind: "stage" | "queue" | "user" | "users"; hint?: string };
+
+/** Áudio enviado pelo editor (upload no armazenamento): o valor do campo é "storage:<chave>"; URL http(s) também vale. */
+export const AUDIO_STORAGE_PREFIX = "storage:";
+
+/** Presença antes do envio: automática (tamanho do texto / duração do áudio), tempo fixo ou desligada. */
+export const PRESENCE_MODE_OPTIONS = [
+  { value: "auto", label: "Automático (pelo texto / duração do áudio)" },
+  { value: "custom", label: "Tempo fixo (segundos)" },
+  { value: "off", label: "Desligado (envia na hora)" },
+];
 
 export type NodeDef = { type: NodeType; category: NodeCategory; label: string; description: string; fields: FieldDef[]; defaults: Record<string, unknown> };
 
@@ -308,7 +318,7 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "trigger_webhook", category: "gatilho_crm", label: "Webhook externo", description: "Sistema externo chama a URL do fluxo com { telefone } e variáveis.", fields: [], defaults: {} },
   { type: "trigger_ai_handoff", category: "gatilho_whatsapp", label: "IA transferiu o atendimento", description: "A IA passou a conversa para a equipe (já na fila escolhida pelo assunto). Variáveis: {{fila}} e {{motivo}}.", fields: [{ key: "queueId", label: "Só quando a fila escolhida for (vazio = qualquer)", kind: "queue" }], defaults: { queueId: "" } },
 
-  { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis e imagem opcional (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }], defaults: { text: "", mediaUrl: "" } },
+  { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis, imagem e nota de voz opcionais, com digitando/gravando antes de cada bloco (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }, { key: "audio", label: "Nota de voz (opcional)", kind: "audio", placeholder: "https://.../audio.mp3", hint: "Envie .mp3, .ogg ou .opus (ou cole a URL): chega como áudio gravado na hora, depois da mensagem." }, { key: "presenceMode", label: "Digitando / gravando antes do envio", kind: "select", options: PRESENCE_MODE_OPTIONS }, { key: "presenceSeconds", label: "Tempo de digitando/gravando (segundos)", kind: "number", hint: "De 0 a 20 s, aplicado a cada bloco (texto e áudio)." }], defaults: { text: "", mediaUrl: "", audio: "", presenceMode: "auto", presenceSeconds: 5 } },
   { type: "delay", category: "mensagem", label: "Aguardar", description: "Pausa o fluxo de segundos até anos.", fields: [...DURATION_FIELDS("Quanto tempo"), { key: "businessHours", label: "Retomar só em horário comercial", kind: "boolean" }], defaults: { amount: 1, unit: "hours", businessHours: false } },
   { type: "ai_agent", category: "ia", label: "Acionar agente de IA", description: "Passa o atendimento para a IA com um objetivo.", fields: [{ key: "objective", label: "Objetivo da IA", kind: "textarea", placeholder: "Qualificar cidade e faixa de preço" }], defaults: { objective: "" } },
 
@@ -386,7 +396,8 @@ export function validateGraph(graph: FlowGraph): string[] {
   }
   for (const node of graph.nodes) {
     const config = node.data.config;
-    if (node.type === "send_whatsapp" && !String(config.text ?? "").trim() && !String(config.mediaUrl ?? "").trim()) problems.push("Enviar WhatsApp: escreva a mensagem.");
+    if (node.type === "send_whatsapp" && !String(config.text ?? "").trim() && !String(config.mediaUrl ?? "").trim() && !String(config.audio ?? "").trim()) problems.push("Enviar WhatsApp: escreva a mensagem ou anexe um áudio.");
+    if (node.type === "send_whatsapp" && String(config.audio ?? "").trim() && !String(config.audio).startsWith(AUDIO_STORAGE_PREFIX) && !/^https?:\/\//i.test(String(config.audio).trim())) problems.push("Enviar WhatsApp: a nota de voz precisa ser um arquivo enviado ou uma URL http(s).");
     if (node.type === "http" && !/^https?:\/\//i.test(String(config.url ?? ""))) problems.push("Requisição HTTP: informe uma URL http(s).");
     if ((node.type === "add_tag" || node.type === "remove_tag" || node.type === "trigger_tag") && !String(config.tag ?? "").trim()) problems.push(`${NODE_DEF[node.type].label}: informe a tag.`);
     if (node.type === "assign" && !String(config.queueId ?? "").trim()) problems.push("Atribuir: escolha a fila.");

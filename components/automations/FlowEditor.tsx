@@ -25,12 +25,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
-  CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
+  AUDIO_STORAGE_PREFIX, CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
   type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
 } from "@/lib/automations/nodes";
 
@@ -108,7 +108,7 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_erp_birthday": return Number(config.amount) > 0 ? `${Number(config.amount)} dia(s) antes do aniversário` : "No dia do aniversário";
     case "trigger_erp_no_purchase": return `Sem comprar há ${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "months")}`;
     case "trigger_erp_lab_ready": return String(config.store || "Todas as lojas");
-    case "send_whatsapp": return String(config.text || "(mensagem vazia)");
+    case "send_whatsapp": return String(config.text || (config.audio ? "Nota de voz" : "(mensagem vazia)"));
     case "delay": { const { amount, unit } = readDuration(config, "hours"); return `${durationLabel(amount, unit)}${config.businessHours ? " · horário comercial" : ""}`; }
     case "ai_agent": return String(config.objective || "Atendimento pela IA");
     case "assign": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "(escolha a fila)";
@@ -218,6 +218,54 @@ function autoLayout(nodes: CanvasNode[], edges: Edge[], dir: "TB" | "LR"): Canva
   return nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position, data: dir === "LR" ? { ...node.data, dir: "LR" } : { kind: node.data.kind, config: node.data.config } }));
 }
 
+/** Nota de voz do nó Enviar WhatsApp: upload (.mp3/.ogg/.opus) para o armazenamento ou URL http(s). */
+function AudioField({ label, hint, value, placeholder, onChange }: { label: ReactNode; hint: ReactNode; value: string; placeholder?: string; onChange: (value: unknown) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const stored = value.startsWith(AUDIO_STORAGE_PREFIX);
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setError("");
+    if (!/\.(mp3|ogg|opus|m4a|wav)$/i.test(file.name) && !file.type.startsWith("audio/")) { setError("Envie um arquivo de áudio (.mp3, .ogg ou .opus)."); return; }
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append("files", file.type.startsWith("audio/") ? file : new File([file], file.name, { type: /\.mp3$/i.test(file.name) ? "audio/mpeg" : "audio/ogg" }));
+      const response = await fetch("/api/upload", { method: "POST", body: form });
+      const body = (await response.json().catch(() => null)) as { files?: { key: string }[]; error?: string } | null;
+      if (!response.ok || !body?.files?.[0]?.key) throw new Error(body?.error ?? "Falha no upload do áudio.");
+      onChange(`${AUDIO_STORAGE_PREFIX}${body.files[0].key}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Falha no upload do áudio.");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+  return (
+    <div className="space-y-1">
+      {label}
+      {stored ? (
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 dark:border-slate-700">
+          <Mic className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+          <span className="min-w-0 flex-1 truncate text-xs text-slate-700 dark:text-slate-200">{value.split("/").pop()}</span>
+          <button type="button" onClick={() => onChange("")} aria-label="Remover áudio" className="cursor-pointer rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-white/10"><X className="h-3.5 w-3.5" /></button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className={input} aria-label="URL do áudio" />
+          <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}Enviar
+          </button>
+          <input ref={fileRef} type="file" accept="audio/*,.mp3,.ogg,.opus" className="hidden" onChange={(event) => void upload(event.target.files?.[0])} />
+        </div>
+      )}
+      {error ? <span role="alert" className="block text-[10px] text-red-600">{error}</span> : hint}
+    </div>
+  );
+}
+
 function Field({ field, value, onChange, options }: { field: FieldDef; value: unknown; onChange: (value: unknown) => void; options: Options }) {
   const label = <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>;
   const hint = field.hint ? <span className="block text-[10px] text-slate-400">{field.hint}</span> : null;
@@ -229,6 +277,7 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
       </label>
     );
   }
+  if (field.kind === "audio") return <AudioField label={label} hint={hint} value={String(value ?? "")} placeholder={field.placeholder} onChange={onChange} />;
   if (field.kind === "textarea") return <label className="block space-y-1">{label}<textarea rows={4} value={String(value ?? "")} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} className={`${input} h-auto resize-y py-2`} />{hint}</label>;
   if (field.kind === "list") return <label className="block space-y-1">{label}<input value={(Array.isArray(value) ? value : []).join(", ")} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} className={input} />{hint ?? <span className="block text-[10px] text-slate-400">Separe por vírgula.</span>}</label>;
   const select = (items: { value: string; label: string }[], empty?: string) => (
@@ -774,6 +823,7 @@ function Editor({ flowId }: { flowId: string }) {
   const selectedFields = selected ? NODE_DEF[selected.data.kind].fields.filter((field) => {
     if (field.key === "keywords" && selected.data.config.mode !== "keywords") return false;
     if (selected.data.kind === "condition" && (field.key === "operator" || field.key === "value") && selected.data.config.field === "none") return false;
+    if (field.key === "presenceSeconds" && selected.data.config.presenceMode !== "custom") return false;
     return true;
   }) : [];
 

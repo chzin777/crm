@@ -2,17 +2,18 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { advance, inactiveSince, pickTrigger, type AdvanceResult, type EnginePorts, type ExecutionContext, type ExecutionState, type StepStatus, type TriggerEvent } from "@/lib/automations/engine";
-import { NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
+import { AUDIO_STORAGE_PREFIX, NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
 import { addedTags, stageChanges } from "@/lib/automations/events";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
-import { sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { sendAutomaticAudio, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { presenceDurationMs, simulatePresence, type PresenceKind } from "@/lib/chat/presence";
+import { readFile } from "@/lib/minio";
 import { readMenuState, saveMenuState } from "@/lib/chat/menu";
 import { aiTakeoverPatch } from "@/lib/chat/queue-rules";
 import { hoursFor } from "@/lib/chat/operations";
 import { isOpenAt } from "@/lib/chat/hours";
 import { phoneVariants } from "@/lib/chat/phone";
-import { sendText } from "@/lib/meta-whatsapp";
-import { resolveChatCapabilities } from "@/lib/permissions";
+import { sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";import { resolveChatCapabilities } from "@/lib/permissions";
 import { notifyChatChange } from "@/lib/chat/events";
 import type { StageId } from "@/lib/pipeline-stages";
 
@@ -32,6 +33,22 @@ async function conversationOf(state: ExecutionState) {
     if (found) return found;
   }
   return prisma.chatConversation.findFirst({ where: { contactId: state.contactId }, orderBy: [{ closedAt: { sort: "desc", nulls: "first" } }, { lastMessageAt: { sort: "desc", nulls: "last" } }] });
+}
+
+const AUDIO_MAX_BYTES = 16 * 1024 * 1024;
+
+/** Áudio do nó: "storage:<chave>" (upload no editor) ou URL http(s) baixada com limite de 16 MB e 20 s. */
+async function loadAutomationAudio(source: string): Promise<{ bytes: Buffer; name: string }> {
+  if (source.startsWith(AUDIO_STORAGE_PREFIX)) {
+    const key = source.slice(AUDIO_STORAGE_PREFIX.length);
+    return { bytes: await readFile(key), name: key.split("/").pop() || "audio" };
+  }
+  if (!/^https?:\/\//i.test(source)) throw new Error("Áudio inválido: envie um arquivo ou informe uma URL http(s).");
+  const response = await fetch(source, { signal: AbortSignal.timeout(20_000), cache: "no-store" }).catch(() => null);
+  if (!response?.ok) throw new Error("Não foi possível baixar o áudio da URL informada.");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > AUDIO_MAX_BYTES) throw new Error("Áudio vazio ou maior que 16 MB.");
+  return { bytes, name: decodeURIComponent(new URL(source).pathname.split("/").pop() || "audio") };
 }
 
 async function requireConversation(state: ExecutionState) {
@@ -89,17 +106,35 @@ export function databasePorts(flowId: string): EnginePorts {
     sendWhatsApp: async (state, input) => {
       const conversation = await requireConversation(state);
       if (!isWindowOpen(conversation.lastInboundAt)) throw new Error("Janela de 24 h do WhatsApp fechada: o cliente precisa ter escrito nas últimas 24 h (fora dela, use um modelo em Campanhas).");
-      if (!input.text.trim() && !input.mediaUrl) throw new Error("Mensagem vazia.");
+      if (!input.text.trim() && !input.mediaUrl && !input.audio) throw new Error("Mensagem vazia.");
+      // Presença por bloco: "digitando..." antes do texto/imagem e "gravando" (tempo do áudio) antes da nota de voz.
+      const presence = input.presence ?? { mode: "auto" as const, seconds: null };
+      const wamid = presence.mode === "off" ? null : (await prisma.chatMessage.findFirst({ where: { conversationId: conversation.id, author: "customer", externalId: { not: null } }, orderBy: { createdAt: "desc" }, select: { externalId: true } }))?.externalId ?? null;
+      const present = (kind: PresenceKind, detail: { text?: string; audioSeconds?: number }) =>
+        simulatePresence(presenceDurationMs({ kind, ...detail, mode: presence.mode, overrideSeconds: presence.seconds }), { indicate: () => sendTypingIndicator(wamid) });
+      const done: string[] = [];
       if (input.mediaUrl) {
+        await present("composing", { text: input.text });
         await sendAutomaticImage(conversation, input.mediaUrl, input.text, AUTHOR, async () => undefined);
         notifyChatChange();
-        return "Imagem enviada no WhatsApp";
+        done.push("imagem");
+      } else if (input.text.trim()) {
+        await present("composing", { text: input.text });
+        const message = await sendAutomaticMessage(conversation, input.text, undefined, undefined, AUTHOR);
+        notifyChatChange();
+        if (!message) throw new Error("Número bloqueado: mensagem não enviada.");
+        if (message.delivery === "failed") throw new Error(message.failureReason ?? "Falha no envio pelo WhatsApp.");
+        done.push("mensagem");
       }
-      const message = await sendAutomaticMessage(conversation, input.text, undefined, undefined, AUTHOR);
-      notifyChatChange();
-      if (!message) throw new Error("Número bloqueado: mensagem não enviada.");
-      if (message.delivery === "failed") throw new Error(message.failureReason ?? "Falha no envio pelo WhatsApp.");
-      return "Mensagem enviada no WhatsApp";
+      if (input.audio) {
+        const audio = await loadAutomationAudio(input.audio);
+        const voice = await sendAutomaticAudio(conversation, audio, AUTHOR, (seconds) => present("recording", { audioSeconds: seconds }));
+        notifyChatChange();
+        if (!voice) throw new Error("Número bloqueado: áudio não enviado.");
+        if (voice.delivery === "failed") throw new Error(voice.failureReason ?? "Falha no envio do áudio pelo WhatsApp.");
+        done.push("nota de voz");
+      }
+      return `${done.join(" + ").replace(/^./, (char) => char.toUpperCase())} enviada no WhatsApp`;
     },
     aiAgent: async (state, objective) => {
       const conversation = await requireConversation(state);
@@ -292,7 +327,7 @@ export async function simulateFlow(graph: FlowGraph, contactId: string, triggerN
     ...real,
     isOptedOut: async () => contact.marketingOptOut,
     nextBusinessTime: async (date) => date,
-    sendWhatsApp: async (_state, input) => `Simulado: enviaria "${input.text.slice(0, 160)}"${input.mediaUrl ? " com imagem" : ""}`,
+    sendWhatsApp: async (_state, input) => `Simulado: enviaria "${input.text.slice(0, 160)}"${input.mediaUrl ? " com imagem" : ""}${input.audio ? " + nota de voz (gravando...)" : ""}${input.presence?.mode === "off" ? " sem digitando" : ""}`,
     aiAgent: async (_state, objective) => `Simulado: passaria a conversa para a IA${objective ? ` (${objective.slice(0, 120)})` : ""}`,
     moveStage: async (_state, stage) => `Simulado: moveria a oportunidade para ${stage}`,
     createOpportunity: describe("criaria a oportunidade em Novo lead"),

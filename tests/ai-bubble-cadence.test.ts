@@ -3,10 +3,10 @@ import { bubbleDelayFor, DEFAULT_AI_SETTINGS, sanitizeAiSettings } from "@/lib/a
 import { sendBubbles } from "@/lib/ai/bubbles";
 
 describe("cadência dos balões da IA", () => {
-  it("padrões mantêm o comportamento antigo (0,6 s a 1 s, 3 balões, ligado)", () => {
+  it("padrões: 0,6 s a 1 s + 25 ms por caractere (digitando proporcional ao texto), 3 balões, ligado)", () => {
     const settings = sanitizeAiSettings({});
     expect(settings.splitReplies).toBe(true);
-    expect([settings.bubbleDelayMinMs, settings.bubbleDelayMaxMs, settings.bubbleMsPerChar, settings.maxBubbles]).toEqual([600, 1000, 0, 3]);
+    expect([settings.bubbleDelayMinMs, settings.bubbleDelayMaxMs, settings.bubbleMsPerChar, settings.maxBubbles]).toEqual([600, 1000, 25, 3]);
   });
 
   it("nunca aceita negativo nem máximo menor que o mínimo", () => {

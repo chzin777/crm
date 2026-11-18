@@ -105,7 +105,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   splitReplies: true,
   bubbleDelayMinMs: 600,
   bubbleDelayMaxMs: 1000,
-  bubbleMsPerChar: 0,
+  bubbleMsPerChar: 25,
   maxBubbles: 3,
   topics: DEFAULT_AI_TOPICS,
   extraInstructions: "Nunca ofereça descontos nem condições especiais. Não faça diagnóstico de saúde ocular: oriente procurar um oftalmologista.",

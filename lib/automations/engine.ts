@@ -1,3 +1,4 @@
+import { isPresenceMode, type PresenceMode } from "@/lib/chat/presence";
 import { describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
@@ -39,7 +40,8 @@ export type EnginePorts = {
   facts: (state: ExecutionState) => Promise<ContactFacts>;
   lastReply: (state: ExecutionState, since: Date) => Promise<string | null>;
   nextBusinessTime: (date: Date) => Promise<Date>;
-  sendWhatsApp: (state: ExecutionState, input: { text: string; mediaUrl: string }) => Promise<string>;
+  /** audio: URL http(s) ou "storage:<chave>" (upload), enviado como nota de voz. presence: digitando/gravando antes de cada bloco. */
+  sendWhatsApp: (state: ExecutionState, input: { text: string; mediaUrl: string; audio?: string; presence?: { mode: PresenceMode; seconds: number | null } }) => Promise<string>;
   aiAgent: (state: ExecutionState, objective: string) => Promise<string>;
   moveStage: (state: ExecutionState, stage: string) => Promise<string>;
   createOpportunity: (state: ExecutionState) => Promise<string>;
@@ -150,7 +152,11 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
   const config = node.data.config;
   const text = (key: string) => renderTemplate(String(config[key] ?? ""), state.context);
   switch (node.type) {
-    case "send_whatsapp": return { message: await ports.sendWhatsApp(state, { text: text("text"), mediaUrl: text("mediaUrl") }) };
+    case "send_whatsapp": {
+      const seconds = config.presenceSeconds === undefined || config.presenceSeconds === "" ? null : Number(config.presenceSeconds);
+      const presence = { mode: isPresenceMode(config.presenceMode) ? config.presenceMode : "auto" as const, seconds };
+      return { message: await ports.sendWhatsApp(state, { text: text("text"), mediaUrl: text("mediaUrl"), audio: text("audio").trim(), presence }) };
+    }
     case "ai_agent": return { message: await ports.aiAgent(state, text("objective")) };
     case "move_stage": return { message: await ports.moveStage(state, String(config.stage ?? "")) };
     case "create_opportunity": return { message: await ports.createOpportunity(state) };

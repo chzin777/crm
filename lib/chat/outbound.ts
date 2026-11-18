@@ -7,6 +7,7 @@ import { readFile, uploadFile } from "@/lib/minio";
 import type { ChatActor } from "@/lib/chat/access";
 import { addAudit, addSystemMessage, isBlocked, isWindowOpen } from "@/lib/chat/conversation";
 import { convertToOggOpus } from "@/lib/chat/audio";
+import { estimateVoiceSeconds } from "@/lib/chat/presence";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import type { ChatInteractiveList } from "@/lib/chat/types";
 import { withoutDashes } from "@/lib/chat/text";
@@ -70,6 +71,27 @@ export async function sendAutomaticImage(conversation: Pick<ChatConversation, "i
     sendText: (value) => sendAutomaticMessage(conversation, value, undefined, undefined, authorName),
     invalidate,
   }, text);
+}
+
+/**
+ * Nota de voz automática (automações): converte para ogg/opus mono (exigência da Meta para voz), guarda no
+ * armazenamento e envia com voice: true, chegando como áudio gravado na hora (player de voz, sem "encaminhada").
+ * beforeSend roda depois da conversão, com a duração estimada (ex.: "gravando áudio..." pelo tempo do áudio).
+ */
+export async function sendAutomaticAudio(conversation: Pick<ChatConversation, "id" | "phone">, input: { bytes: Buffer; name: string }, authorName: string, beforeSend?: (seconds: number) => Promise<unknown>) {
+  if (await isBlocked(conversation.phone)) return null;
+  const bytes = await convertToOggOpus(input.bytes);
+  const name = (input.name.replace(/\.[^.]+$/, "") || "audio") + ".ogg";
+  const seconds = estimateVoiceSeconds(bytes.length);
+  const stored = await uploadFile(bytes, name, "audio/ogg", `chat/automations/${conversation.id}`);
+  const attachment: ChatAttachment = { kind: "audio", name, mime: "audio/ogg", size: bytes.length, key: stored.key };
+  if (beforeSend) await beforeSend(seconds);
+  const now = new Date();
+  const message = await prisma.chatMessage.create({
+    data: { conversationId: conversation.id, author: "bot", authorName, text: "", delivery: "sending", createdAt: now, attachment: attachment as unknown as Prisma.InputJsonValue },
+  });
+  await prisma.chatConversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now } });
+  return deliver(message.id, () => sendMedia(conversation.phone, { mimetype: "audio/ogg", fileName: name, base64: bytes.toString("base64") }));
 }
 
 /** Nova tentativa de mensagem que falhou; a reserva impede dois relógios de reenviarem a mesma. */
