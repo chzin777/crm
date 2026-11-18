@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, MessageSquare, MessageSquarePlus, Mic, RotateCcw, Smile } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, FileText, Loader2, MessageSquare, MessageSquarePlus, Mic, RotateCcw, Smile } from "lucide-react";
 import { sessionBreak, type ChatSession } from "@/lib/chat/session-divider";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
@@ -102,6 +102,31 @@ function Sticker({ message, onOpen }: { message: ChatMessageItem; onOpen: () => 
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={mediaUrl(message)} alt="Figurinha" loading="lazy" onError={() => setFailed(true)} className="h-40 w-40 object-contain" />
     </button>
+  );
+}
+
+/** Texto do áudio do cliente, abaixo do player (discreto enquanto processa ou se falhar). */
+function Transcription({ value }: { value: NonNullable<ChatMessageItem["transcription"]> }) {
+  if (value.status === "pending") {
+    return (
+      <p className="mt-1 flex items-center gap-1.5 px-1 text-[11px] italic opacity-60">
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> Transcrevendo áudio...
+      </p>
+    );
+  }
+  if (value.status === "failed") {
+    return (
+      <p className="mt-1 flex items-center gap-1.5 px-1 text-[11px] italic opacity-60">
+        <AlertCircle className="h-3 w-3 shrink-0" /> Não foi possível transcrever este áudio.
+      </p>
+    );
+  }
+  const text = value.text?.trim();
+  return (
+    <div className="mt-1.5 flex min-w-0 gap-1.5 rounded-lg bg-black/5 px-2 py-1.5 text-xs leading-relaxed dark:bg-white/10">
+      <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
+      <p className="min-w-0 whitespace-pre-wrap break-words">{text ? text : <span className="italic opacity-60">Sem fala reconhecível.</span>}</p>
+    </div>
   );
 }
 
@@ -411,6 +436,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                       ) : (
                         message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />
                       )}
+                      {voice && message.transcription && <Transcription value={message.transcription} />}
                       {missing && <MissingMedia kind={missing} onRetry={message.pendingMedia && onReply ? () => retryMedia(message.id) : undefined} />}
                       {message.interactive ? (
                         <InteractiveListBubble list={message.interactive} messageId={message.id} />

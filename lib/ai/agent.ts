@@ -25,6 +25,7 @@ import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, ba
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
+import { transcribeMessageAudio } from "@/lib/chat/transcription";
 import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
@@ -358,6 +359,13 @@ async function customerMedia(items: PendingMedia[], meta: Omit<AiCallMeta, "maxT
     if (!attachment?.key) return failedMedia(saved?.kind ?? "document", saved?.filename ?? saved?.kind ?? "arquivo", saved?.error ?? "falha ao baixar o arquivo do WhatsApp");
     if (attachment.kind === "sticker") return stickerMedia(attachment.name);
     if (attachment.size > AI_ATTACHMENT_MAX_BYTES) return failedMedia(aiAttachmentKind(attachment.mime, attachment.name) ?? attachment.kind, attachment.name, `arquivo acima de 10 MB (${(attachment.size / 1024 / 1024).toFixed(1)} MB)`);
+    // Áudio do cliente: a mesma transcrição gravada na mensagem (exibida no chat) vira a entrada de texto da IA.
+    if (attachment.kind === "audio" && item.id) {
+      const heard = await transcribeMessageAudio(item.id);
+      if ("text" in heard) return { ...mediaParts("audio", { name: attachment.name, mime: attachment.mime, data: new Uint8Array(0) }, heard.text), source: { messageId: item.id } };
+      if (heard.error && (heard.error.creditExhausted || heard.error.status === 401 || heard.error.status === 503)) throw heard.error;
+      return failedMedia("audio", attachment.name, heard.failed);
+    }
     try {
       const prepared = await prepareMediaSafe({ name: attachment.name, mime: attachment.mime, data: await readFile(attachment.key) }, meta);
       // Mensagem de origem: a receita lida vai para o receituário com o arquivo original.

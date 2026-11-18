@@ -111,6 +111,8 @@ export type ChatMessageItem = {
   createdAt: string;
   attachment: { kind: string; name: string; mime: string; size: number; localUrl?: string } | null;
   pendingMedia?: string | null;
+  /** Áudio do cliente transcrito automaticamente (pending | done | failed). */
+  transcription?: { status: string; text: string | null } | null;
   /** Presente quando a mensagem saiu como lista interativa; o texto fica só como alternativa. */
   interactive?: ChatInteractiveList | null;
 };

@@ -73,5 +73,6 @@ export function serializeMessage(message: ChatMessage) {
     replyTo: message.replyTo,
     createdAt: message.createdAt,
     attachment: attachment ? { kind: attachment.kind, name: attachment.name, mime: attachment.mime, size: attachment.size } : null,
+    transcription: attachment?.kind === "audio" && message.transcriptionStatus ? { status: message.transcriptionStatus, text: message.transcription } : null,
   };
 }

@@ -10,6 +10,7 @@ import { recordSurveyReply } from "@/lib/chat/nps";
 import { absorbPostCloseCourtesy } from "@/lib/chat/post-close";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
+import { transcribeMessageAudio } from "@/lib/chat/transcription";
 
 import { isCustomerMessage, MEDIA_LABELS, mediaFailureReason, readContent, type MetaInboundMessage, type MetaMedia } from "@/lib/chat/inbound-content";
 
@@ -79,13 +80,15 @@ export async function retryInboundMedia(message: Pick<ChatMessage, "id" | "text"
   if (!media?.id) return null;
   const attachment = await storeMedia(media);
   if (!attachment) return null;
-  return prisma.chatMessage.update({
+  const updated = await prisma.chatMessage.update({
     where: { id: message.id },
     data: {
       attachment: attachment as unknown as Prisma.InputJsonValue,
       text: message.text === MEDIA_LABELS[media.kind] ? "" : message.text,
     },
   });
+  if (attachment.kind === "audio") void transcribeMessageAudio(updated.id);
+  return updated;
 }
 
 async function findQuoted(externalId: string | undefined) {
@@ -171,6 +174,9 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;
     throw error;
   }
+
+  // Áudio do cliente: transcreve em segundo plano (o chat mostra o texto e a IA usa o mesmo resultado).
+  if (attachment?.kind === "audio") void transcribeMessageAudio(saved.id);
 
   await prisma.chatConversation.update({
     where: { id: conversation.id },

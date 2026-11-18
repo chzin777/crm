@@ -447,6 +447,9 @@ model ChatMessage {
   metaMedia      Json?
   replyTo        Json?
   externalId     String?          @unique
+  /// Texto do áudio do cliente (whisper); status: pending | done | failed.
+  transcription       String?
+  transcriptionStatus String?
   createdAt      DateTime         @default(now())
   conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
