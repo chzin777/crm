@@ -6,9 +6,11 @@ import { prisma } from "@/lib/prisma";
 export async function GET() {
   const guard = await requireModule("automacoes");
   if (guard.response) return guard.response;
-  const [queues, users] = await Promise.all([
+  const [queues, users, flows] = await Promise.all([
     prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
     prisma.user.findMany({ where: { banned: false }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    // Destinos do nó "Ir para outra automação".
+    prisma.automationFlow.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, status: true } }),
   ]);
-  return NextResponse.json({ queues, users });
+  return NextResponse.json({ queues, users, flows });
 }

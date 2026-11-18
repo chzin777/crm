@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { advance, inactiveSince, pickTrigger, type AdvanceResult, type EnginePorts, type ExecutionContext, type ExecutionState, type StepStatus, type TriggerEvent } from "@/lib/automations/engine";
-import { AUDIO_STORAGE_PREFIX, NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
+import { AUDIO_STORAGE_PREFIX, readFlowSettings, type ConversionKind, NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
 import { addedTags, stageChanges } from "@/lib/automations/events";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
 import { sendAutomaticAudio, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -231,6 +231,13 @@ export function databasePorts(flowId: string): EnginePorts {
       try { data = JSON.parse(raw); } catch { /* texto */ }
       return { status: response.status, data };
     },
+    gotoFlow: async (state, flowId) => {
+      const target = await prisma.automationFlow.findUnique({ where: { id: flowId }, select: { id: true, name: true, status: true } });
+      if (!target) throw new Error("Automação de destino não encontrada.");
+      if (target.status !== "active") throw new Error(`A automação "${target.name}" não está ativa.`);
+      const started = await startFlowFor(target.id, { contactId: state.contactId, conversationId: state.conversationId, vars: state.context.vars });
+      return started ? `Encaminhado para a automação "${target.name}"` : `Contato já está na automação "${target.name}": não entrou de novo`;
+    },
     log: async (state, node, status, message) => {
       await prisma.automationStepLog.create({ data: { executionId: state.id, nodeId: node.id, nodeType: node.type, status, message: message.slice(0, 1000) } });
     },
@@ -239,7 +246,7 @@ export function databasePorts(flowId: string): EnginePorts {
 
 function toState(row: { id: string; flowId: string; contactId: string; conversationId: string | null; currentNodeId: string | null; context: unknown; startedAt: Date }): ExecutionState {
   const context = (row.context && typeof row.context === "object" ? row.context : {}) as Partial<ExecutionContext>;
-  return { id: row.id, flowId: row.flowId, contactId: row.contactId, conversationId: row.conversationId, currentNodeId: row.currentNodeId, context: { vars: context.vars ?? {}, waitingNodeId: context.waitingNodeId ?? null, startedAt: context.startedAt ?? row.startedAt.toISOString(), triggerNodeId: context.triggerNodeId ?? null, ...(context.http ? { http: context.http } : {}) } };
+  return { id: row.id, flowId: row.flowId, contactId: row.contactId, conversationId: row.conversationId, currentNodeId: row.currentNodeId, context: { vars: context.vars ?? {}, waitingNodeId: context.waitingNodeId ?? null, startedAt: context.startedAt ?? row.startedAt.toISOString(), triggerNodeId: context.triggerNodeId ?? null, ...(context.http ? { http: context.http } : {}), ...(context.replySince ? { replySince: context.replySince } : {}), ...(context.variants ? { variants: context.variants } : {}) } };
 }
 
 /**
@@ -310,6 +317,66 @@ export async function triggerAutomations(event: TriggerEvent, target: Target, op
 }
 
 /**
+ * "Ir para outra automação": inicia o fluxo de destino a partir do primeiro gatilho (que só passa direto), com as
+ * variáveis da execução atual. Contato que já está nele (rodando/aguardando) não entra de novo.
+ */
+export async function startFlowFor(flowId: string, target: Target): Promise<string | null> {
+  const flow = await prisma.automationFlow.findFirst({ where: { id: flowId, status: "active" } });
+  if (!flow) return null;
+  const trigger = triggerNodes(sanitizeGraph(flow))[0];
+  if (!trigger) return null;
+  const base = await contactVars(target.contactId);
+  if (!base) return null;
+  const busy = await prisma.automationExecution.findFirst({ where: { flowId, contactId: target.contactId, status: { in: ["running", "waiting"] } }, select: { id: true } });
+  if (busy) return null;
+  const now = new Date();
+  const context: ExecutionContext = { vars: { ...base, ...(target.vars ?? {}) }, startedAt: now.toISOString(), triggerNodeId: trigger.id };
+  const execution = await prisma.automationExecution.create({ data: { flowId, contactId: target.contactId, conversationId: target.conversationId ?? null, status: "waiting", resumeAt: now, currentNodeId: trigger.id, context: context as unknown as Prisma.InputJsonValue } });
+  // Fora da execução atual (que ainda segura a própria trava): o relógio também pegaria em até 1 minuto.
+  setTimeout(() => void runExecution(execution.id).catch((error: unknown) => console.error(`[automacoes] execução ${execution.id}:`, error)), 0);
+  return execution.id;
+}
+
+/**
+ * Aguardar resposta: a mensagem do cliente acorda na hora as execuções paradas nesse nó (a saída Respondeu no
+ * prazo é decidida no motor, pela mensagem recebida depois do início da espera).
+ */
+export async function wakeReplyWaiters(contactId: string) {
+  const waiting = await prisma.automationExecution.findMany({ where: { contactId, status: "waiting", flow: { status: "active" } }, select: { id: true, context: true } });
+  const ids = waiting.filter((row) => { const context = (row.context ?? {}) as Partial<ExecutionContext>; return !!context.replySince && !!context.waitingNodeId; }).map((row) => row.id);
+  if (!ids.length) return 0;
+  await prisma.automationExecution.updateMany({ where: { id: { in: ids }, status: "waiting" }, data: { resumeAt: new Date() } });
+  let resumed = 0;
+  for (const id of ids) if (await runExecution(id).catch((error: unknown) => { console.error(`[automacoes] resposta ${id}:`, error); return null; })) resumed += 1;
+  return resumed;
+}
+
+const CONVERSION_REASON: Record<ConversionKind, string> = {
+  purchase: "Cliente comprou no VMSet",
+  paid: "Cliente pagou / quitou título no VMSet",
+  won: "Oportunidade ganha no pipeline",
+};
+
+/**
+ * Conversão do cliente (compra, pagamento, oportunidade ganha): interrompe as execuções ativas dos fluxos com
+ * "Cancelar automaticamente se o cliente converter" marcado para esse tipo, abortando os passos futuros.
+ * since (opcional, por contato): só cancela execuções iniciadas antes da conversão.
+ */
+export async function cancelOnConversion(contactIds: string[], kind: ConversionKind, since?: Map<string, Date>) {
+  if (!contactIds.length) return 0;
+  const active = await prisma.automationExecution.findMany({
+    where: { contactId: { in: [...new Set(contactIds)] }, status: { in: ["running", "waiting"] } },
+    select: { id: true, contactId: true, currentNodeId: true, startedAt: true, flow: { select: { settings: true } } },
+  });
+  const targets = active.filter((row) => readFlowSettings(row.flow.settings).cancelOnConversion.includes(kind) && (!since?.get(row.contactId) || row.startedAt <= since.get(row.contactId)!));
+  if (!targets.length) return 0;
+  const reason = `${CONVERSION_REASON[kind]}: automação encerrada (cancelamento por conversão)`;
+  const result = await prisma.automationExecution.updateMany({ where: { id: { in: targets.map((row) => row.id) }, status: { in: ["running", "waiting"] } }, data: { status: "cancelled", error: reason, finishedAt: new Date(), lockedUntil: null, resumeAt: null } });
+  await prisma.automationStepLog.createMany({ data: targets.map((row) => ({ executionId: row.id, nodeId: row.currentNodeId ?? "-", nodeType: "conversion", status: "cancelled", message: reason })) });
+  return result.count;
+}
+
+/**
  * "Testar fluxo": roda o grafo (mesmo sem salvar) para um contato real sem efeitos: dados e condições são reais,
  * ações só descrevem o que fariam e os Aguardar são pulados. Nada é gravado.
  */
@@ -338,6 +405,7 @@ export async function simulateFlow(graph: FlowGraph, contactId: string, triggerN
     optOut: describe("marcaria o contato como opt-out"),
     addNote: async (_state, input) => `Simulado: registraria a observação "${input.text.slice(0, 160)}" ${input.target === "contact" ? "no cadastro do contato" : input.target === "both" ? "na oportunidade e no cadastro do contato" : "na oportunidade (ou no contato, se não houver oportunidade aberta)"}`,
     http: async (input) => ({ status: 200, data: { simulado: true, url: input.url } }),
+    gotoFlow: async (_state, flowId) => `Simulado: encaminharia para a automação "${(await prisma.automationFlow.findUnique({ where: { id: flowId }, select: { name: true } }))?.name ?? flowId}"`,
     log: async (_state, node: FlowNode, status, message) => { steps.push({ nodeId: node.id, nodeType: node.type, label: NODE_DEF[node.type].label, status, message }); },
   };
   let state: ExecutionState = { id: "simulacao", flowId: "simulacao", contactId, conversationId: conversation?.id ?? null, currentNodeId: trigger.id, context: { vars: { nome: full.split(/\s+/)[0] ?? "", nome_completo: full, cidade: contact.city ?? "", telefone: contact.phone ?? "", mensagem: "(mensagem de teste)" }, startedAt: new Date().toISOString(), triggerNodeId: trigger.id } };
@@ -417,6 +485,7 @@ export async function cancelAutomationsForContacts(contactIds: string[], reason 
 /** Cards do funil que mudaram de etapa → gatilho "Lead entrou na etapa". */
 export function emitStageChanges(before: { id: string; contactId?: string; coluna: string }[], after: { id: string; contactId?: string; coluna: string }[]) {
   for (const change of stageChanges(before, after)) {
+    if (change.stage === "ganho") void cancelOnConversion([change.contactId], "won").catch((error: unknown) => console.error("[automacoes] conversão (ganho):", error));
     void triggerAutomations({ type: "trigger_stage", stage: change.stage }, { contactId: change.contactId }).catch((error: unknown) => console.error("[automacoes] gatilho de etapa:", error));
   }
 }
@@ -430,13 +499,17 @@ export function emitTagChanges(conversation: { id: string; contactId: string }, 
 
 /** Mensagem do cliente → gatilho "Mensagem recebida". */
 export function emitInboundMessage(conversation: { id: string; contactId: string }, text: string) {
+  void wakeReplyWaiters(conversation.contactId).catch((error: unknown) => console.error("[automacoes] aguardar resposta:", error));
   void triggerAutomations({ type: "trigger_message", text }, { contactId: conversation.contactId, conversationId: conversation.id }).catch((error: unknown) => console.error("[automacoes] gatilho de mensagem:", error));
 }
 
 /** Mesma coisa a partir do id da conversa (webhook do WhatsApp). */
 export async function emitInboundMessageById(conversationId: string, text: string) {
   const conversation = await prisma.chatConversation.findUnique({ where: { id: conversationId }, select: { id: true, contactId: true } });
-  if (conversation && text.trim()) emitInboundMessage(conversation, text);
+  if (!conversation) return;
+  if (text.trim()) emitInboundMessage(conversation, text);
+  // Áudio/foto sem texto também é resposta para o Aguardar resposta.
+  else void wakeReplyWaiters(conversation.contactId).catch((error: unknown) => console.error("[automacoes] aguardar resposta:", error));
 }
 
 /** Contatos dos telefones (opt-out por número marca todos os cadastros com ele). */

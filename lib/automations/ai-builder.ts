@@ -1,4 +1,4 @@
-import { ACTION_TYPES, CONDITION_FIELDS, CONDITION_OPERATORS, FILTER_KINDS, NODE_DEF, NOTE_TARGETS, sanitizeGraph, STAGE_OPTIONS, TIME_UNITS, TRIGGER_TYPES, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@/lib/automations/nodes";
+import { CONVERSION_KINDS, MAX_AB_VARIANTS, readFlowSettings, readVariants, type FlowSettings, ACTION_TYPES, CONDITION_FIELDS, CONDITION_OPERATORS, FILTER_KINDS, NODE_DEF, NOTE_TARGETS, sanitizeGraph, STAGE_OPTIONS, TIME_UNITS, TRIGGER_TYPES, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@/lib/automations/nodes";
 
 /**
  * Criação de automação com IA: o modelo devolve um rascunho (gatilho + passos) num JSON Schema estrito com
@@ -6,11 +6,16 @@ import { ACTION_TYPES, CONDITION_FIELDS, CONDITION_OPERATORS, FILTER_KINDS, NODE
  * Puro: usado pela rota e pelos testes.
  */
 
-export type BuilderWorkspace = { queues: { id: string; name: string }[]; users: { id: string; name: string }[] };
+export type BuilderWorkspace = { queues: { id: string; name: string }[]; users: { id: string; name: string }[]; flows?: { id: string; name: string }[] };
 
 /** Parâmetros possíveis de qualquer nó (strict exige todos; o que não se aplica vem null). */
 const PARAM_KEYS = {
-  mode: { type: ["string", "null"], enum: ["any", "keywords", "settled", null] },
+  mode: { type: ["string", "null"], enum: ["any", "keywords", "settled", "end", "goto", null] },
+  days: { type: ["array", "null"], items: { type: "integer" } },
+  start: { type: ["string", "null"] },
+  end: { type: ["string", "null"] },
+  variants: { type: ["array", "null"], items: { type: "integer" } },
+  flowId: { type: ["string", "null"] },
   customerType: { type: ["string", "null"], enum: ["any", "first", "repeat", null] },
   minAmount: { type: ["number", "null"] },
   store: { type: ["string", "null"] },
@@ -56,6 +61,7 @@ const FILTERS_SCHEMA = {
 export const AUTOMATION_DRAFT_SCHEMA = strictObject({
   name: { type: "string" },
   description: { type: "string" },
+  cancelOnConversion: { type: "array", items: { type: "string", enum: CONVERSION_KINDS.map((item) => item.value) } },
   trigger: strictObject({ type: { type: "string", enum: [...TRIGGER_TYPES] }, params: strictObject(PARAM_KEYS), filters: FILTERS_SCHEMA }),
   steps: {
     type: "array",
@@ -67,14 +73,17 @@ export const AUTOMATION_DRAFT_SCHEMA = strictObject({
       next: { type: ["string", "null"] },
       nextTrue: { type: ["string", "null"] },
       nextFalse: { type: ["string", "null"] },
+      nextReplied: { type: ["string", "null"] },
+      nextTimeout: { type: ["string", "null"] },
+      nextVariants: { type: ["array", "null"], items: { type: ["string", "null"] } },
     }),
   },
 });
 
 type Params = Partial<Record<keyof typeof PARAM_KEYS, unknown>>;
 type DraftFilters = { combinator?: unknown; onFail?: unknown; rules?: unknown } | null;
-type DraftStep = { id?: unknown; type?: unknown; params?: Params | null; filters?: DraftFilters; next?: unknown; nextTrue?: unknown; nextFalse?: unknown };
-export type AutomationDraft = { name?: unknown; description?: unknown; trigger?: { type?: unknown; params?: Params | null; filters?: DraftFilters } | null; steps?: unknown };
+type DraftStep = { id?: unknown; type?: unknown; params?: Params | null; filters?: DraftFilters; next?: unknown; nextTrue?: unknown; nextFalse?: unknown; nextReplied?: unknown; nextTimeout?: unknown; nextVariants?: unknown };
+export type AutomationDraft = { name?: unknown; description?: unknown; cancelOnConversion?: unknown; trigger?: { type?: unknown; params?: Params | null; filters?: DraftFilters } | null; steps?: unknown };
 
 /** Catálogo, etapas, filas e usuários para o prompt (só ids reais). */
 export function builderSystemPrompt(workspace: BuilderWorkspace): string {
@@ -92,6 +101,12 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "Regras:",
     "- steps[0] é o primeiro passo depois do gatilho. Cada passo aponta o próximo em next (id de um passo POSTERIOR na lista) ou null para encerrar.",
     "- Só o tipo condition usa nextTrue (caminho Sim) e nextFalse (caminho Não); nos demais, nextTrue e nextFalse são null. Na condition, next é null.",
+    "- wait_reply (Aguardar resposta do cliente): amount + unit (minutes, hours ou days) é o prazo; usa nextReplied (cliente respondeu no prazo) e nextTimeout (não respondeu); next é null. Use em follow-ups: \"se não responder em 1 dia, mande outra mensagem\" = send_whatsapp → wait_reply (amount 1, unit days) com nextTimeout no follow-up e nextReplied em ai_agent, assign ou null.",
+    "- business_hours (Esperar até horário útil): days = dias da semana (0 = domingo ... 6 = sábado), start e end em HH:MM (horário de Brasília). Coloque ANTES de mensagens quando o pedido falar em horário comercial, não mandar de madrugada ou só em dias úteis (padrão Seg–Sáb, 08:00–18:00: days [1,2,3,4,5,6]).",
+    "- ab_split (Teste A/B): variants = percentuais inteiros (2 a 5 variantes, soma exatamente 100, ex.: [50, 50] ou [70, 30]); nextVariants = lista com o id do primeiro passo de cada variante, na mesma ordem (Variante A, B...); next é null. Cada variante segue o seu próprio caminho (ex.: duas mensagens diferentes).",
+    "- end_flow: mode end (encerra o fluxo) ou goto (vai para outra automação: flowId de uma automação listada); sem next. Use goto só quando o pedido citar uma automação existente.",
+    "- cancelOnConversion (nível da automação): conversões que encerram a automação do contato: purchase (comprou no VMSet), paid (pagou/quitou título), won (oportunidade ganha). Em cadências de venda, recuperação de orçamento e reativação use [\"purchase\", \"won\"]; em cobrança use [\"paid\"]; senão [].",
+    "- Nos demais tipos nextReplied, nextTimeout e nextVariants são null.",
     "- Ids curtos e únicos (ex.: s1, s2). Nunca aponte para um passo anterior (sem laços).",
     "- Tempo: amount + unit (seconds, minutes, hours, days, months, years). Mensagens de WhatsApp fora da janela de 24 h podem não ser entregues: em esperas longas prefira notificar a equipe.",
     "- Mensagens em português do Brasil, curtas e cordiais, com variáveis {{nome}}, {{cidade}}, {{telefone}} quando fizer sentido. Sem emojis em excesso.",
@@ -109,6 +124,7 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     `Etapas do funil (stage): ${STAGE_OPTIONS.map((item) => `${item.value} (${item.label})`).join(", ")}.`,
     `Filas (queueId): ${workspace.queues.length ? workspace.queues.map((queue) => `${queue.id} (${queue.name})`).join(", ") : "nenhuma cadastrada"}.`,
     `Usuários (assigneeId/userIds): ${workspace.users.length ? workspace.users.slice(0, 60).map((user) => `${user.id} (${user.name})`).join(", ") : "nenhum"}.`,
+    `Automações existentes (flowId do end_flow goto): ${workspace.flows?.length ? workspace.flows.slice(0, 60).map((flow) => `${flow.id} (${flow.name})`).join(", ") : "nenhuma"}.`,
     "",
     "Regras & Filtros (kind: op):",
     filters,
@@ -134,6 +150,10 @@ function configFor(type: NodeType, params: Params | null | undefined, filters: D
     else if (field.kind === "user") config[field.key] = userIds.has(String(raw)) ? String(raw) : "";
     else if (field.kind === "users") config[field.key] = (Array.isArray(raw) ? raw : []).map(String).filter((id) => userIds.has(id));
     else if (field.kind === "select") { if (field.options.some((option) => option.value === raw)) config[field.key] = raw; }
+    else if (field.kind === "weekdays") config[field.key] = [...new Set((Array.isArray(raw) ? raw : []).map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+    else if (field.kind === "time") { if (/^\d{2}:\d{2}$/.test(String(raw))) config[field.key] = String(raw); }
+    else if (field.kind === "variants") config[field.key] = (Array.isArray(raw) ? raw : []).map((item) => Math.max(0, Math.min(100, Math.round(Number(item) || 0)))).slice(0, MAX_AB_VARIANTS);
+    else if (field.kind === "flow") config[field.key] = workspace.flows?.some((flow) => flow.id === String(raw)) ? String(raw) : "";
     else config[field.key] = str(raw);
   }
   if (typeof config.tag === "string") config.tag = config.tag.toLowerCase().replace(/\s+/g, "-");
@@ -169,7 +189,11 @@ export function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
   }
   const order = (node: FlowNode) => {
     const incoming = edges.find((edge) => edge.target === node.id);
-    return incoming?.sourceHandle === "true" ? 0 : incoming?.sourceHandle === "false" ? 2 : 1;
+    const handle = incoming?.sourceHandle ?? "";
+    if (handle === "true" || handle === "replied") return 0;
+    if (handle === "false" || handle === "timeout") return 2;
+    const variant = /^v(\d)$/.exec(handle);
+    return variant ? Math.min(2, Number(variant[1]) * 2) : 1;
   };
   const rows = new Map<number, FlowNode[]>();
   for (const node of nodes) rows.set(depth.get(node.id) ?? 0, [...(rows.get(depth.get(node.id) ?? 0) ?? []), node]);
@@ -182,7 +206,7 @@ export function layoutGraph(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
 }
 
 /** Rascunho da IA → grafo do editor. Erro quando não há gatilho válido ou nenhum passo conectado. */
-export function draftToGraph(draft: AutomationDraft, workspace: BuilderWorkspace): { name: string; description: string; graph: FlowGraph } {
+export function draftToGraph(draft: AutomationDraft, workspace: BuilderWorkspace): { name: string; description: string; graph: FlowGraph; settings: FlowSettings } {
   const triggerType = draft.trigger?.type;
   if (!(TRIGGER_TYPES as readonly unknown[]).includes(triggerType)) throw new Error("A IA não definiu um gatilho válido. Descreva quando a automação deve começar.");
   const rawSteps = (Array.isArray(draft.steps) ? draft.steps : []) as DraftStep[];
@@ -201,7 +225,7 @@ export function draftToGraph(draft: AutomationDraft, workspace: BuilderWorkspace
   const edges: FlowEdge[] = [{ id: "trigger-out-n1", source: "trigger", target: "n1", sourceHandle: null }];
   steps.forEach((step, index) => {
     const source = `n${index + 1}`;
-    const link = (target: unknown, handle: "true" | "false" | null) => {
+    const link = (target: unknown, handle: string | null) => {
       const resolved = idOf.get(str(target, 60));
       // Só para frente: sem laços nem auto-conexão.
       if (!resolved || (indexOf.get(resolved) ?? -1) <= index) return;
@@ -210,6 +234,14 @@ export function draftToGraph(draft: AutomationDraft, workspace: BuilderWorkspace
     if (step.type === "condition") {
       link(step.nextTrue, "true");
       link(step.nextFalse, "false");
+    } else if (step.type === "wait_reply") {
+      link(step.nextReplied, "replied");
+      link(step.nextTimeout, "timeout");
+    } else if (step.type === "ab_split") {
+      const variants = readVariants(nodes[index + 1].data.config);
+      (Array.isArray(step.nextVariants) ? step.nextVariants : []).slice(0, variants.length).forEach((target, position) => link(target, `v${position}`));
+    } else if (step.type === "end_flow") {
+      // Encerra: sem próximo passo.
     } else {
       link(step.next, null);
     }
@@ -226,5 +258,6 @@ export function draftToGraph(draft: AutomationDraft, workspace: BuilderWorkspace
     name: str(draft.name, 120) || "Automação criada com IA",
     description: str(draft.description, 300),
     graph,
+    settings: readFlowSettings({ cancelOnConversion: draft.cancelOnConversion }),
   };
 }

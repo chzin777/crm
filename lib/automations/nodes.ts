@@ -11,7 +11,7 @@ export const ERP_TRIGGER_TYPES = [
 export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff", ...ERP_TRIGGER_TYPES] as const;
 export type ErpTriggerType = (typeof ERP_TRIGGER_TYPES)[number];
 export const isErpTrigger = (type: string): type is ErpTriggerType => (ERP_TRIGGER_TYPES as readonly string[]).includes(type);
-export const ACTION_TYPES = ["send_whatsapp", "delay", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "add_note", "opt_out", "condition", "http"] as const;
+export const ACTION_TYPES = ["send_whatsapp", "delay", "business_hours", "wait_reply", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "add_note", "opt_out", "condition", "ab_split", "end_flow", "http"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export type NodeType = TriggerType | (typeof ACTION_TYPES)[number];
 export type NodeCategory = "gatilho_crm" | "gatilho_whatsapp" | "erp_vendas" | "erp_financeiro" | "mensagem" | "ia" | "crm" | "logica";
@@ -32,7 +32,9 @@ export type FieldDef =
   | { key: string; label: string; kind: "select"; options: { value: string; label: string }[]; hint?: string }
   | { key: string; label: string; kind: "boolean"; hint?: string }
   | { key: string; label: string; kind: "list"; placeholder?: string; hint?: string }
-  | { key: string; label: string; kind: "stage" | "queue" | "user" | "users"; hint?: string };
+  | { key: string; label: string; kind: "stage" | "queue" | "user" | "users" | "flow"; hint?: string }
+  /** weekdays: dias da semana (0 = domingo); time: HH:MM; variants: percentuais do Teste A/B. */
+  | { key: string; label: string; kind: "weekdays" | "time" | "variants"; hint?: string };
 
 /** Áudio enviado pelo editor (upload no armazenamento): o valor do campo é "storage:<chave>"; URL http(s) também vale. */
 export const AUDIO_STORAGE_PREFIX = "storage:";
@@ -262,6 +264,124 @@ export const NOTE_TARGETS: { value: NoteTarget; label: string }[] = [
 ];
 const NOTE_HINT = "Variáveis: {{contato.nome}}, {{contato.cidade}}, {{contato.telefone}}, {{mensagem.texto}}, {{fila}}, {{motivo}} e campos do webhook. Sem oportunidade aberta, a nota vai para o cadastro do contato.";
 
+// ---------------------------------------------------------------- Janela de horário comercial
+
+export const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+/** Brasília sem horário de verão desde 2019: UTC-3 fixo. */
+const BRASILIA_OFFSET_MS = 3 * 3_600_000;
+
+const toMinutes = (value: unknown, fallback: number) => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return fallback;
+  const minutes = Number(match[1]) * 60 + Number(match[2]);
+  return Number(match[1]) <= 24 && Number(match[2]) < 60 && minutes <= 24 * 60 ? minutes : fallback;
+};
+
+/** Dias (0 = domingo) e faixa em minutos do dia (horário de Brasília). Padrão: Seg–Sáb, 08:00 às 18:00. */
+export function readBusinessWindow(config: Record<string, unknown>) {
+  const days = Array.isArray(config.days) ? [...new Set(config.days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b) : [1, 2, 3, 4, 5, 6];
+  return { days, start: toMinutes(config.start, 8 * 60), end: toMinutes(config.end, 18 * 60) };
+}
+
+/** "Seg–Sáb · 08:00–18:00" (dias seguidos viram faixa). */
+export function describeBusinessWindow(config: Record<string, unknown>) {
+  const { days, start, end } = readBusinessWindow(config);
+  const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const runs: string[] = [];
+  for (let index = 0; index < days.length;) {
+    let last = index;
+    while (last + 1 < days.length && days[last + 1] === days[last] + 1) last += 1;
+    runs.push(last - index >= 2 ? `${WEEKDAY_LABELS[days[index]]}–${WEEKDAY_LABELS[days[last]]}` : days.slice(index, last + 1).map((day) => WEEKDAY_LABELS[day]).join(", "));
+    index = last + 1;
+  }
+  return `${runs.join(", ") || "Nenhum dia"} · ${hhmm(start)}–${hhmm(end)}`;
+}
+
+/**
+ * Próxima abertura da janela: null quando `now` já está dentro dela (ou a janela é inválida); senão, o instante
+ * exato da abertura do próximo dia útil configurado (horário de Brasília).
+ */
+export function nextBusinessOpening(now: Date, config: Record<string, unknown>): Date | null {
+  const { days, start, end } = readBusinessWindow(config);
+  if (!days.length || end <= start) return null;
+  const local = new Date(now.getTime() - BRASILIA_OFFSET_MS);
+  const minutes = local.getUTCHours() * 60 + local.getUTCMinutes();
+  if (days.includes(local.getUTCDay()) && minutes >= start && minutes < end) return null;
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const day = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + offset));
+    if (!days.includes(day.getUTCDay()) || (offset === 0 && minutes >= start)) continue;
+    return new Date(day.getTime() + start * 60_000 + BRASILIA_OFFSET_MS);
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- Teste A/B e saídas rotuladas
+
+export const MAX_AB_VARIANTS = 5;
+export const variantLetter = (index: number) => String.fromCharCode(65 + index);
+
+/** Percentuais das variantes (2 a 5), inteiros de 0 a 100. */
+export function readVariants(config: Record<string, unknown>): number[] {
+  const raw = Array.isArray(config.variants) ? config.variants : [50, 50];
+  return raw.slice(0, MAX_AB_VARIANTS).map((value) => Math.max(0, Math.min(100, Math.round(Number(value) || 0))));
+}
+
+/** Sorteio ponderado: índice da variante para o número aleatório (0 a 1). */
+export function pickVariant(weights: number[], random: number): number {
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  if (!(total > 0)) return 0;
+  let point = random * total;
+  for (const [index, weight] of weights.entries()) {
+    if (point < weight) return index;
+    point -= weight;
+  }
+  return weights.length - 1;
+}
+
+export type OutputHandle = { id: string; label: string; tone: "yes" | "no" | "warn" | "variant" };
+
+/**
+ * Saídas do nó: null = uma saída comum; [] = sem saída (encerra). Condição (Sim/Não), Aguardar resposta
+ * (Respondeu/Timeout) e Teste A/B (Variante A, B...) têm saídas rotuladas.
+ */
+export function outputHandles(type: NodeType, config: Record<string, unknown>): OutputHandle[] | null {
+  if (type === "condition") return [{ id: "true", label: "Sim / Verdadeiro", tone: "yes" }, { id: "false", label: "Não / Falso", tone: "no" }];
+  if (type === "wait_reply") return [{ id: "replied", label: "Respondeu no prazo", tone: "yes" }, { id: "timeout", label: "Não respondeu (Timeout)", tone: "warn" }];
+  if (type === "ab_split") return readVariants(config).map((percent, index) => ({ id: `v${index}`, label: `Variante ${variantLetter(index)} · ${percent}%`, tone: "variant" }));
+  if (type === "end_flow") return [];
+  return null;
+}
+
+/** Selo curto da aresta pela saída de origem. */
+export function handleLabel(handle: string | null | undefined): string | null {
+  if (handle === "true") return "Sim";
+  if (handle === "false") return "Não";
+  if (handle === "replied") return "Respondeu";
+  if (handle === "timeout") return "Timeout";
+  const variant = /^v(\d)$/.exec(handle ?? "");
+  return variant ? `Variante ${variantLetter(Number(variant[1]))}` : null;
+}
+
+const HANDLE_PATTERN = /^(true|false|replied|timeout|v[0-4])$/;
+
+// ---------------------------------------------------------------- Configurações globais do fluxo
+
+/** Conversões que encerram a automação do contato: compra no VMSet, título pago ou oportunidade ganha. */
+export const CONVERSION_KINDS = [
+  { value: "purchase", label: "Comprou no VMSet (venda faturada)" },
+  { value: "paid", label: "Quitou / pagou um título no VMSet" },
+  { value: "won", label: "Oportunidade movida para Ganho no pipeline" },
+] as const;
+export type ConversionKind = (typeof CONVERSION_KINDS)[number]["value"];
+export type FlowSettings = { cancelOnConversion: ConversionKind[] };
+
+export function readFlowSettings(raw: unknown): FlowSettings {
+  const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const kinds = CONVERSION_KINDS.map((item) => item.value as string);
+  const cancel = Array.isArray(value.cancelOnConversion) ? value.cancelOnConversion.filter((item): item is ConversionKind => kinds.includes(String(item))) : [];
+  return { cancelOnConversion: [...new Set(cancel)] };
+}
+
 // ---------------------------------------------------------------- Catálogo
 
 const DURATION_FIELDS = (amountLabel: string): FieldDef[] => [
@@ -269,7 +389,8 @@ const DURATION_FIELDS = (amountLabel: string): FieldDef[] => [
   { key: "unit", label: "Unidade", kind: "select", options: TIME_UNIT_OPTIONS },
 ];
 
-const DAY_UNIT_OPTIONS = TIME_UNIT_OPTIONS.filter((item) => item.value === "days" || item.value === "months" || item.value === "years");
+const WAIT_REPLY_UNITS = TIME_UNIT_OPTIONS.filter((item) => item.value === "minutes" || item.value === "hours" || item.value === "days");
+const DAY_UNIT_OPTIONS =TIME_UNIT_OPTIONS.filter((item) => item.value === "days" || item.value === "months" || item.value === "years");
 const DAY_DURATION_FIELDS = (amountLabel: string): FieldDef[] => [
   { key: "amount", label: amountLabel, kind: "number" },
   { key: "unit", label: "Unidade", kind: "select", options: DAY_UNIT_OPTIONS },
@@ -320,6 +441,8 @@ export const NODE_DEFS: NodeDef[] = [
 
   { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis, imagem e nota de voz opcionais, com digitando/gravando antes de cada bloco (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }, { key: "audio", label: "Nota de voz (opcional)", kind: "audio", placeholder: "https://.../audio.mp3", hint: "Envie .mp3, .ogg ou .opus (ou cole a URL): chega como áudio gravado na hora, depois da mensagem." }, { key: "presenceMode", label: "Digitando / gravando antes do envio", kind: "select", options: PRESENCE_MODE_OPTIONS }, { key: "presenceSeconds", label: "Tempo de digitando/gravando (segundos)", kind: "number", hint: "De 0 a 20 s, aplicado a cada bloco (texto e áudio)." }], defaults: { text: "", mediaUrl: "", audio: "", presenceMode: "auto", presenceSeconds: 5 } },
   { type: "delay", category: "mensagem", label: "Aguardar", description: "Pausa o fluxo de segundos até anos.", fields: [...DURATION_FIELDS("Quanto tempo"), { key: "businessHours", label: "Retomar só em horário comercial", kind: "boolean" }], defaults: { amount: 1, unit: "hours", businessHours: false } },
+  { type: "business_hours", category: "mensagem", label: "Esperar até horário útil", description: "Janela de horário comercial: dentro dela o fluxo segue na hora; fora, pausa e retoma exatamente na abertura do próximo horário útil (horário de Brasília).", fields: [{ key: "days", label: "Dias da semana", kind: "weekdays" }, { key: "start", label: "Abre às", kind: "time" }, { key: "end", label: "Fecha às", kind: "time" }], defaults: { days: [1, 2, 3, 4, 5, 6], start: "08:00", end: "18:00" } },
+  { type: "wait_reply", category: "mensagem", label: "Aguardar resposta do cliente", description: "Pausa até o cliente mandar mensagem no WhatsApp ou o prazo acabar: saída Respondeu no prazo (na hora em que ele responde) ou Não respondeu (Timeout). A resposta vira {{resposta}}.", fields: [{ key: "amount", label: "Prazo para responder", kind: "number" }, { key: "unit", label: "Unidade", kind: "select", options: WAIT_REPLY_UNITS }], defaults: { amount: 1, unit: "days" } },
   { type: "ai_agent", category: "ia", label: "Acionar agente de IA", description: "Passa o atendimento para a IA com um objetivo.", fields: [{ key: "objective", label: "Objetivo da IA", kind: "textarea", placeholder: "Qualificar cidade e faixa de preço" }], defaults: { objective: "" } },
 
   { type: "move_stage", category: "crm", label: "Mover etapa no pipeline", description: "Move a oportunidade do contato para outra etapa.", fields: [{ key: "stage", label: "Etapa", kind: "stage" }], defaults: { stage: "em-atendimento" } },
@@ -332,6 +455,8 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "opt_out", category: "crm", label: "Marcar opt-out", description: "Tira o contato de campanhas (LGPD) e encerra as automações dele.", fields: [], defaults: {} },
 
   { type: "condition", category: "logica", label: "Condição (se / senão)", description: "Segue pelo caminho Sim quando a verificação (e as Regras & Filtros, se houver) é atendida; senão, pelo caminho Não.", fields: [{ key: "field", label: "Campo / variável", kind: "select", options: CONDITION_FIELDS.map(({ value, label }) => ({ value, label })) }, { key: "variable", label: "Nome da variável", kind: "text", placeholder: "origem" }, { key: "operator", label: "Operador", kind: "select", options: CONDITION_OPERATORS.map(({ value, label }) => ({ value, label })) }, { key: "value", label: "Valor", kind: "text" }], defaults: { field: "reply", operator: "exists", value: "" } },
+  { type: "ab_split", category: "logica", label: "Teste A/B (dividir tráfego)", description: "Sorteia cada contato numa variante pelos percentuais (soma 100%) e segue pela saída dela; a variante fica gravada na execução ({{variante}}) para comparar resultados.", fields: [{ key: "variants", label: "Variantes e percentuais", kind: "variants", hint: "De 2 a 5 variantes; a soma precisa dar 100%." }], defaults: { variants: [50, 50] } },
+  { type: "end_flow", category: "logica", label: "Encerrar / ir para outra automação", description: "Encerra o fluxo na hora ou encaminha o contato para outra automação ativa (que começa do primeiro passo).", fields: [{ key: "mode", label: "Ação", kind: "select", options: [{ value: "end", label: "Encerrar este fluxo" }, { value: "goto", label: "Ir para outra automação" }] }, { key: "flowId", label: "Automação de destino", kind: "flow" }], defaults: { mode: "end", flowId: "" } },
   { type: "http", category: "logica", label: "Requisição HTTP", description: "Chama uma URL externa (GET/POST); a resposta vira variável {{http.campo}}.", fields: [{ key: "method", label: "Método", kind: "select", options: [{ value: "GET", label: "GET" }, { value: "POST", label: "POST" }] }, { key: "url", label: "URL", kind: "url", placeholder: "https://..." }, { key: "body", label: "Corpo JSON (POST)", kind: "textarea", placeholder: "{\"telefone\": \"{{telefone}}\"}" }], defaults: { method: "POST", url: "", body: "" } },
 ];
 
@@ -340,7 +465,7 @@ export const isTrigger = (type: string): type is TriggerType => (TRIGGER_TYPES a
 
 /** dir "LR": nó com entradas à esquerda e saídas à direita (auto-organizar horizontal). */
 export type FlowNode = { id: string; type: NodeType; position: { x: number; y: number }; data: { config: Record<string, unknown>; dir?: "LR" } };
-/** sourceHandle "true"/"false" só na condição. */
+/** sourceHandle: saída rotulada (true/false na condição, replied/timeout no Aguardar resposta, v0..v4 no Teste A/B). */
 export type FlowEdge = { id: string; source: string; target: string; sourceHandle?: string | null };
 export type FlowGraph = { nodes: FlowNode[]; edges: FlowEdge[] };
 
@@ -375,7 +500,13 @@ export function sanitizeGraph(input: { nodes?: unknown; edges?: unknown }): Flow
   const ids = new Set(nodes.map((node) => node.id));
   const edges = (Array.isArray(input.edges) ? input.edges : [])
     .filter((edge): edge is FlowEdge => !!edge && typeof edge === "object" && ids.has((edge as FlowEdge).source) && ids.has((edge as FlowEdge).target) && (edge as FlowEdge).source !== (edge as FlowEdge).target)
-    .map((edge) => ({ id: String(edge.id).slice(0, 120), source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle === "true" || edge.sourceHandle === "false" ? edge.sourceHandle : null }))
+    .map((edge) => ({ id: String(edge.id).slice(0, 120), source: edge.source, target: edge.target, sourceHandle: typeof edge.sourceHandle === "string" && HANDLE_PATTERN.test(edge.sourceHandle) ? edge.sourceHandle : null }))
+    // Nó sem saída (Encerrar) não tem conexões; nas saídas rotuladas, só as que o nó tem.
+    .filter((edge) => {
+      const source = nodes.find((node) => node.id === edge.source)!;
+      const outputs = outputHandles(source.type, source.data.config);
+      return outputs === null ? true : outputs.some((output) => output.id === edge.sourceHandle);
+    })
     .slice(0, 400);
   return { nodes, edges };
 }
@@ -406,6 +537,19 @@ export function validateGraph(graph: FlowGraph): string[] {
     if (node.type === "condition" && config.field === "variable" && !String(config.variable ?? "").trim()) problems.push("Condição: informe o nome da variável.");
     if (node.type === "condition" && config.field !== "none" && CONDITION_OPERATORS.find((item) => item.value === config.operator)?.needsValue && !String(config.value ?? "").trim()) problems.push("Condição: informe o valor da comparação.");
     if (node.type === "add_note" && !String(config.text ?? "").trim()) problems.push("Adicionar observação: escreva o texto da nota.");
+    if (node.type === "business_hours") {
+      const window = readBusinessWindow(config);
+      if (!window.days.length) problems.push("Esperar até horário útil: escolha ao menos um dia da semana.");
+      if (window.end <= window.start) problems.push("Esperar até horário útil: o horário de fechamento precisa ser depois da abertura.");
+    }
+    if (node.type === "wait_reply" && !(readDuration(config, "days").amount > 0)) problems.push("Aguardar resposta: informe o prazo.");
+    if (node.type === "ab_split") {
+      const variants = readVariants(config);
+      if (variants.length < 2) problems.push("Teste A/B: crie ao menos 2 variantes.");
+      else if (variants.reduce((sum, value) => sum + value, 0) !== 100) problems.push("Teste A/B: a soma dos percentuais precisa ser 100%.");
+      else if (variants.some((value) => value <= 0)) problems.push("Teste A/B: cada variante precisa de um percentual maior que 0.");
+    }
+    if (node.type === "end_flow" && config.mode === "goto" && !String(config.flowId ?? "").trim()) problems.push("Ir para outra automação: escolha a automação de destino.");
     if ((node.type === "trigger_erp_after_sale" || node.type === "trigger_erp_overdue" || node.type === "trigger_erp_good_payer" || node.type === "trigger_erp_no_purchase") && !(Number(config.amount) > 0)) problems.push(`${NODE_DEF[node.type].label}: informe o tempo.`);
     if ((node.type === "trigger_erp_due_soon" || node.type === "trigger_erp_birthday") && !(Number(config.amount) >= 0)) problems.push(`${NODE_DEF[node.type].label}: informe os dias.`);
     const filters = readFilters(config);

@@ -25,18 +25,19 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
-  AUDIO_STORAGE_PREFIX, CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
+  AUDIO_STORAGE_PREFIX, CONVERSION_KINDS, describeBusinessWindow, handleLabel, MAX_AB_VARIANTS, outputHandles, readVariants, variantLetter, WEEKDAY_LABELS, type ConversionKind, type FlowSettings, type OutputHandle,
+  CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
   type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
 } from "@/lib/automations/nodes";
 
 type FlowStatus = "draft" | "active" | "paused";
-type FlowData = { id: string; name: string; description: string; status: FlowStatus; webhookToken: string; nodes: FlowNode[]; edges: FlowEdge[] };
-type Options = { queues: { id: string; name: string }[]; users: { id: string; name: string }[] };
+type FlowData = { id: string; name: string; description: string; status: FlowStatus; webhookToken: string; settings?: FlowSettings; nodes: FlowNode[]; edges: FlowEdge[] };
+type Options = { queues: { id: string; name: string }[]; users: { id: string; name: string }[]; flows?: { id: string; name: string; status: string }[] };
 type NodeData = { kind: NodeType; config: Record<string, unknown>; dir?: "LR" };
 type CanvasNode = Node<NodeData, "automation">;
 type Step = { id: string; nodeId: string; nodeType: string; status: string; message: string; createdAt: string };
@@ -47,7 +48,7 @@ const ICONS: Record<NodeType, typeof Zap> = {
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
   trigger_erp_sale: ShoppingBag, trigger_erp_after_sale: CalendarClock, trigger_erp_return: Undo2, trigger_erp_overdue: AlertTriangle, trigger_erp_due_soon: CalendarClock,
   trigger_erp_paid: BadgeCheck, trigger_erp_good_payer: Award, trigger_erp_birthday: Cake, trigger_erp_no_purchase: UserX, trigger_erp_lab_ready: Glasses,
-  send_whatsapp: MessageSquare, delay: Timer, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, add_note: StickyNote, opt_out: ShieldOff, condition: GitBranch, http: Globe,
+  send_whatsapp: MessageSquare, delay: Timer, business_hours: Clock, wait_reply: Hourglass, ab_split: Split, end_flow: Flag, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, add_note: StickyNote, opt_out: ShieldOff, condition: GitBranch, http: Globe,
 };
 const HEADER: Record<NodeCategory, string> = {
   gatilho_crm: "bg-[#C4D600] text-[#051647]",
@@ -109,6 +110,10 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_erp_no_purchase": return `Sem comprar há ${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "months")}`;
     case "trigger_erp_lab_ready": return String(config.store || "Todas as lojas");
     case "send_whatsapp": return String(config.text || (config.audio ? "Nota de voz" : "(mensagem vazia)"));
+    case "business_hours": return describeBusinessWindow(config);
+    case "wait_reply": { const { amount, unit } = readDuration(config, "days"); return `Até ${durationLabel(amount, unit)} pela resposta`; }
+    case "ab_split": return readVariants(config).map((percent, index) => `${variantLetter(index)} ${percent}%`).join(" / ");
+    case "end_flow": return config.mode === "goto" ? `Ir para: ${options.flows?.find((item) => item.id === config.flowId)?.name ?? "(escolha a automação)"}` : "Encerrar este fluxo";
     case "delay": { const { amount, unit } = readDuration(config, "hours"); return `${durationLabel(amount, unit)}${config.businessHours ? " · horário comercial" : ""}`; }
     case "ai_agent": return String(config.objective || "Atendimento pela IA");
     case "assign": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "(escolha a fila)";
@@ -122,7 +127,7 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
   }
 }
 
-const OptionsContext = { current: { queues: [], users: [] } as Options };
+const OptionsContext = { current: { queues: [], users: [] } as Options, flowId: "" };
 const queueNames = () => Object.fromEntries(OptionsContext.current.queues.map((queue) => [queue.id, queue.name]));
 
 const AutomationNode = memo(function AutomationNode({ data, selected }: NodeProps<CanvasNode>) {
@@ -144,22 +149,49 @@ const AutomationNode = memo(function AutomationNode({ data, selected }: NodeProp
         </p>
       ) : null}
       <div className="h-2" />
-      {data.kind === "condition" ? (
-        <>
-          {/* Saídas rotuladas: Sim (verde) e Não (vermelho), cada uma com o seu ponto de conexão. */}
-          <div className={`flex gap-1.5 border-t border-slate-100 px-2 pb-2.5 pt-2 dark:border-slate-800 ${horizontal ? "flex-col items-end" : "justify-between"}`}>
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30"><CheckCircle2 className="h-3 w-3" />Sim / Verdadeiro</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-red-200 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30"><XCircle className="h-3 w-3" />Não / Falso</span>
-          </div>
-          <Handle id="true" type="source" title="Sim / Verdadeiro" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "auto", bottom: 34 } : { left: "25%" }} className="!h-3.5 !w-3.5 !border-2 !border-white !bg-emerald-500" />
-          <Handle id="false" type="source" title="Não / Falso" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "auto", bottom: 10 } : { left: "75%" }} className="!h-3.5 !w-3.5 !border-2 !border-white !bg-red-500" />
-        </>
-      ) : (
-        <Handle type="source" position={horizontal ? Position.Right : Position.Bottom} className={handleCls} />
-      )}
+      <NodeOutputs outputs={outputHandles(data.kind, data.config)} horizontal={horizontal} />
     </div>
   );
 });
+
+const TONE_CHIP: Record<OutputHandle["tone"], string> = {
+  yes: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30",
+  no: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30",
+  warn: "bg-[#F7915E]/15 text-[#9a4a1c] ring-[#F7915E]/40 dark:text-[#F7915E]",
+  variant: "bg-[#002187]/10 text-[#002187] ring-[#002187]/20 dark:bg-white/10 dark:text-[#C4D600] dark:ring-white/20",
+};
+const TONE_HANDLE: Record<OutputHandle["tone"], string> = { yes: "!bg-emerald-500", no: "!bg-red-500", warn: "!bg-[#F7915E]", variant: "!bg-[#002187]" };
+const TONE_ICON: Record<OutputHandle["tone"], typeof Zap> = { yes: CheckCircle2, no: XCircle, warn: Clock, variant: Split };
+
+/**
+ * Saídas do nó: uma comum, nenhuma (Encerrar) ou rotuladas (Sim/Não, Respondeu/Timeout, Variante A/B...), cada
+ * rótulo com o seu ponto de conexão alinhado.
+ */
+function NodeOutputs({ outputs, horizontal }: { outputs: OutputHandle[] | null; horizontal: boolean }) {
+  if (outputs === null) return <Handle type="source" position={horizontal ? Position.Right : Position.Bottom} className={handleCls} />;
+  if (!outputs.length) return <p className="mx-3 mb-2 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-white/10 dark:text-slate-300"><Flag className="h-3 w-3" />Fim do fluxo</p>;
+  return (
+    <>
+      <div className={`flex gap-1.5 border-t border-slate-100 px-2 pb-2.5 pt-2 dark:border-slate-800 ${horizontal ? "flex-col items-end" : "justify-between"}`}>
+        {outputs.map((output) => {
+          const Icon = TONE_ICON[output.tone];
+          return <span key={output.id} className={`inline-flex min-w-0 items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ${TONE_CHIP[output.tone]}`}><Icon className="h-3 w-3 shrink-0" /><span className="truncate">{output.label}</span></span>;
+        })}
+      </div>
+      {outputs.map((output, index) => (
+        <Handle
+          key={output.id}
+          id={output.id}
+          type="source"
+          title={output.label}
+          position={horizontal ? Position.Right : Position.Bottom}
+          style={horizontal ? { top: "auto", bottom: 10 + (outputs.length - 1 - index) * 24 } : { left: `${((index + 0.5) / outputs.length) * 100}%` }}
+          className={`!h-3.5 !w-3.5 !border-2 !border-white ${TONE_HANDLE[output.tone]}`}
+        />
+      ))}
+    </>
+  );
+}
 
 const nodeTypes = { automation: AutomationNode };
 const edgeStyle = { markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 }, style: { strokeWidth: 2 } };
@@ -168,14 +200,15 @@ let nodeSeq = 0;
 const newNodeId = (kind: NodeType) => `${kind.replace(/_/g, "-")}-${Date.now().toString(36)}${(nodeSeq += 1).toString(36)}`;
 
 const toCanvas = (node: FlowNode): CanvasNode => ({ id: node.id, type: "automation", position: node.position, data: { kind: node.type, config: node.data.config, ...(node.data.dir ? { dir: node.data.dir } : {}) } });
-/** Ramo da condição: aresta verde (Sim) ou vermelha (Não) com selo do caminho. */
+/** Ramo de saída rotulada: aresta colorida (Sim/Respondeu verde, Não vermelha, Timeout laranja, Variante azul) com selo. */
 function branchStyle(handle: string | null | undefined): Partial<Edge> {
-  if (handle !== "true" && handle !== "false") return edgeStyle;
-  const color = handle === "true" ? "#10b981" : "#ef4444";
+  const label = handleLabel(handle);
+  if (!label) return edgeStyle;
+  const color = handle === "true" || handle === "replied" ? "#10b981" : handle === "false" ? "#ef4444" : handle === "timeout" ? "#F7915E" : "#002187";
   return {
     markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color },
     style: { strokeWidth: 2, stroke: color },
-    label: handle === "true" ? "Sim" : "Não",
+    label,
     labelStyle: { fill: "#fff", fontSize: 10, fontWeight: 700 },
     labelBgStyle: { fill: color },
     labelBgPadding: [6, 3] as [number, number],
@@ -277,6 +310,49 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
       </label>
     );
   }
+  if (field.kind === "weekdays") {
+    const days = Array.isArray(value) ? value.map(Number) : [];
+    const toggle = (day: number) => onChange(days.includes(day) ? days.filter((item) => item !== day) : [...days, day].sort((a, b) => a - b));
+    return (
+      <div className="space-y-1">
+        {label}
+        <div className="flex flex-wrap gap-1">
+          {WEEKDAY_LABELS.map((name, day) => (
+            <button key={name} type="button" aria-pressed={days.includes(day)} onClick={() => toggle(day)} className={`h-8 min-w-[2.5rem] cursor-pointer rounded-lg px-2 text-[11px] font-semibold ${days.includes(day) ? "bg-[#002187] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "border border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"}`}>{name}</button>
+          ))}
+        </div>
+        {hint}
+      </div>
+    );
+  }
+  if (field.kind === "time") return <label className="block space-y-1">{label}<input type="time" value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} className={`${input} cursor-pointer`} />{hint}</label>;
+  if (field.kind === "variants") {
+    const variants = Array.isArray(value) ? value.map((item) => Number(item) || 0) : [50, 50];
+    const total = variants.reduce((sum, item) => sum + item, 0);
+    const set = (next: number[]) => onChange(next);
+    const even = (count: number) => Array.from({ length: count }, (_, index) => Math.floor(100 / count) + (index < 100 % count ? 1 : 0));
+    return (
+      <div className="space-y-1.5">
+        {label}
+        {variants.map((percent, index) => (
+          <div key={index} className="flex items-center gap-2">
+            <span className="w-20 shrink-0 text-[11px] font-semibold text-[#002187] dark:text-[#C4D600]">Variante {variantLetter(index)}</span>
+            <input type="number" min={0} max={100} aria-label={`Percentual da variante ${variantLetter(index)}`} value={percent} onChange={(event) => set(variants.map((item, position) => (position === index ? Math.max(0, Math.min(100, Math.round(Number(event.target.value) || 0))) : item)))} className={input} />
+            <span className="text-xs text-slate-400">%</span>
+            {variants.length > 2 && <button type="button" onClick={() => set(even(variants.length - 1))} aria-label={`Remover variante ${variantLetter(index)}`} className="cursor-pointer rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600 dark:hover:bg-white/10"><Trash2 className="h-3.5 w-3.5" /></button>}
+          </div>
+        ))}
+        <div className="flex items-center justify-between gap-2">
+          <span className={`text-[11px] font-semibold ${total === 100 ? "text-emerald-600 dark:text-emerald-300" : "text-red-600"}`}>Soma: {total}%{total === 100 ? "" : " (precisa ser 100%)"}</span>
+          <div className="flex gap-1">
+            <button type="button" onClick={() => set(even(variants.length))} className="h-7 cursor-pointer rounded-md border border-slate-200 px-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5">Dividir igual</button>
+            {variants.length < MAX_AB_VARIANTS && <button type="button" onClick={() => set(even(variants.length + 1))} className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2 text-[11px] font-semibold text-[#002187] hover:bg-slate-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5"><Plus className="h-3 w-3" />Variante</button>}
+          </div>
+        </div>
+        {hint}
+      </div>
+    );
+  }
   if (field.kind === "audio") return <AudioField label={label} hint={hint} value={String(value ?? "")} placeholder={field.placeholder} onChange={onChange} />;
   if (field.kind === "textarea") return <label className="block space-y-1">{label}<textarea rows={4} value={String(value ?? "")} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} className={`${input} h-auto resize-y py-2`} />{hint}</label>;
   if (field.kind === "list") return <label className="block space-y-1">{label}<input value={(Array.isArray(value) ? value : []).join(", ")} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} className={input} />{hint ?? <span className="block text-[10px] text-slate-400">Separe por vírgula.</span>}</label>;
@@ -290,6 +366,7 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
   );
   if (field.kind === "select") return select(field.options);
   if (field.kind === "stage") return select(STAGE_OPTIONS);
+  if (field.kind === "flow") return select((options.flows ?? []).filter((item) => item.id !== OptionsContext.flowId).map((item) => ({ value: item.id, label: `${item.name}${item.status === "active" ? "" : " (inativa)"}` })), "Escolha a automação");
   if (field.kind === "queue") return select(options.queues.map((queue) => ({ value: queue.id, label: queue.name })), "Escolha a fila");
   if (field.kind === "user") return select(options.users.map((user) => ({ value: user.id, label: user.name })), "Ninguém (só a fila)");
   if (field.kind === "users") {
@@ -563,7 +640,7 @@ function Executions({ flowId, nodes }: { flowId: string; nodes: CanvasNode[] }) 
     const timer = window.setInterval(() => void load(), 10_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [flowId, filter]);
-  const label = (nodeId: string, type: string) => (NODE_DEF[type as NodeType]?.label ?? (nodes.find((node) => node.id === nodeId) ? NODE_DEF[nodes.find((node) => node.id === nodeId)!.data.kind].label : type));
+  const label = (nodeId: string, type: string) => (type === "conversion" ? "Conversão do cliente" : NODE_DEF[type as NodeType]?.label ?? (nodes.find((node) => node.id === nodeId) ? NODE_DEF[nodes.find((node) => node.id === nodeId)!.data.kind].label : type));
   return (
     <div className="h-full space-y-3 overflow-y-auto p-4">
       <div className="flex flex-wrap gap-1.5">
@@ -661,6 +738,8 @@ function Editor({ flowId }: { flowId: string }) {
   const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [settings, setSettings] = useState<FlowSettings>({ cancelOnConversion: [] });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [saved, setSaved] = useState("");
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<"editor" | "execucoes">("editor");
@@ -681,12 +760,14 @@ function Editor({ flowId }: { flowId: string }) {
       .then(([data, opts]) => {
         if (!active) return;
         OptionsContext.current = opts;
+        OptionsContext.flowId = data.id;
         setOptions(opts);
         setFlow(data);
         setName(data.name);
+        setSettings(data.settings ?? { cancelOnConversion: [] });
         setNodes(data.nodes.map(toCanvas));
         setEdges(data.edges.map(toCanvasEdge));
-        setSaved(JSON.stringify({ name: data.name, nodes: data.nodes, edges: data.edges }));
+        setSaved(JSON.stringify({ name: data.name, nodes: data.nodes, edges: data.edges, settings: data.settings ?? { cancelOnConversion: [] } }));
       })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Erro ao carregar."); });
     return () => { active = false; };
@@ -751,7 +832,7 @@ function Editor({ flowId }: { flowId: string }) {
     nodes: nodes.map((node) => ({ id: node.id, type: node.data.kind, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) }, data: { config: node.data.config, ...(node.data.dir ? { dir: node.data.dir } : {}) } })),
     edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null })),
   }), [nodes, edges]);
-  const dirty = !!flow && JSON.stringify({ name, ...graph }) !== saved;
+  const dirty = !!flow && JSON.stringify({ name, ...graph, settings }) !== saved;
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
   const triggers = nodes.filter((node) => isTrigger(node.data.kind));
   const direction = nodes.some((node) => node.data.dir === "LR") ? "LR" : undefined;
@@ -797,11 +878,12 @@ function Editor({ flowId }: { flowId: string }) {
     if (!flow) return;
     setSaving(true);
     try {
-      const response = await fetch(`/api/automations/${flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...graph, ...(status ? { status } : {}) }) });
+      const response = await fetch(`/api/automations/${flow.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...graph, settings, ...(status ? { status } : {}) }) });
       const data = (await response.json()) as { flow?: FlowData; error?: string; problems?: string[] };
       if (!response.ok || !data.flow) throw new Error(data.problems?.join(" ") ?? data.error ?? "Não foi possível salvar.");
       setFlow(data.flow);
-      setSaved(JSON.stringify({ name: data.flow.name, nodes: data.flow.nodes, edges: data.flow.edges }));
+      setSettings(data.flow.settings ?? { cancelOnConversion: [] });
+      setSaved(JSON.stringify({ name: data.flow.name, nodes: data.flow.nodes, edges: data.flow.edges, settings: data.flow.settings ?? { cancelOnConversion: [] } }));
       toast.success(status === "active" ? "Automação ativada" : status === "paused" ? "Automação pausada" : "Automação salva", data.flow.name);
     } catch (cause) {
       toast.error("Não foi possível salvar", cause instanceof Error ? cause.message : "Tente de novo.");
@@ -824,6 +906,7 @@ function Editor({ flowId }: { flowId: string }) {
     if (field.key === "keywords" && selected.data.config.mode !== "keywords") return false;
     if (selected.data.kind === "condition" && (field.key === "operator" || field.key === "value") && selected.data.config.field === "none") return false;
     if (field.key === "presenceSeconds" && selected.data.config.presenceMode !== "custom") return false;
+    if (field.key === "flowId" && selected.data.config.mode !== "goto") return false;
     return true;
   }) : [];
 
@@ -864,6 +947,7 @@ function Editor({ flowId }: { flowId: string }) {
                 <button type="button" title="Auto-organizar na vertical" aria-label="Auto-organizar na vertical" disabled={!nodes.length} onClick={() => organize("TB")} className={toolBtn}><AlignVerticalSpaceAround className="h-4 w-4" /></button>
                 <button type="button" title="Auto-organizar na horizontal" aria-label="Auto-organizar na horizontal" disabled={!nodes.length} onClick={() => organize("LR")} className={toolBtn}><AlignHorizontalSpaceAround className="h-4 w-4" /></button>
                 <div className="ml-auto flex items-center gap-1.5">
+                  <button type="button" onClick={() => setSettingsOpen(true)} title="Configurações da automação" className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-[#002187] hover:bg-slate-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5"><Settings2 className="h-3.5 w-3.5" />Configurações{settings.cancelOnConversion.length ? <span className="rounded-full bg-[#C4D600] px-1.5 text-[10px] text-[#051647]">{settings.cancelOnConversion.length}</span> : null}</button>
                   <button type="button" disabled={!triggers.length} onClick={() => setTesting(true)} className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-[#002187] hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5"><FlaskConical className="h-3.5 w-3.5" />Testar fluxo</button>
                   <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[#002187] px-3 text-xs font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50">
                     {dirty && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#F7915E]" />}{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}Salvar
@@ -935,6 +1019,26 @@ function Editor({ flowId }: { flowId: string }) {
         )}
       </div>
       {testing && <TestDialog flowId={flow.id} graph={graph} triggers={triggers} onClose={() => setTesting(false)} />}
+      {settingsOpen && (
+        <EntityDialog titleId="config-fluxo" title="Configurações da automação" description="Valem para todos os contatos deste fluxo. Salve a automação para aplicar." onClose={() => setSettingsOpen(false)} size="md">
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-[#051647] dark:text-white">Cancelar automaticamente se o cliente converter</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Assim que a conversão acontece, os passos futuros (esperas, follow-ups) do contato são abortados e a execução aparece como Interrompida no histórico.</p>
+            {CONVERSION_KINDS.map((kind) => {
+              const checked = settings.cancelOnConversion.includes(kind.value);
+              return (
+                <label key={kind.value} className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-white/5">
+                  <input type="checkbox" checked={checked} onChange={() => setSettings((current) => ({ cancelOnConversion: checked ? current.cancelOnConversion.filter((item) => item !== kind.value) : [...current.cancelOnConversion, kind.value as ConversionKind] }))} className="h-4 w-4 cursor-pointer accent-[#002187]" />
+                  {kind.label}
+                </label>
+              );
+            })}
+            <div className="flex justify-end">
+              <button type="button" onClick={() => setSettingsOpen(false)} className="h-9 cursor-pointer rounded-lg bg-[#002187] px-4 text-xs font-semibold text-white hover:bg-[#051647]">Concluir</button>
+            </div>
+          </div>
+        </EntityDialog>
+      )}
       {leaving && <ConfirmDialog variant="destructive" title="Sair sem salvar?" description="Há alterações no fluxo que ainda não foram salvas. Se sair agora, elas serão descartadas." confirmLabel="Descartar e sair" cancelLabel="Continuar editando" onClose={() => setLeaving(false)} onConfirm={() => { setLeaving(false); router.push("/automacoes"); }} />}
     </div>
   );

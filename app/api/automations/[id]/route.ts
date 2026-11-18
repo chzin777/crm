@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { sanitizeGraph, triggerTypesOf, validateGraph } from "@/lib/automations/nodes";
+import { readFlowSettings, sanitizeGraph, triggerTypesOf, validateGraph } from "@/lib/automations/nodes";
 
 type Context = { params: Promise<{ id: string }> };
 const STATUSES = ["draft", "active", "paused"];
@@ -14,7 +14,7 @@ export async function GET(_request: Request, { params }: Context) {
   const flow = await prisma.automationFlow.findUnique({ where: { id } });
   if (!flow) return NextResponse.json({ error: "Automação não encontrada." }, { status: 404 });
   const graph = sanitizeGraph(flow);
-  return NextResponse.json({ flow: { id: flow.id, name: flow.name, description: flow.description, status: flow.status, webhookToken: flow.webhookToken, updatedAt: flow.updatedAt, ...graph } });
+  return NextResponse.json({ flow: { id: flow.id, name: flow.name, description: flow.description, status: flow.status, webhookToken: flow.webhookToken, updatedAt: flow.updatedAt, settings: readFlowSettings(flow.settings), ...graph } });
 }
 
 /** Salva nome, grafo e status. Ativar exige um fluxo válido (gatilho conectado, campos obrigatórios). */
@@ -24,7 +24,7 @@ export async function PUT(request: Request, { params }: Context) {
   const { id } = await params;
   const current = await prisma.automationFlow.findUnique({ where: { id } });
   if (!current) return NextResponse.json({ error: "Automação não encontrada." }, { status: 404 });
-  const body = (await request.json().catch(() => null)) as { name?: unknown; description?: unknown; status?: unknown; nodes?: unknown; edges?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { name?: unknown; description?: unknown; status?: unknown; nodes?: unknown; edges?: unknown; settings?: unknown } | null;
   const graph = sanitizeGraph(body?.nodes !== undefined ? { nodes: body.nodes, edges: body.edges } : current);
   const status = typeof body?.status === "string" && STATUSES.includes(body.status) ? body.status : current.status;
   if (status === "active") {
@@ -41,9 +41,10 @@ export async function PUT(request: Request, { params }: Context) {
       triggerType: triggerTypesOf(graph).join(","),
       nodes: graph.nodes as unknown as Prisma.InputJsonValue,
       edges: graph.edges as unknown as Prisma.InputJsonValue,
+      ...(body?.settings !== undefined ? { settings: readFlowSettings(body.settings) as unknown as Prisma.InputJsonValue } : {}),
     },
   });
-  return NextResponse.json({ flow: { id: flow.id, name: flow.name, description: flow.description, status: flow.status, webhookToken: flow.webhookToken, updatedAt: flow.updatedAt, ...graph } });
+  return NextResponse.json({ flow: { id: flow.id, name: flow.name, description: flow.description, status: flow.status, webhookToken: flow.webhookToken, updatedAt: flow.updatedAt, settings: readFlowSettings(flow.settings), ...graph } });
 }
 
 /** Exclui o fluxo e o histórico de execuções (cascata). */

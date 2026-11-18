@@ -1,5 +1,5 @@
 import { isPresenceMode, type PresenceMode } from "@/lib/chat/presence";
-import { describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
+import { describeBusinessWindow, nextBusinessOpening, outputHandles, pickVariant, readVariants, variantLetter, describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
 
@@ -20,6 +20,10 @@ export type ExecutionContext = {
   /** Gatilho que iniciou a execução (fluxo com vários gatilhos). */
   triggerNodeId?: string | null;
   http?: Record<string, unknown>;
+  /** Aguardar resposta: instante (ISO) a partir do qual uma mensagem do cliente conta como resposta. */
+  replySince?: string | null;
+  /** Teste A/B: variante sorteada por nó ({ "ab-1": "A" }), para atribuição de resultados. */
+  variants?: Record<string, string>;
 };
 
 export type ExecutionState = {
@@ -54,6 +58,10 @@ export type EnginePorts = {
   addNote: (state: ExecutionState, input: { target: NoteTarget; text: string }) => Promise<string>;
   http: (input: { method: string; url: string; body: string }) => Promise<{ status: number; data: unknown }>;
   log: (state: ExecutionState, node: FlowNode, status: StepStatus, message: string) => Promise<void>;
+  /** Encaminha o contato para outra automação ativa (começa do primeiro passo dela). */
+  gotoFlow?: (state: ExecutionState, flowId: string) => Promise<string>;
+  /** Sorteio do Teste A/B (0 a 1); padrão Math.random. */
+  random?: () => number;
 };
 
 export type AdvanceResult =
@@ -139,16 +147,22 @@ export function evaluateCondition(config: Record<string, unknown>, input: { fact
 }
 
 /** Próximo nó: na condição pelo caminho Sim/Não; nos demais, a primeira conexão de saída. */
-export function nextNodeId(graph: FlowGraph, node: FlowNode, branch?: boolean): string | null {
+/** Próximo nó: pela saída rotulada (condição, aguardar resposta, teste A/B) ou pela saída única. */
+export function nextNodeId(graph: FlowGraph, node: FlowNode, handle?: boolean | string | null): string | null {
   const out: FlowEdge[] = graph.edges.filter((edge) => edge.source === node.id);
-  if (node.type === "condition") return out.find((edge) => edge.sourceHandle === (branch ? "true" : "false"))?.target ?? null;
+  const outputs = outputHandles(node.type, node.data.config);
+  if (outputs && !outputs.length) return null;
+  if (outputs) {
+    const id = typeof handle === "boolean" ? (handle ? "true" : "false") : handle;
+    return out.find((edge) => edge.sourceHandle === id)?.target ?? null;
+  }
   return out[0]?.target ?? null;
 }
 
 const brasiliaHour = (date: Date) => Number(new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", hourCycle: "h23" }).format(date)) % 24;
 
 /** Executa um passo (sem o delay, tratado em advance). Devolve a mensagem do log e, na condição, o caminho. */
-async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts): Promise<{ message: string; branch?: boolean }> {
+async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts): Promise<{ message: string; branch?: boolean | string; end?: boolean }> {
   const config = node.data.config;
   const text = (key: string) => renderTemplate(String(config[key] ?? ""), state.context);
   switch (node.type) {
@@ -186,6 +200,24 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
       const branch = check && rules;
       const detail = filters.rules.length ? ` (regras: ${describeFilters(filters)} → ${rules ? "atendidas" : "não atendidas"})` : "";
       return { message: `${branch ? "Condição verdadeira: caminho Sim" : "Condição falsa: caminho Não"}${detail}`, branch };
+    }
+    case "ab_split": {
+      const weights = readVariants(config);
+      // Sorteio uma única vez por contato e nó: a variante fica gravada na execução (atribuição de resultados).
+      const saved = state.context.variants?.[node.id];
+      const index = saved ? Math.max(0, saved.charCodeAt(0) - 65) : pickVariant(weights, (ports.random ?? Math.random)());
+      const letter = variantLetter(index);
+      state.context.variants = { ...(state.context.variants ?? {}), [node.id]: letter };
+      state.context.vars.variante = letter;
+      return { message: `Teste A/B: Variante ${letter} (${weights[index] ?? 0}%)`, branch: `v${index}` };
+    }
+    case "end_flow": {
+      if (config.mode !== "goto") return { message: "Fluxo encerrado", end: true };
+      const flowId = String(config.flowId ?? "");
+      if (!flowId) throw new Error("Escolha a automação de destino.");
+      if (flowId === state.flowId) throw new Error("A automação de destino precisa ser outra.");
+      if (!ports.gotoFlow) throw new Error("Encaminhamento indisponível.");
+      return { message: await ports.gotoFlow(state, flowId), end: true };
     }
     default: return { message: "" };
   }
@@ -241,9 +273,44 @@ export async function advance(graph: FlowGraph, input: ExecutionState, ports: En
       state.currentNodeId = nextNodeId(graph, node);
       continue;
     }
+    if (node.type === "business_hours") {
+      if (state.context.waitingNodeId !== node.id) {
+        const opening = nextBusinessOpening(ports.now(), node.data.config);
+        if (opening) {
+          state.context.waitingNodeId = node.id;
+          await ports.log(state, node, "waiting", `Fora do horário útil (${describeBusinessWindow(node.data.config)}): retoma em ${opening.toISOString()}`);
+          return { status: "waiting", state, resumeAt: opening };
+        }
+        await ports.log(state, node, "ok", "Dentro do horário útil: segue na hora");
+      } else {
+        state.context.waitingNodeId = null;
+        await ports.log(state, node, "ok", "Horário útil aberto: fluxo retomado");
+      }
+      state.currentNodeId = nextNodeId(graph, node);
+      continue;
+    }
+    if (node.type === "wait_reply") {
+      if (state.context.waitingNodeId !== node.id) {
+        const now = ports.now();
+        const resumeAt = delayUntil(now, { ...node.data.config, unit: node.data.config.unit ?? "days" });
+        state.context.waitingNodeId = node.id;
+        state.context.replySince = now.toISOString();
+        await ports.log(state, node, "waiting", `Aguardando resposta do cliente até ${resumeAt.toISOString()}`);
+        return { status: "waiting", state, resumeAt };
+      }
+      const since = new Date(state.context.replySince ?? state.context.startedAt);
+      const reply = await ports.lastReply(state, since);
+      state.context.waitingNodeId = null;
+      state.context.replySince = null;
+      if (reply !== null) state.context.vars.resposta = reply;
+      await ports.log(state, node, "ok", reply !== null ? "Cliente respondeu no prazo" : "Sem resposta no prazo: caminho Timeout");
+      state.currentNodeId = nextNodeId(graph, node, reply !== null ? "replied" : "timeout");
+      continue;
+    }
     try {
       const result = await runNode(node, state, ports);
       await ports.log(state, node, "ok", result.message);
+      if (result.end) return { status: "completed", state: { ...state, currentNodeId: null } };
       state.currentNodeId = nextNodeId(graph, node, result.branch);
       // Ações mudam tags/etapa/fila: as próximas regras releem os dados.
       facts = null;

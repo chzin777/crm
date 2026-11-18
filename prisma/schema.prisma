@@ -796,6 +796,8 @@ model AutomationFlow {
   edges         Json                  @default("[]")
   /// Segredo da URL do gatilho Webhook Externo.
   webhookToken  String                @default("")
+  /// Configurações globais: { cancelOnConversion: ("purchase" | "paid" | "won")[] }.
+  settings      Json                  @default("{}")
   createdById   String?
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt

@@ -18,11 +18,12 @@ export async function POST(request: Request) {
   const prompt = String(body?.prompt ?? "").trim().slice(0, 2000);
   if (prompt.length < 10) return NextResponse.json({ error: "Descreva a automação com um pouco mais de detalhe." }, { status: 400 });
 
-  const [queues, users] = await Promise.all([
+  const [queues, users, flows] = await Promise.all([
     prisma.chatQueue.findMany({ where: { archivedAt: null }, orderBy: [{ order: "asc" }, { name: "asc" }], select: { id: true, name: true } }),
     prisma.user.findMany({ where: { banned: false }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.automationFlow.findMany({ orderBy: { updatedAt: "desc" }, take: 60, select: { id: true, name: true } }),
   ]);
-  const workspace = { queues, users };
+  const workspace = { queues, users, flows };
   const messages = [
     { role: "system" as const, content: builderSystemPrompt(workspace) },
     { role: "user" as const, content: prompt },
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       triggerType: triggerTypesOf(result.graph).join(","),
       nodes: result.graph.nodes as unknown as Prisma.InputJsonValue,
       edges: result.graph.edges as unknown as Prisma.InputJsonValue,
+      settings: result.settings as unknown as Prisma.InputJsonValue,
       webhookToken: randomBytes(18).toString("hex"),
       createdById: guard.user.id,
     },

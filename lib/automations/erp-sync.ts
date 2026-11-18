@@ -3,8 +3,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { firstDispatch } from "@/lib/chat/conversation";
 import { phoneVariants } from "@/lib/chat/phone";
-import { databasePorts, triggerAutomations } from "@/lib/automations/engine-db";
-import { isErpTrigger, sanitizeGraph, shiftDate, triggerNodes, type ErpTriggerType, type FlowNode } from "@/lib/automations/nodes";
+import { cancelOnConversion, databasePorts, triggerAutomations } from "@/lib/automations/engine-db";
+import { readFlowSettings, type ConversionKind, isErpTrigger, sanitizeGraph, shiftDate, triggerNodes, type ErpTriggerType, type FlowNode } from "@/lib/automations/nodes";
 import {
   birthdayLikePatterns, birthdayMatches, birthdayTarget, brDate, brDay, brHour, daysBetween, labVars, nodeDuration, openValue, parseBirthDate,
   saleKey, saleMatches, saleMoment, saleVars, shiftDay, titleMatches, titleVars, type ErpLabOrder, type ErpSale, type ErpTitle,
@@ -247,6 +247,53 @@ const FINANCIAL_TYPES = new Set<ErpTriggerType>(["trigger_erp_overdue", "trigger
 const LIFECYCLE_TYPES = new Set<ErpTriggerType>(["trigger_erp_birthday", "trigger_erp_no_purchase"]);
 
 /** Uma rodada do relógio: vendas sempre; financeiro/OS a cada 15 min (8h–20h); ciclo de vida 1x por dia (9h–20h). */
+// ---------------------------------------------------------------- Cancelamento por conversão
+
+/**
+ * "Cancelar automaticamente se o cliente converter": a cada rodada confere compras no espelho do VMSet (VmsetSale)
+ * depois do início de cada execução ativa; a cada 15 min (8h às 20h) confere títulos pagos na API do VMSet.
+ * Oportunidade ganha é cancelada na hora, no evento de mudança de etapa.
+ */
+export async function checkConversions(now = new Date()): Promise<number> {
+  const rows = await prisma.automationExecution.findMany({
+    where: { status: { in: ["running", "waiting"] }, flow: { status: "active" } },
+    select: { contactId: true, startedAt: true, flow: { select: { settings: true } } },
+    take: 2000,
+  });
+  const wants = (kind: ConversionKind) => rows.filter((row) => readFlowSettings(row.flow.settings).cancelOnConversion.includes(kind));
+  let cancelled = 0;
+
+  const buyers = wants("purchase");
+  if (buyers.length) {
+    const contacts = await prisma.contact.findMany({ where: { id: { in: [...new Set(buyers.map((row) => row.contactId))] } }, select: { id: true, sourceKey: true } });
+    const oldest = new Date(Math.min(...buyers.map((row) => row.startedAt.getTime())));
+    if (contacts.length) {
+      const sales = await prisma.$queryRaw<{ sourceKey: string; seenAt: Date }[]>`
+        SELECT v."sourceKey", max(v."syncedAt") AS "seenAt" FROM "VmsetSale" v
+        WHERE v.type = 'Venda' AND v."syncedAt" >= ${oldest} AND v."sourceKey" IN (${Prisma.join(contacts.map((contact) => contact.sourceKey))})
+        GROUP BY v."sourceKey"`;
+      const seen = new Map(sales.map((sale) => [sale.sourceKey, sale.seenAt]));
+      const converted = new Map<string, Date>();
+      for (const contact of contacts) { const at = seen.get(contact.sourceKey); if (at) converted.set(contact.id, at); }
+      if (converted.size) cancelled += await cancelOnConversion([...converted.keys()], "purchase", converted);
+    }
+  }
+
+  const payers = wants("paid");
+  if (payers.length && brHour(now) >= 8 && brHour(now) < 20 && (await firstDispatch(`automation-conversion:paid:${Math.floor(now.getTime() / (15 * MINUTE))}`))) {
+    const titles = (await fetchEvents<ErpTitle>("paid", brDay(now), new Map())) ?? [];
+    if (titles.length) {
+      const contacts = await prisma.contact.findMany({ where: { id: { in: [...new Set(payers.map((row) => row.contactId))] } }, select: { id: true, cpf: true, phone: true } });
+      const cpfs = new Set(titles.map((title) => title.cpf.replace(/\D/g, "").replace(/^0+/, "")).filter((cpf) => cpf.length >= 9));
+      const phones = new Set(titles.flatMap((title) => (title.phone.replace(/\D/g, "").length >= 10 ? phoneVariants(title.phone) : [])));
+      const paid = contacts.filter((contact) => cpfs.has((contact.cpf ?? "").replace(/\D/g, "").replace(/^0+/, "")) || (!!contact.phone && phoneVariants(contact.phone).some((variant) => phones.has(variant))));
+      // Pagamento do dia: só cancela execuções que começaram antes do início do dia de hoje + pagamento visto agora.
+      if (paid.length) cancelled += await cancelOnConversion(paid.map((contact) => contact.id), "paid", new Map(paid.map((contact) => [contact.id, now])));
+    }
+  }
+  return cancelled;
+}
+
 export async function checkErpTriggers(now = new Date()): Promise<number> {
   const nodes = await erpNodes();
   if (!nodes.length) return 0;
