@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, Boxes, Calculator, ChevronDown, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
+import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { EntityDialog } from "@/components/EntityDialog";
 import { skillSlug, slugify, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type SkillKey } from "@/lib/ai/studio";
@@ -218,7 +218,7 @@ export function RulesSection() {
 
 // ---------------------------------------------------------------- Skills
 
-const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset };
+const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck };
 type SkillDraft = AiSkill & { dirty?: boolean; isNew?: boolean };
 type ToolMap = Record<SkillKey, { tools: string[]; flows: string }>;
 

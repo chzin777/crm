@@ -820,10 +820,6 @@ export function AiSettingsPanel() {
             </label>
           </Block>
 
-          <Block title="Quando a IA resolve sozinha">
-            <Toggle label="Encerrar quando o cliente confirmar que foi resolvido" description="A IA se despede, encerra a conversa e envia a pesquisa de satisfação (como o botão Encerrar do atendimento). Nunca encerra conversa aguardando atendente na fila." checked={settings.closeWhenResolved} onChange={(value) => set("closeWhenResolved", value)} />
-          </Block>
-
           <GroupTitle icon={PlugZap} title="Modelo, conexão e consumo" />
           <Block title="Conexão" hint="A chave da API fica só no servidor (arquivo .env) e nunca aparece na tela.">
             <div className="grid gap-3 sm:grid-cols-3">

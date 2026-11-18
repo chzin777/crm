@@ -9,7 +9,6 @@ import { BROAD_SEARCH_RULES } from "@/lib/ai/stock-showcase";
 import { BRAND_TYPO_RULES } from "@/lib/ai/brand-resolve";
 import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
-import { CLOSE_RULES } from "@/lib/ai/ai-close";
 import { DETAILS_RULES, PRODUCT_CARD_RULES } from "@/lib/ai/product-details";
 import { NATURAL_RULES } from "@/lib/ai/product-names";
 import { LOCATION_RULES } from "@/lib/ai/store-location";
@@ -204,7 +203,8 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = [], mo
     settings.useCustomerOrders ? "" : "Não comente pedidos ou compras anteriores do cliente.",
     settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
     handoff.join("\n"),
-    settings.closeWhenResolved ? `${CLOSE_RULES}\nAo encerrar, use action "resolved" com a despedida curta em reply (a mesma mensagem, sem pergunta).` : "",
+    // Quando encerrar vem da skill "Encerramento Autônomo" (Markdown editável, bloco de skills); aqui só o formato.
+    settings.closeWhenResolved ? 'Ao encerrar (skill "Encerramento Autônomo"), use action "resolved" com a despedida curta em reply (a mesma mensagem, sem pergunta).' : "",
     settings.extraInstructions.trim() ? `Instruções da empresa:\n${settings.extraInstructions.trim()}` : "",
     settings.aiChoosesQueue ? ROUTING_RULES : "",
     settings.aiChoosesQueue ? queueRoutingBlock(queues, settings.queueHints ?? {}) : "",

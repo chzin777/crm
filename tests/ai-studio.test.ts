@@ -110,7 +110,7 @@ describe("Skills nativas: filtro de tools e fluxos", () => {
     const settings = applySkillsToSettings(DEFAULT_AI_SETTINGS, skillsWith(["transbordo_humano"]));
     expect(settings).toMatchObject({ handoffOnComplaint: false, handoffOnPurchaseIntent: false, handoffWhenUnsure: false, handoffOnMedia: false });
     expect(settings.handoffKeywords).toEqual(DEFAULT_AI_SETTINGS.handoffKeywords);
-    expect(applySkillsToSettings(DEFAULT_AI_SETTINGS, skillsWith())).toBe(DEFAULT_AI_SETTINGS);
+    expect(applySkillsToSettings(DEFAULT_AI_SETTINGS, skillsWith())).toEqual(DEFAULT_AI_SETTINGS);
   });
 
   it("crediário e orçamento de lentes desligados tiram os módulos do prompt", () => {

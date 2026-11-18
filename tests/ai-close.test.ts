@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildSystemPrompt } from "@/lib/ai/agent-core";
 import { asksForHuman, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_RULES, CLOSE_TOOL, isPostCloseCourtesy, POST_CLOSE_WINDOW_MS, runAiClose } from "@/lib/ai/ai-close";
+import { applySkillsToSettings, ENCERRAMENTO_MD, fallbackSkills, filterToolsBySkills, skillsPromptBlock } from "@/lib/ai/studio";
 
 const settings = { ...DEFAULT_AI_SETTINGS, closeWhenResolved: true };
 const decide = (pendingText: string, extra: { queued?: boolean; assigned?: boolean } = {}) =>
@@ -63,12 +64,25 @@ describe("encerramento pela IA no fluxo oficial (encerra no banco + pesquisa de 
     expect(isPostCloseCourtesy({ text: "valeu", isText: true, lastClosedAt: closedAt, receivedAt: new Date(closedAt.getTime() + POST_CLOSE_WINDOW_MS + 1), hasOpen: false })).toBe(false);
   });
 
-  it("regras no prompt: despedida única sem pergunta aberta e chamada de encerrarAtendimento (só com a opção ligada)", () => {
+  it("regras vêm da skill Encerramento Autônomo: despedida única sem pergunta aberta e chamada de encerrarAtendimento", () => {
     expect(CLOSE_TOOL.function.name).toBe("encerrarAtendimento");
-    const on = buildSystemPrompt({ settings, info: "" });
-    expect(on).toContain(CLOSE_RULES);
-    expect(CLOSE_RULES).toContain("chame encerrarAtendimento para finalizar o atendimento e liberar a pesquisa de satisfação");
     expect(CLOSE_RULES).toContain("não faça perguntas abertas");
-    expect(buildSystemPrompt({ settings: { ...settings, closeWhenResolved: false }, info: "" })).not.toContain(CLOSE_RULES);
+    expect(ENCERRAMENTO_MD).toContain("chame encerrarAtendimento para finalizar o atendimento e liberar a pesquisa de satisfação");
+    expect(ENCERRAMENTO_MD).toContain("não faça perguntas abertas");
+    const skills = fallbackSkills();
+    expect(skillsPromptBlock(skills)).toContain("chame encerrarAtendimento");
+    expect(buildSystemPrompt({ settings, info: "" })).toContain('action "resolved"');
+    expect(buildSystemPrompt({ settings: { ...settings, closeWhenResolved: false }, info: "" })).not.toContain('action "resolved" com a despedida');
+  });
+
+  it("skill desligada desliga o encerramento e a ferramenta; ligada mantém", () => {
+    const skills = fallbackSkills();
+    expect(applySkillsToSettings({ ...settings, closeWhenResolved: false }, skills).closeWhenResolved).toBe(true);
+    const off = skills.map((skill) => (skill.slug === "encerramento_autonomo" ? { ...skill, isActive: false } : skill));
+    expect(applySkillsToSettings(settings, off).closeWhenResolved).toBe(false);
+    const tools = [{ definition: CLOSE_TOOL }];
+    expect(filterToolsBySkills(tools, off)).toHaveLength(0);
+    expect(filterToolsBySkills(tools, skills)).toHaveLength(1);
+    expect(skillsPromptBlock(off)).not.toContain("chame encerrarAtendimento");
   });
 });

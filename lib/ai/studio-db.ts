@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
 import { readAiSettings } from "@/lib/ai/store";
-import { chunkText, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
+import { chunkText, DEFAULT_SKILLS, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
 
 /** Estúdio de IA no banco: regras, skills e base de conhecimento (RAG). Falha de banco nunca derruba a resposta. */
 
@@ -44,10 +44,28 @@ export async function seedSkills(): Promise<void> {
   await prisma.aiSkill.createMany({ data: seedSkillRows(legacy), skipDuplicates: true });
 }
 
+let nativesChecked = false;
+
+/**
+ * Skills nativas criadas depois do seed inicial (ex.: Encerramento Autônomo) entram nas bases existentes uma vez,
+ * herdando a opção antiga de /ia ("Encerrar quando o cliente confirmar que foi resolvido").
+ */
+async function addMissingNativeSkills(rows: AiSkill[]): Promise<boolean> {
+  if (nativesChecked) return false;
+  const missing = DEFAULT_SKILLS.filter((skill) => !rows.some((row) => row.slug === skill.slug));
+  if (missing.length) {
+    const settings = await readAiSettings();
+    const data = missing.map((skill) => (skill.slug === "encerramento_autonomo" ? { ...skill, isActive: settings.closeWhenResolved } : skill));
+    await prisma.aiSkill.createMany({ data, skipDuplicates: true });
+  }
+  nativesChecked = true;
+  return missing.length > 0;
+}
+
 export async function listSkills(): Promise<AiSkill[]> {
   const rows = await prisma.aiSkill.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: SKILL_SELECT });
-  if (rows.length) return rows;
-  await seedSkills();
+  if (rows.length && !(await addMissingNativeSkills(rows))) return rows;
+  if (!rows.length) await seedSkills();
   return prisma.aiSkill.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: SKILL_SELECT });
 }
 

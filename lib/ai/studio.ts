@@ -97,7 +97,7 @@ export function topicsToRules(topics: { id?: string; title: string; enabled: boo
 // ---------------------------------------------------------------- Skills em Markdown
 
 /** Skills nativas: o slug liga a skill às ferramentas e fluxos do CRM (desligar a skill desliga a ferramenta). */
-export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano"] as const;
+export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo"] as const;
 export type SkillKey = (typeof SKILL_KEYS)[number];
 
 export type AiSkill = {
@@ -123,7 +123,17 @@ export const SKILL_TOOLS: Record<SkillKey, { tools: string[]; flows: string }> =
   crediario_aprovacao: { tools: [], flows: "Consulta de parcelas com card de aprovação no /chat" },
   pipeline_automatico: { tools: [], flows: "Criação/avanço automático da oportunidade no funil" },
   transbordo_humano: { tools: [], flows: "Transbordo por reclamação, compra, dúvida ou documento" },
+  encerramento_autonomo: { tools: ["encerrarAtendimento"], flows: "Despedida, encerramento oficial e pesquisa de satisfação quando o cliente dá o assunto por resolvido" },
 };
+
+/** Antigo bloco "Quando a IA resolve sozinha" de /ia: mesmas regras de encerramento, agora editáveis. */
+export const ENCERRAMENTO_MD = [
+  "## Protocolo",
+  "1. Quando o cliente agradecer dando o assunto por encerrado e **NÃO** estiver aguardando atendente na fila, escreva UMA despedida breve e calorosa, com suas palavras, e chame encerrarAtendimento para finalizar o atendimento e liberar a pesquisa de satisfação.",
+  "2. No encerramento, não faça perguntas abertas.",
+  "3. Se o cliente agradeceu mas fez outra pergunta ou pediu um atendente, **NÃO** encerre: responda a pergunta.",
+  "4. Nunca encerre conversa aguardando atendente na fila ou já com um atendente.",
+].join("\n");
 
 export const DEFAULT_SKILLS: Omit<AiSkill, "id">[] = [
   {
@@ -178,6 +188,15 @@ export const DEFAULT_SKILLS: Omit<AiSkill, "id">[] = [
     instructionsMd: "## Protocolo\n1. Pedido explícito de falar com uma pessoa **sempre** transfere.\n2. Em reclamação, acolha o cliente primeiro e transfira em seguida.\n3. Ao transferir, avise o cliente com naturalidade e resuma o caso para o atendente.\n4. Não prometa prazos de retorno que a equipe não definiu.",
     isActive: true,
     sortOrder: 60,
+    builtin: true,
+  },
+  {
+    name: "Encerramento Autônomo",
+    slug: "encerramento_autonomo",
+    triggerDescription: "Cliente agradece dando o assunto por encerrado (\"muito obrigado, já me ajudou\", \"valeu, era só isso\", \"tudo certo, obrigado\", \"até mais\").",
+    instructionsMd: ENCERRAMENTO_MD,
+    isActive: true,
+    sortOrder: 70,
     builtin: true,
   },
 ];
@@ -235,8 +254,10 @@ export function filterToolsBySkills<T extends { definition: { function: { name: 
 
 /** Transbordo desligado: só o pedido explícito de pessoa (palavras e limite de respostas) continua transferindo. */
 export function applySkillsToSettings(settings: AiSettings, skills: AiSkill[] | undefined): AiSettings {
-  if (skillEnabled(skills, "transbordo_humano")) return settings;
-  return { ...settings, handoffOnComplaint: false, handoffOnPurchaseIntent: false, handoffWhenUnsure: false, handoffOnMedia: false };
+  // Encerramento pela IA: vale a skill "Encerramento Autônomo" (antigo "Quando a IA resolve sozinha" de /ia).
+  const closing = { ...settings, closeWhenResolved: skillEnabled(skills, "encerramento_autonomo") };
+  if (skillEnabled(skills, "transbordo_humano")) return closing;
+  return { ...closing, handoffOnComplaint: false, handoffOnPurchaseIntent: false, handoffWhenUnsure: false, handoffOnMedia: false };
 }
 
 /**
