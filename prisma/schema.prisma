@@ -115,8 +115,16 @@ model Contact {
   marketingOptOut           Boolean                @default(false)
   marketingOptOutAt         DateTime?
   marketingOptOutReason     String?
+  /// Lead Score: pontos alterados pelas automações (nó Alterar pontuação) e pela equipe.
+  score                     Int                    @default(0)
+  /// Nível pelas faixas configuradas em /clientes-vip: BRONZE | PRATA | OURO | DIAMANTE.
+  tier                      String                 @default("BRONZE")
+  scoreUpdatedAt            DateTime?
+  /// Campos personalizados (chave da ContactFieldDef → valor em texto).
+  customFields              Json                   @default("{}")
   createdAt                 DateTime               @default(now())
   updatedAt                 DateTime               @updatedAt
+  scoreLogs                 ContactScoreLog[]
   importedSales             ImportedSale[]
   npsResponses              NpsResponse[]
   chatConversations         ChatConversation[]
@@ -130,6 +138,68 @@ model Contact {
   @@index([email])
   @@index([name])
   @@index([marketingOptOut])
+  @@index([score])
+  @@index([tier])
+}
+
+/// Movimentação de pontos do Lead Score (motivo, delta, saldo e nível depois).
+model ContactScoreLog {
+  id         String   @id @default(cuid())
+  contactId  String
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  delta      Int
+  scoreAfter Int
+  tierBefore String
+  tierAfter  String
+  reason     String   @default("")
+  /// automacao | equipe | sistema
+  source     String   @default("automacao")
+  createdAt  DateTime @default(now())
+
+  @@index([contactId, createdAt])
+}
+
+/// Definição de campo personalizado do contato (texto, número, data ou seleção).
+model ContactFieldDef {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  label     String
+  /// text | number | date | select
+  type      String   @default("text")
+  options   Json     @default("[]")
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+/// Link curto rastreado (/r/slug): identifica o contato que clicou e dispara o gatilho de automação.
+model TrackedLink {
+  id          String             @id @default(cuid())
+  slug        String             @unique
+  url         String
+  contactId   String?
+  flowId      String?
+  /// automacao | campanha | manual
+  source      String             @default("manual")
+  label       String             @default("")
+  clicks      Int                @default(0)
+  lastClickAt DateTime?
+  createdAt   DateTime           @default(now())
+  clickLog    TrackedLinkClick[]
+
+  @@index([contactId])
+  @@index([createdAt])
+}
+
+model TrackedLinkClick {
+  id        String      @id @default(cuid())
+  linkId    String
+  link      TrackedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  contactId String?
+  userAgent String      @default("")
+  createdAt DateTime    @default(now())
+
+  @@index([linkId, createdAt])
+  @@index([contactId, createdAt])
 }
 
 /// Erros críticos recentes (webhooks, IA, campanhas, rotinas), gravados por lib/monitoring/error-reporter.ts.

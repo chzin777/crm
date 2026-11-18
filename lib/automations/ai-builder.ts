@@ -6,7 +6,7 @@ import { CONVERSION_KINDS, MAX_AB_VARIANTS, readFlowSettings, readVariants, type
  * Puro: usado pela rota e pelos testes.
  */
 
-export type BuilderWorkspace = { queues: { id: string; name: string }[]; users: { id: string; name: string }[]; flows?: { id: string; name: string }[] };
+export type BuilderWorkspace = { queues: { id: string; name: string }[]; users: { id: string; name: string }[]; flows?: { id: string; name: string }[]; fields?: { key: string; label: string }[] };
 
 /** Parâmetros possíveis de qualquer nó (strict exige todos; o que não se aplica vem null). */
 const PARAM_KEYS = {
@@ -16,6 +16,13 @@ const PARAM_KEYS = {
   end: { type: ["string", "null"] },
   variants: { type: ["array", "null"], items: { type: "integer" } },
   flowId: { type: ["string", "null"] },
+  operation: { type: ["string", "null"], enum: ["add", "subtract", null] },
+  reason: { type: ["string", "null"] },
+  fieldKey: { type: ["string", "null"] },
+  urlContains: { type: ["string", "null"] },
+  tier: { type: ["string", "null"], enum: ["any", "BRONZE", "PRATA", "OURO", "DIAMANTE", null] },
+  direction: { type: ["string", "null"], enum: ["any", "up", "down", null] },
+  trackLinks: { type: ["boolean", "null"] },
   customerType: { type: ["string", "null"], enum: ["any", "first", "repeat", null] },
   minAmount: { type: ["number", "null"] },
   store: { type: ["string", "null"] },
@@ -107,6 +114,9 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "- end_flow: mode end (encerra o fluxo) ou goto (vai para outra automação: flowId de uma automação listada); sem next. Use goto só quando o pedido citar uma automação existente.",
     "- cancelOnConversion (nível da automação): conversões que encerram a automação do contato: purchase (comprou no VMSet), paid (pagou/quitou título), won (oportunidade ganha). Em cadências de venda, recuperação de orçamento e reativação use [\"purchase\", \"won\"]; em cobrança use [\"paid\"]; senão [].",
     "- Nos demais tipos nextReplied, nextTimeout e nextVariants são null.",
+    "- Lead Score: change_score com operation (add ou subtract), amount (pontos, sempre positivo) e reason (motivo curto). Gatilhos: trigger_score (amount = pontuação atingida), trigger_tier (tier BRONZE, PRATA, OURO, DIAMANTE ou any; direction up, down ou any) e trigger_link_click (urlContains opcional). Ex.: \"quem virar Diamante recebe mensagem VIP e a equipe é avisada\" = trigger_tier (tier DIAMANTE, direction up) → send_whatsapp → notify.",
+    "- update_field: fieldKey de um campo personalizado listado e value (aceita variáveis, ex.: {{venda.loja}}).",
+    "- send_whatsapp com link para o cliente clicar: trackLinks true (o link vira rastreado e o clique pode disparar trigger_link_click).",
     "- Ids curtos e únicos (ex.: s1, s2). Nunca aponte para um passo anterior (sem laços).",
     "- Tempo: amount + unit (seconds, minutes, hours, days, months, years). Mensagens de WhatsApp fora da janela de 24 h podem não ser entregues: em esperas longas prefira notificar a equipe.",
     "- Mensagens em português do Brasil, curtas e cordiais, com variáveis {{nome}}, {{cidade}}, {{telefone}} quando fizer sentido. Sem emojis em excesso.",
@@ -124,6 +134,7 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     `Etapas do funil (stage): ${STAGE_OPTIONS.map((item) => `${item.value} (${item.label})`).join(", ")}.`,
     `Filas (queueId): ${workspace.queues.length ? workspace.queues.map((queue) => `${queue.id} (${queue.name})`).join(", ") : "nenhuma cadastrada"}.`,
     `Usuários (assigneeId/userIds): ${workspace.users.length ? workspace.users.slice(0, 60).map((user) => `${user.id} (${user.name})`).join(", ") : "nenhum"}.`,
+    `Campos personalizados (fieldKey do update_field): ${workspace.fields?.length ? workspace.fields.map((field) => `${field.key} (${field.label})`).join(", ") : "nenhum"}.`,
     `Automações existentes (flowId do end_flow goto): ${workspace.flows?.length ? workspace.flows.slice(0, 60).map((flow) => `${flow.id} (${flow.name})`).join(", ") : "nenhuma"}.`,
     "",
     "Regras & Filtros (kind: op):",
@@ -153,6 +164,7 @@ function configFor(type: NodeType, params: Params | null | undefined, filters: D
     else if (field.kind === "weekdays") config[field.key] = [...new Set((Array.isArray(raw) ? raw : []).map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
     else if (field.kind === "time") { if (/^\d{2}:\d{2}$/.test(String(raw))) config[field.key] = String(raw); }
     else if (field.kind === "variants") config[field.key] = (Array.isArray(raw) ? raw : []).map((item) => Math.max(0, Math.min(100, Math.round(Number(item) || 0)))).slice(0, MAX_AB_VARIANTS);
+    else if (field.kind === "contact_field") config[field.key] = workspace.fields?.some((item) => item.key === String(raw)) ? String(raw) : "";
     else if (field.kind === "flow") config[field.key] = workspace.flows?.some((flow) => flow.id === String(raw)) ? String(raw) : "";
     else config[field.key] = str(raw);
   }

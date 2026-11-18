@@ -8,6 +8,7 @@ export const MODULES = [
   { key: "modelos", label: "Modelos WhatsApp", href: "/modelos", group: "Marketing" },
   { key: "nps", label: "Pesquisas NPS", href: "/nps", group: "Marketing" },
   { key: "automacoes", label: "Automações", href: "/automacoes", group: "Marketing" },
+  { key: "pontuacao", label: "Clientes VIP & Pontuação", href: "/clientes-vip", group: "Marketing" },
   { key: "lojas", label: "Lojas", href: "/lojas", group: "Gestão" },
   { key: "usuarios", label: "Usuários", href: "/usuarios", group: "Gestão" },
   { key: "cargos", label: "Cargos", href: "/cargos", group: "Gestão" },

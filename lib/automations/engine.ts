@@ -1,4 +1,5 @@
 import { isPresenceMode, type PresenceMode } from "@/lib/chat/presence";
+import { TIERS } from "@/lib/scoring";
 import { describeBusinessWindow, nextBusinessOpening, outputHandles, pickVariant, readVariants, variantLetter, describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
@@ -45,7 +46,7 @@ export type EnginePorts = {
   lastReply: (state: ExecutionState, since: Date) => Promise<string | null>;
   nextBusinessTime: (date: Date) => Promise<Date>;
   /** audio: URL http(s) ou "storage:<chave>" (upload), enviado como nota de voz. presence: digitando/gravando antes de cada bloco. */
-  sendWhatsApp: (state: ExecutionState, input: { text: string; mediaUrl: string; audio?: string; presence?: { mode: PresenceMode; seconds: number | null } }) => Promise<string>;
+  sendWhatsApp: (state: ExecutionState, input: { text: string; mediaUrl: string; audio?: string; presence?: { mode: PresenceMode; seconds: number | null }; trackLinks?: boolean }) => Promise<string>;
   aiAgent: (state: ExecutionState, objective: string) => Promise<string>;
   moveStage: (state: ExecutionState, stage: string) => Promise<string>;
   createOpportunity: (state: ExecutionState) => Promise<string>;
@@ -60,6 +61,10 @@ export type EnginePorts = {
   log: (state: ExecutionState, node: FlowNode, status: StepStatus, message: string) => Promise<void>;
   /** Encaminha o contato para outra automação ativa (começa do primeiro passo dela). */
   gotoFlow?: (state: ExecutionState, flowId: string) => Promise<string>;
+  /** Lead Score: soma (delta > 0) ou tira pontos com motivo. */
+  changeScore?: (state: ExecutionState, delta: number, reason: string) => Promise<string>;
+  /** Campo personalizado do contato (valor já com as variáveis aplicadas). */
+  updateField?: (state: ExecutionState, key: string, value: string) => Promise<string>;
   /** Sorteio do Teste A/B (0 a 1); padrão Math.random. */
   random?: () => number;
 };
@@ -169,7 +174,21 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
     case "send_whatsapp": {
       const seconds = config.presenceSeconds === undefined || config.presenceSeconds === "" ? null : Number(config.presenceSeconds);
       const presence = { mode: isPresenceMode(config.presenceMode) ? config.presenceMode : "auto" as const, seconds };
-      return { message: await ports.sendWhatsApp(state, { text: text("text"), mediaUrl: text("mediaUrl"), audio: text("audio").trim(), presence }) };
+      return { message: await ports.sendWhatsApp(state, { text: text("text"), mediaUrl: text("mediaUrl"), audio: text("audio").trim(), presence, trackLinks: config.trackLinks === true }) };
+    }
+    case "change_score": {
+      if (!ports.changeScore) throw new Error("Pontuação indisponível.");
+      const amount = Math.max(0, Math.round(Number(config.amount) || 0));
+      if (!amount) throw new Error("Informe quantos pontos.");
+      const delta = config.operation === "subtract" ? -amount : amount;
+      const reason = text("reason").trim() || "Automação";
+      return { message: await ports.changeScore(state, delta, reason) };
+    }
+    case "update_field": {
+      if (!ports.updateField) throw new Error("Campos personalizados indisponíveis.");
+      const key = String(config.fieldKey ?? "").trim();
+      if (!key) throw new Error("Escolha o campo.");
+      return { message: await ports.updateField(state, key, text("value")) };
     }
     case "ai_agent": return { message: await ports.aiAgent(state, text("objective")) };
     case "move_stage": return { message: await ports.moveStage(state, String(config.stage ?? "")) };
@@ -331,6 +350,10 @@ export type TriggerEvent =
   | { type: "trigger_inactive"; nodeId: string }
   | { type: "trigger_webhook" }
   | { type: "trigger_ai_handoff"; queueId: string | null }
+  | { type: "trigger_link_click"; url: string }
+  /** Lead Score mudou de previous para score: dispara nos nós cujo valor foi cruzado para cima. */
+  | { type: "trigger_score"; score: number; previous: number }
+  | { type: "trigger_tier"; tier: string; previous: string }
   /** Gatilhos do VMSet: o sincronizador já filtrou pelo nó (tempo, valor, loja); aqui só confere o nó. */
   | { type: ErpTriggerType; nodeId: string };
 
@@ -348,6 +371,17 @@ export function triggerMatches(node: FlowNode | null, event: TriggerEvent): bool
   if (event.type === "trigger_tag") return plain(String(config.tag ?? "")) === plain(event.tag);
   if (event.type === "trigger_inactive" || isErpTrigger(event.type)) return "nodeId" in event && node.id === event.nodeId;
   if (event.type === "trigger_ai_handoff") return !String(config.queueId ?? "") || String(config.queueId) === event.queueId;
+  if (event.type === "trigger_link_click") return !plain(String(config.urlContains ?? "")) || plain(event.url).includes(plain(String(config.urlContains)));
+  if (event.type === "trigger_score") {
+    const target = Number(config.amount) || 0;
+    return target > 0 && event.previous < target && event.score >= target;
+  }
+  if (event.type === "trigger_tier") {
+    const wanted = String(config.tier ?? "any");
+    const rank = (tier: string) => TIERS.indexOf(tier as (typeof TIERS)[number]);
+    const direction = rank(event.tier) > rank(event.previous) ? "up" : "down";
+    return (wanted === "any" || wanted === event.tier) && (config.direction === "any" || !config.direction || config.direction === direction);
+  }
   return true;
 }
 

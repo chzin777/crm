@@ -12,6 +12,7 @@ import { CampaignBadge } from "@/components/chat/CampaignBadge";
 import { fieldClass } from "@/components/chat/MenuFormParts";
 import { clockTime, formatCpf, initials, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
+import { ContactCustomFields } from "@/components/ContactCustomFields";
 import { CUSTOMER_TYPE_COLOR, CUSTOMER_TYPE_LABEL, type CustomerType } from "@/lib/sales-pipeline";
 import { STATUS_LABELS, type ContactNoteItem, type ContactProfile, type ConversationDetail } from "@/lib/chat/types";
 
@@ -323,6 +324,10 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
             ) : (
               <Empty text={failed ? "Não foi possível carregar o cadastro." : "Carregando..."} />
             )}
+          </Section>
+
+          <Section title="Pontuação & campos personalizados">
+            <ContactCustomFields contactId={conversation.contactId} canWrite={canWrite} />
           </Section>
 
           <Section title="Oportunidade no Pipeline">

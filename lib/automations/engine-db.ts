@@ -13,7 +13,10 @@ import { aiTakeoverPatch } from "@/lib/chat/queue-rules";
 import { hoursFor } from "@/lib/chat/operations";
 import { isOpenAt } from "@/lib/chat/hours";
 import { phoneVariants } from "@/lib/chat/phone";
-import { sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";import { resolveChatCapabilities } from "@/lib/permissions";
+import { sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
+import { changeScore } from "@/lib/scoring-db";
+import { setContactFields } from "@/lib/contact-fields-db";
+import { trackLinksInText } from "@/lib/tracked-links";import { resolveChatCapabilities } from "@/lib/permissions";
 import { notifyChatChange } from "@/lib/chat/events";
 import type { StageId } from "@/lib/pipeline-stages";
 
@@ -107,6 +110,8 @@ export function databasePorts(flowId: string): EnginePorts {
       const conversation = await requireConversation(state);
       if (!isWindowOpen(conversation.lastInboundAt)) throw new Error("Janela de 24 h do WhatsApp fechada: o cliente precisa ter escrito nas últimas 24 h (fora dela, use um modelo em Campanhas).");
       if (!input.text.trim() && !input.mediaUrl && !input.audio) throw new Error("Mensagem vazia.");
+      // Links rastreados: cada URL do texto vira /r/<slug> do contato (clique dispara o gatilho e soma no histórico).
+      if (input.trackLinks && input.text.trim()) input = { ...input, text: (await trackLinksInText(input.text, { contactId: state.contactId, flowId: state.flowId, source: "automacao" })).text };
       // Presença por bloco: "digitando..." antes do texto/imagem e "gravando" (tempo do áudio) antes da nota de voz.
       const presence = input.presence ?? { mode: "auto" as const, seconds: null };
       const wamid = presence.mode === "off" ? null : (await prisma.chatMessage.findFirst({ where: { conversationId: conversation.id, author: "customer", externalId: { not: null } }, orderBy: { createdAt: "desc" }, select: { externalId: true } }))?.externalId ?? null;
@@ -230,6 +235,15 @@ export function databasePorts(flowId: string): EnginePorts {
       let data: unknown = raw;
       try { data = JSON.parse(raw); } catch { /* texto */ }
       return { status: response.status, data };
+    },
+    changeScore: async (state, delta, reason) => {
+      const change = await changeScore(state.contactId, delta, reason, "automacao");
+      return `${delta > 0 ? "+" : ""}${change.delta} pontos (${reason}): ${change.score} pts · ${change.tier}${change.tier !== change.tierBefore ? ` (antes ${change.tierBefore})` : ""}`;
+    },
+    updateField: async (state, key, value) => {
+      const { rejected } = await setContactFields(state.contactId, { [key]: value });
+      if (rejected.length) throw new Error(`Campo "${key}": ${rejected[0].reason}.`);
+      return value.trim() ? `Campo "${key}" = ${value.slice(0, 120)}` : `Campo "${key}" limpo`;
     },
     gotoFlow: async (state, flowId) => {
       const target = await prisma.automationFlow.findUnique({ where: { id: flowId }, select: { id: true, name: true, status: true } });
@@ -405,6 +419,8 @@ export async function simulateFlow(graph: FlowGraph, contactId: string, triggerN
     optOut: describe("marcaria o contato como opt-out"),
     addNote: async (_state, input) => `Simulado: registraria a observação "${input.text.slice(0, 160)}" ${input.target === "contact" ? "no cadastro do contato" : input.target === "both" ? "na oportunidade e no cadastro do contato" : "na oportunidade (ou no contato, se não houver oportunidade aberta)"}`,
     http: async (input) => ({ status: 200, data: { simulado: true, url: input.url } }),
+    changeScore: async (_state, delta, reason) => `Simulado: ${delta > 0 ? "somaria" : "tiraria"} ${Math.abs(delta)} pontos (${reason})`,
+    updateField: async (_state, key, value) => `Simulado: gravaria "${value.slice(0, 120)}" no campo ${key}`,
     gotoFlow: async (_state, flowId) => `Simulado: encaminharia para a automação "${(await prisma.automationFlow.findUnique({ where: { id: flowId }, select: { name: true } }))?.name ?? flowId}"`,
     log: async (_state, node: FlowNode, status, message) => { steps.push({ nodeId: node.id, nodeType: node.type, label: NODE_DEF[node.type].label, status, message }); },
   };

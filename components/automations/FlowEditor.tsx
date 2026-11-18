@@ -25,9 +25,10 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, MousePointerClick, Gauge, Gem, PenLine, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
+import { TIER_META, type Tier } from "@/lib/scoring";
 import { useToast } from "@/components/ToastProvider";
 import {
   AUDIO_STORAGE_PREFIX, CONVERSION_KINDS, describeBusinessWindow, handleLabel, MAX_AB_VARIANTS, outputHandles, readVariants, variantLetter, WEEKDAY_LABELS, type ConversionKind, type FlowSettings, type OutputHandle,
@@ -37,7 +38,7 @@ import {
 
 type FlowStatus = "draft" | "active" | "paused";
 type FlowData = { id: string; name: string; description: string; status: FlowStatus; webhookToken: string; settings?: FlowSettings; nodes: FlowNode[]; edges: FlowEdge[] };
-type Options = { queues: { id: string; name: string }[]; users: { id: string; name: string }[]; flows?: { id: string; name: string; status: string }[] };
+type Options = { queues: { id: string; name: string }[]; users: { id: string; name: string }[]; flows?: { id: string; name: string; status: string }[]; fields?: { key: string; label: string }[] };
 type NodeData = { kind: NodeType; config: Record<string, unknown>; dir?: "LR" };
 type CanvasNode = Node<NodeData, "automation">;
 type Step = { id: string; nodeId: string; nodeType: string; status: string; message: string; createdAt: string };
@@ -45,6 +46,7 @@ type Execution = { id: string; status: string; currentNodeId: string | null; res
 type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
+  trigger_link_click: MousePointerClick, trigger_score: Gauge, trigger_tier: Gem, change_score: Gauge, update_field: PenLine,
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
   trigger_erp_sale: ShoppingBag, trigger_erp_after_sale: CalendarClock, trigger_erp_return: Undo2, trigger_erp_overdue: AlertTriangle, trigger_erp_due_soon: CalendarClock,
   trigger_erp_paid: BadgeCheck, trigger_erp_good_payer: Award, trigger_erp_birthday: Cake, trigger_erp_no_purchase: UserX, trigger_erp_lab_ready: Glasses,
@@ -123,6 +125,11 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "http": return `${String(config.method)} ${String(config.url || "(sem URL)")}`;
     case "create_opportunity": return "Novo lead (se não houver aberta)";
     case "opt_out": return "Fora das campanhas (LGPD)";
+    case "trigger_link_click": return config.urlContains ? `Destino contém "${String(config.urlContains)}"` : "Qualquer link rastreado";
+    case "trigger_score": return `Chegou a ${Number(config.amount) || 0} pontos`;
+    case "trigger_tier": return `${config.tier === "any" || !config.tier ? "Qualquer nível" : TIER_META[config.tier as Tier]?.label ?? String(config.tier)} · ${config.direction === "down" ? "caiu" : config.direction === "any" ? "subiu ou caiu" : "subiu"}`;
+    case "change_score": return `${config.operation === "subtract" ? "−" : "+"}${Number(config.amount) || 0} pts${config.reason ? ` · ${String(config.reason)}` : ""}`;
+    case "update_field": return config.fieldKey ? `${options.fields?.find((item) => item.key === config.fieldKey)?.label ?? String(config.fieldKey)} = ${String(config.value || "(vazio)")}` : "(escolha o campo)";
     default: return "";
   }
 }
@@ -366,6 +373,14 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
   );
   if (field.kind === "select") return select(field.options);
   if (field.kind === "stage") return select(STAGE_OPTIONS);
+  if (field.kind === "contact_field") {
+    return (
+      <div className="space-y-1">
+        {select((options.fields ?? []).map((item) => ({ value: item.key, label: `${item.label} (${item.key})` })), options.fields?.length ? "Escolha o campo" : "Nenhum campo criado")}
+        {!options.fields?.length && <span className="block text-[10px] text-slate-400">Crie os campos em Contatos › Campos personalizados.</span>}
+      </div>
+    );
+  }
   if (field.kind === "flow") return select((options.flows ?? []).filter((item) => item.id !== OptionsContext.flowId).map((item) => ({ value: item.id, label: `${item.name}${item.status === "active" ? "" : " (inativa)"}` })), "Escolha a automação");
   if (field.kind === "queue") return select(options.queues.map((queue) => ({ value: queue.id, label: queue.name })), "Escolha a fila");
   if (field.kind === "user") return select(options.users.map((user) => ({ value: user.id, label: user.name })), "Ninguém (só a fila)");
@@ -395,6 +410,8 @@ function VariablesPicker({ triggers, onPick }: { triggers: NodeType[]; onPick: (
   for (const kind of [...new Set(triggers)]) {
     if (kind === "trigger_message") groups.push({ label: NODE_DEF[kind].label, vars: ["mensagem.texto"] });
     else if (kind === "trigger_ai_handoff") groups.push({ label: NODE_DEF[kind].label, vars: ["fila", "motivo"] });
+    else if (kind === "trigger_link_click") groups.push({ label: NODE_DEF[kind].label, vars: ["link"] });
+    else if (kind === "trigger_score" || kind === "trigger_tier") groups.push({ label: NODE_DEF[kind].label, vars: ["pontuacao", "nivel", "nivel_anterior"] });
     else if (isErpTrigger(kind)) groups.push({ label: `VMSet · ${NODE_DEF[kind].label}`, vars: ERP_TRIGGER_VARIABLES[kind] });
   }
   return (

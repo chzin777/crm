@@ -53,6 +53,7 @@ import { applySkillsToSettings, filterToolsBySkills, skillEnabled } from "@/lib/
 import { loadSkills, loadStudioContext } from "@/lib/ai/studio-db";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { listFieldDefinitions, setContactFields } from "@/lib/contact-fields-db";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
 import { catalogImages, imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
 import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
@@ -410,6 +411,8 @@ export type AgentRunInput = {
   lastAiText?: string | null;
   /** Últimas mensagens da IA (mais recente primeiro): "essa loja" resolve para a unidade citada nelas. */
   recentAiTexts?: string[];
+  /** Contato do WhatsApp: libera a ferramenta de preencher campos personalizados do cadastro (fora do teste). */
+  contactId?: string | null;
   /** Produtos cuja foto já foi enviada nesta etapa (conversa, ou desde a entrada na fila). */
   sentImageSkus?: string[];
   /** Produto e loja fixados nas mensagens da IA DESTE atendimento (nunca de sessões encerradas ou testes anteriores). */
@@ -1024,7 +1027,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       { role: "system", content: [system, ...turnFacts].join("\n\n") },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills) },
+    { ...input.meta, maxTokens: 700, tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), ...(await contactFieldTools(input.contactId))] },
   );
   let outcome = interpretDecision(decision);
   // Transferência já decidida (pessoa pelo nome, documento lido): a confirmação é a que o modelo escreveu; a frase
@@ -1109,6 +1112,39 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
   if (outcome.action === "reply" && currentCatalogFilterHash && parseShowcase(outcome.reply).length) catalogState.lastCatalogFilterHash = currentCatalogFilterHash;
   return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList && !visualCatalog ? list : null, imageAnalysis, singleReply: false, documents, productInterest: productInterest as { name: string; price: number | null } | null, visualCatalog: visualCatalog && outcome.action === "reply" ? visualCatalog : null };
+}
+
+/**
+ * Campos personalizados do cadastro (ex.: loja_preferida, grau_esferico): a IA grava o que o cliente informou na
+ * conversa. Só no WhatsApp (com contato) e quando há campos definidos em Contatos.
+ */
+async function contactFieldTools(contactId: string | null | undefined) {
+  if (!contactId) return [];
+  const definitions = await listFieldDefinitions().catch(() => []);
+  if (!definitions.length) return [];
+  const described = definitions.map((def) => `${def.key} (${def.label}; ${def.type === "select" ? `uma de: ${def.options.join(", ")}` : def.type === "date" ? "data dd/mm/aaaa" : def.type === "number" ? "número" : "texto"})`).join("; ");
+  return [{
+    definition: {
+      type: "function" as const,
+      function: {
+        name: "atualizarCampoCliente",
+        description: `Grava no cadastro do cliente um dado que ELE informou claramente nesta conversa (nunca invente nem deduza). Campos: ${described}.`,
+        parameters: {
+          type: "object",
+          properties: { campo: { type: "string", enum: definitions.map((def) => def.key) }, valor: { type: "string", description: "Valor informado pelo cliente." } },
+          required: ["campo", "valor"],
+          additionalProperties: false,
+        },
+      },
+    },
+    run: async (args: Record<string, unknown>) => {
+      const key = String(args.campo ?? "");
+      const { rejected } = await setContactFields(contactId, { [key]: String(args.valor ?? "") });
+      return rejected.length
+        ? { gravado: false, motivo: rejected[0].reason, orientacao: "Não grave de novo; siga a conversa normalmente." }
+        : { gravado: true, orientacao: "Dado salvo no cadastro. Não comente isso com o cliente; siga a conversa." };
+    },
+  }];
 }
 
 export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
@@ -1212,6 +1248,7 @@ async function respond(conversationId: string, messageId: string) {
       meta,
       loadMedia: () => customerMedia(pending, meta),
       earlierCustomerTexts: earlier.map((item) => item.text),
+      contactId: conversation.contactId,
       buildContext: async () => (await conversationContext(conversation, { includeHistory: settings.useCustomerOrders, sessionOnly: true })).text,
       queued,
       lastAiText: lastAnswer?.author === "bot" && lastAnswer.authorName === AI_AUTHOR ? lastAnswer.text : null,

@@ -20,6 +20,7 @@ import {
   BarChart3,
   BookOpen,
   Workflow,
+  Gem,
   X,
 } from "lucide-react";
 
@@ -40,6 +41,7 @@ const TABS: TabDef[] = [
   { id: "modelos", label: "Modelos", href: "/modelos", icon: FileText },
   { id: "nps", label: "NPS", href: "/nps", icon: Award },
   { id: "automacoes", label: "Automações", href: "/automacoes", icon: Workflow },
+  { id: "clientes-vip", label: "Clientes VIP", href: "/clientes-vip", icon: Gem },
   { id: "usuarios", label: "Usuários", href: "/usuarios", icon: UserCog },
   { id: "cargos", label: "Cargos", href: "/cargos", icon: Shield },
   { id: "permissoes", label: "Permissões", href: "/permissoes", icon: KeyRound },
