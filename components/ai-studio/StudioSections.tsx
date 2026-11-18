@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { EntityDialog } from "@/components/EntityDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { skillSlug, slugify, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type SkillKey } from "@/lib/ai/studio";
 
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
@@ -156,6 +157,7 @@ export function RulesSection() {
   const patch = (id: string, change: Partial<RuleDraft>) => setRules((current) => current?.map((rule) => (rule.id === id ? { ...rule, ...change, dirty: true } : rule)) ?? current);
   // "Nova regra" (ou um modelo) abre o modal; a regra só entra na lista depois de criada no servidor.
   const [creating, setCreating] = useState<RuleFormValue | null>(null);
+  const [confirming, setConfirming] = useState<RuleDraft | null>(null);
   const closeCreate = useCallback(() => setCreating(null), []);
   const add = (template?: (typeof RULE_TEMPLATES)[number]) => {
     setCreating({
@@ -198,7 +200,6 @@ export function RulesSection() {
     }
   };
   const remove = async (rule: RuleDraft) => {
-    if (!rule.isNew && !window.confirm(`Excluir a regra "${rule.title}"?`)) return;
     setBusy(rule.id);
     try {
       if (!rule.isNew) await api(`/api/ai/rules/${rule.id}`, { method: "DELETE" });
@@ -258,7 +259,7 @@ export function RulesSection() {
                     </span>
                   </button>
                   <Switch label={`Regra ${rule.title} ativa`} checked={rule.active} onChange={(value) => void toggleActive(rule, value)} />
-                  <button type="button" aria-label={`Excluir ${rule.title}`} title="Excluir regra" disabled={busy === rule.id} onClick={() => void remove(rule)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" aria-label={`Excluir ${rule.title}`} title="Excluir regra" disabled={busy === rule.id} onClick={() => (rule.isNew ? void remove(rule) : setConfirming(rule))} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
                 </div>
                 <Collapse open={expanded}>
                   <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-white/[0.03]">
@@ -297,6 +298,7 @@ export function RulesSection() {
         </ul>
       )}
       {creating && <RuleCreateDialog initial={creating} onClose={closeCreate} onCreated={created} />}
+      {confirming && <ConfirmDialog variant="destructive" title="Excluir regra" description={`A regra "${confirming.title}" será excluída e a IA deixa de usá-la. Essa ação não pode ser desfeita.`} confirmLabel="Excluir regra" onClose={() => setConfirming(null)} onConfirm={async () => { await remove(confirming); setConfirming(null); }} />}
     </Panel>
   );
 }
@@ -329,6 +331,7 @@ export function SkillsSection() {
   const patch = (id: string, change: Partial<SkillDraft>) => setSkills((current) => current?.map((skill) => (skill.id === id ? { ...skill, ...change, dirty: true } : skill)) ?? current);
   // "Nova skill" abre o modal; a skill só entra na lista depois de criada no servidor.
   const [creating, setCreating] = useState(false);
+  const [confirming, setConfirming] = useState<SkillDraft | null>(null);
   const closeCreate = useCallback(() => setCreating(false), []);
   const created = (skill: AiSkill) => {
     setSkills((current) => [...(current ?? []), skill]);
@@ -361,7 +364,6 @@ export function SkillsSection() {
     }
   };
   const remove = async (skill: SkillDraft) => {
-    if (!skill.isNew && !window.confirm(`Excluir a skill "${skill.name}"?`)) return;
     setBusy(skill.id);
     try {
       if (!skill.isNew) await api(`/api/ai/skills/${skill.id}`, { method: "DELETE" });
@@ -407,7 +409,7 @@ export function SkillsSection() {
                     </span>
                   </button>
                   <Switch label={`Skill ${skill.name} ativa`} checked={skill.isActive} onChange={(value) => void toggleActive(skill, value)} />
-                  {!skill.builtin && <button type="button" aria-label={`Excluir ${skill.name}`} title="Excluir skill" disabled={busy === skill.id} onClick={() => void remove(skill)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>}
+                  {!skill.builtin && <button type="button" aria-label={`Excluir ${skill.name}`} title="Excluir skill" disabled={busy === skill.id} onClick={() => (skill.isNew ? void remove(skill) : setConfirming(skill))} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>}
                 </div>
                 <Collapse open={expanded}>
                   <div className="space-y-3 border-t border-slate-100 bg-slate-50/60 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-white/[0.03]">
@@ -448,6 +450,7 @@ export function SkillsSection() {
         </ul>
       )}
       {creating && <SkillCreateDialog nextOrder={((skills?.length ?? 0) + 1) * 10} onClose={closeCreate} onCreated={created} />}
+      {confirming && <ConfirmDialog variant="destructive" title="Excluir skill" description={`A skill "${confirming.name}" será excluída e a IA deixa de seguir esse protocolo. Essa ação não pode ser desfeita.`} confirmLabel="Excluir skill" onClose={() => setConfirming(null)} onConfirm={async () => { await remove(confirming); setConfirming(null); }} />}
     </Panel>
   );
 }
@@ -673,6 +676,7 @@ export function KnowledgeSection() {
   const [editing, setEditing] = useState<KnowledgeDoc | null>(null);
   const closeEditor = useCallback(() => setEditing(null), []);
   const [adding, setAdding] = useState(false);
+  const [confirming, setConfirming] = useState<KnowledgeDoc | null>(null);
   const closeAdd = useCallback(() => setAdding(false), []);
 
   useEffect(() => {
@@ -709,7 +713,6 @@ export function KnowledgeSection() {
     }
   };
   const remove = async (document: KnowledgeDoc) => {
-    if (!window.confirm(`Excluir "${document.title}" da base de conhecimento?`)) return;
     setBusy(document.id);
     try {
       await api(`/api/ai/knowledge/${document.id}`, { method: "DELETE" });
@@ -771,7 +774,7 @@ export function KnowledgeSection() {
                   )}
                   {!document.systemKey && <>
                   <button type="button" title="Reindexar" aria-label={`Reindexar ${document.title}`} disabled={busy === document.id} onClick={() => void update(document, { reindex: true })} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-[#002187] dark:hover:bg-white/10 dark:hover:text-[#C4D600]"><RefreshCw className={`h-4 w-4 ${busy === document.id ? "animate-spin" : ""}`} /></button>
-                  <button type="button" title="Excluir" aria-label={`Excluir ${document.title}`} disabled={busy === document.id} onClick={() => void remove(document)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" title="Excluir" aria-label={`Excluir ${document.title}`} disabled={busy === document.id} onClick={() => setConfirming(document)} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15"><Trash2 className="h-4 w-4" /></button>
                   </>}
                 </li>
               );
@@ -781,6 +784,7 @@ export function KnowledgeSection() {
       </Panel>
 
       {adding && <KnowledgeCreateDialog onClose={closeAdd} onCreated={created} />}
+      {confirming && <ConfirmDialog variant="destructive" title="Excluir documento" description={`"${confirming.title}" e todos os trechos indexados saem da base de conhecimento. Essa ação não pode ser desfeita.`} confirmLabel="Excluir documento" onClose={() => setConfirming(null)} onConfirm={async () => { await remove(confirming); setConfirming(null); }} />}
       {editing && <KnowledgeEditor document={editing} onClose={closeEditor} onSaved={(saved) => setDocuments((current) => current?.map((item) => (item.id === saved.id ? saved : item)) ?? current)} />}
 
       <Panel title="Testar busca RAG" hint="Escreva uma pergunta como o cliente faria e veja quais trechos a IA recuperaria (os mais relevantes entram na resposta).">
