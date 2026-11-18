@@ -8,7 +8,7 @@ import type { Pillar, RfvpSettings } from "@/lib/rfvp";
 export type RfvpFilter = Record<`${Pillar}${"Min" | "Max"}`, string>;
 export const EMPTY_RFVP_FILTER: RfvpFilter = { rMin: "", rMax: "", fMin: "", fMax: "", vMin: "", vMax: "", pMin: "", pMax: "" };
 
-export type RfvpSegmentInfo = { key: string; label: string; description: string; tone: string; count: number };
+export type RfvpSegmentInfo = { key: string; label: string; description: string; tone: string; dot: string; count: number };
 export type RfvpRun = { at: string; finishedAt: string | null; changed: number; events: number; punctuality: number | null; warning: string | null; error: string | null; trigger: string };
 export type RfvpStatus = { settings: RfvpSettings; lastRun: RfvpRun | null; running: boolean; segments: RfvpSegmentInfo[]; punctuality: { customers: number; syncedAt: string | null } };
 

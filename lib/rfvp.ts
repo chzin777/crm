@@ -120,18 +120,18 @@ export function parseRfvpCode(code: string | null | undefined): RfvpScores | nul
 // ---------------------------------------------------------------- Segmentos
 
 type Range = [number, number];
-type SegmentRule = { key: string; label: string; description: string; tone: string; when: Partial<Record<Pillar, Range>> };
+type SegmentRule = { key: string; label: string; description: string; tone: string; dot: string; when: Partial<Record<Pillar, Range>> };
 
 /** Primeiro que casa vence (ordem importa). Sempre há um segmento (o último não tem condição). */
 export const RFVP_SEGMENTS: SegmentRule[] = [
-  { key: "campeoes_pagadores", label: "Campeões Pagadores", description: "Compram muito, recentemente, gastam bem e pagam em dia.", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300", when: { r: [4, 5], f: [4, 5], v: [4, 5], p: [4, 5] } },
-  { key: "alto_valor_risco", label: "Alto Valor com Risco de Inadimplência", description: "Gastam bem, mas atrasam ou têm parcela em aberto: cobrança cuidadosa.", tone: "bg-[#F7915E]/20 text-[#9a4a1c] dark:text-[#F7915E]", when: { v: [4, 5], p: [1, 2] } },
-  { key: "fieis_em_dia", label: "Fiéis em Dia", description: "Compram com frequência e pagam em dia.", tone: "bg-[#C4D600]/30 text-[#051647] dark:text-[#C4D600]", when: { r: [3, 5], f: [4, 5], p: [4, 5] } },
-  { key: "novos_promissores", label: "Novos Promissores", description: "Compraram há pouco tempo, ainda com poucas compras.", tone: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300", when: { r: [4, 5], f: [1, 2], p: [3, 5] } },
-  { key: "inadimplentes", label: "Inadimplentes", description: "Pontualidade baixa ou título vencido há muito tempo.", tone: "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-300", when: { p: [1, 2] } },
-  { key: "em_risco", label: "Em Risco / Hibernando", description: "Já compraram com frequência, mas sumiram.", tone: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300", when: { r: [1, 2], f: [3, 5] } },
-  { key: "regulares", label: "Regulares", description: "Compraram no último semestre, sem destaque.", tone: "bg-[#002187]/10 text-[#002187] dark:bg-white/10 dark:text-slate-200", when: { r: [3, 5] } },
-  { key: "inativos", label: "Inativos / Perdidos", description: "Sem compras recentes (ou nunca compraram).", tone: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-400", when: {} },
+  { key: "campeoes_pagadores", label: "Campeões Pagadores", description: "Compram muito, recentemente, gastam bem e pagam em dia.", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300", dot: "bg-emerald-500", when: { r: [4, 5], f: [4, 5], v: [4, 5], p: [4, 5] } },
+  { key: "alto_valor_risco", label: "Alto Valor com Risco de Inadimplência", description: "Gastam bem, mas atrasam ou têm parcela em aberto: cobrança cuidadosa.", tone: "bg-[#F7915E]/20 text-[#9a4a1c] dark:text-[#F7915E]", dot: "bg-[#F7915E]", when: { v: [4, 5], p: [1, 2] } },
+  { key: "fieis_em_dia", label: "Fiéis em Dia", description: "Compram com frequência e pagam em dia.", tone: "bg-[#C4D600]/30 text-[#051647] dark:text-[#C4D600]", dot: "bg-[#C4D600]", when: { r: [3, 5], f: [4, 5], p: [4, 5] } },
+  { key: "novos_promissores", label: "Novos Promissores", description: "Compraram há pouco tempo, ainda com poucas compras.", tone: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300", dot: "bg-sky-500", when: { r: [4, 5], f: [1, 2], p: [3, 5] } },
+  { key: "inadimplentes", label: "Inadimplentes", description: "Pontualidade baixa ou título vencido há muito tempo.", tone: "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-300", dot: "bg-red-500", when: { p: [1, 2] } },
+  { key: "em_risco", label: "Em Risco / Hibernando", description: "Já compraram com frequência, mas sumiram.", tone: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300", dot: "bg-amber-500", when: { r: [1, 2], f: [3, 5] } },
+  { key: "regulares", label: "Regulares", description: "Compraram no último semestre, sem destaque.", tone: "bg-[#002187]/10 text-[#002187] dark:bg-white/10 dark:text-slate-200", dot: "bg-[#002187] dark:bg-slate-300", when: { r: [3, 5] } },
+  { key: "inativos", label: "Inativos / Perdidos", description: "Sem compras recentes (ou nunca compraram).", tone: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-400", dot: "bg-slate-400", when: {} },
 ];
 export const RFVP_SEGMENT_BY_KEY = Object.fromEntries(RFVP_SEGMENTS.map((item) => [item.key, item]));
 export const segmentLabel = (key: string | null | undefined) => (key ? RFVP_SEGMENT_BY_KEY[key]?.label ?? key : "Sem cálculo");

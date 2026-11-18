@@ -5,7 +5,8 @@ import Link from "next/link";
 import { ArrowDownUp, ChevronLeft, ChevronRight, Copy, Filter, Gem, Grid3x3, Link2, Loader2, RefreshCw, Search, SlidersHorizontal, Workflow, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { TierBadge } from "@/components/TierBadge";
-import { EMPTY_RFVP_FILTER, RfvpSegmentsStrip, useRfvpStatus, type RfvpFilter } from "@/components/RfvpPanel";
+import { EMPTY_RFVP_FILTER, useRfvpStatus, type RfvpFilter } from "@/components/RfvpPanel";
+import { RfvpSegmentSelect } from "@/components/RfvpSegmentSelect";
 import { RfvpBadge, RfvpSegmentChip } from "@/components/RfvpBadge";
 import { ScoringSettingsDialog } from "@/components/ScoringSettingsDialog";
 import { ContactDetailModal } from "@/components/contacts/ContactDetailModal";
@@ -19,6 +20,7 @@ type Data = { thresholds: TierThresholds; summary: Summary[]; base: number; tota
 type LinkRow = { id: string; shortUrl: string; url: string; label: string; clicks: number; lastClickAt: string | null; contactName: string | null; source: string; createdAt: string };
 
 const INPUT = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/10 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/15";
+const FILTER = "h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-xs outline-none transition-colors hover:border-slate-300 focus:border-[#002187] focus:ring-2 focus:ring-[#002187]/10 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:hover:border-slate-600 dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/15";
 const GHOST = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#002187] dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-[#C4D600]";
 const SECONDARY = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-[#051647] shadow-sm transition-colors hover:border-[#002187]/40 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-white/5 dark:text-white dark:hover:bg-white/10";
 const PRIMARY = "inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-3.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:brightness-105";
@@ -52,7 +54,7 @@ export default function ClientesVipPage() {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [tier, setTier] = useState<Tier | "">("");
-  const [segment, setSegment] = useState("");
+  const [segments, setSegments] = useState<string[]>([]);
   const [sort, setSort] = useState("score_desc");
   const [includeAll, setIncludeAll] = useState(false);
   const [rfvpFilter, setRfvpFilter] = useState<RfvpFilter>(EMPTY_RFVP_FILTER);
@@ -72,7 +74,7 @@ export default function ClientesVipPage() {
     const params = new URLSearchParams({ sort, page: String(page), pageSize: String(pageSize) });
     if (query) params.set("q", query);
     if (tier) params.set("tier", tier);
-    if (segment) params.set("segment", segment);
+    if (segments.length) params.set("segment", segments.join(","));
     if (includeAll) params.set("all", "1");
     for (const [key, value] of Object.entries(rfvpFilter)) if (value) params.set(key, value);
     try {
@@ -85,15 +87,15 @@ export default function ClientesVipPage() {
     } finally {
       setLoading(false);
     }
-  }, [includeAll, page, pageSize, query, rfvpFilter, segment, sort, tier, toast]);
+  }, [includeAll, page, pageSize, query, rfvpFilter, segments, sort, tier, toast]);
   useEffect(() => { void load(); }, [load]);
 
   const { status, reload: reloadRfvp, recalculate } = useRfvpStatus(() => void load());
 
-  const resetPage = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
+
   const advancedCount = Object.values(rfvpFilter).filter(Boolean).length + (includeAll ? 1 : 0);
-  const clearAll = () => { setSearch(""); setTier(""); setSegment(""); setRfvpFilter(EMPTY_RFVP_FILTER); setIncludeAll(false); setPage(1); };
-  const hasFilters = !!(query || tier || segment || advancedCount);
+  const clearAll = () => { setSearch(""); setTier(""); setSegments([]); setRfvpFilter(EMPTY_RFVP_FILTER); setIncludeAll(false); setPage(1); };
+  const hasFilters = !!(query || tier || segments.length || advancedCount);
 
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -146,33 +148,25 @@ export default function ClientesVipPage() {
         })}
       </section>
 
-      <section aria-label="Segmentos RFV-P" className="space-y-2">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Segmentos RFV-P</p>
-        <RfvpSegmentsStrip segments={status?.segments ?? null} selected={segment} onSelect={resetPage(setSegment)} />
-      </section>
-
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#07194f]" aria-label="Ranking de clientes">
-        <div className="space-y-3 border-b border-slate-100 p-3 dark:border-slate-800">
+        <div className="space-y-3 border-b border-slate-100 p-3 sm:p-4 dark:border-slate-800">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[220px] flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
-              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, telefone ou CPF" aria-label="Buscar cliente" className={`${INPUT} pl-8`} />
+            <div className="relative min-w-[220px] flex-[2_1_260px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, telefone ou CPF" aria-label="Buscar cliente" className={`${FILTER} w-full pl-9`} />
             </div>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-white/5" role="radiogroup" aria-label="Filtrar por nível">
+            <div className="inline-flex h-10 max-w-full items-center overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1 [scrollbar-width:none] dark:border-slate-700 dark:bg-white/5" role="radiogroup" aria-label="Filtrar por nível">
               {(["", ...[...TIERS].reverse()] as (Tier | "")[]).map((item) => (
                 <button key={item || "all"} type="button" role="radio" aria-checked={tier === item} onClick={() => { setTier(item); setPage(1); }}
-                  className={`cursor-pointer rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${tier === item ? "bg-white text-[#051647] shadow-sm dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
+                  className={`h-full shrink-0 cursor-pointer rounded-lg px-3 text-xs font-semibold transition-colors ${tier === item ? "bg-white text-[#051647] shadow-sm dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}>
                   {item ? TIER_META[item].label : "Todos"}
                 </button>
               ))}
             </div>
-            <select value={segment} onChange={(event) => { setSegment(event.target.value); setPage(1); }} aria-label="Segmento RFV-P" className={`${INPUT} w-auto max-w-[240px] cursor-pointer`}>
-              <option value="">Todos os segmentos</option>
-              {(status?.segments ?? []).map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-            </select>
+            <RfvpSegmentSelect segments={status?.segments ?? null} value={segments} onChange={(next) => { setSegments(next); setPage(1); }} />
             <label className="relative">
-              <ArrowDownUp className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-              <select value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }} aria-label="Ordenar" className={`${INPUT} w-auto cursor-pointer pl-8`}>
+              <ArrowDownUp className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+              <select value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }} aria-label="Ordenar" className={`${FILTER} cursor-pointer pl-8 pr-8`}>
                 {SORTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
@@ -182,7 +176,7 @@ export default function ClientesVipPage() {
             <div className="flex flex-wrap items-center gap-1.5">
               {query && <Chip label={`Busca: ${query}`} onRemove={() => setSearch("")} />}
               {tier && <Chip label={`Nível: ${TIER_META[tier].label}`} onRemove={() => { setTier(""); setPage(1); }} />}
-              {segment && <Chip label={`Segmento: ${segmentLabel(segment)}`} onRemove={() => { setSegment(""); setPage(1); }} />}
+              {segments.map((key) => <Chip key={key} label={`Segmento: ${segmentLabel(key)}`} onRemove={() => { setSegments(segments.filter((item) => item !== key)); setPage(1); }} />)}
               {PILLARS.map((pillar) => {
                 const min = rfvpFilter[`${pillar.key}Min`];
                 const max = rfvpFilter[`${pillar.key}Max`];
@@ -307,7 +301,7 @@ function AdvancedFilters({ filter, includeAll, count, onChange }: { filter: Rfvp
 
   return (
     <div ref={box} className="relative">
-      <button type="button" onClick={toggle} aria-expanded={open} aria-haspopup="dialog" className={`inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${count ? "border-[#002187] bg-[#002187]/5 text-[#002187] dark:border-[#C4D600] dark:bg-[#C4D600]/10 dark:text-[#C4D600]" : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"}`}>
+      <button type="button" onClick={toggle} aria-expanded={open} aria-haspopup="dialog" className={`inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-xl border px-3.5 text-xs font-semibold shadow-xs transition-colors ${count ? "border-[#002187] bg-[#002187]/5 text-[#002187] dark:border-[#C4D600] dark:bg-[#C4D600]/10 dark:text-[#C4D600]" : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-white/5"}`}>
         <Filter className="h-4 w-4" />Filtros avançados{count > 0 && <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#002187] px-1 text-[10px] text-white dark:bg-[#C4D600] dark:text-[#051647]">{count}</span>}
       </button>
       {open && (

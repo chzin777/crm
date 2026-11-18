@@ -15,7 +15,7 @@ export async function GET() {
   const counts = new Map(groups.map((row) => [row.rfvpSegment, row._count._all]));
   return Response.json({
     settings, lastRun, running: rfvpRunning(),
-    segments: RFVP_SEGMENTS.map((item) => ({ key: item.key, label: item.label, description: item.description, tone: item.tone, count: counts.get(item.key) ?? 0 })),
+    segments: RFVP_SEGMENTS.map((item) => ({ key: item.key, label: item.label, description: item.description, tone: item.tone, dot: item.dot, count: counts.get(item.key) ?? 0 })),
     punctuality: { customers: punctuality._count._all, syncedAt: punctuality._max.syncedAt },
   });
 }

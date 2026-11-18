@@ -18,8 +18,8 @@ function rfvpWhere(params: URLSearchParams): Prisma.ContactWhereInput[] {
     const range = { ...(min >= 1 && min <= 5 ? { gte: Math.round(min) } : {}), ...(max >= 1 && max <= 5 ? { lte: Math.round(max) } : {}) };
     if (Object.keys(range).length) filters.push({ [column]: range });
   }
-  const segment = params.get("segment");
-  if (segment && RFVP_SEGMENT_BY_KEY[segment]) filters.push({ rfvpSegment: segment });
+  const segments = (params.get("segment") ?? "").split(",").filter((key) => RFVP_SEGMENT_BY_KEY[key]);
+  if (segments.length) filters.push({ rfvpSegment: { in: segments } });
   return filters;
 }
 
