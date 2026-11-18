@@ -655,10 +655,6 @@ export function AiSettingsPanel() {
           <button type="button" title="Restaurar parâmetros padrão (mantém os créditos informados)" onClick={() => setSettings({ ...DEFAULT_AI_SETTINGS, creditLoadedUsd: settings.creditLoadedUsd, creditLoadedAt: settings.creditLoadedAt })} className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">
             <RotateCcw className="h-3.5 w-3.5" /><span className="hidden sm:inline">Restaurar padrões</span>
           </button>
-          <button type="button" disabled={!dirty || saving} onClick={() => void save()} className="relative inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-4 text-sm font-semibold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
-            {dirty && <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-white bg-[#F7915E] dark:border-[#051647]" aria-hidden="true" />}
-            <Save className="h-4 w-4" />{saving ? "Salvando..." : "Salvar alterações"}
-          </button>
         </div>
       </div>
 
@@ -1079,7 +1075,7 @@ export function AiSettingsPanel() {
       </div>
       </div>
 
-      {/* Barra fixa só com alterações pendentes (o botão do cabeçalho sai da tela ao rolar). */}
+      {/* Único ponto de salvar: barra fixa que aparece só com alterações pendentes. */}
       <div className={`sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F7915E]/50 bg-white/95 p-3 shadow-lg backdrop-blur transition-all duration-200 dark:border-[#F7915E]/40 dark:bg-[#051647]/95 ${dirty ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-4 opacity-0"}`} aria-hidden={!dirty}>
         <span className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-200"><span className="h-2 w-2 rounded-full bg-[#F7915E]" />Alterações não salvas</span>
         <div className="flex gap-2">
