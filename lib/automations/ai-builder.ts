@@ -1,4 +1,4 @@
-import { ACTION_TYPES, FILTER_KINDS, NODE_DEF, sanitizeGraph, STAGE_OPTIONS, TIME_UNITS, TRIGGER_TYPES, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@/lib/automations/nodes";
+import { ACTION_TYPES, CONDITION_FIELDS, CONDITION_OPERATORS, FILTER_KINDS, NODE_DEF, NOTE_TARGETS, sanitizeGraph, STAGE_OPTIONS, TIME_UNITS, TRIGGER_TYPES, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@/lib/automations/nodes";
 
 /**
  * Criação de automação com IA: o modelo devolve um rascunho (gatilho + passos) num JSON Schema estrito com
@@ -26,8 +26,10 @@ const PARAM_KEYS = {
   title: { type: ["string", "null"] },
   message: { type: ["string", "null"] },
   whatsappPhone: { type: ["string", "null"] },
-  field: { type: ["string", "null"], enum: ["none", "tag", "stage", "city", "hour", "reply", null] },
-  operator: { type: ["string", "null"], enum: ["equals", "contains", "not_contains", "exists", "gte", "lt", null] },
+  field: { type: ["string", "null"], enum: [...CONDITION_FIELDS.map((item) => item.value), null] },
+  variable: { type: ["string", "null"] },
+  operator: { type: ["string", "null"], enum: [...CONDITION_OPERATORS.map((item) => item.value), null] },
+  target: { type: ["string", "null"], enum: [...NOTE_TARGETS.map((item) => item.value), null] },
   value: { type: ["string", "null"] },
   method: { type: ["string", "null"], enum: ["GET", "POST", null] },
   url: { type: ["string", "null"] },
@@ -91,6 +93,8 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "- Mensagens em português do Brasil, curtas e cordiais, com variáveis {{nome}}, {{cidade}}, {{telefone}} quando fizer sentido. Sem emojis em excesso.",
     "- trigger_message com mode keywords exige keywords; tags em minúsculas e com hífen (ex.: cliente-vip).",
     "- assign exige queueId de uma fila listada; assigneeId e userIds só com ids de usuários listados. Sem fila adequada, use notify.",
+    "- condition: field (reply = resposta do cliente após o início; message = mensagem do gatilho; tag; stage; city; hour; variable = variável em params.variable), operator (equals, not_equals, contains, not_contains, exists, empty, gte, lt) e value.",
+    "- add_note: target (opportunity, contact ou both) e text com a observação interna; pode usar {{contato.nome}} e {{mensagem.texto}}.",
     "- filters (Regras & Filtros) só quando o pedido restringir o público (ex.: só clientes, só uma cidade); senão null.",
     "- name: título curto da automação. description: uma frase do que ela faz.",
     "",

@@ -181,6 +181,23 @@ export async function updateOpportunity(input: { contactId: string; cardId: stri
   return result;
 }
 
+/**
+ * Observação na oportunidade aberta do contato (mesmo histórico "observacoes" que o card mostra no Kanban e no /chat).
+ * Sem oportunidade aberta devolve null (quem chama decide o que fazer).
+ */
+export async function addOpportunityNote(input: { contactId: string; text: string; author: string }) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw(PIPELINE_LOCK);
+    const { cards } = await readPipeline(tx);
+    const open = openSalesCard(cards, input.contactId);
+    if (!open) return null;
+    const note = { id: crypto.randomUUID(), texto: input.text.slice(0, 4000), autor: input.author, criadoEm: new Date().toISOString() };
+    const updated: PipelineCard = { ...open, observacoes: [note, ...(open.observacoes ?? [])] };
+    await writePipeline(tx, cards.map((item) => (item.id === open.id ? updated : item)));
+    return updated;
+  }, { maxWait: 10_000, timeout: 30_000 });
+}
+
 let lastWonSync = 0;
 const WON_SYNC_MS = 60 * 60 * 1000;
 

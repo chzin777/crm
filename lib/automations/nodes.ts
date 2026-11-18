@@ -3,7 +3,7 @@
  */
 
 export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff"] as const;
-export const ACTION_TYPES = ["send_whatsapp", "delay", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "opt_out", "condition", "http"] as const;
+export const ACTION_TYPES = ["send_whatsapp", "delay", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "notify", "add_note", "opt_out", "condition", "http"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export type NodeType = TriggerType | (typeof ACTION_TYPES)[number];
 export type NodeCategory = "gatilho" | "mensagem" | "ia" | "crm" | "logica";
@@ -185,6 +185,62 @@ export function describeFilters(filters: NodeFilters, names: { queues?: Record<s
   return filters.rules.map((rule) => describeRule(rule, names)).join(filters.combinator === "or" ? " OU " : " E ");
 }
 
+// ---------------------------------------------------------------- Condição (se / senão)
+
+export type ConditionField = "none" | "reply" | "message" | "tag" | "stage" | "city" | "hour" | "variable";
+export type ConditionOperator = "equals" | "not_equals" | "contains" | "not_contains" | "exists" | "empty" | "gte" | "lt";
+/** Campos que a condição verifica; "variable" lê qualquer variável da execução (campos do webhook, {{fila}}...). */
+export const CONDITION_FIELDS: { value: ConditionField; label: string; short: string }[] = [
+  { value: "reply", label: "Resposta do cliente (após o início)", short: "Resposta do cliente" },
+  { value: "message", label: "Mensagem recebida (gatilho)", short: "Mensagem recebida" },
+  { value: "tag", label: "Tag da conversa", short: "Tag" },
+  { value: "stage", label: "Etapa do funil", short: "Etapa" },
+  { value: "city", label: "Cidade do contato", short: "Cidade" },
+  { value: "hour", label: "Hora atual (0 a 23)", short: "Hora" },
+  { value: "variable", label: "Variável / campo personalizado", short: "Variável" },
+  { value: "none", label: "Só as Regras & Filtros", short: "Regras & Filtros" },
+];
+export const CONDITION_OPERATORS: { value: ConditionOperator; label: string; symbol: string; needsValue: boolean; numeric?: boolean }[] = [
+  { value: "equals", label: "É igual a", symbol: "=", needsValue: true },
+  { value: "not_equals", label: "É diferente de", symbol: "≠", needsValue: true },
+  { value: "contains", label: "Contém", symbol: "contém", needsValue: true },
+  { value: "not_contains", label: "Não contém", symbol: "não contém", needsValue: true },
+  { value: "exists", label: "Está preenchido / respondeu", symbol: "está preenchido", needsValue: false },
+  { value: "empty", label: "Está vazio / não respondeu", symbol: "está vazio", needsValue: false },
+  { value: "gte", label: "Maior ou igual a", symbol: "≥", needsValue: true, numeric: true },
+  { value: "lt", label: "Menor que", symbol: "<", needsValue: true, numeric: true },
+];
+
+/** Operadores que fazem sentido para o campo (hora: só comparação numérica). */
+export function operatorsFor(field: string) {
+  if (field === "hour") return CONDITION_OPERATORS.filter((item) => ["equals", "not_equals", "gte", "lt"].includes(item.value));
+  return CONDITION_OPERATORS.filter((item) => !item.numeric || field === "variable");
+}
+
+/** Resumo legível da condição para o cartão do nó: Tag contém "vip", Etapa = "Fechamento". */
+export function describeCondition(config: Record<string, unknown>): string {
+  const field = CONDITION_FIELDS.find((item) => item.value === config.field) ?? CONDITION_FIELDS[0];
+  if (field.value === "none") return "Só as Regras & Filtros do nó";
+  const operator = CONDITION_OPERATORS.find((item) => item.value === config.operator) ?? CONDITION_OPERATORS[4];
+  const subject = field.value === "variable" ? `{{${String(config.variable ?? "").trim() || "variável"}}}` : field.short;
+  const raw = String(config.value ?? "").trim();
+  // "exists" com valor (fluxos antigos) funciona como "contém".
+  if (operator.value === "exists" && raw) return `${subject} contém "${raw}"`;
+  if (!operator.needsValue) return `${subject} ${operator.symbol}`;
+  const value = field.value === "stage" ? STAGE_OPTIONS.find((item) => item.value === raw)?.label ?? raw : field.value === "hour" && raw ? `${raw}h` : raw;
+  return `${subject} ${operator.symbol} ${value ? `"${value}"` : "(defina o valor)"}`;
+}
+
+// ---------------------------------------------------------------- Adicionar observação
+
+export type NoteTarget = "opportunity" | "contact" | "both";
+export const NOTE_TARGETS: { value: NoteTarget; label: string }[] = [
+  { value: "opportunity", label: "Oportunidade / card do pipeline" },
+  { value: "contact", label: "Cadastro do contato / cliente" },
+  { value: "both", label: "Ambos" },
+];
+const NOTE_HINT = "Variáveis: {{contato.nome}}, {{contato.cidade}}, {{contato.telefone}}, {{mensagem.texto}}, {{fila}}, {{motivo}} e campos do webhook. Sem oportunidade aberta, a nota vai para o cadastro do contato.";
+
 // ---------------------------------------------------------------- Catálogo
 
 const DURATION_FIELDS = (amountLabel: string): FieldDef[] => [
@@ -210,9 +266,10 @@ export const NODE_DEFS: NodeDef[] = [
   { type: "remove_tag", category: "crm", label: "Remover tag", description: "Tira uma tag da conversa do contato.", fields: [{ key: "tag", label: "Tag", kind: "text" }], defaults: { tag: "" } },
   { type: "assign", category: "crm", label: "Atribuir atendente / fila", description: "Coloca a conversa numa fila e, se quiser, com um atendente.", fields: [{ key: "queueId", label: "Fila", kind: "queue" }, { key: "assigneeId", label: "Atendente (opcional)", kind: "user" }], defaults: { queueId: "", assigneeId: "" } },
   { type: "notify", category: "crm", label: "Notificar usuário / equipe", description: "Notificação interna no CRM e alerta opcional no WhatsApp.", fields: [{ key: "userIds", label: "Usuários (vazio = supervisores)", kind: "users" }, { key: "title", label: "Título", kind: "text" }, { key: "message", label: "Mensagem", kind: "textarea" }, { key: "whatsappPhone", label: "Alerta no WhatsApp (telefone, opcional)", kind: "text", placeholder: "62999990000" }], defaults: { userIds: [], title: "Automação: {{nome}}", message: "", whatsappPhone: "" } },
+  { type: "add_note", category: "crm", label: "Adicionar observação", description: "Registra uma nota interna na oportunidade do funil e/ou no cadastro do contato.", fields: [{ key: "target", label: "Destino", kind: "select", options: NOTE_TARGETS }, { key: "text", label: "Texto da observação", kind: "textarea", placeholder: "Cliente pediu orçamento de {{mensagem.texto}}", hint: NOTE_HINT }], defaults: { target: "opportunity", text: "" } },
   { type: "opt_out", category: "crm", label: "Marcar opt-out", description: "Tira o contato de campanhas (LGPD) e encerra as automações dele.", fields: [], defaults: {} },
 
-  { type: "condition", category: "logica", label: "Condição (se / senão)", description: "Segue pelo caminho Sim ou Não: a verificação abaixo e as Regras & Filtros (se houver) precisam ser atendidas.", fields: [{ key: "field", label: "Verificar", kind: "select", options: [{ value: "none", label: "Só as Regras & Filtros" }, { value: "tag", label: "Tag da conversa" }, { value: "stage", label: "Etapa do funil" }, { value: "city", label: "Cidade do contato" }, { value: "hour", label: "Hora atual (0 a 23)" }, { value: "reply", label: "Resposta do cliente" }] }, { key: "operator", label: "Operador", kind: "select", options: [{ value: "equals", label: "É igual a" }, { value: "contains", label: "Contém" }, { value: "not_contains", label: "Não contém" }, { value: "exists", label: "Existe / respondeu" }, { value: "gte", label: "Maior ou igual" }, { value: "lt", label: "Menor que" }] }, { key: "value", label: "Valor", kind: "text" }], defaults: { field: "reply", operator: "exists", value: "" } },
+  { type: "condition", category: "logica", label: "Condição (se / senão)", description: "Segue pelo caminho Sim quando a verificação (e as Regras & Filtros, se houver) é atendida; senão, pelo caminho Não.", fields: [{ key: "field", label: "Campo / variável", kind: "select", options: CONDITION_FIELDS.map(({ value, label }) => ({ value, label })) }, { key: "variable", label: "Nome da variável", kind: "text", placeholder: "origem" }, { key: "operator", label: "Operador", kind: "select", options: CONDITION_OPERATORS.map(({ value, label }) => ({ value, label })) }, { key: "value", label: "Valor", kind: "text" }], defaults: { field: "reply", operator: "exists", value: "" } },
   { type: "http", category: "logica", label: "Requisição HTTP", description: "Chama uma URL externa (GET/POST); a resposta vira variável {{http.campo}}.", fields: [{ key: "method", label: "Método", kind: "select", options: [{ value: "GET", label: "GET" }, { value: "POST", label: "POST" }] }, { key: "url", label: "URL", kind: "url", placeholder: "https://..." }, { key: "body", label: "Corpo JSON (POST)", kind: "textarea", placeholder: "{\"telefone\": \"{{telefone}}\"}" }], defaults: { method: "POST", url: "", body: "" } },
 ];
 
@@ -283,6 +340,9 @@ export function validateGraph(graph: FlowGraph): string[] {
     if (node.type === "assign" && !String(config.queueId ?? "").trim()) problems.push("Atribuir: escolha a fila.");
     if (node.type === "trigger_inactive" && !(readDuration(config, "days").amount > 0)) problems.push("Cliente inativo: informe o tempo sem contato.");
     if (node.type === "condition" && config.field === "none" && !readFilters(config).rules.length) problems.push("Condição: adicione ao menos uma regra em Regras & Filtros.");
+    if (node.type === "condition" && config.field === "variable" && !String(config.variable ?? "").trim()) problems.push("Condição: informe o nome da variável.");
+    if (node.type === "condition" && config.field !== "none" && CONDITION_OPERATORS.find((item) => item.value === config.operator)?.needsValue && !String(config.value ?? "").trim()) problems.push("Condição: informe o valor da comparação.");
+    if (node.type === "add_note" && !String(config.text ?? "").trim()) problems.push("Adicionar observação: escreva o texto da nota.");
     const filters = readFilters(config);
     if (filters.rules.some((rule) => FILTER_KIND[rule.kind].ops.find((op) => op.value === rule.op)?.needsValue && !String((rule as { value?: string }).value ?? "").trim())) problems.push(`${NODE_DEF[node.type].label}: complete o valor das regras & filtros.`);
   }

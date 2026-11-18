@@ -23,12 +23,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Bell, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
+  AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Bell, Bot, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
-  describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
+  CONDITION_FIELDS, describeCondition, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
   type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
 } from "@/lib/automations/nodes";
 
@@ -43,7 +43,7 @@ type Snapshot = { nodes: CanvasNode[]; edges: Edge[] };
 
 const ICONS: Record<NodeType, typeof Zap> = {
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
-  send_whatsapp: MessageSquare, delay: Timer, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, opt_out: ShieldOff, condition: GitBranch, http: Globe,
+  send_whatsapp: MessageSquare, delay: Timer, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, add_note: StickyNote, opt_out: ShieldOff, condition: GitBranch, http: Globe,
 };
 const HEADER: Record<NodeCategory, string> = {
   gatilho: "bg-[#C4D600] text-[#051647]",
@@ -90,7 +90,8 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "ai_agent": return String(config.objective || "Atendimento pela IA");
     case "assign": return options.queues.find((queue) => queue.id === config.queueId)?.name ?? "(escolha a fila)";
     case "notify": return String(config.title || "Notificação");
-    case "condition": return config.field === "none" ? "Regras & Filtros do nó" : `${String(config.field)} ${String(config.operator)} ${String(config.value ?? "")}`.trim();
+    case "condition": return describeCondition(config);
+    case "add_note": return `${NOTE_TARGETS.find((item) => item.value === config.target)?.label ?? NOTE_TARGETS[0].label}: ${String(config.text || "(sem texto)")}`;
     case "http": return `${String(config.method)} ${String(config.url || "(sem URL)")}`;
     case "create_opportunity": return "Novo lead (se não houver aberta)";
     case "opt_out": return "Fora das campanhas (LGPD)";
@@ -122,9 +123,13 @@ const AutomationNode = memo(function AutomationNode({ data, selected }: NodeProp
       <div className="h-2" />
       {data.kind === "condition" ? (
         <>
-          <Handle id="true" type="source" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "35%" } : { left: "28%" }} className="!h-3 !w-3 !border-2 !border-white !bg-emerald-500" />
-          <Handle id="false" type="source" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "72%" } : { left: "72%" }} className="!h-3 !w-3 !border-2 !border-white !bg-red-500" />
-          <div className={`flex px-6 pb-1 text-[9px] font-bold uppercase ${horizontal ? "flex-col items-end gap-1 pr-3" : "justify-between"}`}><span className="text-emerald-600">Sim</span><span className="text-red-600">Não</span></div>
+          {/* Saídas rotuladas: Sim (verde) e Não (vermelho), cada uma com o seu ponto de conexão. */}
+          <div className={`flex gap-1.5 border-t border-slate-100 px-2 pb-2.5 pt-2 dark:border-slate-800 ${horizontal ? "flex-col items-end" : "justify-between"}`}>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30"><CheckCircle2 className="h-3 w-3" />Sim / Verdadeiro</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-red-200 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30"><XCircle className="h-3 w-3" />Não / Falso</span>
+          </div>
+          <Handle id="true" type="source" title="Sim / Verdadeiro" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "auto", bottom: 34 } : { left: "25%" }} className="!h-3.5 !w-3.5 !border-2 !border-white !bg-emerald-500" />
+          <Handle id="false" type="source" title="Não / Falso" position={horizontal ? Position.Right : Position.Bottom} style={horizontal ? { top: "auto", bottom: 10 } : { left: "75%" }} className="!h-3.5 !w-3.5 !border-2 !border-white !bg-red-500" />
         </>
       ) : (
         <Handle type="source" position={horizontal ? Position.Right : Position.Bottom} className={handleCls} />
@@ -140,7 +145,21 @@ let nodeSeq = 0;
 const newNodeId = (kind: NodeType) => `${kind.replace(/_/g, "-")}-${Date.now().toString(36)}${(nodeSeq += 1).toString(36)}`;
 
 const toCanvas = (node: FlowNode): CanvasNode => ({ id: node.id, type: "automation", position: node.position, data: { kind: node.type, config: node.data.config, ...(node.data.dir ? { dir: node.data.dir } : {}) } });
-const toCanvasEdge = (edge: FlowEdge): Edge => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null, ...edgeStyle, ...(edge.sourceHandle ? { label: edge.sourceHandle === "true" ? "Sim" : "Não" } : {}) });
+/** Ramo da condição: aresta verde (Sim) ou vermelha (Não) com selo do caminho. */
+function branchStyle(handle: string | null | undefined): Partial<Edge> {
+  if (handle !== "true" && handle !== "false") return edgeStyle;
+  const color = handle === "true" ? "#10b981" : "#ef4444";
+  return {
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color },
+    style: { strokeWidth: 2, stroke: color },
+    label: handle === "true" ? "Sim" : "Não",
+    labelStyle: { fill: "#fff", fontSize: 10, fontWeight: 700 },
+    labelBgStyle: { fill: color },
+    labelBgPadding: [6, 3] as [number, number],
+    labelBgBorderRadius: 999,
+  };
+}
+const toCanvasEdge = (edge: FlowEdge): Edge => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle ?? null, ...branchStyle(edge.sourceHandle) });
 
 /**
  * Auto-organizar: camadas pela distância a partir dos gatilhos (e nós sem entrada), na vertical (de cima para baixo)
@@ -216,6 +235,62 @@ function Field({ field, value, onChange, options }: { field: FieldDef; value: un
     );
   }
   return <label className="block space-y-1">{label}<input type={field.kind === "number" ? "number" : "text"} min={field.kind === "number" ? 0 : undefined} value={String(value ?? "")} placeholder={"placeholder" in field ? field.placeholder : undefined} onChange={(event) => onChange(field.kind === "number" ? Number(event.target.value) : event.target.value)} className={input} />{hint}</label>;
+}
+
+/** Painel da Condição: Campo/variável → Operador → Valor, com a frase final e os dois caminhos explicados. */
+function ConditionEditor({ config, onChange }: { config: Record<string, unknown>; onChange: (key: string, value: unknown) => void }) {
+  const field = String(config.field ?? "reply");
+  const operators = operatorsFor(field);
+  const operator = operators.find((item) => item.value === config.operator) ?? operators[0];
+  const label = (text: string) => <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">{text}</span>;
+  const changeField = (next: string) => {
+    onChange("field", next);
+    // Operador incompatível com o novo campo volta para o primeiro válido.
+    const valid = operatorsFor(next);
+    if (!valid.some((item) => item.value === config.operator)) onChange("operator", valid[0].value);
+    if (next === "stage" && !STAGE_OPTIONS.some((item) => item.value === config.value)) onChange("value", STAGE_OPTIONS[0].value);
+  };
+  return (
+    <div className="space-y-2.5">
+      <label className="block space-y-1">{label("Campo / variável")}
+        <select value={field} onChange={(event) => changeField(event.target.value)} className={`${input} cursor-pointer`}>
+          {CONDITION_FIELDS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </label>
+      {field === "variable" && (
+        <label className="block space-y-1">{label("Nome da variável")}
+          <input value={String(config.variable ?? "")} placeholder="origem" onChange={(event) => onChange("variable", event.target.value.replace(/[{}\s]/g, ""))} className={`${input} font-mono`} />
+          <span className="block text-[10px] text-slate-400">Campo do webhook, {"{{fila}}"}, {"{{motivo}}"}, {"{{http.campo}}"}...</span>
+        </label>
+      )}
+      {field !== "none" && (
+        <>
+          <label className="block space-y-1">{label("Operador")}
+            <select value={operator.value} onChange={(event) => onChange("operator", event.target.value)} className={`${input} cursor-pointer`}>
+              {operators.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </label>
+          {(operator.needsValue || (operator.value === "exists" && String(config.value ?? "").trim())) && (
+            <label className="block space-y-1">{label("Valor")}
+              {field === "stage" ? (
+                <select value={String(config.value ?? "")} onChange={(event) => onChange("value", event.target.value)} className={`${input} cursor-pointer`}>
+                  {STAGE_OPTIONS.map((stage) => <option key={stage.value} value={stage.value}>{stage.label}</option>)}
+                </select>
+              ) : (
+                <input type={field === "hour" ? "number" : "text"} min={field === "hour" ? 0 : undefined} max={field === "hour" ? 23 : undefined} value={String(config.value ?? "")} placeholder={field === "hour" ? "18" : field === "tag" ? "vip" : field === "city" ? "Goiânia" : "texto"} onChange={(event) => onChange("value", event.target.value)} className={input} />
+              )}
+            </label>
+          )}
+        </>
+      )}
+      <div className="space-y-1.5 rounded-lg bg-slate-50 p-2.5 text-[11px] dark:bg-white/5">
+        <p className="font-semibold text-[#051647] dark:text-white">Se {describeCondition(config)}</p>
+        <p className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5 shrink-0" />segue pela saída <b>Sim / Verdadeiro</b> (verde)</p>
+        <p className="flex items-center gap-1.5 text-red-700 dark:text-red-300"><XCircle className="h-3.5 w-3.5 shrink-0" />senão, pela saída <b>Não / Falso</b> (vermelha)</p>
+        <p className="text-[10px] text-slate-500 dark:text-slate-400">Para combinar várias regras com E / OU, use Regras & Filtros abaixo: elas entram no Sim junto com esta verificação.</p>
+      </div>
+    </div>
+  );
 }
 
 /** Regras & Filtros de Execução de qualquer nó (E/OU, fila, tipo de contato, etapa, tag, cidade, receita). */
@@ -581,7 +656,7 @@ function Editor({ flowId }: { flowId: string }) {
   const onConnect = useCallback((connection: Connection) => {
     record();
     // Cada saída leva a um só passo (na condição, um para Sim e um para Não): nova conexão substitui a anterior.
-    setEdges((current) => addEdge({ ...connection, id: `${connection.source}-${connection.sourceHandle ?? "out"}-${connection.target}`, ...edgeStyle, ...(connection.sourceHandle ? { label: connection.sourceHandle === "true" ? "Sim" : "Não" } : {}) }, current.filter((edge) => !(edge.source === connection.source && (edge.sourceHandle ?? null) === (connection.sourceHandle ?? null)))));
+    setEdges((current) => addEdge({ ...connection, id: `${connection.source}-${connection.sourceHandle ?? "out"}-${connection.target}`, ...branchStyle(connection.sourceHandle) }, current.filter((edge) => !(edge.source === connection.source && (edge.sourceHandle ?? null) === (connection.sourceHandle ?? null)))));
   }, [setEdges, record]);
 
   // Vários gatilhos por fluxo: qualquer um que disparar inicia a execução a partir dele.
@@ -729,7 +804,9 @@ function Editor({ flowId }: { flowId: string }) {
                       <span className="block text-[10px] text-slate-400">Corpo JSON: {"{ \"telefone\": \"62999990000\", \"campo\": \"valor\" }"}. Campos viram {"{{campo}}"}.</span>
                     </div>
                   )}
-                  {selectedFields.map((field) => (
+                  {selected.data.kind === "condition" ? (
+                    <ConditionEditor config={selected.data.config} onChange={updateConfig} />
+                  ) : selectedFields.map((field) => (
                     <Field key={field.key} field={field} value={selected.data.config[field.key]} options={options} onChange={(value) => updateConfig(field.key, value)} />
                   ))}
                   <FiltersEditor key={selected.id} kind={selected.data.kind} filters={readFilters(selected.data.config)} options={options} onChange={(filters) => updateConfig("filters", filters)} />

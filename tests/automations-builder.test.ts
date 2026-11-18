@@ -26,6 +26,7 @@ function fakePorts(facts: ContactFacts) {
     assign: async () => { calls.push("assign"); return "ok"; },
     notify: async (_state, input) => { calls.push(`notify:${input.title}`); return "ok"; },
     optOut: async () => { calls.push("optout"); return "ok"; },
+    addNote: async (_state, input) => { calls.push(`note:${input.target}:${input.text}`); return "ok"; },
     http: async () => ({ status: 200, data: {} }),
     log: async (_state, item, status, message) => { logs.push({ node: item.id, status, message }); },
   };

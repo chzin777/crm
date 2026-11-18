@@ -166,6 +166,23 @@ export function databasePorts(flowId: string): EnginePorts {
       }
       return "Contato marcado como opt-out (fora das campanhas)";
     },
+    addNote: async (state, input) => {
+      const done: string[] = [];
+      let toContact = input.target !== "opportunity";
+      if (input.target !== "contact") {
+        const { addOpportunityNote } = await import("@/lib/sales-pipeline-db");
+        const card = await addOpportunityNote({ contactId: state.contactId, text: input.text, author: AUTHOR });
+        if (card) done.push("na oportunidade");
+        // Sem oportunidade aberta a nota não se perde: vai para o cadastro do contato.
+        else toContact = true;
+      }
+      if (toContact) {
+        await prisma.contactNote.create({ data: { contactId: state.contactId, authorId: null, authorName: AUTHOR, text: input.text } });
+        done.push(input.target === "opportunity" ? "no cadastro do contato (sem oportunidade aberta)" : "no cadastro do contato");
+      }
+      notifyChatChange();
+      return `Observação registrada ${done.join(" e ")}`;
+    },
     http: async (input) => {
       if (!/^https?:\/\//i.test(input.url)) throw new Error("URL inválida.");
       const response = await fetch(input.url, {
@@ -284,6 +301,7 @@ export async function simulateFlow(graph: FlowGraph, contactId: string, triggerN
     assign: describe("colocaria a conversa na fila escolhida"),
     notify: async (_state, input) => `Simulado: notificaria ${input.userIds.length || "os supervisores"} (${input.title.slice(0, 80)})`,
     optOut: describe("marcaria o contato como opt-out"),
+    addNote: async (_state, input) => `Simulado: registraria a observação "${input.text.slice(0, 160)}" ${input.target === "contact" ? "no cadastro do contato" : input.target === "both" ? "na oportunidade e no cadastro do contato" : "na oportunidade (ou no contato, se não houver oportunidade aberta)"}`,
     http: async (input) => ({ status: 200, data: { simulado: true, url: input.url } }),
     log: async (_state, node: FlowNode, status, message) => { steps.push({ nodeId: node.id, nodeType: node.type, label: NODE_DEF[node.type].label, status, message }); },
   };

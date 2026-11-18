@@ -73,6 +73,7 @@ function fakePorts(options: { reply?: string | null; optedOut?: () => boolean; s
     assign: async () => { calls.push("assign"); return "ok"; },
     notify: async (_state, input) => { calls.push(`notify:${input.title}|${input.message}`); return "ok"; },
     optOut: async () => { calls.push("optout"); return "ok"; },
+    addNote: async (_state, input) => { calls.push(`note:${input.target}:${input.text}`); return "ok"; },
     http: async () => ({ status: 200, data: { ok: true } }),
     log: async (_state, item, status, message) => { logs.push({ node: item.id, status, message }); },
   };

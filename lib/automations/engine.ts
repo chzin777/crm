@@ -1,4 +1,4 @@
-import { describeFilters, evaluateFilters, isTrigger, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
+import { describeFilters, evaluateFilters, isTrigger, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
 
@@ -48,6 +48,8 @@ export type EnginePorts = {
   assign: (state: ExecutionState, input: { queueId: string; assigneeId: string }) => Promise<string>;
   notify: (state: ExecutionState, input: { userIds: string[]; title: string; message: string; whatsappPhone: string }) => Promise<string>;
   optOut: (state: ExecutionState) => Promise<string>;
+  /** Nota interna na oportunidade aberta e/ou no cadastro do contato (sem oportunidade: vai para o contato). */
+  addNote: (state: ExecutionState, input: { target: NoteTarget; text: string }) => Promise<string>;
   http: (input: { method: string; url: string; body: string }) => Promise<{ status: number; data: unknown }>;
   log: (state: ExecutionState, node: FlowNode, status: StepStatus, message: string) => Promise<void>;
 };
@@ -60,14 +62,26 @@ export type AdvanceResult =
 
 const MAX_STEPS = 60;
 
-/** {{nome}}, {{cidade}}, {{http.campo}}...: variáveis desconhecidas viram vazio. */
+/** Nomes com ponto equivalentes às variáveis curtas ({{contato.nome}} = {{nome}}, {{mensagem.texto}} = {{mensagem}}). */
+const VAR_ALIASES: Record<string, string> = {
+  "contato.nome": "nome", "contato.primeiro_nome": "nome", "contato.nome_completo": "nome_completo", "contato.cidade": "cidade", "contato.telefone": "telefone",
+  "mensagem.texto": "mensagem", "cliente.nome": "nome", "cliente.cidade": "cidade", "cliente.telefone": "telefone",
+};
+
+/** Valor de uma variável da execução (com os apelidos acima); desconhecida = vazio. */
+export function readVar(vars: Record<string, string>, key: string): string {
+  const name = key.trim().replace(/^\{\{\s*|\s*\}\}$/g, "");
+  return vars[name] ?? vars[VAR_ALIASES[name] ?? ""] ?? "";
+}
+
+/** {{nome}}, {{contato.nome}}, {{cidade}}, {{http.campo}}...: variáveis desconhecidas viram vazio. */
 export function renderTemplate(text: string, context: ExecutionContext): string {
   return text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => {
     if (key.startsWith("http.")) {
       const value = key.slice(5).split(".").reduce<unknown>((current, part) => (current && typeof current === "object" ? (current as Record<string, unknown>)[part] : undefined), context.http);
       return value === undefined || value === null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
     }
-    return context.vars[key] ?? "";
+    return readVar(context.vars, key);
   });
 }
 
@@ -86,7 +100,7 @@ export function inactiveSince(now: Date, config: Record<string, unknown>): Date 
 const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
 /** Condição (se/senão) a partir dos dados do contato, da hora de Brasília e da resposta do cliente. */
-export function evaluateCondition(config: Record<string, unknown>, input: { facts: ContactFacts; hour: number; reply: string | null }): boolean {
+export function evaluateCondition(config: Record<string, unknown>, input: { facts: ContactFacts; hour: number; reply: string | null; vars?: Record<string, string> }): boolean {
   const field = String(config.field ?? "reply");
   const operator = String(config.operator ?? "exists");
   const expected = plain(String(config.value ?? ""));
@@ -95,14 +109,30 @@ export function evaluateCondition(config: Record<string, unknown>, input: { fact
     const value = Number(config.value);
     if (operator === "gte") return input.hour >= value;
     if (operator === "lt") return input.hour < value;
+    if (operator === "not_equals") return input.hour !== value;
     return input.hour === value;
   }
-  const values = field === "tag" ? input.facts.tags : field === "stage" ? [input.facts.stage ?? ""] : field === "city" ? [input.facts.city ?? ""] : [input.reply ?? ""];
+  const vars = input.vars ?? {};
+  const values = field === "tag" ? input.facts.tags
+    : field === "stage" ? [input.facts.stage ?? ""]
+    : field === "city" ? [input.facts.city ?? ""]
+    : field === "message" ? [readVar(vars, "mensagem")]
+    : field === "variable" ? [readVar(vars, String(config.variable ?? ""))]
+    : [input.reply ?? ""];
   const present = values.map(plain).filter(Boolean);
+  // "exists" com valor (fluxos antigos) funciona como "contém".
   if (operator === "exists") return expected ? present.some((item) => item.includes(expected)) : present.length > 0;
+  if (operator === "empty") return present.length === 0;
   if (operator === "equals") return present.some((item) => item === expected);
+  if (operator === "not_equals") return !present.some((item) => item === expected);
   if (operator === "contains") return present.some((item) => item.includes(expected));
   if (operator === "not_contains") return !present.some((item) => item.includes(expected));
+  if (operator === "gte" || operator === "lt") {
+    const number = Number(String(present[0] ?? "").replace(",", "."));
+    const limit = Number(expected.replace(",", "."));
+    if (!present.length || Number.isNaN(number) || Number.isNaN(limit)) return false;
+    return operator === "gte" ? number >= limit : number < limit;
+  }
   return false;
 }
 
@@ -128,6 +158,12 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
     case "remove_tag": return { message: await ports.removeTag(state, text("tag").trim()) };
     case "assign": return { message: await ports.assign(state, { queueId: String(config.queueId ?? ""), assigneeId: String(config.assigneeId ?? "") }) };
     case "notify": return { message: await ports.notify(state, { userIds: Array.isArray(config.userIds) ? config.userIds.map(String) : [], title: text("title"), message: text("message"), whatsappPhone: String(config.whatsappPhone ?? "").replace(/\D/g, "") }) };
+    case "add_note": {
+      const note = text("text").trim();
+      if (!note) throw new Error("Observação vazia.");
+      const target = config.target === "contact" || config.target === "both" ? config.target : "opportunity";
+      return { message: await ports.addNote(state, { target, text: note.slice(0, 4000) }) };
+    }
     case "opt_out": return { message: await ports.optOut(state) };
     case "http": {
       const response = await ports.http({ method: String(config.method ?? "POST"), url: text("url"), body: text("body") });
@@ -139,7 +175,7 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
       const filters = readFilters(config);
       const needsFacts = config.field !== "none" || filters.rules.length > 0;
       const [facts, reply] = await Promise.all([needsFacts ? ports.facts(state) : Promise.resolve({ tags: [], stage: null, city: null } as ContactFacts), config.field === "reply" ? ports.lastReply(state, new Date(state.context.startedAt)) : Promise.resolve(null)]);
-      const check = evaluateCondition(config, { facts, hour: brasiliaHour(ports.now()), reply });
+      const check = evaluateCondition(config, { facts, hour: brasiliaHour(ports.now()), reply, vars: state.context.vars });
       const rules = evaluateFilters(filters, facts);
       const branch = check && rules;
       const detail = filters.rules.length ? ` (regras: ${describeFilters(filters)} → ${rules ? "atendidas" : "não atendidas"})` : "";
