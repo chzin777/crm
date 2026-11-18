@@ -11,6 +11,7 @@ import { applyOptOutCommand } from "@/lib/marketing-opt-out-db";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { emitInboundMessageById } from "@/lib/automations/engine-db";
+import { syncCampaignTemplateStatus } from "@/lib/campaigns";
 
 /** Descadastro/reativação de campanhas pedido pelo próprio cliente. */
 async function handleOptOutCommand(conversationId: string, phone: string, command: OptOutCommand, text: string) {
@@ -145,12 +146,38 @@ export async function POST(request: Request) {
   }
   try {
     const payload = JSON.parse(raw) as {
-      entry?: { changes?: { field?: string; value?: { statuses?: StatusEvent[]; messages?: (InboundMessageEvent & MetaInboundMessage)[]; message_echoes?: (MetaInboundMessage & { to?: string })[]; contacts?: { wa_id?: string; profile?: { name?: string } }[] } }[] }[];
+      entry?: { changes?: { field?: string; value?: {
+        statuses?: StatusEvent[];
+        messages?: (InboundMessageEvent & MetaInboundMessage)[];
+        message_echoes?: (MetaInboundMessage & { to?: string })[];
+        contacts?: { wa_id?: string; profile?: { name?: string } }[];
+        event?: string;
+        message_template_id?: string;
+        message_template_name?: string;
+        message_template_language?: string;
+        reason?: string;
+      } }[] }[];
     };
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const profiles = change.value?.contacts ?? [];
         console.log(`[whatsapp/webhook] evento ${change.field ?? "?"}: ${change.value?.messages?.length ?? 0} mensagem(ns), ${change.value?.statuses?.length ?? 0} status`);
+        if (change.field === "message_template_status_update" && change.value?.event) {
+          try {
+            await syncCampaignTemplateStatus({
+              id: change.value.message_template_id ?? "",
+              name: change.value.message_template_name ?? "",
+              language: change.value.message_template_language ?? "",
+              status: change.value.event,
+              rejectedReason: change.value.reason,
+            });
+          } catch (failure) {
+            console.error("[whatsapp/webhook] atualizar aprovação do template:", failure);
+            return new Response("Falha ao atualizar aprovação do template", { status: 500 });
+          }
+          console.log(`[whatsapp/webhook] template ${change.value.message_template_name ?? change.value.message_template_id}: ${change.value.event}${change.value.reason ? ` — ${change.value.reason}` : ""}`);
+          continue;
+        }
         for (const echo of change.value?.message_echoes ?? []) {
           let conversationId;
           try {

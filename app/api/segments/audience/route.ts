@@ -104,6 +104,10 @@ const bodySchema = z.object({
   // Critérios aplicados só sobre os contatos do grupo de mesma chave em contactGroups (refino da planilha).
   contactCriteria: z.record(z.string().max(100), z.array(criterionSchema).max(30))
     .refine((groups) => Object.keys(groups).length <= 200).optional(),
+  campaignCriteria: z.record(z.string().max(100), z.object({
+    groupKeys: z.array(z.string().max(200)).max(200),
+    criteria: z.array(criterionSchema).max(10),
+  })).refine((campaigns) => Object.keys(campaigns).length <= 200).optional(),
   includeRecipients: z.boolean().optional(),
   /** Quantos contatos de amostra devolver por grupo (prévia ao vivo do construtor). */
   sample: z.number().int().min(0).max(50).optional(),
@@ -212,6 +216,16 @@ function ruleCondition(rule: SegmentRule, context: RuleContext): Prisma.Sql {
       return rule.operador === "neq"
         ? Prisma.sql`c.id NOT IN (SELECT contact_id FROM (${PIPELINE_CARDS}) p WHERE p.stage = ${value})`
         : Prisma.sql`c.id IN (SELECT contact_id FROM (${PIPELINE_CARDS}) p WHERE p.stage = ${value})`;
+    case "tier":
+    case "rfvpSegment": {
+      const field = rule.campo === "tier" ? "tier" : "rfvpSegment";
+      const target = normalizeText(Prisma.sql`COALESCE(c."${Prisma.raw(field)}", '')`);
+      const selected = splitRuleList(value).map(normalizeRuleText);
+      if (rule.operador === "in") return Prisma.sql`${target} = ANY(${selected}::text[])`;
+      return rule.operador === "neq"
+        ? Prisma.sql`${target} <> ${normalizeRuleText(value)}`
+        : Prisma.sql`${target} = ${normalizeRuleText(value)}`;
+    }
     case "lastPurchase": {
       const hasPurchase = Prisma.sql`${LAST_PURCHASE_DATE} IS NOT NULL`;
       switch (rule.operador) {
@@ -387,7 +401,11 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Critérios inválidos." }, { status: 400 });
 
-  const allCriteria = [...Object.values(parsed.data.groups), ...Object.values(parsed.data.contactCriteria ?? {})].flat();
+  const allCriteria = [
+    ...Object.values(parsed.data.groups),
+    ...Object.values(parsed.data.contactCriteria ?? {}),
+    ...Object.values(parsed.data.campaignCriteria ?? {}).map((item) => item.criteria),
+  ].flat();
   const usesBirthday = allCriteria.some((criterion) => criterion.regras?.some((rule) => rule.campo === "birthday"));
   const [storeRows, campaigns, birthDates] = await Promise.all([
     prisma.store.findMany(),
@@ -444,6 +462,13 @@ export async function POST(request: Request) {
       dataNascimento: contact.birthDate ?? "",
       segmento: contact.segment ?? "",
     }));
+  }
+  for (const [campaignId, item] of Object.entries(parsed.data.campaignCriteria ?? {})) {
+    if (item.criteria.length === 0) continue;
+    const candidateIds = [...new Set(item.groupKeys.flatMap((key) => (recipients[key] ?? []).map((recipient) => recipient.id)))];
+    const result = await computeGroupCount(campaignId, item.criteria, stores, !!parsed.data.includeRecipients, candidateIds, context);
+    counts[campaignId] = result.count;
+    if (parsed.data.includeRecipients && result.recipients) recipients[campaignId] = result.recipients;
   }
   if (parsed.data.includeRecipients) return Response.json({ counts, recipients });
   return Response.json(sampleSize > 0 ? { counts, samples } : { counts });

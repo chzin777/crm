@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Sparkles,
   SquareCheck,
   Users,
   X,
@@ -42,11 +43,12 @@ import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 import { CampaignRecipientsLog } from "@/components/CampaignRecipientsLog";
 import { BULK_STARTED_EVENT, BulkJobDetailsDialog, type BulkJobView } from "@/components/BulkDispatchTracker";
 
-type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio";
+type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
+const isDispatchBlocked = (campaign: Campaign) => isDispatchLocked(campaign.status) || Boolean(campaign.metaApprovalStatus && campaign.metaApprovalStatus !== "APPROVED");
 
 /** Status exibido na listagem unificada (campanhas e lotes do pipeline). */
-type DisplayStatus = "Rascunho" | "Pronta" | "Agendado" | "Enviando" | "Pausado" | "Concluído" | "Parcial" | "Falha" | "Cancelado";
+type DisplayStatus = "Rascunho" | "Pronta" | "Agendado" | "Aguardando Meta" | "Rejeitada pela Meta" | "Enviando" | "Pausado" | "Concluído" | "Parcial" | "Falha" | "Cancelado";
 type DisplayFilter = "Todas" | "Enviando" | "Pausado" | "Agendado" | "Concluído" | "Falha" | "Rascunho";
 const PAGE_SIZES = [10, 20, 50];
 
@@ -64,6 +66,18 @@ interface AudienceCriterion {
   tipo: "geral" | "loja";
   inativo?: boolean;
   regras?: { campo: string; operador: string; valor?: string; valor2?: string }[];
+  combinar?: "all" | "any";
+}
+
+interface CampaignTemplateDraft {
+  category: "MARKETING" | "UTILITY";
+  headerFormat: "NONE" | "TEXT";
+  headerText: string;
+  body: string;
+  footer: string;
+  params: string[];
+  examples: string[];
+  buttons: { type: "QUICK_REPLY"; text: string }[];
 }
 
 interface CampaignRecipient {
@@ -93,6 +107,14 @@ interface Campaign {
   nome: string;
   publico: string;
   audienceSegmentIds?: string[];
+  criteriaFilters?: AudienceCriterion[];
+  objective?: string;
+  audienceDescription?: string;
+  metaCategory?: "MARKETING" | "UTILITY";
+  metaApprovalStatus?: string;
+  metaApprovalReason?: string;
+  metaTemplateId?: string;
+  metaTemplateDraft?: CampaignTemplateDraft;
   status: CampaignStatus;
   disparos: number;
   rotuloDisparos: string;
@@ -145,6 +167,8 @@ const displayStyles: Record<DisplayStatus, string> = {
   Rascunho: "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]",
   Pronta: "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]",
   Agendado: "bg-blue-100 text-[#002187] dark:bg-blue-950/50 dark:text-blue-300",
+  "Aguardando Meta": "bg-blue-100 text-[#002187] dark:bg-blue-950/50 dark:text-blue-300",
+  "Rejeitada pela Meta": "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300",
   Enviando: "bg-[#002187]/10 text-[#002187] dark:bg-[#002187]/30 dark:text-[#C4D600]",
   Pausado: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
   Concluído: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
@@ -161,6 +185,10 @@ const campaignDisplayStatus = (campaign: Campaign): DisplayStatus => {
     case "Envio parcial": return "Parcial";
     case "Falha no envio": return "Falha";
     case "Agendada": return "Agendado";
+    case "Aguardando aprovação Meta": return "Aguardando Meta";
+    case "Rejeitada pela Meta": return "Rejeitada pela Meta";
+    case "Falha na submissão":
+    case "Modelo indisponível na Meta": return "Falha";
     case "Pronta para envio": return "Pronta";
     default: return "Rascunho";
   }
@@ -181,7 +209,7 @@ const filterMatches: Record<DisplayFilter, DisplayStatus[] | null> = {
   Agendado: ["Agendado"],
   Concluído: ["Concluído", "Parcial"],
   Falha: ["Falha"],
-  Rascunho: ["Rascunho", "Pronta"],
+  Rascunho: ["Rascunho", "Pronta", "Aguardando Meta", "Rejeitada pela Meta"],
 };
 const filters = Object.keys(filterMatches) as DisplayFilter[];
 
@@ -261,14 +289,30 @@ export function CampaignsView() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [selectedAudienceSegments, setSelectedAudienceSegments] = useState<string[]>([]);
+  const [campaignCriteriaFilters, setCampaignCriteriaFilters] = useState<AudienceCriterion[]>([]);
+  const [campaignObjective, setCampaignObjective] = useState("");
+  const [campaignAudienceDescription, setCampaignAudienceDescription] = useState("");
+  const [campaignCategory, setCampaignCategory] = useState<"MARKETING" | "UTILITY">("MARKETING");
+  const [campaignPrompt, setCampaignPrompt] = useState("");
+  const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
+  const [campaignAiError, setCampaignAiError] = useState("");
+  const [templatePrompt, setTemplatePrompt] = useState("");
+  const [isGeneratingTemplate, setIsGeneratingTemplate] = useState(false);
+  const [isSubmittingTemplate, setIsSubmittingTemplate] = useState(false);
+  const [templateAiError, setTemplateAiError] = useState("");
+  const [aiTemplateDraft, setAiTemplateDraft] = useState<CampaignTemplateDraft | null>(null);
+  const [metaStatusError, setMetaStatusError] = useState("");
   const [selectedAttachments, setSelectedAttachments] = useState<File[]>([]);
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState<Map<File, string>>(new Map());
   const attachmentPreviewUrlsRef = useRef(new Map<File, string>());
+  const newCampaignIdRef = useRef<string | null>(null);
   const [form, setForm] = useState({ nome: "", publico: "", mensagem: "" });
   const [campaignTemplate, setCampaignTemplate] = useState<CampaignTemplate | null>(null);
   const changeCampaignTemplate = (template: CampaignTemplate | null) => {
     setForm((current) => ({ ...current, mensagem: template ? template.body : campaignTemplate ? "" : current.mensagem }));
     setCampaignTemplate(template);
+    setAiTemplateDraft(null);
+    setTemplateAiError("");
     setFormError("");
   };
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -338,6 +382,28 @@ export function CampaignsView() {
     const timer = window.setInterval(() => void refreshAll(), hasActiveJob ? 3000 : 15000);
     return () => { window.clearTimeout(first); window.clearInterval(timer); };
   }, [campaignsLoading, hasActiveJob, refreshAll]);
+
+  const hasPendingMetaCampaign = campaigns.some((campaign) => ["PENDING", "PENDING_REVIEW", "IN_APPEAL"].includes(campaign.metaApprovalStatus ?? ""));
+  useEffect(() => {
+    if (campaignsLoading || !hasPendingMetaCampaign) return;
+    let active = true;
+    const syncMetaStatus = async () => {
+      try {
+        const response = await fetch("/api/campaigns/templates/status", { cache: "no-store" });
+        const result = await response.json() as { error?: string };
+        if (!response.ok) throw new Error(result.error || "Não foi possível consultar a análise da Meta.");
+        const refreshed = await reloadCampaigns();
+        if (!active) return;
+        setMetaStatusError("");
+        setSelectedCampaign((current) => current ? refreshed.find((item) => item.id === current.id) ?? current : current);
+      } catch (error) {
+        if (active) setMetaStatusError(error instanceof Error ? error.message : "Não foi possível consultar a análise da Meta.");
+      }
+    };
+    const first = window.setTimeout(() => void syncMetaStatus(), 0);
+    const timer = window.setInterval(() => void syncMetaStatus(), 30_000);
+    return () => { active = false; window.clearTimeout(first); window.clearInterval(timer); };
+  }, [campaignsLoading, hasPendingMetaCampaign, reloadCampaigns]);
 
   const controlDispatch = async (campaignId: string, action: "pause" | "resume" | "cancel") => {
     setJobBusy(campaignId);
@@ -513,12 +579,25 @@ export function CampaignsView() {
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
   const pageRows = filteredRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
-  const selectableRows = pageRows.filter((row) => row.kind === "campaign" && row.campaign && !isDispatchLocked(row.campaign.status));
+  const selectableRows = pageRows.filter((row) => row.kind === "campaign" && row.campaign && !isDispatchBlocked(row.campaign));
 
   const resetCreateForm = () => {
+    newCampaignIdRef.current = null;
     setForm({ nome: "", publico: "", mensagem: "" });
     setCampaignTemplate(null);
     setSelectedAudienceSegments([]);
+    setCampaignCriteriaFilters([]);
+    setCampaignObjective("");
+    setCampaignAudienceDescription("");
+    setCampaignCategory("MARKETING");
+    setCampaignPrompt("");
+    setIsGeneratingCampaign(false);
+    setCampaignAiError("");
+    setTemplatePrompt("");
+    setIsGeneratingTemplate(false);
+    setIsSubmittingTemplate(false);
+    setTemplateAiError("");
+    setAiTemplateDraft(null);
     clearSelectedAttachments();
     setUploadedAttachments([]);
     setFormError("");
@@ -539,11 +618,16 @@ export function CampaignsView() {
     }
     return {
       // eslint-disable-next-line react-hooks/purity -- chamado só em handlers de clique, não durante a renderização
-      id: `camp-${Date.now()}`,
+      id: newCampaignIdRef.current ?? (newCampaignIdRef.current = `camp-${Date.now()}`),
       nome,
       modelo: campaignTemplate,
       publico: selectedAudienceSegments.join(", "),
       audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
+      criteriaFilters: campaignCriteriaFilters,
+      objective: campaignObjective,
+      audienceDescription: campaignAudienceDescription,
+      metaCategory: campaignCategory,
+      ...(aiTemplateDraft ? { metaTemplateDraft: { ...aiTemplateDraft, body: mensagem, category: campaignCategory }, metaApprovalStatus: "TEMPLATE_DRAFT" } : {}),
       status: "Rascunho",
       disparos: 0,
       rotuloDisparos: "contatos no público",
@@ -552,6 +636,152 @@ export function CampaignsView() {
       mensagem,
       anexos: uploadedAttachments.length > 0 ? uploadedAttachments : selectedAttachments.map(({ name, size, type }) => ({ name, size, type })),
     };
+  };
+
+  const generateCampaignWithAi = async () => {
+    const prompt = campaignPrompt.trim();
+    if (prompt.length < 10) {
+      setCampaignAiError("Descreva o objetivo e o público da campanha com um pouco mais de detalhe.");
+      return;
+    }
+    setIsGeneratingCampaign(true);
+    setCampaignAiError("");
+    try {
+      const response = await fetch("/api/campaigns/gerar-ia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "campaign", prompt }),
+      });
+      const result = await response.json() as { campaign?: { name: string; objective: string; audienceDescription: string; category: "MARKETING" | "UTILITY"; segmentIds: string[]; audienceFilters: AudienceCriterion[]; body: string; headerFormat: "NONE" | "TEXT"; headerText: string; footer: string; params: string[]; examples: string[]; buttons: CampaignTemplateDraft["buttons"] }; error?: string };
+      if (!response.ok || !result.campaign) throw new Error(result.error || "Não foi possível gerar a campanha.");
+      const generated = result.campaign;
+      setForm({ nome: generated.name, publico: segments.filter((segment) => generated.segmentIds.includes(segment.id)).map((segment) => segment.nome).join(", "), mensagem: generated.body });
+      setSelectedAudienceSegments(segments.filter((segment) => generated.segmentIds.includes(segment.id)).map((segment) => segment.nome));
+      setCampaignCriteriaFilters(generated.audienceFilters);
+      setCampaignObjective(generated.objective);
+      setCampaignAudienceDescription(generated.audienceDescription);
+      setCampaignCategory(generated.category);
+      setAiTemplateDraft({
+        category: generated.category,
+        headerFormat: generated.headerFormat,
+        headerText: generated.headerText,
+        body: generated.body,
+        footer: generated.footer,
+        params: generated.params,
+        examples: generated.examples,
+        buttons: generated.buttons,
+      });
+      setCampaignTemplate(null);
+      setCampaignAiError("");
+      setFormError("");
+      toast.success("Campanha gerada", "Revise o nome, o público, os filtros e a mensagem antes de salvar ou enviar.");
+    } catch (error) {
+      setCampaignAiError(error instanceof Error ? error.message : "Não foi possível gerar a campanha.");
+    } finally {
+      setIsGeneratingCampaign(false);
+    }
+  };
+
+  const generateMessageTemplateWithAi = async () => {
+    if (!form.nome.trim() || selectedAudienceSegments.length === 0) {
+      setTemplateAiError("Informe o nome da campanha e selecione o público antes de gerar o modelo.");
+      return;
+    }
+    const prompt = templatePrompt.trim() || `Crie uma mensagem para a campanha "${form.nome.trim()}"`;
+    setIsGeneratingTemplate(true);
+    setTemplateAiError("");
+    try {
+      const response = await fetch("/api/campaigns/gerar-ia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "template",
+          prompt,
+          campaignName: form.nome.trim(),
+          segmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
+          campaignObjective,
+          audienceDescription: campaignAudienceDescription,
+          audienceFilters: campaignCriteriaFilters,
+        }),
+      });
+      const result = await response.json() as { template?: CampaignTemplateDraft; error?: string };
+      if (!response.ok || !result.template) throw new Error(result.error || "Não foi possível gerar o modelo.");
+      setAiTemplateDraft(result.template);
+      setCampaignCategory(result.template.category);
+      setCampaignTemplate(null);
+      setForm((current) => ({ ...current, mensagem: result.template?.body ?? "" }));
+      setTemplateAiError("");
+      setFormError("");
+    } catch (error) {
+      setTemplateAiError(error instanceof Error ? error.message : "Não foi possível gerar a mensagem.");
+    } finally {
+      setIsGeneratingTemplate(false);
+    }
+  };
+
+  const updateGeneratedTemplateBody = (body: string) => {
+    setForm((current) => ({ ...current, mensagem: body }));
+    setAiTemplateDraft((current) => {
+      if (!current) return current;
+      const indices = [...new Set(body.match(/\{\{\d+\}\}/g) ?? [])].map((item) => Number(item.slice(2, -2))).sort((a, b) => a - b);
+      const params = indices.map((_, index) => current.params[index] ?? "nome");
+      const examplesByField: Record<string, string> = { nome: "Maria", email: "maria@example.com", telefone: "+5511999999999", segmento: "Clientes especiais", data_nascimento: "15/05/1990" };
+      return { ...current, body, params, examples: params.map((field) => examplesByField[field] ?? "Exemplo") };
+    });
+    setFormError("");
+  };
+
+  const updateGeneratedTemplateParam = (index: number, field: string) => {
+    const examplesByField: Record<string, string> = { nome: "Maria", email: "maria@example.com", telefone: "+5511999999999", segmento: "Clientes especiais", data_nascimento: "15/05/1990" };
+    setAiTemplateDraft((current) => current ? {
+      ...current,
+      params: current.params.map((item, i) => i === index ? field : item),
+      examples: current.params.map((item, i) => examplesByField[i === index ? field : item] ?? "Exemplo"),
+    } : current);
+  };
+
+  const submitTemplateForMeta = async (campaign: Campaign, draft: CampaignTemplateDraft, closeAfterSubmit = true) => {
+    if (isSubmittingTemplate) return;
+    setIsSubmittingTemplate(true);
+    setTemplateAiError("");
+    setFormError("");
+    try {
+      const response = await fetch("/api/campaigns/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaign, template: { ...draft, body: form.mensagem.trim(), category: campaignCategory } }),
+      });
+      const result = await response.json() as { id?: string; name?: string; status?: string; campaignStatus?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || "Não foi possível enviar o modelo para análise da Meta.");
+      const refreshed = await reloadCampaigns().catch(() => null);
+      const submittedCampaign: Campaign = {
+        ...campaign,
+        status: (result.campaignStatus ?? "Aguardando aprovação Meta") as CampaignStatus,
+        metaApprovalStatus: result.status ?? "PENDING",
+        metaApprovalReason: "",
+        metaTemplateId: result.id ?? "",
+        metaTemplateDraft: draft,
+        modelo: { name: result.name ?? campaign.modelo?.name ?? "template_pendente", language: "pt_BR", body: form.mensagem.trim(), hasImage: false, params: draft.params },
+      };
+      setSelectedCampaign((current) => current?.id === campaign.id ? refreshed?.find((item) => item.id === current.id) ?? submittedCampaign : current);
+      if (closeAfterSubmit) {
+        resetCreateForm();
+        setIsCreateOpen(false);
+        setActiveFilter("Todas");
+        setSearchTerm("");
+      } else {
+        setAiTemplateDraft(null);
+        setTemplateAiError("");
+      }
+      if (!refreshed) setMetaStatusError("O modelo foi submetido, mas a lista não atualizou. Atualize a página para confirmar o status.");
+      toast.success(result.status === "APPROVED" ? "Modelo aprovado pela Meta" : "Modelo enviado para análise", result.status === "APPROVED"
+        ? `"${campaign.nome}" está pronta para disparo.`
+        : `A campanha "${campaign.nome}" ficará bloqueada até a aprovação da Meta.`);
+    } catch (error) {
+      setTemplateAiError(error instanceof Error ? error.message : "Não foi possível enviar o modelo para análise.");
+    } finally {
+      setIsSubmittingTemplate(false);
+    }
   };
 
   /** Botão secundário: guarda a campanha pausada para editar depois. */
@@ -570,8 +800,13 @@ export function CampaignsView() {
     setSelectedCampaign(campaign);
     clearSelectedAttachments();
     setSelectedAudienceSegments(campaign.publico.split(", ").filter((segment) => segmentOptionSet.has(segment)));
+    setCampaignCriteriaFilters(campaign.criteriaFilters ?? []);
+    setCampaignObjective(campaign.objective ?? "");
+    setCampaignAudienceDescription(campaign.audienceDescription ?? "");
+    setCampaignCategory(campaign.metaCategory ?? "MARKETING");
     setForm({ nome: campaign.nome, publico: campaign.publico, mensagem: campaign.mensagem });
-    setCampaignTemplate(campaign.modelo ?? null);
+    setCampaignTemplate(campaign.metaApprovalStatus === "REJECTED" || campaign.metaApprovalStatus === "SUBMISSION_FAILED" ? null : campaign.modelo ?? null);
+    setAiTemplateDraft(campaign.metaTemplateDraft ?? null);
     setFormError("");
   };
 
@@ -677,13 +912,20 @@ export function CampaignsView() {
       setFormError(!nome ? "Informe o nome da campanha." : !publico ? "Selecione pelo menos um segmento para o público-alvo." : "Escreva a mensagem da campanha.");
       return;
     }
+    const metaTemplateChanged = Boolean(selectedCampaign.metaApprovalStatus && !aiTemplateDraft && campaignTemplate?.name !== selectedCampaign.modelo?.name);
     const updatedCampaign = {
       ...selectedCampaign,
       nome,
-      modelo: campaignTemplate,
+      modelo: aiTemplateDraft ? selectedCampaign.modelo : campaignTemplate,
       publico,
       audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id),
+      criteriaFilters: campaignCriteriaFilters,
+      objective: campaignObjective,
+      audienceDescription: campaignAudienceDescription,
+      metaCategory: campaignCategory,
       mensagem,
+      ...(metaTemplateChanged ? { status: "Rascunho" as const, metaApprovalStatus: undefined, metaApprovalReason: "", metaTemplateId: "" } : {}),
+      ...(aiTemplateDraft ? { metaTemplateDraft: { ...aiTemplateDraft, body: mensagem, category: campaignCategory } } : {}),
       dataAtualizacao: new Date().toISOString(),
     };
     setCampaigns((current) => current.map((campaign) => campaign.id === updatedCampaign.id ? updatedCampaign : campaign));
@@ -727,6 +969,7 @@ export function CampaignsView() {
     const groups: Record<string, AudienceCriterion[]> = {};
     const contactGroups: Record<string, string[]> = {};
     const contactCriteria: Record<string, AudienceCriterion[]> = {};
+    const campaignCriteria: Record<string, { groupKeys: string[]; criteria: AudienceCriterion[] }> = {};
     const groupKeysByCampaign = new Map<string, string[]>();
     for (const campaign of readyCampaigns) {
       const campaignSegments = campaign.audienceSegmentIds?.length
@@ -761,12 +1004,13 @@ export function CampaignsView() {
         groups[key] = criteria as AudienceCriterion[];
       }
       groupKeysByCampaign.set(campaign.id, keys);
+      if (campaign.criteriaFilters?.length) campaignCriteria[campaign.id] = { groupKeys: keys, criteria: campaign.criteriaFilters };
     }
 
     const audienceResponse = await fetch("/api/segments/audience", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groups, contactGroups, contactCriteria, includeRecipients: true }),
+      body: JSON.stringify({ groups, contactGroups, contactCriteria, campaignCriteria, includeRecipients: true }),
     });
     const audienceCt = audienceResponse.headers.get("content-type") ?? "";
     if (!audienceCt.includes("application/json")) {
@@ -782,8 +1026,12 @@ export function CampaignsView() {
     const recipientsByCampaign = new Map<string, CampaignRecipient[]>();
     for (const campaign of readyCampaigns) {
       const recipients = new Map<string, CampaignRecipient>();
-      for (const key of groupKeysByCampaign.get(campaign.id) ?? []) {
-        for (const recipient of audience.recipients[key] ?? []) recipients.set(recipient.id, recipient);
+      if (campaign.criteriaFilters?.length) {
+        for (const recipient of audience.recipients[campaign.id] ?? []) recipients.set(recipient.id, recipient);
+      } else {
+        for (const key of groupKeysByCampaign.get(campaign.id) ?? []) {
+          for (const recipient of audience.recipients[key] ?? []) recipients.set(recipient.id, recipient);
+        }
       }
       if (recipients.size === 0) throw new Error(`O público de "${campaign.nome}" não contém contatos para envio.`);
       recipientsByCampaign.set(campaign.id, [...recipients.values()]);
@@ -847,6 +1095,10 @@ export function CampaignsView() {
   /** Botão primário do assistente: cria a campanha, inicia o lote em segundo plano e abre o acompanhamento ao vivo. */
   const launchNewCampaign = async () => {
     if (isLaunching) return;
+    if (aiTemplateDraft) {
+      setFormError("Envie o modelo gerado para análise da Meta antes de liberar o disparo.");
+      return;
+    }
     const campaign = buildNewCampaign();
     if (!campaign) return;
     setIsLaunching(true);
@@ -891,8 +1143,10 @@ export function CampaignsView() {
       const targetCampaigns = dispatchTarget.ids.map((id) => currentCampaigns.find((campaign) => campaign.id === id));
       if (targetCampaigns.some((campaign) => !campaign)) throw new Error("Uma das campanhas selecionadas não foi encontrada. Atualize a página e tente novamente.");
       const readyCampaigns = targetCampaigns as Campaign[];
-      const blocked = readyCampaigns.find((campaign) => isDispatchLocked(campaign.status));
-      if (blocked) throw new Error(`"${blocked.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`);
+      const blocked = readyCampaigns.find(isDispatchBlocked);
+      if (blocked) throw new Error(blocked.metaApprovalStatus && blocked.metaApprovalStatus !== "APPROVED"
+        ? `"${blocked.nome}" aguarda aprovação do template pela Meta e não pode ser disparada.`
+        : `"${blocked.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`);
 
       await ensureReadyToDispatch();
       const recipientsByCampaign = await buildCampaignRecipients(readyCampaigns);
@@ -961,12 +1215,14 @@ export function CampaignsView() {
   const selectedJob = selectedCampaign ? jobByCampaign.get(selectedCampaign.id) : undefined;
   const selectedStats = selectedCampaign ? stats[selectedCampaign.id] ?? EMPTY_STATS : EMPTY_STATS;
   const selectedLocked = selectedCampaign ? isDispatchLocked(selectedCampaign.status) : false;
+  const selectedMetaPending = Boolean(selectedCampaign && ["PENDING", "PENDING_REVIEW", "IN_APPEAL"].includes(selectedCampaign.metaApprovalStatus ?? ""));
   const selectedDisplay = selectedCampaign ? campaignDisplayStatus(selectedCampaign) : "Rascunho";
 
   return (
     <div>
       <div className="space-y-4 pb-10">
         {campaignsError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{campaignsError}</p>}
+        {metaStatusError && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">{metaStatusError}</p>}
 
         <div className="flex flex-wrap items-center gap-3">
           <label className="relative block w-full sm:w-72 md:w-80">
@@ -1031,7 +1287,7 @@ export function CampaignsView() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {pageRows.map((row) => {
-                  const selectable = row.kind === "campaign" && row.campaign !== undefined && !isDispatchLocked(row.campaign.status);
+                  const selectable = row.kind === "campaign" && row.campaign !== undefined && !isDispatchBlocked(row.campaign);
                   const isSelected = selectable && selectedCampaignIds.has(row.id);
                   const percent = row.total > 0 ? Math.min(100, Math.round((row.processed / row.total) * 100)) : 0;
                   const busy = jobBusy === row.id;
@@ -1104,7 +1360,7 @@ export function CampaignsView() {
                               <button type="button" disabled={busy} onClick={() => void controlDispatch(row.id, "pause")} aria-label={`Pausar ${row.nome}`} title="Pausar disparo" className={iconAction}><Pause className="h-3.5 w-3.5" /></button>
                             ) : row.job?.status === "paused" ? (
                               <button type="button" disabled={busy} onClick={() => void controlDispatch(row.id, "resume")} aria-label={`Retomar ${row.nome}`} title="Retomar disparo" className={iconAction}><Play className="h-3.5 w-3.5" /></button>
-                            ) : !isDispatchLocked(row.campaign.status) ? (
+                            ) : !isDispatchBlocked(row.campaign) ? (
                               <button type="button" disabled={isDispatching} onClick={() => openDispatchConfirm([row.id], "single")} aria-label={`Disparar ${row.nome}`} title="Disparar agora" className={iconAction}><Send className="h-3.5 w-3.5" /></button>
                             ) : null
                           )}
@@ -1155,8 +1411,8 @@ export function CampaignsView() {
           titleId="campaign-create-title"
           title="Nova campanha"
           description="Configure, revise e dispare. O envio roda em segundo plano no servidor."
-          size="wizard"
-          onClose={() => { if (isLaunching) return; setIsCreateOpen(false); resetCreateForm(); }}
+          size="campaign-wizard"
+          onClose={() => { if (isLaunching || isSubmittingTemplate) return; setIsCreateOpen(false); resetCreateForm(); }}
         >
           <Stepper
             initialStep={1}
@@ -1190,11 +1446,11 @@ export function CampaignsView() {
             }}
             backButtonText="Voltar"
             nextButtonText="Continuar"
-            completeButtonText={isLaunching ? "Disparando..." : "Disparar agora"}
-            nextButtonProps={{ disabled: isLaunching }}
-            backButtonProps={{ disabled: isLaunching }}
+            completeButtonText={aiTemplateDraft ? "Envie o template à Meta" : isLaunching ? "Disparando..." : "Disparar agora"}
+            nextButtonProps={{ disabled: isLaunching || isSubmittingTemplate }}
+            backButtonProps={{ disabled: isLaunching || isSubmittingTemplate }}
             lastStepSecondaryAction={(
-              <button type="button" disabled={isLaunching} onClick={saveDraft} className="inline-flex h-[38px] items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">
+              <button type="button" disabled={isLaunching || isSubmittingTemplate} onClick={saveDraft} className="inline-flex h-[38px] items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">
                 Salvar como rascunho
               </button>
             )}
@@ -1212,14 +1468,46 @@ export function CampaignsView() {
           >
             <Step title="Identificação" description="Nome da campanha">
               <div className="space-y-4">
+                <section aria-label="Criar campanha com IA" className="space-y-3 rounded-xl border border-[#002187]/15 bg-[#002187]/5 p-4 dark:border-[#C4D600]/20 dark:bg-[#C4D600]/5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" />
+                    <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Criar com IA</h3><p className="mt-0.5 text-xs font-normal text-slate-500 dark:text-slate-400">Descreva a campanha; a IA seleciona segmentos e filtros reais deste workspace.</p></div>
+                  </div>
+                  <textarea
+                    value={campaignPrompt}
+                    onChange={(event) => { setCampaignPrompt(event.target.value); setCampaignAiError(""); }}
+                    rows={2}
+                    maxLength={2000}
+                    placeholder="Ex.: Campanha de reativação para clientes Diamante e Ouro sem comprar há mais de 90 dias com cupom de 15%"
+                    aria-label="Descreva a campanha para a IA"
+                    className="min-h-16 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        "Reativação de clientes Ouro e Diamante sem comprar há mais de 90 dias com cupom de 15%",
+                        "Novidades de armações para clientes fiéis que compraram nos últimos 180 dias",
+                      ].map((suggestion) => (
+                        <button key={suggestion} type="button" onClick={() => { setCampaignPrompt(suggestion); setCampaignAiError(""); }} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-medium text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer">{suggestion}</button>
+                      ))}
+                    </div>
+                    <button type="button" disabled={isGeneratingCampaign || !campaignPrompt.trim()} onClick={() => void generateCampaignWithAi()} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
+                      <Sparkles className="h-3.5 w-3.5" />{isGeneratingCampaign ? "Gerando..." : "Criar campanha"}
+                    </button>
+                  </div>
+                  {campaignAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{campaignAiError}</p>}
+                </section>
                 <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome para encontrá-la depois.</p></div>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className={inputClass} /></label>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Objetivo</span><input value={campaignObjective} onChange={(event) => setCampaignObjective(event.target.value)} placeholder="Ex.: Recuperar clientes inativos" className={inputClass} /></label>
+                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Categoria do template Meta</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING — promoções e ofertas</option><option value="UTILITY">UTILITY — mensagens transacionais</option></select></label>
                 {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>
             </Step>
             <Step title="Público" description="Quem receberá">
               <div className="space-y-4">
                 <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Defina o público</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Selecione um ou mais segmentos salvos para receber a campanha.</p></div>
+                {campaignAudienceDescription && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">{campaignAudienceDescription}</p>}
                 <FormMultiSelect
                   label="Público-alvo"
                   selected={selectedAudienceSegments}
@@ -1228,6 +1516,15 @@ export function CampaignsView() {
                   placeholder="Selecione os segmentos"
                   required
                 />
+                {campaignCriteriaFilters.length > 0 && (
+                  <section className="space-y-2 rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3">
+                    <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Filtros adicionais gerados pela IA (todos devem corresponder)</p><button type="button" onClick={() => setCampaignCriteriaFilters([])} className="text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600] cursor-pointer">Remover filtros</button></div>
+                    {campaignCriteriaFilters.flatMap((criterion) => criterion.regras ?? []).map((rule, index) => (
+                      <p key={`${rule.campo}-${index}`} className="text-xs text-slate-600 dark:text-slate-300">{rule.campo === "lastPurchase" ? "Última compra" : rule.campo === "rfvpSegment" ? "Segmento RFV-P" : rule.campo === "pipelineStage" ? "Etapa do pipeline" : rule.campo === "tier" ? "Nível VIP" : rule.campo === "tag" ? "Tag" : rule.campo} {rule.operador === "older_days" ? "há mais de" : rule.operador === "in" ? "em" : "é"} {rule.valor}{rule.campo === "lastPurchase" ? " dias" : ""}</p>
+                    ))}
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">O público final será a união dos segmentos selecionados, refinada por estes filtros.</p>
+                  </section>
+                )}
                 {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>
             </Step>
@@ -1235,6 +1532,32 @@ export function CampaignsView() {
               <div className="space-y-3">
                 <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Escolha o modelo ou escreva a mensagem</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Modelos aprovados pela Meta podem ter imagem no cabeçalho.</p></div>
                 <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
+                <section aria-label="Gerar template com IA" className="space-y-2 rounded-xl border border-[#002187]/15 bg-[#002187]/5 p-3 dark:border-[#C4D600]/20 dark:bg-[#C4D600]/5">
+                  <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" /><div><p className="text-xs font-semibold text-slate-800 dark:text-white">Gerar mensagem/template com IA</p><p className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Usa o nome da campanha e o público selecionado para criar um template revisável da Meta.</p></div></div>
+                  <div className="flex gap-2">
+                    <input value={templatePrompt} onChange={(event) => { setTemplatePrompt(event.target.value); setTemplateAiError(""); }} placeholder="Opcional: tom, oferta ou chamada para ação" aria-label="Orientação para gerar mensagem" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]" />
+                    <button type="button" disabled={isGeneratingTemplate || !form.nome.trim() || selectedAudienceSegments.length === 0} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar mensagem"}</button>
+                  </div>
+                  {templateAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{templateAiError}</p>}
+                </section>
+                {aiTemplateDraft && (
+                  <section aria-label="Revisar template da Meta" className="space-y-3 rounded-xl border border-[#C4D600]/50 bg-[#C4D600]/5 p-3 dark:bg-[#C4D600]/[0.04]">
+                    <div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-slate-800 dark:text-white">Revise o template antes da análise</p><p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">O disparo fica bloqueado até a Meta aprovar este conteúdo.</p></div><button type="button" onClick={() => setAiTemplateDraft(null)} className="text-[10px] font-semibold text-slate-500 hover:underline cursor-pointer">Descartar</button></div>
+                    <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => { const category = event.target.value as "MARKETING" | "UTILITY"; setCampaignCategory(category); setAiTemplateDraft((current) => current ? { ...current, category } : current); }} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label>
+                    {aiTemplateDraft.headerFormat === "TEXT" && <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Cabeçalho de texto (opcional)</span><input maxLength={60} value={aiTemplateDraft.headerText} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, headerText: event.target.value } : current)} className={inputClass} /></label>}
+                    <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé (opcional, até 60 caracteres)</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label>
+                    {aiTemplateDraft.params.map((field, index) => (
+                      <label key={`template-param-${index}`} className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span className="w-10 shrink-0">{`{{${index + 1}}}`}</span><select value={field} onChange={(event) => updateGeneratedTemplateParam(index, event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal dark:border-slate-700 dark:bg-slate-900 cursor-pointer">{messageVariables.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                    ))}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Respostas rápidas (opcional)</p><button type="button" disabled={aiTemplateDraft.buttons.length >= 3} onClick={() => setAiTemplateDraft((current) => current ? { ...current, buttons: [...current.buttons, { type: "QUICK_REPLY", text: "" }] } : current)} className="text-[10px] font-semibold text-[#002187] hover:underline disabled:opacity-50 dark:text-[#C4D600] cursor-pointer">Adicionar botão</button></div>
+                      {aiTemplateDraft.buttons.map((button, index) => <div key={`template-button-${index}`} className="flex gap-2"><input maxLength={25} value={button.text} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, buttons: current.buttons.map((item, i) => i === index ? { ...item, text: event.target.value } : item) } : current)} placeholder="Texto do botão" className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal dark:border-slate-700 dark:bg-slate-900" /><button type="button" aria-label="Remover botão" onClick={() => setAiTemplateDraft((current) => current ? { ...current, buttons: current.buttons.filter((_, i) => i !== index) } : current)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"><X className="h-3.5 w-3.5" /></button></div>)}
+                    </div>
+                    <div className="flex justify-end border-t border-slate-200 pt-2 dark:border-slate-700">
+                      <button type="button" disabled={isSubmittingTemplate || isUploading || !form.mensagem.trim()} onClick={() => { const campaign = buildNewCampaign(); if (campaign) void submitTemplateForMeta(campaign, { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory }); }} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer"><Send className="h-3.5 w-3.5" />{isSubmittingTemplate ? "Enviando..." : "Aprovar e enviar para análise da Meta"}</button>
+                    </div>
+                  </section>
+                )}
                 {!campaignTemplate && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Variáveis de personalização</p>
@@ -1257,7 +1580,7 @@ export function CampaignsView() {
                 )}
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                   <span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
-                  <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+                  <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => aiTemplateDraft ? updateGeneratedTemplateBody(event.target.value) : (setForm({ ...form, mensagem: event.target.value }), setFormError(""))} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
                 </label>
                 <div className="space-y-2">
                   <input
@@ -1365,7 +1688,10 @@ export function CampaignsView() {
                               </div>
                             );
                           })}
-                          {form.mensagem.trim() && <p className="whitespace-pre-wrap break-words">{form.mensagem.trim()}</p>}
+                          {aiTemplateDraft?.headerText && <p className="font-semibold">{aiTemplateDraft.headerText}</p>}
+                          {form.mensagem.trim() && <p className="whitespace-pre-wrap break-words">{aiTemplateDraft ? form.mensagem.trim().replace(/\{\{(\d+)\}\}/g, (_match, number: string) => aiTemplateDraft.examples[Number(number) - 1] ?? `{{${number}}}`) : form.mensagem.trim()}</p>}
+                          {aiTemplateDraft?.footer && <p className="text-[10px] text-slate-500">{aiTemplateDraft.footer}</p>}
+                          {aiTemplateDraft?.buttons.map((button, index) => <span key={`preview-template-button-${index}`} className="block rounded-lg bg-white/70 px-2 py-1 text-center text-xs font-medium text-[#002187] dark:bg-[#051647]/60 dark:text-[#C4D600]">{button.text || "Resposta rápida"}</span>)}
                         </div>
                       </div>
                     ) : (
@@ -1384,9 +1710,11 @@ export function CampaignsView() {
                 <dl className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Campanha</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "—"}</dd></div>
                   <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Segmento</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{selectedAudienceSegments.join(", ") || "—"}</dd></div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Modelo / mensagem</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{campaignTemplate ? campaignTemplate.name : "Mensagem livre"}</dd></div>
+                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Modelo / mensagem</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{campaignTemplate ? campaignTemplate.name : aiTemplateDraft ? "Template novo · aguardando submissão" : "Mensagem livre"}</dd></div>
+                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Categoria Meta</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{campaignCategory}{campaignObjective ? ` · ${campaignObjective}` : ""}</dd></div>
                   <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Mídia</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{selectedAttachments.length > 0 ? `${selectedAttachments.length} arquivo(s)` : campaignTemplate?.hasImage ? "Imagem do modelo" : "Sem mídia"}</dd></div>
                 </dl>
+                {aiTemplateDraft && <p role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">Este template ainda precisa ser enviado para análise. Volte à etapa Mensagem e clique em “Aprovar e enviar para análise da Meta”. O botão de disparo ficará bloqueado até a aprovação.</p>}
                 <div className="rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
                   {!dispatchEstimate || dispatchEstimate.loading ? (
                     <span className="inline-flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Calculando público e custo estimado...</span>
@@ -1470,9 +1798,11 @@ export function CampaignsView() {
                   </div>
                 </section>
 
-                {selectedLocked ? (
+                {selectedLocked || selectedMetaPending ? (
                   <section aria-label="Conteúdo enviado" className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">Conteúdo enviado</p>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100">{selectedMetaPending ? "Aguardando análise da Meta" : "Conteúdo enviado"}</p>
+                    {selectedMetaPending && <p role="status" className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">O disparo está bloqueado. A campanha será liberada automaticamente quando o webhook ou a consulta de status confirmar a aprovação do template.</p>}
+                    {selectedCampaign.metaApprovalStatus === "REJECTED" && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">A Meta rejeitou o template: {selectedCampaign.metaApprovalReason || "motivo não informado"}</p>}
                     <dl className="grid gap-2 text-xs sm:grid-cols-2">
                       <div><dt className="text-[10px] font-semibold uppercase text-slate-400">Segmento</dt><dd className="mt-0.5 text-slate-700 dark:text-slate-200">{selectedCampaign.publico || "—"}</dd></div>
                       <div><dt className="text-[10px] font-semibold uppercase text-slate-400">Modelo</dt><dd className="mt-0.5 text-slate-700 dark:text-slate-200">{selectedCampaign.modelo ? `${selectedCampaign.modelo.name} (${selectedCampaign.modelo.language})` : "Mensagem livre"}</dd></div>
@@ -1511,7 +1841,10 @@ export function CampaignsView() {
                       required
                     />
                     <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => { setForm({ ...form, mensagem: event.target.value }); setFormError(""); }} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
+                    {(selectedCampaign.metaApprovalStatus === "REJECTED" || selectedCampaign.metaApprovalStatus === "SUBMISSION_FAILED") && <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/30"><p className="text-xs font-semibold text-red-800 dark:text-red-200">{selectedCampaign.metaApprovalStatus === "REJECTED" ? `Rejeitada pela Meta: ${selectedCampaign.metaApprovalReason || "motivo não informado"}` : `Não foi possível submeter: ${selectedCampaign.metaApprovalReason || "verifique a integração e tente novamente"}`}</p><div className="flex gap-2"><input value={templatePrompt} onChange={(event) => setTemplatePrompt(event.target.value)} placeholder="Orientação para uma nova versão do template" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={isGeneratingTemplate} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar nova versão"}</button></div></div>}
+                    {aiTemplateDraft && <div className="space-y-2 rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/5 p-3"><p className="text-xs font-semibold text-slate-800 dark:text-white">Template para reenviar à análise</p><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label><button type="button" disabled={isSubmittingTemplate} onClick={() => void submitTemplateForMeta({ ...selectedCampaign, nome: form.nome.trim(), publico: selectedAudienceSegments.join(", "), audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id), criteriaFilters: campaignCriteriaFilters, objective: campaignObjective, audienceDescription: campaignAudienceDescription, metaCategory: campaignCategory, mensagem: form.mensagem.trim(), metaTemplateDraft: { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory } }, { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory }, false)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Send className="h-3.5 w-3.5" />{isSubmittingTemplate ? "Enviando..." : "Aprovar e reenviar para análise"}</button></div>}
+                    {templateAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{templateAiError}</p>}
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><textarea rows={5} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => aiTemplateDraft ? updateGeneratedTemplateBody(event.target.value) : (setForm({ ...form, mensagem: event.target.value }), setFormError(""))} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" /></label>
                     {selectedCampaign.anexos && selectedCampaign.anexos.length > 0 && (
                       <div className="space-y-1">
                         <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Arquivos da campanha</p>
@@ -1539,10 +1872,10 @@ export function CampaignsView() {
 
             <footer className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
               <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />Atualizada em {(() => { const time = new Date(selectedCampaign.dataAtualizacao).getTime(); return Number.isNaN(time) ? selectedCampaign.dataAtualizacao : formatDateTime(selectedCampaign.dataAtualizacao); })()}</span>
-              {!selectedLocked && (
+              {!selectedLocked && !selectedMetaPending && (
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={saveCampaign} className={ghostButton}>Salvar alterações</button>
-                  <button type="button" disabled={isDispatching} onClick={() => openDispatchConfirm([selectedCampaign.id], "single")} className={primaryButton}><Send className="h-3.5 w-3.5" />Disparar agora</button>
+                  {!isDispatchBlocked(selectedCampaign) && <button type="button" disabled={isDispatching} onClick={() => openDispatchConfirm([selectedCampaign.id], "single")} className={primaryButton}><Send className="h-3.5 w-3.5" />Disparar agora</button>}
                 </div>
               )}
             </footer>

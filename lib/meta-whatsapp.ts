@@ -521,8 +521,9 @@ export async function editTemplate(id: string, input: TemplateContent) {
 /** Consulta direta por nome: a listagem geral para em 100 modelos. */
 export async function findTemplate(id: string, name: string) {
   const accountId = getAccountId();
-  const found = await graph<{ data: { id: string; status: string }[] }>(`/${accountId}/message_templates?name=${encodeURIComponent(name)}&fields=id,status&limit=100`);
-  return found.data.find((item) => item.id === id && !["DELETED", "PENDING_DELETION"].includes(item.status)) ?? null;
+  const found = await graph<{ data: { id: string; status: string; rejected_reason?: string }[] }>(`/${accountId}/message_templates?name=${encodeURIComponent(name)}&fields=id,status,rejected_reason&limit=100`);
+  const item = found.data.find((template) => template.id === id && !["DELETED", "PENDING_DELETION"].includes(template.status));
+  return item ? { ...item, rejectedReason: item.rejected_reason && item.rejected_reason !== "NONE" ? item.rejected_reason : undefined } : null;
 }
 
 /**
@@ -559,6 +560,7 @@ export async function sendTemplate(
   params: string[] = [],
   headerImage?: { mimetype: string; fileName: string; base64?: string; url?: string; mediaId?: string; kind?: "image" | "video" | "document" },
   headerParams: string[] = [],
+  quickReplyPayloads: { index: number; payload: string }[] = [],
 ) {
   const { phoneNumberId } = getConfig();
   const components: Record<string, unknown>[] = [];
@@ -572,6 +574,14 @@ export async function sendTemplate(
   if (params.length > 0) {
     components.push({ type: "body", parameters: params.map((text) => ({ type: "text", text })) });
   }
+  quickReplyPayloads.forEach(({ index, payload }) => {
+    components.push({
+      type: "button",
+      sub_type: "quick_reply",
+      index: String(index),
+      parameters: [{ type: "payload", payload }],
+    });
+  });
   return graph<{ messages: { id: string }[] }>(`/${phoneNumberId}/messages`, {
     method: "POST",
     body: JSON.stringify({

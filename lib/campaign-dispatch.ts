@@ -1,7 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
-import { getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
+import { findTemplate, getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { phoneVariants } from "@/lib/chat/phone";
 import { formatBr } from "@/lib/br-time";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
@@ -11,7 +11,7 @@ import { reportError } from "@/lib/monitoring/error-reporter";
 
 export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string };
 
-type CampaignTemplate = { name: string; language: string; params: string[]; hasImage?: boolean };
+type CampaignTemplate = { name: string; language: string; params: string[]; hasImage?: boolean; buttons?: { type: string; text: string }[] };
 type CampaignRecord = {
   id: string;
   nome: string;
@@ -20,6 +20,10 @@ type CampaignRecord = {
   mensagem: string;
   anexos?: { name: string; size: number; type: string; url?: string }[];
   modelo?: CampaignTemplate | null;
+  metaTemplateDraft?: { buttons?: { type: string; text: string }[] };
+  metaTemplateId?: string;
+  metaApprovalStatus?: string;
+  metaApprovalReason?: string;
   [key: string]: unknown;
 };
 
@@ -201,7 +205,9 @@ async function sendToRecipient(
   };
   if (campaign.modelo) {
     const params = campaign.modelo.params.map((field) => values[field] || "-");
-    const sent = await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header);
+    const quickReplyPayloads = (campaign.metaTemplateDraft?.buttons ?? campaign.modelo.buttons ?? [])
+      .flatMap((button, index) => button.type === "QUICK_REPLY" && button.text.trim() ? [{ index, payload: button.text }] : []);
+    const sent = await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header, [], quickReplyPayloads);
     return { messageId: sent.messages?.[0]?.id ?? null, text: renderTemplateText(templateInfo, campaign.modelo.name, params) };
   }
   const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento)\}\}/g, (_match, key: string) => values[key] ?? "");
@@ -402,6 +408,25 @@ function enqueue(campaignId: string) {
     .finally(() => running.delete(campaignId));
 }
 
+async function assertCampaignTemplateReady(campaign: CampaignRecord) {
+  if (campaign.metaApprovalStatus && campaign.metaApprovalStatus !== "APPROVED") {
+    const reason = campaign.metaApprovalReason ? ` Motivo: ${campaign.metaApprovalReason}` : "";
+    throw new DispatchError(`A campanha "${campaign.nome}" só pode ser disparada após a aprovação do template pela Meta.${reason}`, 409);
+  }
+  if (!campaign.modelo) {
+    if (campaign.metaApprovalStatus === "APPROVED") {
+      throw new DispatchError(`O template aprovado da campanha "${campaign.nome}" não está vinculado.`, 409);
+    }
+    return;
+  }
+  const template = campaign.metaTemplateId
+    ? await findTemplate(campaign.metaTemplateId, campaign.modelo.name)
+    : (await listTemplates()).find((item) => item.name === campaign.modelo?.name && item.language === campaign.modelo?.language);
+  if (!template || template.status !== "APPROVED") {
+    throw new DispatchError(`O template "${campaign.modelo.name}" não está aprovado pela Meta e a campanha não pode ser disparada.`, 409);
+  }
+}
+
 export async function startDispatch(campaignId: string, requested: DispatchRecipient[], options: { ignoreCooldown?: boolean } = {}) {
   // Quem pediu para sair (marketingOptOut) nunca entra na fila de uma campanha.
   const recipients = withoutOptedOut(requested, await loadOptOutKeys());
@@ -414,6 +439,7 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
   if (["Enviando", "Enviada", "Envio parcial", "Envio pausado"].includes(campaign.status)) {
     throw new DispatchError(`"${campaign.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`, 409);
   }
+  await assertCampaignTemplateReady(campaign);
   if (recipients.length === 0) throw new DispatchError(`O público de "${campaign.nome}" não contém contatos para envio.`, 400);
 
   const messaging = await getMessagingInfo().catch(() => null);
@@ -453,6 +479,9 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
 export async function resumeDispatch(campaignId: string) {
   const job = await readJob(campaignId);
   if (!job || job.status !== "paused") throw new DispatchError("Não há disparo pausado para esta campanha.", 409);
+  const campaign = await readCampaign(campaignId);
+  if (!campaign) throw new DispatchError("Campanha não encontrada.", 404);
+  await assertCampaignTemplateReady(campaign);
   const next: DispatchJob = { ...job, status: "running", pause: undefined };
   await writeJob(next);
   await syncCampaign(next);

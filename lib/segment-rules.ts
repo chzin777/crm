@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { STAGE_DEFINITIONS } from "@/lib/pipeline-stages";
-
 import { describeBirthday, validateBirthday } from "@/lib/birthday";
 
 export type RuleFieldType = "number" | "date" | "text" | "select" | "presence" | "purchase" | "campaign" | "birthday";
@@ -89,6 +88,8 @@ export const ruleFields: RuleField[] = [
   { id: "avgTicket", label: "Ticket médio (R$)", type: "number" },
   { id: "totalSpent", label: "Total gasto acumulado – LTV (R$)", type: "number" },
   { id: "lastPurchase", label: "Última compra (ERP)", type: "date" },
+  { id: "tier", label: "Nível VIP", type: "text" },
+  { id: "rfvpSegment", label: "Segmento RFV-P", type: "text" },
   {
     id: "category",
     label: "Categoria do contato",

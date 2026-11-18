@@ -11,9 +11,10 @@ export type CampaignTemplate = {
   headerImageUrl?: string | null;
   // Campo de contato usado em cada variável {{1}}, {{2}}...
   params: string[];
+  buttons?: { type: "QUICK_REPLY" | "URL" | "PHONE_NUMBER"; text: string; url?: string; phone_number?: string }[];
 };
 
-type ApiTemplate = { id: string; name: string; status: string; language: string; body: string; headerFormat: string | null; headerImageUrl?: string | null };
+type ApiTemplate = { id: string; name: string; status: string; language: string; body: string; headerFormat: string | null; headerImageUrl?: string | null; buttons?: CampaignTemplate["buttons"] };
 
 const FIELDS = [
   { value: "nome", label: "Nome do cliente" },
@@ -38,8 +39,6 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError("");
     fetch("/api/whatsapp/templates", { cache: "no-store" })
       .then(async (response) => {
         const result = (await response.json().catch(() => ({}))) as { data?: ApiTemplate[]; error?: string };
@@ -67,6 +66,7 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
       hasImage: template.headerFormat === "IMAGE",
       headerImageUrl: template.headerFormat === "IMAGE" ? template.headerImageUrl ?? null : null,
       params: Array.from({ length: variableCount(template.body) }, (_, index) => FIELDS[index]?.value ?? "nome"),
+      buttons: template.buttons ?? [],
     });
   };
 
@@ -87,7 +87,7 @@ export function CampaignTemplatePicker({ value, onChange }: { value: CampaignTem
       </label>
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         <a href="/modelos" target="_blank" rel="noopener" className="font-semibold text-[#002187] hover:underline dark:text-[#C4D600] cursor-pointer">Criar novo modelo</a>
-        <button type="button" onClick={() => setReloadKey((key) => key + 1)} disabled={loading} className="text-slate-500 hover:text-slate-800 hover:underline disabled:opacity-50 dark:text-slate-400 dark:hover:text-white cursor-pointer">Atualizar lista</button>
+        <button type="button" onClick={() => { setLoading(true); setError(""); setReloadKey((key) => key + 1); }} disabled={loading} className="text-slate-500 hover:text-slate-800 hover:underline disabled:opacity-50 dark:text-slate-400 dark:hover:text-white cursor-pointer">Atualizar lista</button>
         <span className="text-slate-400">O modelo abre em outra aba; a campanha continua aqui.</span>
       </p>
       {error && <p className="text-[10px] text-[#9a3d12] dark:text-[#F7915E]">{error}</p>}
