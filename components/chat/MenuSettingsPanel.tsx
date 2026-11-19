@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, List, ListOrdered, ListTree, MessageCircleQuestion, MessagesSquare, Plus, Save, Star, Timer, Trash2, Workflow, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CornerDownRight, Hand, List, ListTree, MessageCircleQuestion, MessagesSquare, Plus, Save, Star, Timer, Trash2, Workflow, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { ChoiceCards, DurationField, MessageField, SettingCard, Switch, SwitchRow, fieldClass, labelClass } from "@/components/chat/MenuFormParts";
@@ -397,20 +397,6 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                       </ul>
                     </div>
                   </>
-                )}
-              </SettingCard>
-
-              <SettingCard
-                icon={ListOrdered}
-                title="Posição na fila"
-                description="Avisa o cliente quando ele avança, se a janela de 24h estiver aberta."
-                action={<Switch checked={settings.notifyQueuePosition} onChange={(value) => set("notifyQueuePosition", value)} label="Avisar quando a posição na fila mudar" />}
-              >
-                {settings.notifyQueuePosition && (
-                  <div>
-                    <p className={labelClass}>O cliente recebe</p>
-                    <p className="w-fit max-w-full rounded-2xl rounded-bl-sm border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">Você avançou na fila: agora é o 2º da fila Vendas. Obrigado por aguardar.</p>
-                  </div>
                 )}
               </SettingCard>
             </>

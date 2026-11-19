@@ -109,10 +109,10 @@ export async function runClock() {
     }
   });
 
-  // A posição é guardada sempre (o painel de /filas mostra há quanto tempo o cliente está nela);
-  // o aviso ao cliente só sai com a opção ligada.
+  // A posição é guardada só para uso interno (painel de /filas e destaque no /chat).
+  // Nenhuma mensagem é enviada ao cliente quando a posição muda.
   await block("posição na fila", async () => {
-    // Conversas em atendimento pela IA ficam de fora (nem posição, nem aviso): regra em lib/chat/queue-rules.
+    // Conversas em atendimento pela IA ficam de fora: regra em lib/chat/queue-rules.
     const rows = await prisma.chatConversation.findMany({
       where: { status: "waiting", closedAt: null, queueId: { not: null } },
       orderBy: { waitingSince: "asc" },
@@ -121,7 +121,7 @@ export async function runClock() {
     const byId = new Map(rows.map((row) => [row.id, row]));
     const updates = planQueuePositions(
       rows.map((row) => ({ ...row, queueName: row.queue?.name ?? null })),
-      { now: new Date(now), notifyEnabled: settings.notifyQueuePosition, windowOpen: isWindowOpen },
+      { now: new Date(now) },
     );
     for (const update of updates) {
       const row = byId.get(update.id)!;
@@ -129,12 +129,7 @@ export async function runClock() {
       state.notifiedPosition = update.position;
       state.positionSince = update.positionSince;
       await saveMenuState(row.id, state);
-      // "Você avançou na fila" só para quem entrou na fila de verdade: atendimento engajado (pediu algo além de
-      // saudação, interesse genérico, ruído ou resposta automática de outra empresa).
-      if (update.notify && (await conversationEngaged(row))) {
-        await sendAutomaticMessage(row, update.notify);
-        summary.positions += 1;
-      }
+      summary.positions += 1;
     }
   });
 

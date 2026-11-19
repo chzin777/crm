@@ -14,7 +14,7 @@ const waiting = (id: string, since: number, notifiedPosition: number | null = nu
 /** Aplica o patch gravado pelo agente, como o banco faria. */
 const apply = (row: QueueRow, patch: Partial<QueueRow>, state: object): QueueRow => ({ ...row, ...patch, menuState: { ...(row.menuState as object), ...state } });
 
-const run = (rows: QueueRow[], notifyEnabled = true) => planQueuePositions(rows, { now: NOW, notifyEnabled, windowOpen: () => true });
+const run = (rows: QueueRow[]) => planQueuePositions(rows, { now: NOW });
 
 describe("fila humana × atendimento da IA", () => {
   it('"Bom dia" → IA responde → fora da fila: o relógio não conta posição nem manda aviso', () => {
@@ -25,9 +25,9 @@ describe("fila humana × atendimento da IA", () => {
 
     const rows = [waiting("ana", 40, 1), maria, waiting("joao", 20, 3)];
     const updates = run(rows);
-    // Maria não aparece; João sobe de 3º para 2º (a vaga da Maria) e é o único avisado.
+    // Maria não aparece; João sobe de 3º para 2º (a vaga da Maria), sem mensagem ao cliente.
     expect(updates.map((item) => item.id)).toEqual(["joao"]);
-    expect(updates[0]).toMatchObject({ position: 2, notify: expect.stringContaining("agora é o 2º da fila Atendimento Geral") });
+    expect(updates[0]).toEqual({ id: "joao", position: 2, positionSince: NOW.toISOString() });
     expect(updates.some((item) => item.id === "maria")).toBe(false);
   });
 
@@ -36,7 +36,7 @@ describe("fila humana × atendimento da IA", () => {
     expect(run([ai, waiting("cliente", 10, 2)]).find((item) => item.id === "ia")).toBeUndefined();
   });
 
-  it("transbordo → entra na fila Atendimento Geral agora → passa a ter posição real e recebe avisos", () => {
+  it("transbordo → entra na fila Atendimento Geral agora → passa a ter posição real (sem avisos ao cliente)", () => {
     const ai = apply(waiting("maria", 30), aiTakeoverPatch(), { aiActive: true });
     const handed = apply(ai, handoffPatch(GERAL, NOW), { aiActive: false, notifiedPosition: null });
     expect(handed).toMatchObject({ status: "waiting", queueId: GERAL, waitingSince: NOW });
@@ -45,27 +45,28 @@ describe("fila humana × atendimento da IA", () => {
     // Entra no fim da fila (chegou agora): 3º, sem aviso na primeira contagem.
     const first = run([waiting("ana", 40, 1), waiting("joao", 20, 2), handed]);
     const mariaFirst = first.find((item) => item.id === "maria")!;
-    expect(mariaFirst).toMatchObject({ position: 3, notify: null });
+    expect(mariaFirst).toMatchObject({ position: 3 });
+    expect(mariaFirst).not.toHaveProperty("notify");
 
-    // Ana foi atendida: Maria avança para 2º e agora recebe o aviso de fila.
+    // Ana foi atendida: Maria avança para 2º; a posição muda só internamente.
     const marked = { ...handed, menuState: { ...(handed.menuState as object), notifiedPosition: 3 } };
     const next = run([waiting("joao", 20, 2), marked]);
-    expect(next.find((item) => item.id === "maria")).toMatchObject({ position: 2, notify: expect.stringContaining("Você avançou na fila: agora é o 2º") });
+    const mariaNext = next.find((item) => item.id === "maria")!;
+    expect(mariaNext).toMatchObject({ position: 2 });
+    expect(mariaNext).not.toHaveProperty("notify");
   });
 
-  it("religar os avisos de fila não dispara aviso para conversas com a IA", () => {
+  it("conversas com a IA ficam fora da contagem da fila", () => {
     const rows = [
       waiting("ana", 40, 2),
       apply(waiting("bia", 35, 3), aiTakeoverPatch(), { aiActive: true }),
       apply(waiting("caio", 25, 4), aiTakeoverPatch(), { aiActive: true }),
       waiting("davi", 15, 5),
     ];
-    // Avisos desligados: posições guardadas, nenhuma mensagem.
-    expect(run(rows, false).every((item) => item.notify === null)).toBe(true);
-    // Avisos religados: só quem espera um humano é contado e avisado.
-    const updates = run(rows, true);
+    // Só quem espera um humano é contado; nenhuma mensagem é gerada.
+    const updates = run(rows);
     expect(updates.map((item) => item.id).sort()).toEqual(["ana", "davi"]);
-    expect(updates.filter((item) => item.notify).map((item) => item.id).sort()).toEqual(["ana", "davi"]);
+    expect(updates.every((item) => !("notify" in item))).toBe(true);
     expect(updates.find((item) => item.id === "davi")).toMatchObject({ position: 2 });
   });
 

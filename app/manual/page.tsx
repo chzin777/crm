@@ -705,8 +705,7 @@ export default function ManualPage() {
               <p>Para incluir alguém, use <Kbd>Adicionar pessoas</Kbd> (várias de uma vez). Quem não tem acesso ao Atendimento no cargo aparece sinalizado.</p>
             </Sub>
             <Sub id="filas-espera" number="11.3" title="Clientes aguardando">
-              <p>Mostra os clientes por ordem de chegada, com o tempo total de espera e o tempo na posição atual, atualizando sozinho. Com o aviso ligado, o cliente é informado quando avança na fila:</p>
-              <WhatsApp lines={[{ from: "empresa", text: "Você avançou na fila: agora é o 2º da fila Vendas. Obrigado por aguardar." }]} />
+              <p>Mostra os clientes por ordem de chegada, com o tempo total de espera e o tempo na posição atual, atualizando sozinho. A posição é só para a equipe: o cliente não recebe mensagens quando avança na fila.</p>
             </Sub>
             <Sub id="filas-respostas" number="11.4" title="Respostas prontas">
               <Bullets items={[
