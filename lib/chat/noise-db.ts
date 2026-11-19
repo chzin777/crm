@@ -9,6 +9,7 @@ import { notifyChatChange } from "@/lib/chat/events";
 import { NOISE_AUTHOR, classifyNoise, type NoiseKind } from "@/lib/chat/noise";
 import { phoneVariants } from "@/lib/chat/phone";
 import { readMenuState } from "@/lib/chat/menu";
+import { readAiSettings } from "@/lib/ai/store";
 import { closeConversation } from "@/lib/chat/actions";
 import { addAudit, addSystemMessage } from "@/lib/chat/conversation";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
@@ -66,7 +67,7 @@ const TRIAGE_PROMPT = [
 
 /** Visão computacional só para separar Receita/Óculos/Comprovante de conteúdo aleatório. Falha = segue o fluxo. */
 export async function triageImage(image: { buffer: Buffer; mime: string; name: string }): Promise<"relevante" | "aleatorio"> {
-  if (!aiConfigured()) return "relevante";
+  if (!(await triageActive())) return "relevante";
   try {
     const result = await aiJson<{ categoria?: string }>([
       { role: "system", content: TRIAGE_PROMPT },
@@ -193,7 +194,7 @@ const CAMPAIGN_REPLY_PROMPT = [
 
 /** Classificador leve pós-campanha (Structured Output, modelo rápido). Falha ou IA desligada = trata como pessoa. */
 export async function classifyCampaignReply(text: string): Promise<{ isAutoReplyOrNoise: boolean; reason: string } | null> {
-  if (!aiConfigured() || !text.trim()) return null;
+  if (!text.trim() || !(await triageActive())) return null;
   try {
     const result = await aiJson<{ isAutoReplyOrNoise?: boolean; reason?: string }>([
       { role: "system", content: CAMPAIGN_REPLY_PROMPT },
@@ -212,4 +213,10 @@ export async function classifyCampaignReply(text: string): Promise<{ isAutoReply
     console.warn(`[chat][triagem] classificador pós-campanha indisponível, segue o fluxo (${error instanceof Error ? error.message : error})`);
     return null;
   }
+}
+
+/** Triagem inteligente (IA silenciosa) ligada em /ia e chave da OpenAI configurada. Independe das respostas automáticas. */
+export async function triageActive() {
+  if (!aiConfigured()) return false;
+  return (await readAiSettings().catch(() => null))?.triageEnabled !== false;
 }

@@ -19,6 +19,8 @@ export const AI_TONES: { id: AiTone; label: string; hint: string; instruction: s
 export type AiSettings = {
   /** Liga o atendimento autônomo (o copiloto do atendente funciona sempre que houver chave). */
   autonomousEnabled: boolean;
+  /** Triagem inteligente silenciosa (robô/ausência/ruído pós-campanha e imagem aleatória): nunca envia mensagem ao cliente. */
+  triageEnabled: boolean;
   /** Nome com que a IA se apresenta ao cliente. */
   agentName: string;
   /** Tom de voz das respostas ao cliente. */
@@ -93,6 +95,7 @@ export const DEFAULT_AI_TOPICS: AiKnowledgeTopic[] = [
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   autonomousEnabled: false,
+  triageEnabled: true,
   agentName: "Assistente Óticas Brasil",
   tone: "acolhedor",
   scheduleMode: "off_hours",
@@ -167,6 +170,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     : d.schedule;
   return {
     autonomousEnabled: bool(raw.autonomousEnabled, d.autonomousEnabled),
+    triageEnabled: bool(raw.triageEnabled, d.triageEnabled),
     agentName: str(raw.agentName, d.agentName, 60).trim() || d.agentName,
     tone: AI_TONES.some((tone) => tone.id === raw.tone) ? (raw.tone as AiTone) : d.tone,
     scheduleMode: raw.scheduleMode === "always" || raw.scheduleMode === "custom" || raw.scheduleMode === "off_hours" ? raw.scheduleMode : d.scheduleMode,

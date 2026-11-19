@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { firstDispatch, isBlocked } from "@/lib/chat/conversation";
 import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
-import { conversationEngaged } from "@/lib/chat/noise-db";
+import { conversationEngaged, triageActive } from "@/lib/chat/noise-db";
 import { attendByMenu, readMenuState, saveMenuState } from "@/lib/chat/menu";
 import { handleOffHours } from "@/lib/chat/operations";
 import type { RecordedInbound } from "@/lib/chat/inbound";
@@ -98,7 +98,9 @@ export async function runAutomation(recorded: RecordedInbound) {
   if (!answered && conversation.status === "bot") {
     // Resposta a campanha só com saudação/interesse genérico: não entra sozinha na fila humana (fica na aba
     // Campanhas); entra quando o cliente disser o que quer ou pedir um atendente.
-    if (conversation.campaignId && !(await conversationEngaged(conversation))) {
+    // Com a triagem inteligente ligada, a mensagem já foi validada como de pessoa: entra na fila (não fica presa
+    // esperando uma IA de respostas desligada).
+    if (conversation.campaignId && !(await triageActive()) && !(await conversationEngaged(conversation))) {
       console.log(`[bot] ${conversation.id}: resposta de campanha sem pedido claro, fora da fila humana`);
       return;
     }

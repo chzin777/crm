@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
-import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, Coins, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, Coins, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, ShieldCheck, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { Collapse, KnowledgeSection, RulesSection, SkillsSection } from "@/components/ai-studio/StudioSections";
 import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
@@ -669,6 +669,33 @@ export function AiSettingsPanel() {
           </button>
         </div>
       </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className={`rounded-xl border px-4 py-3 ${settings.triageEnabled ? "border-[#002187]/25 bg-[#002187]/5 dark:border-[#C4D600]/30 dark:bg-[#C4D600]/5" : "border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40"}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"><ShieldCheck className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />Triagem inteligente e filtro pós-campanha</p>
+              <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">Silenciosa: identifica respostas automáticas, ausências e ruídos depois das campanhas e encerra com o motivo “Não é resposta da campanha”. Nunca envia mensagem ao cliente nem joga na fila.</p>
+            </div>
+            <SwitchOnly label="Triagem inteligente" checked={settings.triageEnabled} onChange={(value) => set("triageEnabled", value)} />
+          </div>
+        </div>
+        <div className={`rounded-xl border px-4 py-3 ${settings.autonomousEnabled ? "border-[#C4D600]/50 bg-[#C4D600]/10" : "border-slate-200/70 bg-white dark:border-slate-800 dark:bg-slate-900/40"}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"><Bot className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />Respostas automáticas da IA no atendimento</p>
+              <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">Desligada, a IA não envia nenhuma mensagem ao cliente (saudação, qualificação ou catálogo): quem escreve de verdade vai direto para a fila do atendimento humano.</p>
+            </div>
+            <SwitchOnly label="Respostas automáticas" checked={settings.autonomousEnabled} onChange={(value) => set("autonomousEnabled", value)} />
+          </div>
+        </div>
+      </div>
+
+      {settings.triageEnabled && !settings.autonomousEnabled && (
+        <p className="flex items-start gap-2 rounded-lg border border-[#002187]/25 bg-[#002187]/5 px-3 py-2 text-xs text-[#002187] dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600]">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />Modo Triagem Silenciosa: a IA filtra robôs e ruídos pós-campanha, mas não responde clientes. Conversas válidas vão para a fila humana.
+        </p>
+      )}
 
       {!configured && (
         <p className="flex items-start gap-2 rounded-lg border border-[#F7915E]/60 bg-[#F7915E]/10 px-3 py-2 text-xs text-[#9a4a1c] dark:text-[#F7915E]">

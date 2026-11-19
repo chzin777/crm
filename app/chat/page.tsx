@@ -45,6 +45,7 @@ function ChatWorkspace() {
   const [priority, setPriority] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [attendants, setAttendants] = useState<Attendant[]>([]);
+  const [silentTriage, setSilentTriage] = useState(false);
   const [items, setItems] = useState<ConversationItem[]>([]);
   const [counts, setCounts] = useState(EMPTY_COUNTS);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
@@ -140,6 +141,11 @@ function ChatWorkspace() {
         setCapabilities(me.capabilities);
         setAgentName(me.name);
         setIsAdmin(me.isAdmin);
+      })
+      .catch((error) => console.error("[chat]", error));
+    fetch("/api/chat/ai-mode", { cache: "no-store" })
+      .then(async (response) => {
+        if (response.ok) setSilentTriage(((await response.json()) as { mode?: string }).mode === "triage_only");
       })
       .catch((error) => console.error("[chat]", error));
     fetch("/api/chat/queues")
@@ -520,6 +526,7 @@ function ChatWorkspace() {
             assigneeId={assigneeId}
             onAssignee={setAssigneeId}
             attendants={attendants}
+            silentTriage={silentTriage}
             loading={loadingList}
             error={listError}
             selectedId={selectedId}

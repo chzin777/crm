@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
+import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShieldCheck, ShoppingBag, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { AttendantFilter, type Attendant } from "@/components/chat/AttendantFilter";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
@@ -145,6 +145,8 @@ type Props = {
   assigneeId: string;
   onAssignee: (value: string) => void;
   attendants: Attendant[];
+  /** IA em Modo Triagem Silenciosa (filtra robôs/ruídos pós-campanha, respostas automáticas desligadas). */
+  silentTriage?: boolean;
   loading: boolean;
   error: boolean;
   selectedId: string | null;
@@ -189,7 +191,7 @@ function FilterSelect({ label, value, placeholder, options, onChange }: FilterSe
   );
 }
 
-export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, assigneeId, onAssignee, attendants, loading, error, selectedId, onSelect, onDelete, onContextMenu, onEndReached, actions }: Props) {
+export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, assigneeId, onAssignee, attendants, silentTriage, loading, error, selectedId, onSelect, onDelete, onContextMenu, onEndReached, actions }: Props) {
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const list = event.currentTarget;
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
@@ -201,6 +203,15 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
       <div className="shrink-0 space-y-2 border-b border-slate-200 px-4 pb-2 pt-3 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Conversas</h2>
+          {silentTriage && (
+            <span
+              title="Modo Triagem Silenciosa: a IA filtra robôs e ruídos pós-campanha, mas não responde clientes. Conversas válidas vão para a fila."
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#002187]/10 px-2 py-0.5 text-[10px] font-semibold text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"
+            >
+              <ShieldCheck className="h-3 w-3" />
+              Triagem
+            </span>
+          )}
           {counts.unread > 0 && (
             <span title="Conversas não lidas" className="rounded-full bg-[#C4D600] px-2 py-0.5 text-[11px] font-semibold text-[#051647]">{counts.unread}</span>
           )}
