@@ -12,7 +12,7 @@ import { readMenuState, saveMenuState, sendMenu } from "@/lib/chat/menu";
 import { expireSurveys, isSurveyMessage, resendSurvey } from "@/lib/chat/nps";
 import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
 import { silenceFarewell } from "@/lib/chat/settings";
-import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { ChatRuleError, resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
 import { listDispatchJobs } from "@/lib/campaign-dispatch";
@@ -192,6 +192,8 @@ export async function runClock() {
         if (!isWindowOpen(row.lastInboundAt) || !(await customerInteracted(row.id))) continue;
         // Menu/IA: "oi"/"quero aproveitar"/ruído depois do disparo não conta como atendimento engajado.
         if (!row.assigneeId && row.status !== "in_progress" && !(await conversationEngaged(row))) continue;
+        // Trava no banco: duas execuções do relógio ao mesmo tempo nunca mandam o aviso duas vezes para o mesmo silêncio.
+        if (!(await firstDispatch(`silence-warn:${row.id}:${last!.createdAt.toISOString()}`))) continue;
         await sendAutomaticMessage(row, settings.silenceAskText.replaceAll("{minutos}", String(settings.silenceCloseMinutes)));
         // Gravado depois do envio: o próprio aviso não conta como "equipe escreveu depois do aviso".
         state.warnedAt = new Date().toISOString();
@@ -199,11 +201,17 @@ export async function runClock() {
         summary.silenceAsked += 1;
         continue;
       }
+      if (!(await firstDispatch(`silence-close:${row.id}:${state.warnedAt}`))) continue;
       state.warnedAt = null;
       await saveMenuState(row.id, state);
       // Sem pesquisa: o cliente parou de responder.
-      await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings));
-      summary.silenceClosed += 1;
+      try {
+        await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings));
+        summary.silenceClosed += 1;
+      } catch (error) {
+        // Já encerrada por outra execução ou pelo atendente: segue para as próximas.
+        if (!(error instanceof ChatRuleError)) throw error;
+      }
     }
   });
 
