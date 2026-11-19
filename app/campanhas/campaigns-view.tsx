@@ -108,6 +108,7 @@ interface DispatchJobView {
   duplicatesRemoved?: number;
   errors: string[];
   pause?: { kind: string; code?: number; message: string };
+  startedAt?: string;
 }
 
 interface Campaign {
@@ -563,7 +564,16 @@ export function CampaignsView() {
     })),
   ];
 
+  // Disparos "Enviando" ficam sempre no topo, do início mais recente para o mais antigo; o resto segue a ordenação escolhida.
+  const sendingStart = (row: UnifiedRow) => {
+    const started = new Date(row.job?.startedAt ?? row.bulk?.createdAt ?? 0).getTime();
+    return Number.isNaN(started) || started === 0 ? row.updatedAt : started;
+  };
   const sortedRows = [...rows].sort((a, b) => {
+    const aSending = a.status === "Enviando";
+    const bSending = b.status === "Enviando";
+    if (aSending !== bSending) return aSending ? -1 : 1;
+    if (aSending) return sendingStart(b) - sendingStart(a);
     const dir = sortConfig.order === "asc" ? 1 : -1;
     switch (sortConfig.field) {
       case "nome": return dir * a.nome.localeCompare(b.nome, "pt-BR");
