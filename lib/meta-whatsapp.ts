@@ -9,7 +9,12 @@
  */
 
 import { request } from "node:https";
+import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { connect, type TLSSocket } from "node:tls";
+
+// O Node tenta IPv6 e IPv4 e desiste de cada endereço em 250 ms; a rota do servidor até a Meta às vezes leva
+// ~2 s para abrir, e a chamada falhava com ETIMEDOUT em menos de 1 s. 2,5 s por endereço evita o falso erro.
+if (getDefaultAutoSelectFamilyAttemptTimeout() < 2_500) setDefaultAutoSelectFamilyAttemptTimeout(2_500);
 import { interactiveListPayload, type InteractiveShowcase } from "@/lib/ai/interactive-showcase";
 import { sendWhatsAppTypingIndicator, WHATSAPP_GRAPH_API } from "@/lib/chat/typing";
 
@@ -123,7 +128,8 @@ function getConfig() {
   return { phoneNumberId, accessToken, accountId };
 }
 
-const CONNECT_ERRORS = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+// ETIMEDOUT aqui vem da abertura da conexão (o fetch usa UND_ERR_*_TIMEOUT para respostas lentas): nada chegou à Meta.
+const CONNECT_ERRORS = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"]);
 const CONNECT_RETRY_MS = [1_000, 3_000];
 
 /** Falha em que a conexão nem abriu: reenviar depois não duplica a mensagem. */
