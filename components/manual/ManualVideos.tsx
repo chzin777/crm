@@ -24,6 +24,7 @@ import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ToastProvider";
 import { FormSelect } from "@/components/FormSelect";
+import { CustomVideoPlayer } from "@/components/manual/CustomVideoPlayer";
 
 type Video = {
   id: string;
@@ -292,20 +293,14 @@ export function ManualVideos() {
       <section aria-label="Player" className="min-w-0">
         {current ? (
           <>
-            <div className="overflow-hidden rounded-2xl bg-black shadow-sm">
-              <video
-                key={current.id}
-                src={current.videoUrl}
-                poster={current.thumbnailUrl ?? undefined}
-                controls
-                autoPlay={autoStart}
-                playsInline
-                preload="metadata"
-                controlsList="nodownload"
-                onEnded={() => { if (autoplay && next) play(next); }}
-                className="aspect-video h-auto w-full bg-black"
-              />
-            </div>
+            <CustomVideoPlayer
+              key={current.id}
+              src={current.videoUrl}
+              poster={current.thumbnailUrl ?? undefined}
+              autoPlay={autoStart}
+              title={current.title}
+              onEnded={() => { if (autoplay && next) play(next); }}
+            />
             <div className="mt-4 min-w-0 break-words">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                 {current.category && <span className="rounded-full bg-[#C4D600]/25 px-2.5 py-0.5 font-semibold text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{current.category}</span>}

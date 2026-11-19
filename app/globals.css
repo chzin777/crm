@@ -312,3 +312,17 @@ button, [role="button"], label, a {
   transform: translateX(100%);
   box-shadow: inset 15px -4px 0px 15px #fff000;
 }
+
+/* Player do /manual: ícone rápido no centro ao pausar, retomar ou pular. */
+@keyframes manual-player-flash {
+  0% { opacity: 0.95; transform: scale(0.8); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+
+.manual-player-flash {
+  animation: manual-player-flash 0.6s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manual-player-flash { animation-duration: 0.01ms; }
+}
