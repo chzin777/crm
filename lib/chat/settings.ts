@@ -59,7 +59,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   silenceEnabled: true,
   silenceAskMinutes: 10,
   silenceCloseMinutes: 3,
-  silenceAskText: "Você ainda está por aí? Se não responder, encerro esta conversa em {minutos} minutos.",
+  silenceAskText: "Você ainda está por aí? Em caso de inatividade, este atendimento será encerrado automaticamente em {minutos} minutos.",
   silenceCloseCustom: false,
   silenceCloseText: "",
   npsEnabled: true,

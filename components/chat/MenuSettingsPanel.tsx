@@ -323,12 +323,12 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
             <SettingCard
               icon={Timer}
               title="Silêncio do cliente"
-              description={settings.silenceEnabled ? `Sem resposta, a conversa encerra em ${settings.silenceAskMinutes + settings.silenceCloseMinutes} minutos. Só no menu: com a equipe, nunca encerra sozinha.` : "Desligado: conversas paradas no menu ficam abertas."}
+              description={settings.silenceEnabled ? `Sem resposta do cliente, a conversa encerra em ${settings.silenceAskMinutes + settings.silenceCloseMinutes} minutos (menu, IA ou atendente). Se a última mensagem for do cliente, nunca encerra sozinha.` : "Desligado: conversas paradas ficam abertas."}
               action={<Switch checked={settings.silenceEnabled} onChange={(value) => set("silenceEnabled", value)} label="Cuidar do silêncio do cliente" />}
             >
               {settings.silenceEnabled && (
                 <ol>
-                  <TimelineStep number={1} title="Cliente para de responder" description="O tempo conta a partir da última mensagem do menu." />
+                  <TimelineStep number={1} title="Cliente para de responder" description="O tempo conta a partir da última mensagem da equipe, da IA ou do menu. Se a última for do cliente, nada acontece." />
                   <TimelineStep number={2} title="Perguntar se ainda está aí" description="Se ele responder, o menu continua normalmente.">
                     <DurationField label="Esperar antes de perguntar" value={settings.silenceAskMinutes} onChange={(value) => set("silenceAskMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[5, 10, 15, 30].map((value) => ({ value, label: `${value} min` }))} />
                     <MessageField id="menu-silence-ask" label="Pergunta" rows={2} value={settings.silenceAskText} onChange={(value) => set("silenceAskText", value)} variables={[{ mark: "{minutos}", label: "Tempo até encerrar" }]} />

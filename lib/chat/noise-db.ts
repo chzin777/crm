@@ -45,6 +45,15 @@ export async function conversationEngaged(conversation: { id: string; status: st
   return messages.some(isEngagingCustomerMessage);
 }
 
+/** O cliente já escreveu de verdade nesta conversa (fora ruído e resposta automática de outra empresa). */
+export async function customerInteracted(conversationId: string) {
+  const found = await prisma.chatMessage.findFirst({
+    where: { conversationId, author: "customer", OR: [{ authorName: null }, { authorName: { notIn: [NOISE_AUTHOR, AUTO_REPLY_AUTHOR] } }] },
+    select: { id: true },
+  });
+  return Boolean(found);
+}
+
 /** Conversa aberta do número e se ela já está engajada (aí ruído leve como figurinha segue o fluxo normal). */
 export async function openEngagement(phone: string) {
   const open = await prisma.chatConversation.findFirst({

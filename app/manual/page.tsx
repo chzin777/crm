@@ -757,11 +757,13 @@ export default function ManualPage() {
             </Sub>
             <Sub id="menu-silencio" number="12.4" title="Silêncio do cliente">
               <Steps items={[
-                "Se o cliente parar de responder no menu (padrão de 10 minutos), o sistema pergunta se ele ainda está ali.",
-                "Sem resposta no tempo seguinte (padrão de 3 minutos), a conversa é encerrada com a despedida padrão ou uma mensagem própria.",
+                "Se a última mensagem for do atendente, da IA ou do menu e o cliente parar de responder (padrão de 10 minutos), o sistema pergunta uma única vez se ele ainda está ali.",
+                "Sem resposta no tempo seguinte (padrão de 3 minutos), a conversa é encerrada por inatividade com a despedida padrão ou uma mensagem própria.",
+                "Se a última mensagem for do cliente, a conversa nunca é encerrada sozinha: ela espera a resposta da equipe.",
+                "Conversa que só tem o disparo da campanha, sem resposta real do cliente, não recebe o aviso.",
                 "Se ele voltar depois, começa uma conversa nova.",
               ]} />
-              <WhatsApp lines={[{ from: "empresa", text: "Você ainda está por aí? Se não responder, encerro esta conversa em 3 minutos." }]} />
+              <WhatsApp lines={[{ from: "empresa", text: "Você ainda está por aí? Em caso de inatividade, este atendimento será encerrado automaticamente em 3 minutos." }]} />
             </Sub>
             <Sub id="menu-despedida" number="12.5" title="Despedida e pesquisa de satisfação">
               <p>Ao finalizar o atendimento, o cliente recebe a despedida e, em seguida, a pesquisa de 1 a 5:</p>

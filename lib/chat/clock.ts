@@ -3,7 +3,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { brDay } from "@/lib/br-time";
 import { retryInboundMedia } from "@/lib/chat/inbound";
-import { conversationEngaged } from "@/lib/chat/noise-db";
+import { conversationEngaged, customerInteracted } from "@/lib/chat/noise-db";
+import { planInactivity } from "@/lib/chat/inactivity";
 import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
@@ -153,26 +154,56 @@ export async function runClock() {
 
   await block("silêncio", async () => {
     if (!settings.silenceEnabled) return;
-    // Só conversa em que nada encaminhou para gente: status bot e sem dono.
-    const rows = await prisma.chatConversation.findMany({ where: { status: "bot", closedAt: null, assigneeId: null, lastMessageAt: { lte: new Date(now - settings.silenceAskMinutes * MINUTE) } } });
+    const askMs = settings.silenceAskMinutes * MINUTE;
+    const closeMs = settings.silenceCloseMinutes * MINUTE;
+    // Menu/IA (status bot, sem dono) e atendimentos com operador. Cliente esperando na fila (waiting sem dono)
+    // fica de fora: quem espera é ele. A regra de quem escreveu por último está em lib/chat/inactivity.
+    const rows = await prisma.chatConversation.findMany({
+      where: {
+        closedAt: null,
+        lastMessageAt: { lte: new Date(now - Math.min(askMs, closeMs)) },
+        OR: [{ status: "bot", assigneeId: null }, { assigneeId: { not: null } }, { status: "in_progress" }],
+      },
+    });
     for (const row of rows) {
-      const last = await prisma.chatMessage.findFirst({ where: { conversationId: row.id, internal: false }, orderBy: { createdAt: "desc" }, select: { author: true } });
-      if (last?.author === "customer") continue;
+      const last = await prisma.chatMessage.findFirst({
+        where: { conversationId: row.id, internal: false, author: { not: "system" } },
+        orderBy: { createdAt: "desc" },
+        select: { author: true, createdAt: true },
+      });
       const state = readMenuState(row.menuState);
-      if (state.closeAt) continue;
-      // "Você ainda está por aí?" só em atendimento engajado: disparo da campanha + "oi"/"quero aproveitar"/ruído não conta.
-      if (!state.warnedAt && !(await conversationEngaged(row))) continue;
-      if (!state.warnedAt) {
-        if (!isWindowOpen(row.lastInboundAt)) continue;
-        state.warnedAt = new Date(now).toISOString();
+      if (row.status === "bot" && !row.assigneeId && state.closeAt) continue;
+      const action = planInactivity({
+        lastAuthor: last ? (last.author as "customer" | "agent" | "bot") : null,
+        lastAt: last?.createdAt ?? null,
+        warnedAt: state.warnedAt ? new Date(state.warnedAt) : null,
+        now: new Date(now),
+        askMs,
+        closeMs,
+      });
+      if (action === "none") continue;
+      if (action === "reset") {
+        state.warnedAt = null;
         await saveMenuState(row.id, state);
-        await sendAutomaticMessage(row, settings.silenceAskText.replaceAll("{minutos}", String(settings.silenceCloseMinutes)));
-        summary.silenceAsked += 1;
-      } else if (now - new Date(state.warnedAt).getTime() >= settings.silenceCloseMinutes * MINUTE) {
-        // Sem pesquisa: aqui o cliente só passou pelo menu, nenhum atendente falou com ele.
-        await closeConversation(row, null, "Conversa encerrada por falta de resposta", silenceFarewell(settings));
-        summary.silenceClosed += 1;
+        continue;
       }
+      if (action === "warn") {
+        // Só com interação real do cliente: conversa que tem apenas o disparo da campanha não recebe aviso.
+        if (!isWindowOpen(row.lastInboundAt) || !(await customerInteracted(row.id))) continue;
+        // Menu/IA: "oi"/"quero aproveitar"/ruído depois do disparo não conta como atendimento engajado.
+        if (!row.assigneeId && row.status !== "in_progress" && !(await conversationEngaged(row))) continue;
+        await sendAutomaticMessage(row, settings.silenceAskText.replaceAll("{minutos}", String(settings.silenceCloseMinutes)));
+        // Gravado depois do envio: o próprio aviso não conta como "equipe escreveu depois do aviso".
+        state.warnedAt = new Date().toISOString();
+        await saveMenuState(row.id, state);
+        summary.silenceAsked += 1;
+        continue;
+      }
+      state.warnedAt = null;
+      await saveMenuState(row.id, state);
+      // Sem pesquisa: o cliente parou de responder.
+      await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings));
+      summary.silenceClosed += 1;
     }
   });
 
