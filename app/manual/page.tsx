@@ -709,6 +709,11 @@ export default function ManualPage() {
               <WhatsApp lines={[{ from: "empresa", text: "Você avançou na fila: agora é o 2º da fila Vendas. Obrigado por aguardar." }]} />
             </Sub>
             <Sub id="filas-respostas" number="11.4" title="Respostas prontas">
+              <Bullets items={[
+                <>No /chat, o botão de respostas rápidas tem <Kbd>+ Nova resposta rápida</Kbd> (cria sem sair da conversa) e <Kbd>Gerenciar todas</Kbd>, que abre a página Respostas Rápidas (menu Vendas; também em Configurações).</>,
+                "Cada resposta tem atalho (/pix), título, categoria, mensagem com variáveis clicáveis e visibilidade: Toda a equipe (criada por quem gerencia filas) ou Apenas para mim.",
+                "Na gestão é possível buscar por atalho, título ou texto, filtrar por categoria e visibilidade, editar e excluir (com confirmação).",
+              ]} />
               <p>
                 Cadastre título e texto (com variações). Uma resposta pode responder automaticamente a gatilhos (palavras, uma por linha). Sem gatilho, ela
                 vale como saudação. As respostas ficam disponíveis no botão de respostas prontas da caixa de escrita.

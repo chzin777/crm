@@ -545,10 +545,15 @@ model ChatQuickReply {
   triggers   String[] @default([])
   variations String[] @default([])
   queueId    String?
+  /// Categoria livre (Geral, Vendas, Pós-venda, Financeiro...).
+  category   String?
+  /// Nulo = resposta de toda a equipe; preenchido = resposta pessoal deste usuário.
+  ownerId    String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   @@index([queueId, title])
+  @@index([ownerId])
 }
 
 model ChatBlockedNumber {

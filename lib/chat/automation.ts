@@ -18,7 +18,7 @@ const onlyWords = (text: string) => normalize(text).replace(/[^a-z\s]/g, " ").re
 
 async function answerByQuickReply(entry: { conversationId: string; phone: string; queueId: string | null; text: string; firstMessage: boolean; customerName: string; queueName: string | null }) {
   const candidates = await prisma.chatQuickReply.findMany({
-    where: { automatic: true, ...(entry.queueId ? { OR: [{ queueId: null }, { queueId: entry.queueId }] } : {}) },
+    where: { automatic: true, ownerId: null, ...(entry.queueId ? { OR: [{ queueId: null }, { queueId: entry.queueId }] } : {}) },
     orderBy: [{ queueId: { sort: "asc", nulls: "last" } }, { title: "asc" }],
   });
   const text = normalize(entry.text);

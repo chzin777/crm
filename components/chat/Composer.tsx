@@ -14,6 +14,10 @@ import { useRecorder } from "@/lib/chat/use-recorder";
 import { extractClipboardImages } from "@/lib/clipboard";
 import { MAX_IMAGE_BYTES } from "@/lib/chat/media-rules";
 import { useToast } from "@/components/ToastProvider";
+import Link from "next/link";
+import { Plus, Settings2 } from "lucide-react";
+import { QuickReplyDialog } from "@/components/chat/QuickReplyDialog";
+import { matchesQuickReply, type QuickReply as FullQuickReply } from "@/lib/chat/quick-replies";
 
 // A biblioteca e a base de emojis só são baixadas quando o seletor abre.
 const EmojiPanel = dynamic(() => import("@/components/chat/EmojiPanel").then((module) => module.EmojiPanel), {
@@ -23,7 +27,7 @@ const EmojiPanel = dynamic(() => import("@/components/chat/EmojiPanel").then((mo
 
 export type ComposerSend = { text: string; internal: boolean; replyTo: ChatMessageItem | null };
 
-type QuickReply = { id: string; title: string; text: string; shortcut: string; queueId: string | null };
+type QuickReply = Pick<FullQuickReply, "id" | "title" | "text" | "shortcut" | "queueId" | "category">;
 
 type Props = {
   conversation: ConversationDetail;
@@ -67,6 +71,10 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [showQuick, setShowQuick] = useState(false);
   const [quickSearch, setQuickSearch] = useState("");
+  // Criar resposta rápida sem sair da conversa (modal próprio; a lista do popover é recarregada ao salvar).
+  const [creatingQuick, setCreatingQuick] = useState(false);
+  const [canManageTeamReplies, setCanManageTeamReplies] = useState(false);
+  const [quickReload, setQuickReload] = useState(0);
   const [internal, setInternal] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const [sending, setSending] = useState(false);
@@ -172,22 +180,27 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
 
   useEffect(() => {
     let active = true;
-    fetch("/api/chat/quick-replies")
+    fetch("/api/chat/quick-replies", { cache: "no-store" })
       .then(async (response) => {
-        if (response.ok && active) setQuickReplies(((await response.json()) as { data: QuickReply[] }).data);
+        if (!response.ok || !active) return;
+        const result = (await response.json()) as { data: QuickReply[]; canManageTeam?: boolean };
+        setQuickReplies(result.data);
+        setCanManageTeamReplies(!!result.canManageTeam);
       })
       .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, []);
+  }, [quickReload]);
 
   const slashTerm = text.startsWith("/") ? text.slice(1).toLowerCase() : null;
   const quickVisible = showQuick || slashTerm !== null;
   const term = slashTerm ?? quickSearch.trim().toLowerCase();
   const quickMatches = quickReplies
     .filter((item) => !item.queueId || item.queueId === conversation.queue?.id)
-    .filter((item) => !term || item.title.toLowerCase().includes(term) || item.shortcut.toLowerCase().includes(term) || item.text.toLowerCase().includes(term));
+    .filter((item) => !term || matchesQuickReply(item, term))
+    // Atalho que começa com o que foi digitado vem primeiro ("/pi" → /pix).
+    .sort((a, b) => Number(!!term && b.shortcut.toLowerCase().startsWith(term)) - Number(!!term && a.shortcut.toLowerCase().startsWith(term)));
 
   const insertAtCursor = (value: string) => {
     const box = field.current;
@@ -255,7 +268,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
           <EmojiPanel onPick={insertAtCursor} />
         </ComposerPopover>
       )}
-      {quickVisible && typing && (
+      {quickVisible && typing && !creatingQuick && (
         <ComposerPopover anchor={quickButton} label="Respostas prontas" onClose={closeQuick}>
           <div className="w-80 max-w-full">
             {slashTerm === null && (
@@ -273,13 +286,26 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
             )}
             <div className="max-h-60 overflow-y-auto p-1">
               {quickMatches.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">Nenhuma resposta pronta encontrada.</p>
+                <div className="px-3 py-3 text-center">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{quickReplies.length === 0 ? "Nenhuma resposta rápida cadastrada ainda." : "Nenhuma resposta rápida encontrada."}</p>
+                  <button type="button" onClick={() => { closeQuick(); setCreatingQuick(true); }} className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">
+                    <Plus className="h-3.5 w-3.5" /> Nova resposta rápida
+                  </button>
+                </div>
               ) : quickMatches.map((item) => (
                 <button key={item.id} type="button" onClick={() => chooseQuick(item)} className="block w-full cursor-pointer rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-white/10">
                   <span className="block truncate text-xs font-semibold text-slate-900 dark:text-white">{item.title}{item.shortcut ? ` · /${item.shortcut}` : ""}</span>
                   <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{item.text}</span>
                 </button>
               ))}
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-2 py-1.5 dark:border-slate-800">
+              <button type="button" onClick={() => { closeQuick(); setCreatingQuick(true); }} className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-[#002187] hover:bg-slate-100 dark:text-[#C4D600] dark:hover:bg-white/10">
+                <Plus className="h-3.5 w-3.5" /> Nova resposta rápida
+              </button>
+              <Link href="/respostas-rapidas" target="_blank" rel="noopener noreferrer" onClick={closeQuick} className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white">
+                <Settings2 className="h-3.5 w-3.5" /> Gerenciar todas
+              </Link>
             </div>
           </div>
         </ComposerPopover>
@@ -374,6 +400,20 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
         <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label="Envio do arquivo" aria-valuenow={uploadProgress}>
           <div className="h-full bg-[#002187] transition-all dark:bg-[#C4D600]" style={{ width: `${uploadProgress}%` }} />
         </div>
+      )}
+      {creatingQuick && (
+        <QuickReplyDialog
+          canManageTeam={canManageTeamReplies}
+          onClose={() => setCreatingQuick(false)}
+          onSaved={(item) => {
+            setCreatingQuick(false);
+            // Lista atualizada na hora e o popover reabre já filtrado na nova resposta, pronta para inserir.
+            setQuickReplies((current) => [...current.filter((reply) => reply.id !== item.id), item].sort((a, b) => a.title.localeCompare(b.title, "pt-BR")));
+            setQuickReload((value) => value + 1);
+            setQuickSearch(item.shortcut || item.title);
+            setShowQuick(true);
+          }}
+        />
       )}
       {scheduling !== null && onScheduled && (
         <ScheduleMessageDialog

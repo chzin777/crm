@@ -15,6 +15,7 @@ export const MODULES = [
   { key: "permissoes", label: "Permissões", href: "/permissoes", group: "Gestão" },
   { key: "chat", label: "Atendimento", href: "/chat", group: "Vendas" },
   { key: "filas", label: "Filas de Atendimento", href: "/filas", group: "Vendas" },
+  { key: "respostas", label: "Respostas Rápidas", href: "/respostas-rapidas", group: "Vendas" },
   { key: "metricas", label: "Métricas de Atendimento", href: "/metricas-atendimento", group: "Vendas" },
   { key: "configuracoes", label: "Configurações", href: "/configuracoes", group: "Geral" },
   { key: "ia", label: "Inteligência Artificial", href: "/ia", group: "Geral" },
@@ -55,6 +56,8 @@ export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAc
   // A IA saiu de Configurações para /ia: quem já administrava Configurações continua com acesso.
   if (key === "ia") return modules?.configuracoes === true;
   // Catálogo é ferramenta de balcão: quem atende ou vende já consulta produtos.
+  // Respostas rápidas acompanham o atendimento: quem atende ou gerencia filas já administra as suas.
+  if (key === "respostas") return modules?.chat === true || modules?.filas === true || modules?.configuracoes === true;
   if (key === "produtos") return modules?.chat === true || modules?.pipelines === true || modules?.contatos === true;
   return key === "campanhas" && modules?.disparos === true;
 }

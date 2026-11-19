@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { WhatsAppSettings } from "@/components/WhatsAppSettings";
-import { Bell, CheckCircle2, Clock3, DollarSign, Save, TrendingUp, Users } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, DollarSign, MessageSquareText, Save, TrendingUp, Users } from "lucide-react";
+import { QuickRepliesPanel } from "@/components/chat/QuickRepliesPanel";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
 
@@ -231,6 +232,10 @@ export default function ConfiguracoesPage() {
               <SettingsTextField label="Janela de conversão (dias após o envio)" value={settings.janelaConversaoDias ?? "7"} type="number" onChange={(value) => updateSetting("janelaConversaoDias", value)} />
             </div>
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Mensagens livres, dentro da janela de 24h de atendimento, não são cobradas pela Meta.</p>
+          </SettingsCard>
+
+          <SettingsCard title="Respostas Rápidas" description="Textos padrão do atendimento usados no /chat (botão de respostas rápidas ou / e o atalho). Também ficam em Vendas › Respostas Rápidas." icon={MessageSquareText}>
+            <QuickRepliesPanel />
           </SettingsCard>
 
           <WhatsAppSettings />

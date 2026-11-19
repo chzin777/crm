@@ -21,6 +21,7 @@ import {
   Workflow,
   Gem,
   PackageSearch,
+  MessageSquareText,
   X,
 } from "lucide-react";
 
@@ -47,6 +48,7 @@ const TABS: TabDef[] = [
   { id: "chat", label: "Atendimento", href: "/chat", icon: MessageSquare },
   { id: "produtos", label: "Produtos", href: "/produtos", icon: PackageSearch },
   { id: "filas", label: "Filas", href: "/filas", icon: ListOrdered },
+  { id: "respostas", label: "Respostas Rápidas", href: "/respostas-rapidas", icon: MessageSquareText },
   { id: "metricas", label: "Métricas", href: "/metricas-atendimento", icon: BarChart3 },
   { id: "ia", label: "Inteligência Artificial", href: "/ia", icon: Sparkles },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
