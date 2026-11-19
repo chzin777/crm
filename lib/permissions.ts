@@ -3,6 +3,7 @@ export const MODULES = [
   { key: "pipelines", label: "Pipelines", href: "/", group: "Vendas" },
   { key: "contatos", label: "Contatos & Clientes", href: "/contatos", group: "Vendas" },
   { key: "segmentos", label: "Segmentos", href: "/segmentos", group: "Vendas" },
+  { key: "produtos", label: "Catálogo de Produtos", href: "/produtos", group: "Vendas" },
   { key: "campanhas", label: "Campanhas", href: "/campanhas", group: "Marketing" },
   { key: "disparos", label: "Disparos pelo pipeline", href: "/campanhas", group: "Marketing" },
   { key: "modelos", label: "Modelos WhatsApp", href: "/modelos", group: "Marketing" },
@@ -54,6 +55,8 @@ export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAc
   if (modules?.[key] === true) return true;
   // A IA saiu de Configurações para /ia: quem já administrava Configurações continua com acesso.
   if (key === "ia") return modules?.configuracoes === true;
+  // Catálogo é ferramenta de balcão: quem atende ou vende já consulta produtos.
+  if (key === "produtos") return modules?.chat === true || modules?.pipelines === true || modules?.contatos === true;
   return key === "campanhas" && modules?.disparos === true;
 }
 

@@ -67,6 +67,7 @@ const CHAPTERS: ManualChapter[] = [
     { id: "campanhas-meta", title: "Aprovação do modelo na Meta" },
     { id: "campanhas-dedup", title: "Vários segmentos sem mensagem repetida" },
     { id: "campanhas-custo", title: "Custo estimado e calculadora" },
+    { id: "campanhas-produtos", title: "Catálogo de Produtos (VMSET)" },
   ] },
   { id: "atendimento", title: "Atendimento (inbox do WhatsApp)", sections: [
     { id: "atendimento-tela", title: "A tela de atendimento" },
@@ -568,6 +569,14 @@ export default function ManualPage() {
                 "No passo Público da Nova campanha, o resumo mostra o custo dos destinatários únicos conforme a categoria do modelo.",
                 <>O botão <Kbd>Calculadora de custo</Kbd> (em Segmentos e Campanhas) simula um ou mais segmentos, já sem repetidos, ou uma quantidade manual, nas categorias Marketing, Utilidade e Autenticação, em R$ e US$.</>,
                 "Em Editar tarifas, ajuste a tabela da Meta (US$ por mensagem) e a cotação do dólar. Os valores salvos também passam a valer no gasto das campanhas.",
+              ]} />
+            </Sub>
+            <Sub id="campanhas-produtos" number="9.11" title="Catálogo de Produtos (VMSET)">
+              <Bullets items={[
+                <>Em <Kbd>Catálogo de Produtos</Kbd> (menu Vendas), busque por código, referência, descrição, marca ou EAN e filtre por loja, categoria, marca, faixa de preço e “Somente em estoque”.</>,
+                "Alterne entre Grade e Lista; o ícone ao lado da referência copia o código em 1 clique para colar no atendimento.",
+                "Ao clicar no produto abre a ficha com especificações, preço por loja e estoque de todas as lojas (com saldo primeiro), além do botão Copiar resumo para WhatsApp.",
+                "Os saldos são atualizados a cada minuto; “Atualizar do VMSET” força uma nova leitura de produtos, preços e estoque.",
               ]} />
             </Sub>
           </Chapter>

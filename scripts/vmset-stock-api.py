@@ -13,6 +13,11 @@ GET /events?kind=overdue|due|paid|good_payer|lab_ready&date=YYYY-MM-DD  (cabeça
   - eventos do dia para os gatilhos de /automacoes (parcela vencida/a vencer, baixa, bom pagador, OS pronta no laboratório);
 GET /punctuality?months=24&grace=0  (cabeçalho x-api-key)  ->  {"items": [{"cpf", "due", "onTime", "avgDelay", "maxOverdueDays"}]}
   - pontualidade por CPF (carnê/boleto/crédito interno vencidos na janela) para a matriz RFV-P do CRM;
+GET /catalog/products[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [[codigo, descricao, referencia, ean, marca, categoria, subcategoria, ncm, cor, material, aro, ponte, garantiaMeses, preco, precoMin, precoMax]]}
+  - produtos ativos das categorias de venda (armações, solares, lentes, acessórios...), preço mais comum entre as lojas;
+  - retrato em memória por 60 min (a consulta de preços varre a PRECO_VENDA e leva ~30 s), renovado em segundo plano;
+GET /catalog/stock[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [[codigo, unidade, nomeUnidade, disponivel, reservado]]}
+  - saldo de todas as unidades que vendem, retrato de 2 min (mesma regra do /stock);
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -59,6 +64,45 @@ JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PV.UNIDADE_EMPRESARIA
 WHERE PR.PRDT_CODIGO IN ({binds})
   AND (PV.PRVD_DT_VALIDADE IS NULL OR PV.PRVD_DT_VALIDADE >= TRUNC(SYSDATE))
 GROUP BY PR.PRDT_CODIGO, UE.UNEM_CODIGO
+"""
+
+# Catálogo de produtos (página /produtos do CRM): cadastro + preço mais comum entre as lojas.
+CATALOG_CATEGORIES = ("ARMACAO", "OCULOS SOLAR", "LENTES", "LENTE PRONTA", "ACESSORIOS", "LENTES DE CONTATO", "RELOGIO")
+CATALOG_SQL = """
+SELECT PR.PRDT_CODIGO, PR.PRDT_DESCRICAO, PR.PRDT_REFERENCIA_FABRICAN, NVL(PR.PRDT_COD_BARRA_INDUSTRIA, EB.EAN),
+       M.MARC_DESCRICAO, CP.CATG_DESCRICAO, SP.SBCA_DESCRICAO, N.NCMX_CODIGO, CO.CORS_DESCRICAO, MA.MATE_DESCRICAO,
+       PR.PRDT_ARO_ARMACAO, PR.PRDT_PONTE_ARMACAO, PR.PRDT_GARANTIA_MES, PZ.PRECO, PZ.PRECO_MIN, PZ.PRECO_MAX
+FROM PRODUTO PR
+JOIN SUBCATEGORIA_PRODUTO SP ON SP.SUBCATEGORIA_PRODUTO_ID = PR.SUBCATEGORIA_PRODUTO_ID
+JOIN CATEGORIA_PRODUTO CP ON CP.CATEGORIA_PRODUTO_ID = SP.CATEGORIA_PRODUTO_ID
+LEFT JOIN MARCAS M ON M.MARCA_ID = PR.MARCA_ID
+LEFT JOIN NCM N ON N.NCM_ID = PR.NCM_ID
+LEFT JOIN CORES CO ON CO.CORES_ID = PR.CORES_ID
+LEFT JOIN MATERIAL MA ON MA.MATERIAL_ID = PR.MATERIAL_ID
+LEFT JOIN (SELECT PRODUTO_ID, MAX(EMBV_COD_BARRA) EAN FROM EMBALAGEM_VENDA WHERE STATUS = 'Ativo' GROUP BY PRODUTO_ID) EB ON EB.PRODUTO_ID = PR.PRODUTO_ID
+LEFT JOIN (
+  SELECT EV.PRODUTO_ID, STATS_MODE(PV.PRVD_PRECO) PRECO, MIN(PV.PRVD_PRECO) PRECO_MIN, MAX(PV.PRVD_PRECO) PRECO_MAX
+  FROM PRECO_VENDA PV
+  JOIN EMBALAGEM_VENDA EV ON EV.EMBALAGEM_VENDA_ID = PV.EMBALAGEM_VENDA_ID
+  WHERE PV.STATUS = 'Ativo' AND PV.PRVD_PRECO > 0 AND (PV.PRVD_DT_VALIDADE IS NULL OR PV.PRVD_DT_VALIDADE >= TRUNC(SYSDATE))
+  GROUP BY EV.PRODUTO_ID
+) PZ ON PZ.PRODUTO_ID = PR.PRODUTO_ID
+WHERE PR.STATUS = 'Ativo' AND CP.CATG_DESCRICAO IN ({categories})
+"""
+
+# Saldo de todas as unidades que vendem (mesma regra do SQL acima, sem filtro de código).
+CATALOG_STOCK_SQL = """
+SELECT PR.PRDT_CODIGO, UE.UNEM_CODIGO, MAX(PU.PRCR_NOME),
+       SUM(ES.ESTQ_QTDE - NVL(ES.ESTQ_QTDE_RESERVA_VENDA, 0)), SUM(NVL(ES.ESTQ_QTDE_RESERVA_VENDA, 0))
+FROM ESTOQUE ES
+JOIN PRODUTO PR ON PR.PRODUTO_ID = ES.PRODUTO_ID
+JOIN SETOR SE ON SE.SETOR_ID = ES.SETOR_ID AND SE.STATUS = 'Ativo' AND NVL(SE.SETR_EFETUA_VENDA, 'Nao') = 'Sim'
+JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = SE.UNIDADE_EMPRESARIAL_ID AND UE.STATUS = 'Ativo'
+JOIN PARCEIRO PU ON PU.PARCEIRO_ID = UE.UNIDADE_EMPRESARIAL_ID
+WHERE TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199
+  AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 1000 AND 2999
+GROUP BY PR.PRDT_CODIGO, UE.UNEM_CODIGO
+HAVING SUM(ES.ESTQ_QTDE - NVL(ES.ESTQ_QTDE_RESERVA_VENDA, 0)) > 0 OR SUM(NVL(ES.ESTQ_QTDE_RESERVA_VENDA, 0)) > 0
 """
 
 oracledb.init_oracle_client(lib_dir=os.environ.get("ORACLE_LIB_DIR"))
@@ -245,6 +289,86 @@ def events(kind, date):
         } for title_id, cpf, name, cel, fone, number, installment, due, amount, paid_at, paid, store, invoice, remaining in cur.fetchmany(MAX_EVENTS)]
 
 
+def text(value):
+    return " ".join(str(value).split()) if value is not None and str(value).strip() else None
+
+
+def price_value(value):
+    return round(float(value), 2) if value is not None and float(value) > 0 else None
+
+
+def catalog_products():
+    categories = ",".join(f":k{i}" for i in range(len(CATALOG_CATEGORIES)))
+    with pool.acquire() as conn:
+        conn.call_timeout = 180_000
+        cur = conn.cursor()
+        cur.arraysize = 5000
+        cur.execute(CATALOG_SQL.format(categories=categories), {f"k{i}": name for i, name in enumerate(CATALOG_CATEGORIES)})
+        items = []
+        for row in cur:
+            code = text(row[0])
+            if not code:
+                continue
+            # A embalagem costuma repetir o próprio código como "código de barras": só vale EAN de verdade.
+            ean = text(row[3])
+            items.append([code, text(row[1]) or code, text(row[2]), ean if ean and ean != code else None, text(row[4]), text(row[5]), text(row[6]), text(row[7]),
+                          text(row[8]), text(row[9]), text(row[10]), text(row[11]), int(row[12]) if row[12] else None,
+                          price_value(row[13]), price_value(row[14]), price_value(row[15])])
+        return items
+
+
+def catalog_stock():
+    with pool.acquire() as conn:
+        conn.call_timeout = 60_000
+        cur = conn.cursor()
+        cur.arraysize = 5000
+        cur.execute(CATALOG_STOCK_SQL)
+        items = []
+        for code, unit, name, available, reserved in cur:
+            unit_code = str(int(unit)) if str(unit).isdigit() else str(unit)
+            items.append([str(code), unit_code, (name or "").strip(), float(available or 0), float(reserved or 0)])
+        return items
+
+
+class Snapshot:
+    """Retrato em memória com renovação em segundo plano: só a 1ª carga (ou um refresh) espera o Oracle."""
+
+    def __init__(self, label, loader, ttl, min_refresh):
+        self.label, self.loader, self.ttl, self.min_refresh = label, loader, ttl, min_refresh
+        self.data, self.at, self.lock, self.refreshing = None, 0.0, threading.Lock(), False
+
+    def _load(self):
+        started = time.monotonic()
+        items = self.loader()
+        self.data, self.at = items, time.time()
+        log(f"catálogo {self.label}: {len(items)} linhas em {time.monotonic() - started:.1f}s")
+
+    def _background(self):
+        try:
+            with self.lock:
+                self._load()
+        except Exception as error:
+            log(f"ERRO catálogo {self.label}: {str(error)[:200]}")
+        finally:
+            self.refreshing = False
+
+    def get(self, refresh=False):
+        if self.data is None or (refresh and time.time() - self.at > self.min_refresh):
+            with self.lock:
+                if self.data is None or (refresh and time.time() - self.at > self.min_refresh):
+                    self._load()
+        elif time.time() - self.at > self.ttl and not self.refreshing:
+            self.refreshing = True
+            threading.Thread(target=self._background, daemon=True).start()
+        return {"at": int(self.at * 1000), "items": self.data}
+
+
+catalog_cache = {
+    "/catalog/products": Snapshot("produtos", catalog_products, ttl=3600, min_refresh=300),
+    "/catalog/stock": Snapshot("estoque", catalog_stock, ttl=120, min_refresh=30),
+}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -258,10 +382,17 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path not in ("/stock", "/installments", "/events", "/punctuality"):
+        if url.path not in ("/stock", "/installments", "/events", "/punctuality", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
+        if url.path in catalog_cache:
+            refresh = parse_qs(url.query).get("refresh", [""])[0] == "1"
+            try:
+                return self._send(200, catalog_cache[url.path].get(refresh))
+            except Exception as error:
+                log(f"ERRO catálogo {url.path}: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
         if url.path == "/punctuality":
             query = parse_qs(url.query)
             try:

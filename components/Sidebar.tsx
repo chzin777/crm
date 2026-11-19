@@ -33,6 +33,7 @@ import {
   BarChart3,
   Workflow,
   Gem,
+  PackageSearch,
 } from "lucide-react";
 
 const ITEM_ACTIVE = "bg-[#051647]/[0.07] text-[#051647] dark:bg-white/10 dark:text-[#C4D600]";
@@ -87,6 +88,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Contatos & Clientes", href: "/contatos", icon: Users },
     { title: "Segmentos", href: "/segmentos", icon: Layers },
     { title: "Atendimento", href: "/chat", icon: MessageSquare },
+    { title: "Catálogo de Produtos", href: "/produtos", icon: PackageSearch },
     { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Métricas de Atendimento", href: "/metricas-atendimento", icon: BarChart3 },
     { title: "Lojas", href: "/lojas", icon: Store },
@@ -105,7 +107,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/filas"), byHref("/metricas-atendimento")] },
+    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/metricas-atendimento")] },
     { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes"), byHref("/clientes-vip")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
   ]
