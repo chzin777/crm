@@ -21,6 +21,8 @@ export type MenuState = {
   positionSince?: string | null;
   /** Conversa em atendimento ativo pela IA: fora da fila humana até o transbordo. */
   aiActive?: boolean;
+  /** A IA transferiu de propósito para a fila humana (qualificou ou o cliente pediu atendente). */
+  handedOff?: boolean;
 };
 
 const EMPTY: MenuState = { path: [], stopped: false, closeAt: null, closePhrase: null, warnedAt: null };
@@ -37,6 +39,7 @@ export function readMenuState(raw: unknown): MenuState {
     notifiedPosition: typeof value.notifiedPosition === "number" ? value.notifiedPosition : null,
     positionSince: typeof value.positionSince === "string" ? value.positionSince : null,
     aiActive: value.aiActive === true,
+    ...(value.handedOff === true ? { handedOff: true } : {}),
   };
 }
 

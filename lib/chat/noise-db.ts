@@ -8,7 +8,10 @@ import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
 import { notifyChatChange } from "@/lib/chat/events";
 import { NOISE_AUTHOR, classifyNoise, type NoiseKind } from "@/lib/chat/noise";
 import { phoneVariants } from "@/lib/chat/phone";
+import { readMenuState } from "@/lib/chat/menu";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
+
+const HUMAN_REQUEST = /\b(atendente|vendedor[a]?|consultor[a]?|humano|uma pessoa|algu[eé]m da loja|falar com (algu[eé]m|voc[eê]s|a loja))\b/i;
 
 /** Mensagem do cliente que conta como atendimento engajado (não é ruído, resposta automática nem "oi"/"quero aproveitar"). */
 export function isEngagingCustomerMessage(message: { text: string; authorName: string | null; attachment: unknown }) {
@@ -17,15 +20,19 @@ export function isEngagingCustomerMessage(message: { text: string; authorName: s
   if (kind && kind !== "sticker") return true;
   const text = message.text.trim();
   if (!text || classifyNoise({ type: "text", text, hasMedia: false })) return false;
-  return !isGenericInterest(text);
+  // Pedido explícito de pessoa ("quero falar com um atendente") é entrada intencional na fila.
+  return HUMAN_REQUEST.test(text) || !isGenericInterest(text);
 }
 
 /**
  * Atendimento engajado: já tem atendente, está em atendimento ou o cliente já disse algo além de saudação,
  * interesse genérico ou ruído (ex.: respondeu a qualificação, mandou receita).
  */
-export async function conversationEngaged(conversation: { id: string; status: string; assigneeId: string | null }) {
+export async function conversationEngaged(conversation: { id: string; status: string; assigneeId: string | null; menuState?: unknown }) {
   if (conversation.assigneeId || conversation.status === "in_progress") return true;
+  // Transbordo decidido pela IA ou opção escolhida no menu: entrada intencional no atendimento.
+  const state = readMenuState(conversation.menuState);
+  if (state.handedOff || state.path.length > 0) return true;
   const messages = await prisma.chatMessage.findMany({
     where: { conversationId: conversation.id, author: "customer" },
     orderBy: { createdAt: "desc" },
@@ -39,7 +46,7 @@ export async function conversationEngaged(conversation: { id: string; status: st
 export async function openEngagement(phone: string) {
   const open = await prisma.chatConversation.findFirst({
     where: { phone: { in: phoneVariants(phone) }, closedAt: null },
-    select: { id: true, status: true, assigneeId: true },
+    select: { id: true, status: true, assigneeId: true, menuState: true },
   });
   return { open, engaged: open ? await conversationEngaged(open) : false };
 }
@@ -87,6 +94,8 @@ export async function absorbNoise(input: {
   text: string;
   receivedAt: Date;
   attachment: ChatAttachment | null;
+  /** Marca gravada na mensagem (padrão: ruído; resposta automática de outra empresa usa a marca própria). */
+  authorName?: string;
 }) {
   const target = input.openConversationId
     ?? (await prisma.chatConversation.findFirst({ where: { phone: { in: phoneVariants(input.phone) } }, orderBy: { createdAt: "desc" }, select: { id: true } }))?.id
@@ -100,7 +109,7 @@ export async function absorbNoise(input: {
       data: {
         conversationId: target,
         author: "customer",
-        authorName: NOISE_AUTHOR,
+        authorName: input.authorName ?? NOISE_AUTHOR,
         text: input.text,
         externalId: input.externalId,
         createdAt: input.receivedAt,

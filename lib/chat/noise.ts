@@ -6,7 +6,7 @@
 /** Marca gravada em ChatMessage.authorName das mensagens do cliente ignoradas pela triagem (sem fila, IA ou timer). */
 export const NOISE_AUTHOR = "Mensagem ignorada (ruído)";
 
-export type NoiseKind = "sticker" | "pontuacao" | "risada" | "link" | "imagem_aleatoria";
+export type NoiseKind = "sticker" | "pontuacao" | "risada" | "link" | "imagem_aleatoria" | "auto_resposta";
 
 const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 

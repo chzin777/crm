@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { downloadMedia } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
 import { attributeCampaignReply } from "@/lib/chat/campaign-origin";
-import { AUTO_REPLY_AUTHOR, detectAutoReply } from "@/lib/chat/auto-reply";
+import { AUTO_REPLY_AUTHOR, detectAutoReply, type AutoReplyVerdict } from "@/lib/chat/auto-reply";
 import { openConversationFor } from "@/lib/chat/conversation";
 import { recordSurveyReply } from "@/lib/chat/nps";
 import { absorbPostCloseCourtesy } from "@/lib/chat/post-close";
@@ -109,7 +109,7 @@ export type RecordedInbound = {
   choiceId: string | null;
   created: boolean;
   /** Preenchido quando a mensagem foi reconhecida como resposta automática do contato (não aciona o menu). */
-  autoReply: "pattern" | "instant" | "post_dispatch_greeting" | null;
+  autoReply: NonNullable<AutoReplyVerdict>["kind"] | null;
 };
 
 /**
@@ -152,17 +152,9 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     }
   }
 
-  const contact = await findOrCreateContact(message.from, profileName);
-  const { conversation, created } = await openConversationFor(contact.id, message.from);
   const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
-  const replyTo = await findQuoted(message.context?.id);
-  // error: motivo da falha no download (a IA avisa o cliente em vez de ignorar o arquivo).
-  // selectedProductRef: modelo escolhido na lista interativa da vitrine (a IA abre a ficha + foto desse item).
-  const metaMedia: SavedMetaMedia | { selectedProductRef: string } | null = content.media
-    ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind, ...(mediaError ? { error: mediaError } : {}) }
-    : content.selectedProductRef ? { selectedProductRef: content.selectedProductRef } : null;
   const choiceId = message.interactive?.list_reply?.id ?? message.interactive?.button_reply?.id ?? null;
-  // Ausência/saudação automática do WhatsApp Business do contato: fica no histórico, mas não abre menu nem conta como resposta.
+  // Ausência/saudação/menu automático do WhatsApp Business de outra empresa (ex.: logo após a campanha).
   const autoReply = await detectAutoReply({
     phone: message.from,
     text,
@@ -172,6 +164,25 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     console.error("[chat] falha ao avaliar resposta automática:", error);
     return null;
   });
+  // Fora de atendimento engajado: ignorada 100% em silêncio (sem abrir atendimento, sem fila, IA, aviso de posição
+  // ou timer). Fica só no histórico do contato, marcada como resposta automática.
+  if (autoReply) {
+    const { open, engaged } = await openEngagement(message.from);
+    if (!engaged) {
+      console.log(`[chat] resposta automática de ${message.from} ignorada (${autoReply.kind}: ${autoReply.detail})`);
+      await absorbNoise({ kind: "auto_resposta", phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text, receivedAt, attachment, authorName: AUTO_REPLY_AUTHOR });
+      return null;
+    }
+  }
+
+  const contact = await findOrCreateContact(message.from, profileName);
+  const { conversation, created } = await openConversationFor(contact.id, message.from);
+  const replyTo = await findQuoted(message.context?.id);
+  // error: motivo da falha no download (a IA avisa o cliente em vez de ignorar o arquivo).
+  // selectedProductRef: modelo escolhido na lista interativa da vitrine (a IA abre a ficha + foto desse item).
+  const metaMedia: SavedMetaMedia | { selectedProductRef: string } | null = content.media
+    ? { id: content.media.id, mime_type: content.media.mime_type, filename: content.media.filename, kind: content.media.kind, ...(mediaError ? { error: mediaError } : {}) }
+    : content.selectedProductRef ? { selectedProductRef: content.selectedProductRef } : null;
 
   let saved;
   try {

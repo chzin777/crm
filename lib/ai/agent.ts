@@ -250,6 +250,8 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   const state = readMenuState(conversation.menuState);
   state.stopped = true;
   state.aiActive = false;
+  // Entrada legítima na fila (transbordo decidido pela IA): libera o aviso de posição.
+  state.handedOff = true;
   state.notifiedPosition = null;
   state.positionSince = null;
   await prisma.chatConversation.update({

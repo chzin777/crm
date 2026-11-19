@@ -58,8 +58,9 @@ export async function openConversationFor(contactId: string, phone: string) {
           phone,
           openKey: contactId,
           queueId: queue?.id ?? null,
-          status: useMenu ? "bot" : "waiting",
-          waitingSince: useMenu ? null : new Date(),
+          // Resposta a campanha nunca cai direto na fila humana: a automação (IA/menu) decide depois se entra.
+          status: "bot",
+          waitingSince: null,
           closedAt: null,
           tags: holder.tags.filter((tag) => tag !== DISPATCH_TAG),
         },

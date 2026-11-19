@@ -129,7 +129,9 @@ export async function runClock() {
       state.notifiedPosition = update.position;
       state.positionSince = update.positionSince;
       await saveMenuState(row.id, state);
-      if (update.notify) {
+      // "Você avançou na fila" só para quem entrou na fila de verdade: atendimento engajado (pediu algo além de
+      // saudação, interesse genérico, ruído ou resposta automática de outra empresa).
+      if (update.notify && (await conversationEngaged(row))) {
         await sendAutomaticMessage(row, update.notify);
         summary.positions += 1;
       }
