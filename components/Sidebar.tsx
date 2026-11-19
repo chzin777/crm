@@ -1,4 +1,5 @@
 "use client";
+import { attentionLabel, useChatAttention } from "@/lib/chat/use-attention";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef, useState, useEffect } from "react";
@@ -50,6 +51,15 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const { data: session } = authClient.useSession();
   const { modules } = usePermissions();
   const canAccess = (href: string) => canAccessModule(moduleForPath(href), modules);
+  // Contador do "Atendimento": fila aguardando + meus atendimentos com não lidas, em tempo real em qualquer página.
+  const attention = useChatAttention(canAccess("/chat"));
+  const chatCount = attention?.count ?? 0;
+  const chatCountTitle = attention ? `${attention.waiting} aguardando na fila · ${attention.mine} dos seus atendimentos com mensagem não lida` : "";
+  const countBadge = (extra: string) => (
+    <span title={chatCountTitle} aria-label={`${chatCount} conversas aguardando resposta`} className={`inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#F7915E] px-1 text-[10px] font-bold leading-none text-white tabular-nums shadow-sm ${extra}`}>
+      {attentionLabel(chatCount)}
+    </span>
+  );
 
   const userName = session?.user?.name ?? "Usuário";
   const userEmail = session?.user?.email ?? "";
@@ -177,8 +187,13 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                     groupActive ? "text-[#051647] dark:text-[#C4D600]" : "text-[#68748a] hover:bg-[#f7f8fa] hover:text-[#142344] dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
                   }`}
                 >
-                  <GroupIcon className={`h-5 w-5 shrink-0 transition-colors ${groupActive ? ICON_ACTIVE : ICON_IDLE}`} />
+                  <span className="relative shrink-0">
+                    <GroupIcon className={`h-5 w-5 shrink-0 transition-colors ${groupActive ? ICON_ACTIVE : ICON_IDLE}`} />
+                    {/* Recolhida: o "Atendimento" não aparece, então o contador fica no canto do ícone do grupo. */}
+                    {isCollapsed && chatCount > 0 && group.items.some((item) => item.href === "/chat") && countBadge("absolute -right-2.5 -top-2 ring-2 ring-white dark:ring-slate-900")}
+                  </span>
                   <span className={`truncate text-left transition-[opacity,width,flex] duration-200 ${isCollapsed ? "w-0 flex-none overflow-hidden opacity-0" : "min-w-0 flex-1 opacity-100"}`}>{group.label}</span>
+                  {!isCollapsed && !expanded && chatCount > 0 && group.items.some((item) => item.href === "/chat") && countBadge("")}
                   <ChevronDown className={`h-4 w-4 shrink-0 text-[#929bad] transition-[transform,opacity,width] duration-200 ${expanded ? "rotate-180" : ""} ${isCollapsed ? "w-0 overflow-hidden opacity-0" : "opacity-100"}`} />
                 </button>
                 {!isCollapsed && (
@@ -212,7 +227,8 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
                                   }`}
                                 >
                                   <Icon className={`h-4 w-4 shrink-0 transition-colors ${itemActive ? ICON_ACTIVE : "text-slate-400 group-hover:text-current dark:text-slate-500"}`} />
-                                  <span className="truncate">{item.title}</span>
+                                  <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                                  {item.href === "/chat" && chatCount > 0 && countBadge("ml-auto")}
                                 </Link>
                               </div>
                             );

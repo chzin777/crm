@@ -71,6 +71,8 @@ export type ConversationItem = {
   followUp: { dueAt: string; note: string } | null;
   /** Atendimentos do contato no histórico (a lista mostra só o mais recente de cada cliente). */
   totalSessions?: number;
+  /** Posição na fila (aba Aguardando, sem busca/prioridade): 1º, 2º e 3º ganham destaque. */
+  queuePosition?: number | null;
 };
 
 export type ConversationDetail = ConversationItem & {

@@ -183,7 +183,10 @@ export async function GET(request: Request) {
     prisma.chatConversation.findMany({
       where: { AND: [tabWhere(tab, actor), ...filters] },
       include: conversationInclude,
-      orderBy: [{ lastMessageAt: { sort: "desc", nulls: "last" } }, { id: "asc" }],
+      // Aguardando: ordem real da fila (quem espera há mais tempo primeiro); as demais, a mensagem mais recente.
+      orderBy: tab === "queue"
+        ? [{ waitingSince: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }]
+        : [{ lastMessageAt: { sort: "desc", nulls: "last" } }, { id: "asc" }],
       skip: offset,
       take: PAGE_SIZE + 1,
     }),
@@ -191,7 +194,8 @@ export async function GET(request: Request) {
   ]);
 
   return NextResponse.json({
-    items: await withSessionTotals(rows.slice(0, PAGE_SIZE)),
+    // Posição na fila (pódio 1º/2º/3º na tela): só sem busca/prioridade, que mudariam a ordem real.
+    items: (await withSessionTotals(rows.slice(0, PAGE_SIZE))).map((item, index) => ({ ...item, queuePosition: tab === "queue" && !search && !priority ? offset + index + 1 : null })),
     nextCursor: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
     counts,
   });

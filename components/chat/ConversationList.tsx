@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
+import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, SLA_BREACH_MINUTES, SLA_WARN_MINUTES, type ChatCounts, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
@@ -102,6 +102,13 @@ function followUpOf(item: ConversationItem): Origin | null {
 }
 
 const PRIORITY_DOTS: Partial<Record<ChatPriority, string>> = { low: "bg-slate-300 dark:bg-slate-600", high: "bg-amber-500", urgent: "bg-rose-500" };
+
+/** Pódio da fila (aba Aguardando): 1º destaque máximo (próximo a puxar), 2º intermediário, 3º discreto. */
+const PODIUM: Record<number, { card: string; badge: string; title: string }> = {
+  1: { card: "border-[#C4D600] bg-[#C4D600]/15 shadow-xs ring-1 ring-[#C4D600]/40 hover:bg-[#C4D600]/20 dark:bg-[#C4D600]/10", badge: "bg-[#C4D600] text-[#051647]", title: "Próximo cliente a ser atendido" },
+  2: { card: "border-[#002187]/70 bg-[#002187]/[0.06] hover:bg-[#002187]/10 dark:border-[#7f95ff] dark:bg-white/[0.06]", badge: "bg-[#002187] text-white dark:bg-[#7f95ff] dark:text-[#051647]", title: "Segundo da fila" },
+  3: { card: "border-[#F7915E]/70 bg-[#F7915E]/[0.06] hover:bg-[#F7915E]/10 dark:bg-[#F7915E]/[0.06]", badge: "bg-[#F7915E]/20 text-[#9a3d12] dark:text-[#F7915E]", title: "Terceiro da fila" },
+};
 
 function ListSkeleton() {
   return (
@@ -300,6 +307,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const corner = cornerTime(item, waiting);
             const priorityDot = PRIORITY_DOTS[item.priority];
             const operational = [item.queue?.name, item.store ? storeLabel(item.store) : null].filter((value): value is string => !!value);
+            const podium = item.queuePosition ? PODIUM[item.queuePosition] ?? null : null;
             return (
               <div
                 key={item.id}
@@ -316,7 +324,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                   className={`flex h-[84px] w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border-l-4 p-2.5 text-left transition-all duration-150 ${
                     selected
                       ? "border-[#051647] bg-blue-50/70 shadow-xs dark:border-[#C4D600] dark:bg-white/10"
-                      : "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5"
+                      : podium?.card ?? "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5"
                   }`}
                 >
                   <div className="relative shrink-0">
@@ -335,6 +343,14 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                             <span className="sr-only">Prioridade {PRIORITY_LABELS[item.priority].toLowerCase()}</span>
                           </span>
                         )}
+                        {podium ? (
+                          <span title={podium.title} className={`inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-px text-[10px] font-bold ${podium.badge}`}>
+                            {item.queuePosition === 1 && <Crown className="h-3 w-3" />}
+                            {item.queuePosition}º na fila
+                          </span>
+                        ) : item.queuePosition ? (
+                          <span title={`${item.queuePosition}º na fila`} className="shrink-0 rounded-md bg-slate-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-slate-500 dark:bg-white/10 dark:text-slate-400">#{item.queuePosition}</span>
+                        ) : null}
                         <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
                         {(item.totalSessions ?? 1) > 1 && (
                           <span
