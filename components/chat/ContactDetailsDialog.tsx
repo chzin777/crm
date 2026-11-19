@@ -13,6 +13,8 @@ import { fieldClass } from "@/components/chat/MenuFormParts";
 import { clockTime, formatCpf, initials, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
 import { ContactCustomFields } from "@/components/ContactCustomFields";
+import { ContactScoreTab } from "@/components/ContactScoreTab";
+import { ContactPurchaseHistory } from "@/components/contacts/ContactPurchaseHistory";
 import { CUSTOMER_TYPE_COLOR, CUSTOMER_TYPE_LABEL, type CustomerType } from "@/lib/sales-pipeline";
 import { STATUS_LABELS, type ContactNoteItem, type ContactProfile, type ConversationDetail } from "@/lib/chat/types";
 
@@ -20,7 +22,7 @@ const COPIED_MS = 1500;
 const CATEGORY_LABELS: Record<string, string> = { cliente: "Cliente", lead: "Lead", nps: "NPS", inativo: "Inativo" };
 const INPUT = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-[#002187] disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] dark:disabled:bg-slate-900";
 
-type Tab = "cadastro" | "receituario" | "atendimento";
+type Tab = "cadastro" | "pontuacao" | "campos" | "historico" | "receituario" | "atendimento";
 type ContactForm = { name: string; cpf: string; email: string; birthDate: string; city: string };
 
 const dateTime = (value: string | null) =>
@@ -161,6 +163,8 @@ type Props = {
 export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsChange, onOpenConversation, onSaved }: Props) {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("cadastro");
+  // Pontuação, Campos e Histórico só carregam na 1ª visita à aba e depois ficam montados.
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set<Tab>(["cadastro"]));
   const [profile, setProfile] = useState<ContactProfile | null>(null);
   const [failed, setFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -224,6 +228,7 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
 
   const changeTab = (next: Tab) => {
     setTab(next);
+    setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
     if (content.current) content.current.scrollTop = 0;
   };
 
@@ -251,6 +256,9 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "cadastro", label: "Cadastro & Funil" },
+    { id: "pontuacao", label: "Pontuação" },
+    { id: "campos", label: "Campos" },
+    { id: "historico", label: "Histórico" },
     { id: "receituario", label: prescriptionCount ? `Receituário (${prescriptionCount})` : "Receituário" },
     { id: "atendimento", label: "Atendimento" },
   ];
@@ -326,10 +334,6 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
             )}
           </Section>
 
-          <Section title="Pontuação & campos personalizados">
-            <ContactCustomFields contactId={conversation.contactId} canWrite={canWrite} />
-          </Section>
-
           <Section title="Oportunidade no Pipeline">
             <ContactOpportunityCard contactId={conversation.contactId} conversationId={id} canWrite={canWrite} onRecurrence={setRecurrence} />
           </Section>
@@ -339,6 +343,18 @@ export function ContactDetailsDialog({ conversation, canWrite, onClose, onTagsCh
               <Notes conversationId={id} notes={profile.notes} canWrite={canWrite} onAdded={(note) => setProfile((current) => (current ? { ...current, notes: [note, ...current.notes] } : current))} />
             ) : <Empty text={failed ? "Não foi possível carregar as notas." : "Carregando..."} />}
           </Section>
+        </div>
+
+        <div role="tabpanel" id="contact-panel-pontuacao" aria-labelledby="contact-tab-pontuacao" hidden={tab !== "pontuacao"}>
+          {visited.has("pontuacao") && <ContactScoreTab contactId={conversation.contactId} />}
+        </div>
+
+        <div role="tabpanel" id="contact-panel-campos" aria-labelledby="contact-tab-campos" hidden={tab !== "campos"}>
+          {visited.has("campos") && <ContactCustomFields contactId={conversation.contactId} canWrite={canWrite} showScore={false} />}
+        </div>
+
+        <div role="tabpanel" id="contact-panel-historico" aria-labelledby="contact-tab-historico" hidden={tab !== "historico"}>
+          {visited.has("historico") && <ContactPurchaseHistory contactId={conversation.contactId} />}
         </div>
 
         <div role="tabpanel" id="contact-panel-receituario" aria-labelledby="contact-tab-receituario" hidden={tab !== "receituario"}>
