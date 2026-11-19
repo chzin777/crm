@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, FileText, Loader2, MessageSquare, MessageSquarePlus, Mic, RotateCcw, Smile } from "lucide-react";
+import { AlertCircle, Ban, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, FileText, Loader2, MessageSquare, MessageSquarePlus, Mic, MoreVertical, RotateCcw, Smile, Trash2 } from "lucide-react";
+import { FloatingMenu } from "@/components/chat/FloatingMenu";
+import { DeleteMessageDialog } from "@/components/chat/DeleteMessageDialog";
 import { sessionBreak, type ChatSession } from "@/lib/chat/session-divider";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
@@ -207,6 +209,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [sessions, setSessions] = useState<ReadonlyMap<string, ChatSession>>(() => new Map());
   const [viewing, setViewing] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<ChatMessageItem | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -371,6 +374,21 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
             const voice = message.attachment?.kind === "audio";
             // Áudio sem legenda, citação ou nota interna vira a própria cápsula, sem o balão em volta.
             const pill = voice && !message.text && !message.replyTo && !message.internal;
+            // Menu de ações do balão (estilo WhatsApp Web): só em mensagens reais já gravadas e não apagadas.
+            const actions = onReply && !message.deleted && !message.id.startsWith("temp-") ? (
+              <FloatingMenu
+                label="Ações da mensagem"
+                align={fromUs ? "right" : "left"}
+                widthClassName="w-48"
+                compact
+                triggerClassName="cursor-pointer rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-slate-600 focus:opacity-100 group-hover:opacity-100 dark:hover:text-slate-200"
+                trigger={<MoreVertical className="h-4 w-4" />}
+                items={[
+                  { label: "Responder", icon: <CornerUpLeft className="h-4 w-4" />, onSelect: () => onReply(message), hidden: message.internal },
+                  { label: "Apagar mensagem", icon: <Trash2 className="h-4 w-4" />, danger: true, onSelect: () => setDeleting(message) },
+                ]}
+              />
+            ) : null;
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {divider && (
@@ -390,8 +408,21 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                       {message.text === LEGACY_PROTOCOL_TEXT ? "Aviso de sistema do WhatsApp" : message.text} · {clockTime(message.createdAt)}
                     </span>
                   </div>
+                ) : message.deleted ? (
+                  <div className={`flex ${fromUs ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[75%] rounded-2xl border border-slate-200 bg-white/70 px-3 py-1.5 text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400 ${fromUs ? "rounded-br-sm" : "rounded-bl-sm"}`}>
+                      <p className="flex items-center gap-1.5 text-sm italic">
+                        <Ban className="h-3.5 w-3.5 shrink-0" />
+                        {message.deleted.scope === "everyone"
+                          ? fromUs ? "Você apagou esta mensagem" : "Esta mensagem foi apagada"
+                          : `Mensagem apagada no CRM${message.deleted.by ? ` por ${message.deleted.by}` : ""}`}
+                      </p>
+                      <p className="mt-0.5 text-right text-[10px] opacity-70">{clockTime(message.createdAt)}</p>
+                    </div>
+                  </div>
                 ) : (
                   <div className={`group flex items-center gap-1 ${fromUs ? "justify-end" : "justify-start"}`}>
+                    {fromUs && actions}
                     {fromUs && onReply && !message.internal && (
                       <button type="button" title="Responder" aria-label="Responder" onClick={() => onReply(message)} className="cursor-pointer rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-slate-600 group-hover:opacity-100 dark:hover:text-slate-200">
                         <CornerUpLeft className="h-4 w-4" />
@@ -452,6 +483,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                         <CornerUpLeft className="h-4 w-4" />
                       </button>
                     )}
+                    {!fromUs && actions}
                   </div>
                 )}
               </div>
@@ -459,6 +491,16 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
           })}
           {scheduled?.map((item) => <ScheduledBubble key={item.id} item={item} onCancel={onCancelScheduled} />)}
         </div>
+      )}
+      {deleting && (
+        <DeleteMessageDialog
+          message={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={(updated) => {
+            setDeleting(null);
+            merge([updated]);
+          }}
+        />
       )}
       {viewing && (
         <MediaViewer

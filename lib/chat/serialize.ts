@@ -10,7 +10,8 @@ export const conversationInclude = {
   queue: { select: { id: true, name: true, color: true } },
   assignee: { select: { id: true, name: true } },
   messages: {
-    where: { internal: false },
+    // Prévia da lista ignora mensagens apagadas.
+    where: { internal: false, deletedAt: null },
     orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }],
     take: 1,
     select: { text: true, author: true, delivery: true, attachment: true, createdAt: true },
@@ -59,6 +60,26 @@ export function serializeConversation(row: ConversationRow) {
 export function serializeMessage(message: ChatMessage) {
   const attachment = message.attachment as ChatAttachment | null;
   const metaMedia = message.metaMedia as { id?: string; kind?: string; interactive?: ChatInteractiveList } | null;
+  // Apagada: a tela recebe só o aviso (o conteúdo original fica no banco para auditoria).
+  if (message.deletedAt) {
+    return {
+      id: message.id,
+      conversationId: message.conversationId,
+      interactive: null,
+      pendingMedia: null,
+      author: message.author,
+      authorName: message.authorName,
+      text: "",
+      delivery: message.delivery,
+      failureReason: null,
+      internal: message.internal,
+      replyTo: null,
+      createdAt: message.createdAt,
+      attachment: null,
+      transcription: null,
+      deleted: { scope: message.deletedScope === "everyone" ? ("everyone" as const) : ("me" as const), by: message.deletedByName, at: message.deletedAt },
+    };
+  }
   return {
     id: message.id,
     conversationId: message.conversationId,

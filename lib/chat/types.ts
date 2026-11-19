@@ -115,6 +115,8 @@ export type ChatMessageItem = {
   transcription?: { status: string; text: string | null } | null;
   /** Presente quando a mensagem saiu como lista interativa; o texto fica só como alternativa. */
   interactive?: ChatInteractiveList | null;
+  /** Mensagem apagada: "me" = só no CRM; "everyone" = revogada também no WhatsApp do cliente. */
+  deleted?: { scope: "me" | "everyone"; by: string | null; at: string | Date } | null;
 };
 
 export const PRIORITY_LABELS: Record<ChatPriority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };

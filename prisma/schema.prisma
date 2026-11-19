@@ -530,6 +530,11 @@ model ChatMessage {
   /// Texto do áudio do cliente (whisper); status: pending | done | failed.
   transcription       String?
   transcriptionStatus String?
+  /// Mensagem apagada no /chat; scope "me" (só no CRM) ou "everyone" (revogada no WhatsApp). O conteúdo fica para auditoria.
+  deletedAt      DateTime?
+  deletedScope   String?
+  deletedById    String?
+  deletedByName  String?
   createdAt      DateTime         @default(now())
   conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
