@@ -42,8 +42,8 @@ export type PositionUpdate = { id: string; position: number; positionSince: stri
 
 /**
  * Posições da fila humana (uso interno: /filas e destaque 1º/2º/3º no /chat). Só conta quem espera uma pessoa:
- * status "waiting", sem dono, aberta, com fila e fora do atendimento da IA. Nenhuma mensagem é enviada ao
- * cliente quando a posição muda (o antigo aviso "Você avançou na fila" foi removido por gerar spam).
+ * status "waiting", sem dono, aberta, com fila e fora do atendimento da IA. A fila é 100% interna e silenciosa:
+ * o cliente nunca recebe mensagem sobre posição ou avanço.
  */
 export function planQueuePositions(rows: QueueRow[], options: { now: Date }): PositionUpdate[] {
   const waiting = rows

@@ -32,7 +32,6 @@ const settings = z.object({
   acceptFreeText: z.boolean(),
   invalidOptionText: z.string().max(1000),
   farewellText: z.string().max(1000),
-  notifyQueuePosition: z.boolean(),
   silenceEnabled: z.boolean(),
   silenceAskMinutes: z.number().int().min(1).max(1440),
   silenceCloseMinutes: z.number().int().min(1).max(1440),

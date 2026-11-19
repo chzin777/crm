@@ -29,7 +29,6 @@ export type ChatMenuSettings = {
   acceptFreeText: boolean;
   invalidOptionText: string;
   farewellText: string;
-  notifyQueuePosition: boolean;
   silenceEnabled: boolean;
   silenceAskMinutes: number;
   silenceCloseMinutes: number;
@@ -57,7 +56,6 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   acceptFreeText: true,
   invalidOptionText: "Não entendi essa opção. Responda com o número de uma das opções abaixo.",
   farewellText: "Atendimento encerrado. Quando precisar, é só mandar uma mensagem.",
-  notifyQueuePosition: false,
   silenceEnabled: true,
   silenceAskMinutes: 10,
   silenceCloseMinutes: 3,
@@ -206,7 +204,10 @@ const withOptionDefaults = (option: MenuOption): MenuOption => ({
 });
 
 export function mergeChatSettings(stored: unknown): ChatMenuSettings {
-  const value = typeof stored === "object" && stored !== null && !Array.isArray(stored) ? (stored as Partial<ChatMenuSettings>) : {};
+  const raw = typeof stored === "object" && stored !== null && !Array.isArray(stored) ? (stored as Partial<ChatMenuSettings> & { notifyQueuePosition?: unknown }) : {};
+  // Aviso de posição na fila ao cliente foi removido do sistema: a chave antiga gravada no banco é descartada.
+  const { notifyQueuePosition: _removed, ...value } = raw;
+  void _removed;
   return {
     ...DEFAULT_CHAT_SETTINGS,
     ...value,

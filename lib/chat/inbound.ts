@@ -165,7 +165,7 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     console.error("[chat] falha ao avaliar resposta automática:", error);
     return null;
   });
-  // Fora de atendimento engajado: ignorada 100% em silêncio (sem abrir atendimento, sem fila, IA, aviso de posição
+  // Fora de atendimento engajado: ignorada 100% em silêncio (sem abrir atendimento, sem fila, IA
   // ou timer). Fica só no histórico do contato, marcada como resposta automática.
   if (autoReply) {
     const { open, engaged } = await openEngagement(message.from);

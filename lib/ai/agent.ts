@@ -175,7 +175,7 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
     // Espera assistida: a conversa continua na fila (posição e avisos seguem), a IA só responde enquanto ninguém assume.
     await prisma.chatConversation.update({ where: { id: conversation.id }, data: { menuState: state as unknown as Prisma.InputJsonValue } });
   } else {
-    // Atendimento da IA fica fora da fila humana: sem posição, sem "Você avançou na fila" e sem alerta de espera.
+    // Atendimento da IA fica fora da fila humana: sem posição e sem alerta de espera.
     state.aiActive = true;
     state.notifiedPosition = null;
     state.positionSince = null;
