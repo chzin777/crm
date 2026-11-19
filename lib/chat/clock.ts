@@ -14,6 +14,7 @@ import { silenceFarewell } from "@/lib/chat/settings";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
+import { listDispatchJobs } from "@/lib/campaign-dispatch";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/engine-db";
@@ -173,6 +174,12 @@ export async function runClock() {
         summary.silenceClosed += 1;
       }
     }
+  });
+
+  // Disparo de campanha interrompido por deploy/reinício volta sozinho (sem depender de alguém abrir /campanhas).
+  // A trava de 3 min sem progresso evita retomar em paralelo com a outra cor do blue/green.
+  await block("disparos de campanha", async () => {
+    await listDispatchJobs();
   });
 
   await block("pesquisa", async () => {
