@@ -191,7 +191,7 @@ export default function ManualPage() {
                   ["Início", "Painel (visão de clientes e relacionamento)"],
                   ["Vendas", "Pipelines · Atendimento · Filas · Métricas de Atendimento"],
                   ["Marketing", "Contatos & Clientes · Segmentos · Campanhas e disparos · Modelos WhatsApp · Pesquisas NPS · Automações · Clientes VIP & Pontuação"],
-                  ["Gestão", "Lojas · Usuários · Cargos · Permissões"],
+                  ["Gestão", "Lojas · Usuários · Permissões (inclui a gestão de cargos)"],
                   ["Sistema", "Inteligência Artificial · Configurações · Manual do sistema (este documento, com vídeos de treinamento)"],
                 ]}
               />
@@ -828,7 +828,7 @@ export default function ManualPage() {
               ]} />
             </Sub>
             <Sub id="seguranca-cargos" number="14.2" title="Cargos">
-              <p>Crie cargos com nome e descrição (ex.: “Supervisor Regional”, “Vendedor”). O cargo <Kbd>admin</Kbd> tem acesso total, sempre. As telas de cada cargo são liberadas em Permissões.</p>
+              <p>Tudo sobre cargos fica em <Kbd>Permissões</Kbd>: “Adicionar Cargo” cria um cargo com nome e descrição (ex.: “Supervisor Regional”, “Vendedor”); com o cargo selecionado, “Editar cargo” muda nome e descrição e “Excluir” remove cargos personalizados. O cargo <Kbd>admin</Kbd> tem acesso total, sempre.</p>
             </Sub>
             <Sub id="seguranca-modulos" number="14.3" title="Permissões por tela">
               <Table
@@ -837,7 +837,7 @@ export default function ManualPage() {
                   ["Geral", "Painel · Configurações"],
                   ["Vendas", "Pipelines · Contatos & Clientes · Segmentos · Atendimento · Filas de Atendimento · Métricas de Atendimento"],
                   ["Marketing", "Campanhas · Disparos pelo pipeline · Modelos WhatsApp · Pesquisas NPS"],
-                  ["Gestão", "Lojas · Usuários · Cargos · Permissões"],
+                  ["Gestão", "Lojas · Usuários · Permissões (inclui a gestão de cargos)"],
                 ]}
               />
               <Note>Quem tem “Disparos pelo pipeline” também abre a tela de Campanhas, onde ficam todos os envios.</Note>

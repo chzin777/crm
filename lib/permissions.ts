@@ -12,7 +12,6 @@ export const MODULES = [
   { key: "pontuacao", label: "Clientes VIP & Pontuação", href: "/clientes-vip", group: "Marketing" },
   { key: "lojas", label: "Lojas", href: "/lojas", group: "Gestão" },
   { key: "usuarios", label: "Usuários", href: "/usuarios", group: "Gestão" },
-  { key: "cargos", label: "Cargos", href: "/cargos", group: "Gestão" },
   { key: "permissoes", label: "Permissões", href: "/permissoes", group: "Gestão" },
   { key: "chat", label: "Atendimento", href: "/chat", group: "Vendas" },
   { key: "filas", label: "Filas de Atendimento", href: "/filas", group: "Vendas" },

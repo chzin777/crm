@@ -21,7 +21,7 @@ const TABS: TabItem[] = [
   { href: "/modelos", label: "Modelos" },
   { href: "/nps", label: "NPS" },
   { href: "/usuarios", label: "Usuários" },
-  { href: "/cargos", label: "Cargos" },
+  { href: "/permissoes", label: "Permissões" },
   { href: "/ia", label: "IA" },
   { href: "/configuracoes", label: "Configurações" },
 ];

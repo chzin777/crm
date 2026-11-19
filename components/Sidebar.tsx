@@ -24,7 +24,6 @@ import {
   Megaphone,
   LogOut,
   User as UserIcon,
-  ShieldCheck,
   KeyRound,
   TrendingUp,
   Target,
@@ -98,7 +97,6 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Automações", href: "/automacoes", icon: Workflow },
     { title: "Clientes VIP & Pontuação", href: "/clientes-vip", icon: Gem },
     { title: "Usuários", href: "/usuarios", icon: UserCog },
-    { title: "Cargos", href: "/cargos", icon: ShieldCheck },
     { title: "Permissões", href: "/permissoes", icon: KeyRound },
     { title: "Inteligência Artificial", href: "/ia", icon: Sparkles },
     { title: "Configurações", href: "/configuracoes", icon: Settings },
@@ -109,7 +107,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const navGroups = [
     { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/metricas-atendimento")] },
     { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes"), byHref("/clientes-vip")] },
-    { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/cargos"), byHref("/permissoes")] },
+    { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/permissoes")] },
   ]
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))
     .filter((group) => group.items.length > 0);

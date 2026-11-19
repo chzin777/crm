@@ -4,11 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
 
 export async function GET() {
-  const guard = await requireModule("usuarios", "cargos", "permissoes");
+  const guard = await requireModule("usuarios", "permissoes");
   if (guard.response) return guard.response;
   try {
     const roles = await prisma.role.findMany({
       orderBy: { name: "asc" },
+      include: { _count: { select: { users: true } } },
     });
     return NextResponse.json({ data: roles });
   } catch (error) {
@@ -18,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const guard = await requireModule("cargos");
+  const guard = await requireModule("permissoes");
   if (guard.response) return guard.response;
   try {
     const body = await request.json();
@@ -52,7 +53,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
     const { id, name, description, permissions } = body;
-    const guard = await requireModule(...(permissions !== undefined ? (["permissoes"] as const) : (["cargos"] as const)));
+    const guard = await requireModule("permissoes");
     if (guard.response) return guard.response;
 
     if (!id) {
@@ -60,7 +61,16 @@ export async function PATCH(request: NextRequest) {
     }
 
     const updateData: Record<string, unknown> = {};
-    if (name !== undefined) updateData.name = name.trim();
+    if (name !== undefined) {
+      const trimmed = typeof name === "string" ? name.trim() : "";
+      if (!trimmed) return NextResponse.json({ error: "Nome do cargo é obrigatório." }, { status: 400 });
+      const current = await prisma.role.findUnique({ where: { id }, select: { name: true, isSystem: true } });
+      if (!current) return NextResponse.json({ error: "Cargo não encontrado." }, { status: 404 });
+      if (current.isSystem && trimmed !== current.name) return NextResponse.json({ error: "O nome de um cargo de sistema não pode ser alterado." }, { status: 403 });
+      const clash = await prisma.role.findFirst({ where: { name: trimmed, NOT: { id } }, select: { id: true } });
+      if (clash) return NextResponse.json({ error: "Já existe um cargo com este nome." }, { status: 409 });
+      updateData.name = trimmed;
+    }
     if (description !== undefined) updateData.description = description?.trim() || null;
     if (permissions !== undefined) updateData.permissions = permissions;
 
@@ -77,7 +87,7 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const guard = await requireModule("cargos");
+  const guard = await requireModule("permissoes");
   if (guard.response) return guard.response;
   try {
     const { searchParams } = new URL(request.url);
