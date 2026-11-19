@@ -657,13 +657,14 @@ export function AiSettingsPanel() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         {heading}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-3 rounded-xl border border-slate-200/70 bg-white px-3 py-1.5 dark:border-slate-800 dark:bg-slate-900/40">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${settings.autonomousEnabled ? "bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]" : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400"}`}>
-              <span className={`h-2 w-2 rounded-full ${settings.autonomousEnabled ? "bg-[#9aaa00] dark:bg-[#C4D600]" : "bg-slate-400"}`} />
-              {settings.autonomousEnabled ? "Ativa em produção" : "Pausada"}
-            </span>
-            <div className="w-auto"><SwitchOnly label="Atendimento autônomo" checked={settings.autonomousEnabled} onChange={(value) => set("autonomousEnabled", value)} /></div>
-          </div>
+          {/* Só informativo: os interruptores ficam nos cartões de Triagem e de Respostas automáticas logo abaixo. */}
+          <span
+            title="Modo atual da IA (altere nos cartões abaixo)"
+            className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold ${settings.autonomousEnabled ? "border-[#C4D600]/50 bg-[#C4D600]/20 text-[#051647] dark:text-[#C4D600]" : settings.triageEnabled ? "border-[#002187]/25 bg-[#002187]/5 text-[#002187] dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600]" : "border-slate-200/70 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-white/10 dark:text-slate-400"}`}
+          >
+            <span className={`h-2 w-2 rounded-full ${settings.autonomousEnabled ? "bg-[#9aaa00] dark:bg-[#C4D600]" : settings.triageEnabled ? "bg-[#002187] dark:bg-[#C4D600]" : "bg-slate-400"}`} />
+            {settings.autonomousEnabled ? "Respondendo clientes" : settings.triageEnabled ? "Modo Triagem Silenciosa" : "IA pausada"}
+          </span>
           <button type="button" title="Restaurar parâmetros padrão (mantém os créditos informados)" onClick={() => setSettings({ ...DEFAULT_AI_SETTINGS, creditLoadedUsd: settings.creditLoadedUsd, creditLoadedAt: settings.creditLoadedAt })} className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10">
             <RotateCcw className="h-3.5 w-3.5" /><span className="hidden sm:inline">Restaurar padrões</span>
           </button>
