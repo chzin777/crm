@@ -12,7 +12,7 @@ import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type 
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
 import { transcribeMessageAudio } from "@/lib/chat/transcription";
 import { classifyNoise } from "@/lib/chat/noise";
-import { absorbNoise, openEngagement, triageImage } from "@/lib/chat/noise-db";
+import { absorbNoise, campaignReplyContext, classifyCampaignReply, openEngagement, triageImage } from "@/lib/chat/noise-db";
 
 import { isCustomerMessage, MEDIA_LABELS, mediaFailureReason, readContent, type MetaInboundMessage, type MetaMedia } from "@/lib/chat/inbound-content";
 
@@ -147,7 +147,8 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     const { open, engaged } = await openEngagement(message.from);
     const kind = engaged ? null : noiseKind ?? (attachment && mediaBuffer && (await triageImage({ buffer: mediaBuffer, mime: attachment.mime, name: attachment.name })) === "aleatorio" ? "imagem_aleatoria" as const : null);
     if (kind) {
-      await absorbNoise({ kind, phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text: content.text, receivedAt, attachment });
+      const campaign = await campaignReplyContext(message.from, receivedAt);
+      await absorbNoise({ kind, phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text: content.text, receivedAt, attachment, ...(campaign ? { campaignReason: `ruído (${kind})` } : {}) });
       return null;
     }
   }
@@ -170,7 +171,22 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
     const { open, engaged } = await openEngagement(message.from);
     if (!engaged) {
       console.log(`[chat] resposta automática de ${message.from} ignorada (${autoReply.kind}: ${autoReply.detail})`);
-      await absorbNoise({ kind: "auto_resposta", phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text, receivedAt, attachment, authorName: AUTO_REPLY_AUTHOR });
+      const campaign = await campaignReplyContext(message.from, receivedAt);
+      await absorbNoise({ kind: "auto_resposta", phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text, receivedAt, attachment, authorName: AUTO_REPLY_AUTHOR, ...(campaign ? { campaignReason: autoReply.detail } : {}) });
+      return null;
+    }
+  }
+
+  // Classificador rápido pós-campanha (IA, Structured Output): a última mensagem enviada ao contato foi um disparo e
+  // não há atendimento engajado. Robô/ausência/ruído não conta na campanha, não vai para IA de vendas nem fila e a
+  // conversa é encerrada com o motivo "Não é resposta da campanha". Botão/lista e mídia são sempre interação real.
+  if (message.type === "text" && text.trim()) {
+    const campaign = await campaignReplyContext(message.from, receivedAt);
+    const { open, engaged } = campaign ? await openEngagement(message.from) : { open: null, engaged: true };
+    const verdict = campaign && !engaged ? await classifyCampaignReply(text) : null;
+    if (verdict?.isAutoReplyOrNoise) {
+      console.log(`[chat] mensagem de ${message.from} não é resposta da campanha (IA: ${verdict.reason})`);
+      await absorbNoise({ kind: "auto_resposta", phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text, receivedAt, attachment, authorName: AUTO_REPLY_AUTHOR, campaignReason: verdict.reason });
       return null;
     }
   }
@@ -228,7 +244,7 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   if (autoReply) {
     console.log(`[chat] mensagem ${message.id} de ${message.from} parece automática (${autoReply.kind}: ${autoReply.detail})`);
   }
-  // Toda resposta conta para a campanha; as automáticas são descartadas pela equipe em "Não é resposta da campanha".
+  // Só resposta de pessoa chega aqui: robô/ausência/ruído pós-campanha já saiu antes como "Não é resposta da campanha".
   await attributeCampaignReply({ conversation, contactId: contact.id, phone: message.from, receivedAt, quotedId: message.context?.id })
     .catch((error) => console.error("[chat] falha ao identificar campanha da resposta:", error));
 

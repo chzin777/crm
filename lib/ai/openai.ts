@@ -29,6 +29,8 @@ export type AiCallMeta = {
   feature: string; conversationId?: string | null; userId?: string | null; maxTokens?: number; settings?: AiSettings; tools?: AiTool[];
   /** Structured Outputs: a resposta segue exatamente este JSON Schema (strict). Sem ele, json_object livre. */
   jsonSchema?: { name: string; schema: object };
+  /** Modelo próprio para tarefas simples e frequentes (ex.: triagem); sem ele, o modelo configurado em /ia. */
+  model?: string;
 };
 /** Rodadas de ferramenta por resposta (evita laço e custo descontrolado). */
 const MAX_TOOL_ROUNDS = 2;
@@ -49,7 +51,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   if (!key) throw new AiError("IA não configurada: defina OPENAI_API_KEY no servidor.", 503);
   // O teste da página /ia usa os parâmetros ainda não salvos.
   const settings = meta.settings ?? (await readAiSettings());
-  const model = settings.model || process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
+  const model = meta.model || settings.model || process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
   const base = { feature: meta.feature, model, conversationId: meta.conversationId, userId: meta.userId };
 
   type Body = {
