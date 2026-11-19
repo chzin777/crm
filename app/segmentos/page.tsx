@@ -34,6 +34,11 @@ import { describeRule, validateRule, type RuleMatch, type SegmentRule } from "@/
 import { compareStoreNames, storeDisplayName } from "@/lib/stores";
 import type { Contact, ContactCategory } from "@/lib/contacts";
 import { useCrmData } from "@/hooks/useCrmData";
+import { Calculator } from "lucide-react";
+import { DispatchCostCalculator } from "@/components/DispatchCostCalculator";
+import { useMetaPricing } from "@/hooks/useMetaPricing";
+import { formatBrl } from "@/lib/meta-pricing-shared";
+import { summarizeSegmentOverlap } from "@/lib/campaign-audience";
 
 const generateId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -192,6 +197,10 @@ export default function SegmentosPage() {
   const setCriteriaOptions = (options: SegmentCriterion[]) => setSavedCriteriaOptions(options);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<SegmentFilter>("Todos");
+  // Custo estimado na lista: categoria do modelo usada na coluna e calculadora.
+  const { pricing } = useMetaPricing();
+  const [costCategory, setCostCategory] = useState<"marketing" | "utility">("marketing");
+  const [isCostCalculatorOpen, setIsCostCalculatorOpen] = useState(false);
   const [selectedSegment, setSelectedSegment] = useState<Segment | null>(null);
   const [pendingDeleteSegment, setPendingDeleteSegment] = useState<Segment | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -453,6 +462,33 @@ export default function SegmentosPage() {
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [refineSignature, criteriaOptionsSignature]);
   const draftRefinedCount = refinedCounts[DRAFT_REFINE_KEY];
+
+  /** Calculadora: busca os contatos de cada segmento e une sem repetir pessoa (mesmo contato ou mesmo celular). */
+  const resolveUniqueAudience = async (segmentIds: string[]) => {
+    const groups: Record<string, SegmentCriterion[]> = {};
+    const contactGroups: Record<string, string[]> = {};
+    const contactCriteria: Record<string, SegmentCriterion[]> = {};
+    const chosen = segments.filter((segment) => segmentIds.includes(segment.id));
+    for (const segment of chosen) {
+      const resolved = resolveCriterionNames(segment.criterios ?? [], criteriaOptions);
+      if (segment.modoPublico === "contatos") {
+        contactGroups[segment.id] = segment.contatosSelecionados;
+        if (resolved && resolved.length > 0) contactCriteria[segment.id] = resolved;
+        continue;
+      }
+      if (!resolved || resolved.length === 0) throw new Error(`O segmento "${segment.nome}" usa um critério que não existe mais.`);
+      groups[segment.id] = resolved;
+    }
+    const response = await fetch("/api/segments/audience", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups, contactGroups, contactCriteria, includeRecipients: true }),
+    });
+    const result = (await response.json().catch(() => ({}))) as { recipients?: Record<string, { id: string; telefone: string }[]>; error?: string };
+    if (!response.ok || !result.recipients) throw new Error(result.error || "Não foi possível calcular o público.");
+    const summary = summarizeSegmentOverlap(chosen.map((segment) => ({ label: segment.nome, recipients: result.recipients?.[segment.id] ?? [] })));
+    return { unique: summary.unique, raw: summary.rawTotal };
+  };
   const draftMemberCount = audienceMode === "contatos" && draftCriteria.length > 0
     ? draftRefinedCount ?? selectedContactIds.length
     : selectedContactIds.length;
@@ -893,7 +929,26 @@ export default function SegmentosPage() {
                 );
               })}
             </div>
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <div role="radiogroup" aria-label="Categoria usada no custo estimado" className="inline-flex h-10 items-center rounded-lg bg-white p-1 dark:bg-slate-800">
+                <span className="px-2 text-[11px] font-medium text-slate-400">Custo como</span>
+                {([["marketing", "Marketing"], ["utility", "Utilidade"]] as const).map(([value, label]) => (
+                  <button key={value} type="button" role="radio" aria-checked={costCategory === value} onClick={() => setCostCategory(value)} className={`h-8 cursor-pointer rounded-md px-2.5 text-xs font-semibold transition-colors ${costCategory === value ? "bg-[#051647] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}>{label}</button>
+                ))}
+              </div>
+              <button type="button" onClick={() => setIsCostCalculatorOpen(true)} className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                <Calculator className="h-4 w-4" /> Calculadora de custo
+              </button>
+            </div>
           </div>
+          {isCostCalculatorOpen && (
+            <DispatchCostCalculator
+              segments={segments.map((segment) => ({ id: segment.id, nome: segment.nome, count: segmentMemberCount(segment) }))}
+              resolveUnique={resolveUniqueAudience}
+              initialCategory={costCategory}
+              onClose={() => setIsCostCalculatorOpen(false)}
+            />
+          )}
 
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
             <div className="border-b border-slate-100 px-5 py-3 dark:border-slate-800">
@@ -902,11 +957,12 @@ export default function SegmentosPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-left">
+              <table className="w-full min-w-[880px] border-collapse text-left">
                 <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
                   <tr>
                     <th className="px-5 py-3"><button type="button" onClick={() => handleSort("nome")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Segmento<SortIndicator field="nome" /></button></th>
                     <th className="px-4 py-3"><button type="button" onClick={() => handleSort("pessoas")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Pessoas<SortIndicator field="pessoas" /></button></th>
+                    <th className="px-4 py-3" title={`Contatos do segmento × tarifa de ${costCategory === "marketing" ? "Marketing" : "Utilidade"} (${formatBrl(pricing[costCategory], 4)} por mensagem)`}>Custo estimado</th>
                     <th className="px-4 py-3"><button type="button" onClick={() => handleSort("criterios")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Critérios<SortIndicator field="criterios" /></button></th>
                     <th className="px-4 py-3"><button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status<SortIndicator field="status" /></button></th>
                     <th className="px-5 py-3"><button type="button" onClick={() => handleSort("atualizado")} className="inline-flex items-center gap-1 cursor-pointer hover:cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Atualizado<SortIndicator field="atualizado" /></button></th>
@@ -916,7 +972,7 @@ export default function SegmentosPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {segmentsLoading && (
-                    <tr><td colSpan={7} className="px-5 py-8">
+                    <tr><td colSpan={8} className="px-5 py-8">
                       <LoadingSpinner label="Carregando segmentos..." className="w-full justify-center" />
                     </td></tr>
                   )}
@@ -941,6 +997,10 @@ export default function SegmentosPage() {
                         </div>
                       </td>
                       <td className="px-4 py-2 xl:py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-200">{segmentMemberCount(segment).toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 xl:py-3.5 whitespace-nowrap" title={`Marketing: ${formatBrl(segmentMemberCount(segment) * pricing.marketing)} · Utilidade: ${formatBrl(segmentMemberCount(segment) * pricing.utility)} · ${formatBrl(pricing[costCategory], 4)} por mensagem`}>
+                        <span className="block text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-200">{formatBrl(segmentMemberCount(segment) * pricing[costCategory])}</span>
+                        <span className="mt-0.5 block text-[10px] tabular-nums text-slate-400">{costCategory === "marketing" ? `Utilidade: ${formatBrl(segmentMemberCount(segment) * pricing.utility)}` : `Marketing: ${formatBrl(segmentMemberCount(segment) * pricing.marketing)}`}</span>
+                      </td>
                       <td className="px-4 py-2 xl:py-3.5"><span className="inline-flex max-w-56 items-center gap-1.5 truncate text-xs text-slate-600 dark:text-slate-300"><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />{segment.modoPublico === "contatos" ? `${segment.contatosSelecionados.length} contatos selecionados${segment.criterios?.length ? ` · refinado por ${segment.criterios.length} critério${segment.criterios.length === 1 ? "" : "s"}` : ""}` : segment.criterios[0] || "Sem critérios"}</span><span className="ml-1 text-[10px] text-slate-400">{segment.modoPublico === "criterios" && segment.criterios.length > 1 ? `+${segment.criterios.length - 1}` : ""}</span></td>
                       <td className="px-4 py-2 xl:py-3.5"><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${statusStyles[segment.status]}`}>{segment.status}</span></td>
                       <td className="px-5 py-2 xl:py-3.5 text-xs text-slate-500 dark:text-slate-400">{segment.atualizado}</td>
@@ -971,7 +1031,7 @@ export default function SegmentosPage() {
                       </td>
                     </tr>
                   ))}
-                  {!segmentsLoading && filteredSegments.length === 0 && <tr><td colSpan={7} className="px-5 py-14 text-center"><Search className="mx-auto h-5 w-5 text-slate-400" /><p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum segmento encontrado</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p></td></tr>}
+                  {!segmentsLoading && filteredSegments.length === 0 && <tr><td colSpan={8} className="px-5 py-14 text-center"><Search className="mx-auto h-5 w-5 text-slate-400" /><p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">Nenhum segmento encontrado</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Tente mudar a busca ou o filtro.</p></td></tr>}
                 </tbody>
               </table>
             </div>

@@ -66,6 +66,7 @@ const CHAPTERS: ManualChapter[] = [
     { id: "campanhas-ia", title: "Criar campanha com IA" },
     { id: "campanhas-meta", title: "Aprovação do modelo na Meta" },
     { id: "campanhas-dedup", title: "Vários segmentos sem mensagem repetida" },
+    { id: "campanhas-custo", title: "Custo estimado e calculadora" },
   ] },
   { id: "atendimento", title: "Atendimento (inbox do WhatsApp)", sections: [
     { id: "atendimento-tela", title: "A tela de atendimento" },
@@ -559,6 +560,14 @@ export default function ManualPage() {
                 "Cada segmento mostra quantos contatos tem e quantos são só dele.",
                 "Um alerta laranja avisa quando um segmento está 100% contido nos outros e não acrescenta ninguém novo.",
                 "A fila de disparo no servidor também remove repetidos, e o acompanhamento do envio informa quantos foram unificados.",
+              ]} />
+            </Sub>
+            <Sub id="campanhas-custo" number="9.10" title="Custo estimado e calculadora">
+              <Bullets items={[
+                <>Em <Kbd>Segmentos</Kbd>, a coluna Custo estimado mostra contatos × tarifa da Meta. O seletor “Custo como” alterna entre Marketing e Utilidade.</>,
+                "No passo Público da Nova campanha, o resumo mostra o custo dos destinatários únicos conforme a categoria do modelo.",
+                <>O botão <Kbd>Calculadora de custo</Kbd> (em Segmentos e Campanhas) simula um ou mais segmentos, já sem repetidos, ou uma quantidade manual, nas categorias Marketing, Utilidade e Autenticação, em R$ e US$.</>,
+                "Em Editar tarifas, ajuste a tabela da Meta (US$ por mensagem) e a cotação do dólar. Os valores salvos também passam a valer no gasto das campanhas.",
               ]} />
             </Sub>
           </Chapter>

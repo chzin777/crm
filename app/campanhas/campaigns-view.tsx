@@ -43,6 +43,9 @@ import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 import { CampaignRecipientsLog } from "@/components/CampaignRecipientsLog";
 import { BULK_STARTED_EVENT, BulkJobDetailsDialog, type BulkJobView } from "@/components/BulkDispatchTracker";
 import { AudienceOverlapNotice } from "@/components/AudienceOverlapNotice";
+import { Calculator } from "lucide-react";
+import { DispatchCostCalculator } from "@/components/DispatchCostCalculator";
+import { useMetaPricing } from "@/hooks/useMetaPricing";
 import { dedupeRecipients, summarizeSegmentOverlap, type SegmentOverlapSummary } from "@/lib/campaign-audience";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
@@ -1060,7 +1063,7 @@ export function CampaignsView() {
   const overlapEditorOpen = isCreateOpen || Boolean(selectedCampaign);
   const overlapSignature = JSON.stringify([selectedAudienceSegments, campaignCriteriaFilters]);
   useEffect(() => {
-    if (!overlapEditorOpen || selectedAudienceSegments.length < 2 || segmentsLoading || criteriaLoading) return;
+    if (!overlapEditorOpen || selectedAudienceSegments.length < 1 || segmentsLoading || criteriaLoading) return;
     let active = true;
     const timer = window.setTimeout(() => {
       setAudienceOverlap({ signature: overlapSignature, loading: true });
@@ -1086,13 +1089,26 @@ export function CampaignsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- recalcula só quando os segmentos/filtros escolhidos mudam
   }, [overlapEditorOpen, overlapSignature, segmentsLoading, criteriaLoading]);
 
+  const { pricing: metaPricing } = useMetaPricing();
+  const [isCostCalculatorOpen, setIsCostCalculatorOpen] = useState(false);
+
   // Resultado de outra seleção (ou ainda não calculado) aparece como "calculando".
-  const audienceOverlapNotice = selectedAudienceSegments.length >= 2 ? (
+  const audienceOverlapNotice = selectedAudienceSegments.length >= 1 ? (
     <AudienceOverlapNotice
       state={audienceOverlap?.signature === overlapSignature ? audienceOverlap : { loading: true }}
       hasFilters={campaignCriteriaFilters.length > 0}
+      cost={{ unitBrl: campaignCategory === "UTILITY" ? metaPricing.utility : metaPricing.marketing, label: campaignCategory === "UTILITY" ? "Utilidade" : "Marketing" }}
     />
   ) : null;
+
+  // Calculadora de custo: une os segmentos escolhidos sem repetir pessoa, como no disparo.
+  const resolveUniqueAudience = async (segmentIds: string[]) => {
+    const preview = { id: "calculadora", nome: "Calculadora", publico: "", audienceSegmentIds: segmentIds, criteriaFilters: [] } as unknown as Campaign;
+    const audience = await fetchCampaignAudience([preview]);
+    const keys = audience.groupKeysByCampaign.get(preview.id) ?? [];
+    const summary = summarizeSegmentOverlap(keys.map(({ key, label }) => ({ label, recipients: audience.recipients[key] ?? [] })));
+    return { unique: summary.unique, raw: summary.rawTotal };
+  };
 
   // Custo estimado do disparo: contatos com telefone × preço da categoria do modelo.
   const estimateDispatchCost = async (readyCampaigns: Campaign[]) => {
@@ -1296,6 +1312,17 @@ export function CampaignsView() {
             })}
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={() => setIsCostCalculatorOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+              <Calculator className="h-4 w-4" />
+              <span className="hidden sm:inline">Calculadora de custo</span>
+            </button>
+            {isCostCalculatorOpen && (
+              <DispatchCostCalculator
+                segments={segments.map((segment) => ({ id: segment.id, nome: segment.nome }))}
+                resolveUnique={resolveUniqueAudience}
+                onClose={() => setIsCostCalculatorOpen(false)}
+              />
+            )}
             <button type="button" onClick={() => { void reloadCampaigns(); void refreshAll(); }} aria-label="Atualizar lista" title="Atualizar lista" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
               <RefreshCw className="h-4 w-4" />
               Atualizar

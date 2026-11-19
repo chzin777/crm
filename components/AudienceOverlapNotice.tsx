@@ -2,19 +2,23 @@
 
 import { AlertTriangle, Info, Loader2, Users } from "lucide-react";
 import type { SegmentOverlapSummary } from "@/lib/campaign-audience";
+import { formatBrl } from "@/lib/meta-pricing-shared";
 
 const int = (value: number) => value.toLocaleString("pt-BR");
 
 /**
- * Resumo do público quando 2+ segmentos são escolhidos: soma bruta × destinatários únicos, quantos estão em
- * mais de um segmento (unificados) e quais segmentos não acrescentam ninguém novo.
+ * Resumo do público da campanha: destinatários únicos e custo estimado; com 2+ segmentos, também a soma bruta,
+ * quantos estão em mais de um segmento (unificados) e quais segmentos não acrescentam ninguém novo.
  */
 export function AudienceOverlapNotice({
   state,
   hasFilters,
+  cost,
 }: {
   state: { loading: boolean; summary?: SegmentOverlapSummary; finalUnique?: number; error?: string };
   hasFilters: boolean;
+  /** Tarifa da categoria do modelo (R$ por mensagem) para o custo estimado dos destinatários únicos. */
+  cost?: { unitBrl: number; label: string };
 }) {
   if (state.loading) {
     return (
@@ -29,6 +33,7 @@ export function AudienceOverlapNotice({
   const finalUnique = state.finalUnique ?? summary.unique;
   const contained = summary.segments.filter((segment) => segment.contained);
   const empty = summary.segments.filter((segment) => segment.total === 0);
+  const multiple = summary.segments.length > 1;
 
   return (
     <section role="status" aria-label="Resumo do público" className="min-w-0 space-y-2 rounded-xl border border-[#002187]/15 bg-[#002187]/5 p-3 text-xs text-slate-600 dark:border-[#C4D600]/20 dark:bg-[#C4D600]/5 dark:text-slate-300">
@@ -39,12 +44,18 @@ export function AudienceOverlapNotice({
             {int(finalUnique)} destinatários únicos receberão o disparo
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-            Soma dos segmentos: {int(summary.rawTotal)} · Únicos após unir: {int(summary.unique)}
+            {multiple ? `Soma dos segmentos: ${int(summary.rawTotal)} · Únicos após unir: ${int(summary.unique)}` : `Contatos do segmento: ${int(summary.rawTotal)}`}
             {hasFilters && finalUnique !== summary.unique ? ` · Após os filtros adicionais: ${int(finalUnique)}` : ""}
           </p>
+          {cost && (
+            <p className="mt-1.5 text-xs text-slate-700 dark:text-slate-200">
+              Custo estimado: <b className="tabular-nums text-[#002187] dark:text-[#C4D600]">{formatBrl(finalUnique * cost.unitBrl)}</b>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400"> · {cost.label}, {formatBrl(cost.unitBrl, 4)} por mensagem entregue</span>
+            </p>
+          )}
         </div>
       </div>
-      {summary.inMultipleSegments > 0 ? (
+      {!multiple ? null : summary.inMultipleSegments > 0 ? (
         <p className="flex items-start gap-2 break-words">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
           <span><b className="text-slate-900 dark:text-white">{int(summary.inMultipleSegments)}</b> contatos pertencem a mais de um segmento selecionado e foram deduplicados automaticamente — cada cliente receberá apenas 1 mensagem.</span>
@@ -55,7 +66,7 @@ export function AudienceOverlapNotice({
           <span>Nenhum contato se repete entre os segmentos selecionados.</span>
         </p>
       )}
-      <ul className="space-y-0.5 text-[11px]">
+      <ul className={`space-y-0.5 text-[11px] ${multiple ? "" : "hidden"}`}>
         {summary.segments.map((segment, index) => (
           <li key={`${segment.label}-${index}`} className="flex min-w-0 items-center justify-between gap-2">
             <span className="min-w-0 truncate" title={segment.label}>{segment.label}</span>
