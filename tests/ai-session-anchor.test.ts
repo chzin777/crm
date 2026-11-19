@@ -612,11 +612,11 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     // Sem foto cadastrada: vitrine em texto limpo, sem código "Ref."; a ordem fica em lastShownProducts.
     expect(turn1.messages[0]).toContain("1. 👓 *Radda* — R$ 120,00");
-    expect(turn1.messages[0]).toContain("4. 👓 *Radda* — R$ 120,00");
+    expect(turn1.messages[0]).toContain("3. 👓 *Radda* — R$ 120,00");
     expect(turn1.messages[0]).not.toMatch(/Ref\./);
     // A ferramenta já avisou o modelo de que não há fotos (fotosNoCatalogo: 0); o aviso é dele, não do código.
     expect(turn1.messages.join("\n")).toContain("As fotos não estão no sistema agora");
-    expect(turn1.catalogContext?.lastShownProducts?.map((item) => item.ref)).toEqual(["JC60020", "JC2501", "JC60016", "OPBR 455"]);
+    expect(turn1.catalogContext?.lastShownProducts?.map((item) => item.ref)).toEqual(["JC60020", "JC2501", "JC60016"]);
     history.push(...turn1.messages.map((text, index): PlaygroundMessage => ({ from: "ai", text, ...(index === 0 ? { catalogContext: turn1.catalogContext } : {}) })));
 
     // Turno 2: "esse de 120" com 4 itens a R$ 120 → o modelo tenta a busca ampla de novo; nada de vitrine repetida.
@@ -631,7 +631,7 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     expect(calls.stock.length).toBe(searchesBefore);
     // A ferramenta não devolve a vitrine de novo e orienta perguntar o número (sem frase pronta nem código "Ref.").
-    expect(seen).toMatchObject({ vitrineJaEnviada: true, opcoesComEssePreco: [1, 2, 3, 4] });
+    expect(seen).toMatchObject({ vitrineJaEnviada: true, opcoesComEssePreco: [1, 2, 3] });
     expect(seen!.orientacao).not.toMatch(/Ref\.|"/);
     expect(turn2.messages.join("\n")).toBe("Os quatro estão por R$ 120! Qual número você quer ver primeiro?");
     expect(turn2.image).toBeUndefined();

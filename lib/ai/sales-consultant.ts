@@ -77,8 +77,10 @@ export function gatedStockResult(askBudget: boolean, askType = false) {
 }
 
 /** Preenche orçamento/tipo que o cliente já disse quando o modelo esquece de passar. */
-export function withBudgetArgs(args: Record<string, unknown>, input: { budget: Budget; cheap: boolean; category: string }) {
+export function withBudgetArgs(args: Record<string, unknown>, input: { budget: Budget; cheap: boolean; category: string; ticketFloor?: number }) {
   const next = { ...args };
+  // Ticket mínimo das sugestões (configuração /ia): só sem faixa/orçamento do cliente e sem pedido de algo barato.
+  if (input.ticketFloor && !input.cheap && !input.budget.maxPrice && !input.budget.minPrice) next._pisoTicket = input.ticketFloor;
   if (next.maxPrice === undefined && input.budget.maxPrice) next.maxPrice = input.budget.maxPrice;
   if (next.minPrice === undefined && input.budget.minPrice) next.minPrice = input.budget.minPrice;
   if (next.sortBy === undefined && input.cheap) next.sortBy = "price_asc";
@@ -291,4 +293,45 @@ export function withoutRedundantStoreQuestion(reply: string) {
   if (!/📍/.test(reply) || !STORE_CHECK_QUESTION.test(reply)) return reply;
   STORE_CHECK_QUESTION.lastIndex = 0;
   return reply.replace(STORE_CHECK_QUESTION, "Quer passar na unidade mais perto de você pra provar? Se tiver a receita, me manda foto que eu já calculo as lentes junto!");
+}
+
+/** "Quero aproveitar!", "Tenho interesse", "Oi", "👍": resposta genérica (ex.: a uma campanha) sem dizer o que procura. */
+const GENERIC_INTEREST = /\b(oi+|ola|opa|eae|e ai|bom dia|boa tarde|boa noite|tudo bem|aproveitar|aproveito|interesse|interessad[oa]|interessei|saber mais|mais (info|informac\w*|detalhes)|quero( sim| ver| saber| conhecer| participar| comprar)?|gostaria( de saber)?|pode mandar|manda( ai| mais)?|como funciona|promoc\w*|oferta|desconto|sim|claro|com certeza|opa)\b/;
+const PRODUCT_SIGNAL = /\b(grau|sol|solar|solares|escuros?|armac\w*|lentes?|receita|multifoca\w*|bifoca\w*|leitura|perto|longe|crianca|infantil|filh[oa]|masculin\w*|feminin\w*|redond\w*|quadrad\w*|aviador|gatinho)\b/;
+
+export function isGenericInterest(text: string) {
+  const source = plainText(text).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  // Só pontuação/emoji: também é genérico.
+  if (!source) return true;
+  if (source.split(" ").length > 10 || PRODUCT_SIGNAL.test(source) || explicitBrand(text) || asksSpecificModel(text)) return false;
+  return GENERIC_INTEREST.test(source);
+}
+
+/**
+ * Cliente ainda não disse o que procura (só saudação/interesse genérico, sem tipo, marca ou foto): a IA qualifica
+ * antes de consultar o catálogo — nada de vitrine nem foto nesta resposta.
+ */
+export function needsQualificationFirst(input: { category: string; brand: string; texts: string[]; photo: boolean; selectedProduct: boolean; queued: boolean }) {
+  if (input.category || input.brand || input.photo || input.selectedProduct || input.queued) return false;
+  const texts = input.texts.filter((text) => text.trim());
+  return texts.length > 0 && texts.every(isGenericInterest);
+}
+
+export function qualifyFirstBlock() {
+  return [
+    "QUALIFICAÇÃO ANTES DE PRODUTOS (regra desta resposta): o cliente ainda não disse o que procura (respondeu algo genérico, como \"Quero aproveitar!\", \"Tenho interesse\" ou \"Oi\").",
+    "PROIBIDO consultar o estoque, listar produtos ou mandar fotos nesta resposta.",
+    "Responda como consultora de ótica experiente: curta, natural e humana (sem soar robô), agradecendo o interesse, e faça no máximo 2 perguntas rápidas: se procura óculos de grau ou de sol e, se ainda não souber, em qual cidade ou loja quer ser atendido (ou o estilo/para quem é).",
+  ].join("\n");
+}
+
+export function qualifyGatedResult() {
+  return {
+    tipoBusca: "marca_ampla" as const,
+    cenario: "perfil_desconhecido" as const,
+    produtos: [] as [],
+    modelos: [] as [],
+    vitrineFormatada: null,
+    orientacao: `O cliente ainda não disse o que procura: NÃO liste produtos nem mande fotos. ${qualifyFirstBlock()}`,
+  };
 }

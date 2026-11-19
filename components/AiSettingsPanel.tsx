@@ -832,6 +832,13 @@ export function AiSettingsPanel() {
             </label>
           </Block>
 
+          <Block title="Sugestões de produtos" hint="Como a IA apresenta produtos por iniciativa própria (ex.: cliente respondeu à campanha). Antes de mostrar, ela pergunta grau ou sol, estilo e cidade/loja; depois mostra no máximo 3 opções distintas.">
+            <label className={labelCls}>Ticket mínimo das sugestões (R$)
+              <input type="number" min={0} max={100000} step={10} value={settings.minProactivePrice} onChange={(event) => set("minProactivePrice", Number(event.target.value))} className={`${input} w-32`} />
+            </label>
+            <p className="text-xs text-slate-500 dark:text-slate-400">A IA não prioriza os mais baratos: só sugere modelos a partir desse valor. Se o cliente pedir algo mais em conta ou disser quanto quer gastar, vale o pedido dele. Use 0 para desligar.</p>
+          </Block>
+
           <Block title="Foto do produto" hint="O ERP não tem fotos: a IA busca a foto do modelo na web (com cache de 30 dias por produto) e envia junto com as informações de estoque.">
             <Toggle label="Enviar foto do produto encontrada na web junto com as informações" description="Só quando o modelo é confirmado no estoque. Se a foto falhar, a resposta segue em texto." checked={settings.sendProductImage} onChange={(value) => set("sendProductImage", value)} />
             <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">

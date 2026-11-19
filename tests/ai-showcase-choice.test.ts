@@ -32,7 +32,6 @@ describe("vitrine de marca numerada e identificável", () => {
       "1. 👓 *Radda (Ref. JC60020)* — R$ 120,00",
       "2. 👓 *Radda (Ref. JC2501)* — R$ 120,00",
       "3. 👓 *Radda (Ref. JC60016)* — R$ 120,00",
-      "4. 👓 *Radda (Ref. OPBR 455)* — R$ 120,00",
     ]);
     // Nenhum item indistinguível ("Radda" sem referência).
     expect(result.modelos.every((model) => model.referencia)).toBe(true);
@@ -41,7 +40,7 @@ describe("vitrine de marca numerada e identificável", () => {
   it("listedProducts lidos da vitrine da sessão, na ordem exibida", () => {
     const listed = extractListedProducts(["Oi!", `${raddaShowcase().vitrineFormatada}`, "Gostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?"]);
     expect(listed[0]).toEqual({ index: 1, sku: null, referencia: "JC60020", nomeComercial: "Radda", preco: 120 });
-    expect(listed.map((item) => item.referencia)).toEqual(["JC60020", "JC2501", "JC60016", "OPBR 455"]);
+    expect(listed.map((item) => item.referencia)).toEqual(["JC60020", "JC2501", "JC60016"]);
     expect(parseShowcase("📦 *Estoque:* 2 unidades")).toEqual([]);
   });
 });

@@ -306,7 +306,7 @@ export function RulesSection() {
 
 // ---------------------------------------------------------------- Skills
 
-const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck };
+const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck, consultoria_pos_campanha: Sparkles };
 type SkillDraft = AiSkill & { dirty?: boolean; isNew?: boolean };
 type ToolMap = Record<SkillKey, { tools: string[]; flows: string }>;
 

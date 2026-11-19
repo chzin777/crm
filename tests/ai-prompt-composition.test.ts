@@ -256,7 +256,7 @@ describe("emoji único e sem clichê de fechamento", () => {
 describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
   const photoSettings = { ...settings, sendProductImage: true };
 
-  it("óculos de sol em Goiânia com fotos: no máximo 4 itens com imageUrl e legenda \"Nome — R$ Preço\" + lojas, sem Ref.", async () => {
+  it("óculos de sol em Goiânia com fotos: no máximo 3 itens com imageUrl e legenda \"Nome — R$ Preço\" + lojas, sem Ref.", async () => {
     photos.byCode = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`r${n}`, `https://img.test/r${n}.jpg`]));
     const opening = "Separei umas de sol que vão bem no dia a dia, leves e clássicas 👇";
     const closing = "Alguma delas chamou sua atenção?";
@@ -264,10 +264,10 @@ describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
     const run = await simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
     expect(calls.stock[0]).toMatchObject({ marca: "Ray-Ban", cidade: "Goiânia", tipoBusca: "marca_ampla" });
     // O modelo soube das fotos antes de escrever (fato da busca no prompt).
-    expect(calls.prompts.at(-1)).toContain("\"fotosNoCatalogo\":4");
+    expect(calls.prompts.at(-1)).toContain("\"fotosNoCatalogo\":3");
     const catalog = run.visualCatalog!;
-    expect(catalog.items).toHaveLength(4);
-    expect(catalog.items.map((item) => item.imageUrl)).toEqual(["https://img.test/r1.jpg", "https://img.test/r2.jpg", "https://img.test/r3.jpg", "https://img.test/r4.jpg"]);
+    expect(catalog.items).toHaveLength(3);
+    expect(catalog.items.map((item) => item.imageUrl)).toEqual(["https://img.test/r1.jpg", "https://img.test/r2.jpg", "https://img.test/r3.jpg"]);
     for (const [position, item] of catalog.items.entries()) {
       expect(item.caption.startsWith(`${position + 1}. `)).toBe(true);
       expect(item.caption).toMatch(/^\d\. [^\n]+ — R\$ 999,00\nLoja em Goiânia: Setor Marista$/);

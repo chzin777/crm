@@ -459,8 +459,8 @@ export function brandFallbackReply(fallback: BrandFallback, variant = 0) {
   return fallback.alternatives.length >= 2 ? showcase : `${showcase}\n\nQuer que eu peça a transferência da *${brand}* ou prefere conhecer essa opção na loja?`;
 }
 
-/** Catálogo com foto: no máximo 4 opções por vitrine (leve no celular do cliente e no envio de mídia). */
-export const VISUAL_CATALOG_MAX = 4;
+/** Catálogo com foto: no máximo 3 opções por vitrine (leve no celular do cliente e no envio de mídia). */
+export const VISUAL_CATALOG_MAX = 3;
 /** Opção do catálogo: foto + legenda curta (nome limpo, preço e lojas da cidade), sem código "Ref.". */
 export type CatalogPhoto = { index: number; sku: string; ref: string | null; name: string; price: string | null; priceValue: number | null; stores: string[]; imageUrl: string; caption: string };
 export type VisualCatalog = { opening: string; items: CatalogPhoto[]; closing: string };
@@ -494,10 +494,19 @@ export const CATALOG_CLOSINGS = ["Qual dessas fotos chamou mais sua atenção?",
  */
 export function buildVisualCatalog(input: { models: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number }): VisualCatalog | null {
   const items: CatalogPhoto[] = [];
+  // Nunca o mesmo modelo (referência/nome) nem a mesma foto duas vezes na mesma resposta.
+  const seenModels = new Set<string>();
+  const seenImages = new Set<string>();
+  const key = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const imageKey = (url: string) => url.trim().replace(/#.*$/, "");
   for (const model of input.models) {
     if (items.length >= (input.max ?? VISUAL_CATALOG_MAX)) break;
-    const sku = model.codigos.find((code) => !!input.images[code]);
+    const sku = model.codigos.find((code) => !!input.images[code] && !seenImages.has(imageKey(input.images[code])));
     if (!sku) continue;
+    const modelKeys = [model.referencia && !model.referencia.startsWith("#") ? `ref:${key(model.referencia)}` : "", ...model.codigos.map((code) => `cod:${code}`)].filter(Boolean);
+    if (modelKeys.some((value) => seenModels.has(value))) continue;
+    modelKeys.forEach((value) => seenModels.add(value));
+    seenImages.add(imageKey(input.images[sku]));
     const index = items.length + 1;
     const stores = model.lojas ?? [];
     items.push({

@@ -31,6 +31,8 @@ import { emitAiHandoff, hasActiveHandoffFlow } from "@/lib/automations/ai-handof
 import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
+import { needsQualificationFirst, qualifyFirstBlock, qualifyGatedResult } from "@/lib/ai/sales-consultant";
+import { NOISE_AUTHOR } from "@/lib/chat/noise";
 import { withToolContent, withoutRedundantStoreQuestion, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
@@ -609,6 +611,11 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   // "Óculos" sem dizer grau ou sol: pergunta o tipo antes de listar (não mistura sol e grau).
   const typeFirst = needsTypeFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued || !!staffRoute || !!documentRoute });
   const askBudget = (cityFirst || typeFirst) && !budget.maxPrice && !budget.minPrice && !catalogState.brand;
+  // Pós-campanha ("Quero aproveitar!", "Tenho interesse", "Oi"): qualifica antes de qualquer vitrine ou foto.
+  // "Sim"/"pode" depois da 1ª resposta responde a uma pergunta da IA: aí quem decide é o modelo.
+  const affirmative = /^\s*(sim|claro|pode|pode sim|quero sim|com certeza|isso|ok|beleza)\b/i.test(input.pendingText);
+  const qualifyFirst = skillEnabled(skills, "consultoria_pos_campanha") && !cityFirst && !typeFirst && !(affirmative && input.aiReplies > 0)
+    && needsQualificationFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued || !!staffRoute || !!documentRoute });
   const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
   const forceCatalog = !cityFirst && !staffRoute && !documentRoute && !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
     && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand));
@@ -650,7 +657,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     // Módulos de lib/ai/prompts escolhidos pelo assunto desta mensagem e pelo estado da sessão.
     // Estúdio de IA: regras da empresa ligadas ao assunto, skills e trechos do RAG entram no composeSystemPrompt.
     prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length, studio: { ...studioContext, skills }, conversationText },
-    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
+    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -703,7 +710,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       return canonical.length > 3 && canonical === canonical.toUpperCase() ? titleCase(canonical) : canonical;
     }))].slice(0, 8),
     search: async (args) => {
-      const { result, log } = await consultarEstoqueProduto({ ...withBudgetArgs(args, { budget, cheap, category: catalogState.category }), ...(wantsKids ? { publicoInfantil: true } : {}) }, { products: catalogProducts, withPrices: settings.canQuotePrices });
+      const { result, log } = await consultarEstoqueProduto({ ...withBudgetArgs(args, { budget, cheap, category: catalogState.category, ticketFloor: settings.minProactivePrice }), ...(wantsKids ? { publicoInfantil: true } : {}) }, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
       return result.tipoBusca === "marca_ampla" ? result : null;
     },
@@ -727,9 +734,13 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       if (!chosen && !anchoredProduct && typeFirst && isBroadStockCall(baseQuery)) {
         return typeGatedResult(askBudget);
       }
+      // Cliente ainda não disse o que procura: nenhuma consulta (nem de modelo) antes da qualificação.
+      if (!chosen && !anchoredProduct && qualifyFirst) {
+        return qualifyGatedResult();
+      }
       // Cidade digitada pelo modelo com erro ("Goiânai", "Brasila") vira a cidade real da rede.
       const cityArg = typeof args.cidade === "string" && args.cidade.trim() ? extractPreferredCity(args.cidade, cities) ?? args.cidade : args.cidade;
-      const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category }), cidade: catalogState.preferredCity || cityArg };
+      const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category, ticketFloor: settings.minProactivePrice }), cidade: catalogState.preferredCity || cityArg };
       // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
       if (wantsKids) query.publicoInfantil = true;
       else delete query.publicoInfantil;
@@ -1194,7 +1205,7 @@ async function respond(conversationId: string, messageId: string) {
   const consumed = consumedUntil.get(conversationId);
   const lastOther = consumed ? await prisma.chatMessage.findFirst({ where: { conversationId, internal: false, OR: [{ author: "agent" }, { author: "bot", NOT: { authorName: AI_AUTHOR } }] }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }) : null;
   const pendingSince = consumed ? (lastOther && lastOther.createdAt > consumed ? lastOther.createdAt : consumed) : lastAnswer?.createdAt ?? sessionStart ?? undefined;
-  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { id: true, text: true, attachment: true, metaMedia: true, createdAt: true } });
+  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", deletedAt: null, OR: [{ authorName: null }, { authorName: { not: NOISE_AUTHOR } }], ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { id: true, text: true, attachment: true, metaMedia: true, createdAt: true } });
   if (!pending.length) return;
   consumedUntil.set(conversationId, pending[pending.length - 1].createdAt);
   // Na espera assistida, o limite de respostas conta só as respostas depois do transbordo.
@@ -1202,7 +1213,7 @@ async function respond(conversationId: string, messageId: string) {
   const inStage = stageStart ? { createdAt: { gt: stageStart } } : {};
   const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, ...inStage } });
   // Mensagens anteriores do cliente: insistência em tentativa de manipulação leva para a equipe.
-  const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt, ...(sessionStart ? { gt: sessionStart } : {}) } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
+  const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", deletedAt: null, OR: [{ authorName: null }, { authorName: { not: NOISE_AUTHOR } }], ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt, ...(sessionStart ? { gt: sessionStart } : {}) } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
   const meta = { feature: "agent", conversationId };
   // Fotos já enviadas: na fila, só as mandadas depois da transferência (perguntar de novo na fila reenvia a foto).
   const photos = await prisma.chatMessage.findMany({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inStage }, orderBy: { createdAt: "desc" }, take: 30, select: { metaMedia: true } });

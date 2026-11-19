@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
 import { readAiSettings } from "@/lib/ai/store";
-import { chunkText, DEFAULT_SKILLS, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
+import { chunkText, DEFAULT_SKILLS, LEGACY_ESTOQUE_MD, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
 
 /** Estúdio de IA no banco: regras, skills e base de conhecimento (RAG). Falha de banco nunca derruba a resposta. */
 
@@ -58,8 +58,16 @@ async function addMissingNativeSkills(rows: AiSkill[]): Promise<boolean> {
     const data = missing.map((skill) => (skill.slug === "encerramento_autonomo" ? { ...skill, isActive: settings.closeWhenResolved } : skill));
     await prisma.aiSkill.createMany({ data, skipDuplicates: true });
   }
+  // Skill de estoque nunca editada: recebe o protocolo novo (3 opções distintas e ticket mínimo).
+  const estoque = DEFAULT_SKILLS.find((skill) => skill.slug === "estoque_cidade");
+  let upgraded = 0;
+  try {
+    if (estoque) upgraded = (await prisma.aiSkill.updateMany({ where: { slug: "estoque_cidade", instructionsMd: LEGACY_ESTOQUE_MD }, data: { instructionsMd: estoque.instructionsMd } })).count;
+  } catch (error) {
+    console.warn("[ai][estudio] protocolo novo da skill de estoque não aplicado:", error instanceof Error ? error.message : error);
+  }
   nativesChecked = true;
-  return missing.length > 0;
+  return missing.length > 0 || upgraded > 0;
 }
 
 export async function listSkills(): Promise<AiSkill[]> {

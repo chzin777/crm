@@ -82,11 +82,13 @@ const TYPE_CATEGORY: Record<string, "ARMACAO" | "SOLAR" | "LENTE_CONTATO"> = { g
 /** Modelos candidatos de uma busca sem marca (só tipo/orçamento) consultados no saldo do VMSet. */
 const GENERIC_CANDIDATES = 30;
 
-function priceFilterOf(args: { minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown }): PriceFilter | undefined {
+function priceFilterOf(args: { minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; _pisoTicket?: unknown }): PriceFilter | undefined {
   const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined);
   const sortBy = args.sortBy === "price_asc" || args.sortBy === "price_desc" ? args.sortBy : undefined;
-  const filter: PriceFilter = { minPrice: number(args.minPrice), maxPrice: number(args.maxPrice), sortBy };
-  return filter.minPrice || filter.maxPrice || filter.sortBy ? filter : undefined;
+  // Ticket mínimo (configuração da IA) só quando o cliente não deu faixa nem pediu barato.
+  const floor = !number(args.minPrice) && !number(args.maxPrice) && sortBy !== "price_asc" ? number(args._pisoTicket) : undefined;
+  const filter: PriceFilter = { minPrice: number(args.minPrice), maxPrice: number(args.maxPrice), sortBy, ...(floor ? { floor } : {}) };
+  return filter.minPrice || filter.maxPrice || filter.sortBy || filter.floor ? filter : undefined;
 }
 
 /**
@@ -95,6 +97,11 @@ function priceFilterOf(args: { minPrice?: unknown; maxPrice?: unknown; sortBy?: 
  */
 function orderByBudget(products: IndexedProduct[], price?: PriceFilter) {
   if (!price) return products;
+  // Só o ticket mínimo: candidatos acima do piso primeiro (mais vendidos dentro de cada grupo), o resto depois.
+  if (price.floor && !price.minPrice && !price.maxPrice && !price.sortBy) {
+    const floor = price.floor * 0.85;
+    return [...products.filter((product) => (product.price ?? 0) >= floor), ...products.filter((product) => (product.price ?? 0) < floor)];
+  }
   // Folga de 15%: o preço da loja pode diferir um pouco do cadastro.
   const inRange = products.filter((product) => product.price === null || ((!price.maxPrice || product.price <= price.maxPrice * 1.15) && (!price.minPrice || product.price >= price.minPrice * 0.85)));
   if (price.sortBy === "price_asc") return [...inRange].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity) || b.sales - a.sales);
@@ -107,7 +114,7 @@ function orderByBudget(products: IndexedProduct[], price?: PriceFilter) {
  * Nunca lança erro: falha ou lentidão da API vira o cenário "unavailable_api".
  */
 export async function consultarEstoqueProduto(
-  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; publicoInfantil?: unknown },
+  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; publicoInfantil?: unknown; _pisoTicket?: unknown },
   deps: { products: () => Promise<IndexedProduct[]>; withPrices: boolean },
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
@@ -136,7 +143,9 @@ export async function consultarEstoqueProduto(
   // Busca ampla (só marca/categoria): vitrine de modelos distintos com estoque, sem lojas nem foto.
   // Só tipo/orçamento ("armação até 250"): o valor no termo não é referência de modelo.
   const withoutValues = term.replace(/\b\d{2,5}(?:[.,]\d{2})?\b/g, " ").replace(/\s+/g, " ").trim();
-  const budgetOnly = !iconic && (!!price || !!field(args.tipo)) && !brandMatch?.rest.length && !modelWords(withoutValues).length;
+  // O ticket mínimo (floor) não é pedido do cliente: não transforma busca de marca em busca por orçamento.
+  const clientPrice = !!price && !!(price.minPrice || price.maxPrice || price.sortBy);
+  const budgetOnly = !iconic && (clientPrice || !!field(args.tipo)) && !brandMatch?.rest.length && !modelWords(withoutValues).length;
   const kind = iconic ? "modelo_especifico" : budgetOnly || (brandMatch && !brandMatch.rest.length) ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
   if (kind === "marca_ampla") {
     const broad = requestedBrand && !brandMatch ? { products: [], brand: requestedBrand } : broadCatalogMatches(all, budgetOnly ? withoutValues : term, brands, city || price || category ? all.length : undefined);

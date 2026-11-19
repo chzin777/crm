@@ -10,8 +10,8 @@ import { modelFamilyKey } from "@/lib/ai/product-names";
 
 export type SearchKind = "marca_ampla" | "modelo_especifico";
 
-/** Modelos na vitrine da busca ampla. */
-export const SHOWCASE_MAX_MODELS = 8;
+/** Modelos na vitrine da busca ampla: no máximo 3 opções distintas (curadoria de consultora, não catálogo inteiro). */
+export const SHOWCASE_MAX_MODELS = 3;
 /** Modelos candidatos consultados no saldo (até 2 códigos cada) para sobrarem até 8 com estoque. */
 export const SHOWCASE_CANDIDATES = 12;
 export const SHOWCASE_CODES_PER_MODEL = 2;
@@ -169,7 +169,32 @@ const SHOWCASE_GUIDANCE = {
   produto_nao_encontrado: "Nenhum produto dessa marca/categoria foi encontrado no catálogo. Pergunte qual modelo ou referência o cliente procura ou transfira para um atendente (action handoff).",
 } as const;
 
-export type PriceFilter = { minPrice?: number; maxPrice?: number; sortBy?: "price_asc" | "price_desc" | "relevance" };
+/** floor: ticket mínimo das sugestões por iniciativa da IA (não vem do cliente; nunca aparece como "faixa pedida"). */
+export type PriceFilter = { minPrice?: number; maxPrice?: number; sortBy?: "price_asc" | "price_desc" | "relevance"; floor?: number };
+
+/** Mesmo modelo em linhas diferentes (variantes de cor/código com o mesmo nome/referência): fica só a primeira. */
+export function distinctModels(models: ShowcaseModel[]) {
+  const seen = new Set<string>();
+  return models.filter((model) => {
+    // Referência comercial identifica o modelo; sem ela, o nome (só a marca no nome não basta: aí vale o código).
+    const ref = model.referencia && !model.referencia.startsWith("#") ? `ref:${norm(model.referencia)}` : "";
+    const keys = [ref, ...model.codigos.map((code) => `cod:${code}`)].filter(Boolean);
+    if (keys.some((key) => seen.has(key))) return false;
+    keys.forEach((key) => seen.add(key));
+    return true;
+  });
+}
+
+/**
+ * Ticket mínimo: sugestões a partir do piso. Se nada com estoque alcança o piso, mostra o que há, do mais caro
+ * para o mais barato (nunca prioriza os mais baratos).
+ */
+export function applyTicketFloor(models: ShowcaseModel[], floor?: number) {
+  if (!floor) return models;
+  const above = models.filter((model) => (priceNumber(model.precoVenda) ?? 0) >= floor);
+  if (above.length) return above;
+  return [...models].sort((a, b) => (priceNumber(b.precoVenda) ?? -1) - (priceNumber(a.precoVenda) ?? -1));
+}
 
 /** "R$ 1.070,00" → 1070. */
 export const priceNumber = (text: string | null | undefined) => {
@@ -266,9 +291,9 @@ export function buildShowcaseResult(input: {
   // Modelos com referência comercial do cadastro primeiro; código interno (#) por último; até 8.
   const rank = (model: ShowcaseModel) => (model.referencia?.startsWith("#") ? 2 : fallbackOnly.has(model) ? 1 : 0);
   models.sort((a, b) => rank(a) - rank(b));
-  const priced = applyPriceFilter(models, input.price);
+  const priced = applyTicketFloor(distinctModels(applyPriceFilter(models, input.price)), input.price?.floor);
   // Busca por orçamento sem marca: no máximo 2 modelos por marca, para a vitrine ter variedade de verdade.
-  const varied = input.price && !input.brand ? diverseByBrand(priced, 2) : priced;
+  const varied = (input.price?.minPrice || input.price?.maxPrice || input.price?.sortBy || input.price?.floor) && !input.brand ? diverseByBrand(priced, 2) : priced;
   models.splice(0, models.length, ...(varied.length >= 3 ? varied : priced));
   models.splice(SHOWCASE_MAX_MODELS);
   const range = priceRangeLabel(input.price);
@@ -279,7 +304,7 @@ export function buildShowcaseResult(input: {
     cenario: "disponivel_em_lojas",
     modelos: models,
     vitrineFormatada: formatShowcase(models, { header: false }),
-    orientacao: input.price ? BUDGET_SHOWCASE_GUIDANCE : SHOWCASE_GUIDANCE.disponivel_em_lojas,
+    orientacao: input.price?.minPrice || input.price?.maxPrice || input.price?.sortBy ? BUDGET_SHOWCASE_GUIDANCE : SHOWCASE_GUIDANCE.disponivel_em_lojas,
   };
 }
 

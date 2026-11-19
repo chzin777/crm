@@ -73,10 +73,10 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
     expect(parts).toEqual([result.vitrineFormatada, "Gostaria de ver a foto, lojas disponíveis e mais detalhes de algum desses modelos?"]);
   });
 
-  it("vitrine limitada a 8 modelos; sem estoque, sem preço e API fora do ar", () => {
+  it("vitrine limitada a 3 modelos; sem estoque, sem preço e API fora do ar", () => {
     const many = Array.from({ length: 12 }, (_, index) => ({ code: String(500 + index), description: `OCS RAY BAN REF-RB${4000 + index} 601 54`, brand: "RAY BAN" }));
     const full = { ...lookup, byCode: Object.fromEntries(many.map((product) => [product.code, [unit("34", 1, 900)]])) };
-    expect(buildShowcaseResult({ term: "Ray-Ban", groups: showcaseCandidates(many), lookup: full, stores, withPrices: true }).modelos).toHaveLength(8);
+    expect(buildShowcaseResult({ term: "Ray-Ban", groups: showcaseCandidates(many), lookup: full, stores, withPrices: true }).modelos).toHaveLength(3);
     expect(buildShowcaseResult({ term: "Ray-Ban", groups: [[catalog[4]]], lookup, stores, withPrices: true }).cenario).toBe("sem_estoque_na_rede");
     expect(buildShowcaseResult({ term: "Ray-Ban", groups: showcaseCandidates(catalog), lookup, stores, withPrices: false }).vitrineFormatada).not.toContain("R$");
     expect(buildShowcaseResult({ term: "Ray-Ban", groups: showcaseCandidates(catalog), lookup: { ...lookup, stockStatus: "unavailable_api" }, stores, withPrices: true }).cenario).toBe("unavailable_api");

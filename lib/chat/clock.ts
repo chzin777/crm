@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { brDay } from "@/lib/br-time";
 import { retryInboundMedia } from "@/lib/chat/inbound";
+import { conversationEngaged } from "@/lib/chat/noise-db";
 import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
@@ -161,6 +162,8 @@ export async function runClock() {
       if (last?.author === "customer") continue;
       const state = readMenuState(row.menuState);
       if (state.closeAt) continue;
+      // "Você ainda está por aí?" só em atendimento engajado: disparo da campanha + "oi"/"quero aproveitar"/ruído não conta.
+      if (!state.warnedAt && !(await conversationEngaged(row))) continue;
       if (!state.warnedAt) {
         if (!isWindowOpen(row.lastInboundAt)) continue;
         state.warnedAt = new Date(now).toISOString();

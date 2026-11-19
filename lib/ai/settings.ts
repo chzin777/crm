@@ -36,6 +36,8 @@ export type AiSettings = {
   requireApprovalForFinancialQueries: boolean;
   /** Envia a foto do produto achada na web junto com as informações de estoque. */
   sendProductImage: boolean;
+  /** Ticket mínimo (R$) das sugestões por iniciativa da IA; 0 desliga. Vale até o cliente pedir algo mais barato ou dar orçamento. */
+  minProactivePrice: number;
   /** Agrupa mensagens picadas do cliente e responde uma vez só (espera adaptativa, até 12 s). */
   groupMessages: boolean;
   /** Resposta longa da IA em vários balões (---SPLIT---); desligado, sai numa mensagem só. */
@@ -101,6 +103,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   canQuotePrices: false,
   requireApprovalForFinancialQueries: true,
   sendProductImage: true,
+  minProactivePrice: 450,
   groupMessages: true,
   splitReplies: true,
   bubbleDelayMinMs: 600,
@@ -174,6 +177,7 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     canQuotePrices: bool(raw.canQuotePrices, d.canQuotePrices),
     requireApprovalForFinancialQueries: bool(raw.requireApprovalForFinancialQueries, d.requireApprovalForFinancialQueries),
     sendProductImage: bool(raw.sendProductImage, d.sendProductImage),
+    minProactivePrice: Math.round(num(raw.minProactivePrice, d.minProactivePrice, 0, 100_000)),
     groupMessages: bool(raw.groupMessages, d.groupMessages),
     splitReplies: bool(raw.splitReplies, d.splitReplies),
     ...bubbleTiming(raw),

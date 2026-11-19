@@ -11,6 +11,8 @@ import { absorbPostCloseCourtesy } from "@/lib/chat/post-close";
 import { extensionFor, MAX_MEDIA_BYTES, safeFileName, type AttachmentKind, type ChatAttachment } from "@/lib/chat/media-rules";
 import { formatPhone, phoneVariants } from "@/lib/chat/phone";
 import { transcribeMessageAudio } from "@/lib/chat/transcription";
+import { classifyNoise } from "@/lib/chat/noise";
+import { absorbNoise, openEngagement, triageImage } from "@/lib/chat/noise-db";
 
 import { isCustomerMessage, MEDIA_LABELS, mediaFailureReason, readContent, type MetaInboundMessage, type MetaMedia } from "@/lib/chat/inbound-content";
 
@@ -52,7 +54,7 @@ async function findOrCreateContact(waId: string, profileName: string | undefined
 let bucketReady = false;
 
 /** O arquivo nunca derruba a mensagem: se o download falhar, ela entra com o rótulo do tipo. */
-async function storeMedia(media: MetaMedia & { kind: AttachmentKind }, onError?: (reason: string) => void): Promise<ChatAttachment | null> {
+async function storeMedia(media: MetaMedia & { kind: AttachmentKind }, onError?: (reason: string) => void, onBuffer?: (buffer: Buffer) => void): Promise<ChatAttachment | null> {
   try {
     if (!bucketReady) {
       await ensureBucket();
@@ -62,6 +64,7 @@ async function storeMedia(media: MetaMedia & { kind: AttachmentKind }, onError?:
     const type = media.mime_type ?? mime;
     const name = safeFileName(media.filename ?? `${media.kind}.${extensionFor(type)}`);
     const { key } = await uploadFile(buffer, name, type, "chat");
+    onBuffer?.(buffer);
     return { kind: media.kind, name, mime: type, size: buffer.length, key };
   } catch (error) {
     // Log detalhado (status HTTP da Meta, token expirado, limite) e motivo curto para a IA avisar o cliente.
@@ -132,10 +135,25 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
   });
   if (answeredSurvey) return null;
 
+  let mediaError: string | undefined;
+  let mediaBuffer: Buffer | null = null;
+  const attachment = content.media ? await storeMedia(content.media, (reason) => { mediaError = reason; }, (buffer) => { mediaBuffer = buffer; }) : null;
+
+  // Triagem de ruído (antes de abrir atendimento, fila, IA e timer): figurinha solta, só pontuação/emoji,
+  // risada, link aleatório e imagem sem legenda que não é receita/óculos/comprovante. Em atendimento engajado segue normal.
+  const noiseKind = classifyNoise({ type: message.type, text: content.text, hasMedia: !!content.media });
+  const imageTriage = message.type === "image" && !content.text.trim() && !!attachment && !!mediaBuffer;
+  if (noiseKind || imageTriage) {
+    const { open, engaged } = await openEngagement(message.from);
+    const kind = engaged ? null : noiseKind ?? (attachment && mediaBuffer && (await triageImage({ buffer: mediaBuffer, mime: attachment.mime, name: attachment.name })) === "aleatorio" ? "imagem_aleatoria" as const : null);
+    if (kind) {
+      await absorbNoise({ kind, phone: message.from, openConversationId: open?.id ?? null, externalId: message.id, text: content.text, receivedAt, attachment });
+      return null;
+    }
+  }
+
   const contact = await findOrCreateContact(message.from, profileName);
   const { conversation, created } = await openConversationFor(contact.id, message.from);
-  let mediaError: string | undefined;
-  const attachment = content.media ? await storeMedia(content.media, (reason) => { mediaError = reason; }) : null;
   const text = content.text || (content.media && !attachment ? MEDIA_LABELS[content.media.kind] : "");
   const replyTo = await findQuoted(message.context?.id);
   // error: motivo da falha no download (a IA avisa o cliente em vez de ignorar o arquivo).
