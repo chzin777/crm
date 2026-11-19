@@ -12,6 +12,7 @@ import { VmsetCopilotPanel } from "@/components/chat/VmsetCopilotPanel";
 import { AiSalesDialog, AiSummaryDialog } from "@/components/chat/AiPanels";
 import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
+import type { Attendant } from "@/components/chat/AttendantFilter";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { FinancialApprovalCard } from "@/components/chat/FinancialApprovalCard";
 import { DeleteConversationDialog, deleteConversation, type DeleteReason } from "@/components/chat/DeleteConversationDialog";
@@ -42,6 +43,8 @@ function ChatWorkspace() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [queueId, setQueueId] = useState("");
   const [priority, setPriority] = useState("");
+  const [assigneeId, setAssigneeId] = useState("");
+  const [attendants, setAttendants] = useState<Attendant[]>([]);
   const [items, setItems] = useState<ConversationItem[]>([]);
   const [counts, setCounts] = useState(EMPTY_COUNTS);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
@@ -141,7 +144,16 @@ function ChatWorkspace() {
       .catch((error) => console.error("[chat]", error));
     fetch("/api/chat/queues")
       .then(async (response) => {
-        if (response.ok) setQueueOptions(((await response.json()) as { data: { id: string; name: string }[] }).data);
+        if (!response.ok) return;
+        const queues = ((await response.json()) as { data: { id: string; name: string; members?: { userId: string; name: string; online?: boolean }[] }[] }).data;
+        setQueueOptions(queues.map((queue) => ({ id: queue.id, name: queue.name })));
+        // Atendentes = membros de todas as filas (sem repetir).
+        const byId = new Map<string, Attendant>();
+        for (const queue of queues) for (const member of queue.members ?? []) {
+          const known = byId.get(member.userId);
+          byId.set(member.userId, { id: member.userId, name: member.name, online: Boolean(member.online || known?.online) });
+        }
+        setAttendants([...byId.values()]);
       })
       .catch((error) => console.error("[chat]", error));
   }, []);
@@ -166,6 +178,8 @@ function ChatWorkspace() {
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (queueId) params.set("queueId", queueId);
       if (priority) params.set("priority", priority);
+      // Na aba "Minhas" a própria aba já filtra pelo atendente logado.
+      if (assigneeId && tab !== "mine") params.set("assigneeId", assigneeId);
       if (cursor) params.set("cursor", String(cursor));
       const response = await fetch(`/api/chat/conversations?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -185,7 +199,7 @@ function ChatWorkspace() {
     } finally {
       if (requestId === listRequest.current) setLoadingList(false);
     }
-  }, [tab, debouncedSearch, queueId, priority]);
+  }, [tab, debouncedSearch, queueId, priority, assigneeId]);
 
   useEffect(() => {
     void loadList();
@@ -503,6 +517,9 @@ function ChatWorkspace() {
             priority={priority}
             onPriority={setPriority}
             queues={queueOptions}
+            assigneeId={assigneeId}
+            onAssignee={setAssigneeId}
+            attendants={attendants}
             loading={loadingList}
             error={listError}
             selectedId={selectedId}

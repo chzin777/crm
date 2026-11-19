@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShoppingBag, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
+import { AttendantFilter, type Attendant } from "@/components/chat/AttendantFilter";
 import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, SLA_BREACH_MINUTES, SLA_WARN_MINUTES, type ChatCounts, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
 
@@ -141,6 +142,9 @@ type Props = {
   priority: string;
   onPriority: (value: string) => void;
   queues: { id: string; name: string }[];
+  assigneeId: string;
+  onAssignee: (value: string) => void;
+  attendants: Attendant[];
   loading: boolean;
   error: boolean;
   selectedId: string | null;
@@ -185,7 +189,7 @@ function FilterSelect({ label, value, placeholder, options, onChange }: FilterSe
   );
 }
 
-export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, loading, error, selectedId, onSelect, onDelete, onContextMenu, onEndReached, actions }: Props) {
+export function ConversationList({ items, counts, tab, onTab, search, onSearch, queueId, onQueue, priority, onPriority, queues, assigneeId, onAssignee, attendants, loading, error, selectedId, onSelect, onDelete, onContextMenu, onEndReached, actions }: Props) {
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const list = event.currentTarget;
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
@@ -280,6 +284,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             </button>
           )}
         </div>
+        <AttendantFilter value={tab === "mine" ? "" : assigneeId} onChange={onAssignee} attendants={attendants} lockedLabel={tab === "mine" ? "Meus atendimentos" : undefined} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-1" onScroll={handleScroll}>

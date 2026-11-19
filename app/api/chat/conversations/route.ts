@@ -136,6 +136,9 @@ export async function GET(request: Request) {
   const queueId = url.searchParams.get("queueId");
   const priority = PRIORITIES.find((item) => item === url.searchParams.get("priority"));
   const search = (url.searchParams.get("search") ?? "").trim();
+  // Atendente: "all"/omitido = todos; "unassigned" = sem atendente (fila ou IA); senão, o id do atendente.
+  const assignee = (url.searchParams.get("assigneeId") ?? "").trim().slice(0, 64);
+  const assigneeFilter: Prisma.ChatConversationWhereInput[] = !assignee || assignee === "all" ? [] : [{ assigneeId: assignee === "unassigned" ? null : assignee }];
   const offset = Math.max(0, Number(url.searchParams.get("cursor")) || 0);
 
   const filters: Prisma.ChatConversationWhereInput[] = [
@@ -143,6 +146,7 @@ export async function GET(request: Request) {
     ...(queueId ? [{ queueId }] : []),
     ...(priority ? [{ priority }] : []),
     ...searchWhere(search),
+    ...assigneeFilter,
   ];
 
   // "Todas" e "Encerradas": 1 entrada por contato (o atendimento mais recente), calculada sobre os filtros/busca.
@@ -195,7 +199,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     // Posição na fila (pódio 1º/2º/3º na tela): só sem busca/prioridade, que mudariam a ordem real.
-    items: (await withSessionTotals(rows.slice(0, PAGE_SIZE))).map((item, index) => ({ ...item, queuePosition: tab === "queue" && !search && !priority ? offset + index + 1 : null })),
+    items: (await withSessionTotals(rows.slice(0, PAGE_SIZE))).map((item, index) => ({ ...item, queuePosition: tab === "queue" && !search && !priority && !assigneeFilter.length ? offset + index + 1 : null })),
     nextCursor: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
     counts,
   });
