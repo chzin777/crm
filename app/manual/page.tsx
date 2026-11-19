@@ -1,8 +1,7 @@
+import { Suspense } from "react";
 import Link from "next/link";
-import { BookOpen, Clapperboard, ListChecks, Settings2, UsersRound } from "lucide-react";
 import { Bullets, Chapter, Flow, Kbd, Note, Steps, Sub, Table, WhatsApp, type ManualChapter } from "@/components/manual/ManualParts";
-import { ManualToc } from "@/components/manual/ManualToc";
-import { ManualVideos } from "@/components/manual/ManualVideos";
+import { ManualShell } from "@/components/manual/ManualShell";
 
 export const metadata = {
   title: "Manual do Sistema | CRM Óticas Brasil",
@@ -132,10 +131,6 @@ const CHAPTERS: ManualChapter[] = [
     { id: "vip-rfvp", title: "Matriz RFV-P (555-5)" },
     { id: "vip-segmentos", title: "Segmentos RFV-P e uso no dia a dia" },
   ] },
-  { id: "videos", title: "Vídeos & Treinamentos", sections: [
-    { id: "videos-assistir", title: "Assistir aos treinamentos" },
-    { id: "videos-gerenciar", title: "Publicar e gerenciar vídeos (administrador)" },
-  ] },
   { id: "guias", title: "Guias passo a passo por perfil", sections: [
     { id: "guia-atendente", title: "O dia a dia do atendente" },
     { id: "guia-supervisor", title: "O dia a dia do supervisor" },
@@ -162,33 +157,8 @@ export default function ManualPage() {
     <div id="manual" className="mx-auto w-full max-w-7xl px-4 pb-16 pt-2 sm:px-6">
       <style>{printCss}</style>
 
-      <header className="relative overflow-hidden rounded-2xl bg-[#051647] px-6 py-8 text-white shadow-sm sm:px-10 sm:py-10">
-        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[#C4D600]/15" aria-hidden />
-        <div className="absolute -bottom-20 right-24 h-40 w-40 rounded-full bg-[#F7915E]/15" aria-hidden />
-        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#C4D600]"><BookOpen className="h-4 w-4" /> Manual do sistema</p>
-        <h1 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight sm:text-4xl">Manual completo do CRM Óticas Brasil</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-300 sm:text-base">
-          Tudo o que o sistema faz, tela por tela: atendimento no WhatsApp, filas e menu automático, pipelines, contatos, segmentos,
-          campanhas com retorno em vendas do ERP, IA de atendimento, automações, clientes VIP com RFV-P, pesquisas de satisfação, permissões e configurações.
-          Use o sumário para ir direto ao assunto ou assista aos vídeos de treinamento.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <a href="#visao-geral" className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#C4D600] px-4 py-2 text-sm font-semibold text-[#051647] transition hover:bg-[#d4e400]"><BookOpen className="h-4 w-4" /> Iniciar leitura</a>
-          <a href="#videos" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#C4D600]/60 px-4 py-2 text-sm font-semibold text-[#C4D600] transition hover:bg-white/10"><Clapperboard className="h-4 w-4" /> Vídeos &amp; treinamentos</a>
-          <a href="#config-tabela" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"><Settings2 className="h-4 w-4" /> Tabela de configurações</a>
-          <a href="#guias" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"><UsersRound className="h-4 w-4" /> Guia por perfil</a>
-          <a href="#perguntas" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"><ListChecks className="h-4 w-4" /> Perguntas frequentes</a>
-        </div>
-      </header>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="manual-toc lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
-          <div className="rounded-2xl border border-[#e2e6ee] bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-[#07194f]/60">
-            <ManualToc chapters={CHAPTERS} />
-          </div>
-        </aside>
-
-        <main className="min-w-0 space-y-6">
+      <Suspense>
+        <ManualShell chapters={CHAPTERS} guide={<>
           {/* 1 */}
           <Chapter number={1} id="visao-geral" title="Visão geral do CRM" description="O que o sistema resolve, como ele se organiza e de onde vêm os dados." tags={["visao-geral", "erp", "whatsapp"]}>
             <Sub id="o-que-e" number="1.1" title="O que é o CRM Óticas Brasil">
@@ -1074,24 +1044,8 @@ export default function ManualPage() {
           </Chapter>
 
           {/* 19 */}
-          <Chapter number={19} id="videos" title="Vídeos & Treinamentos" description="Treinamentos em vídeo da equipe, para assistir direto nesta página." tags={["videos", "treinamento", "tutorial"]}>
-            <Sub id="videos-assistir" number="19.1" title="Assistir aos treinamentos">
-              <p>Escolha um vídeo na lista ao lado do player. Use a busca ou o filtro de categoria para encontrar um assunto. O player permite pausar, avançar, mudar a velocidade e ver em tela cheia.</p>
-              <ManualVideos />
-            </Sub>
-            <Sub id="videos-gerenciar" number="19.2" title="Publicar e gerenciar vídeos (administrador)">
-              <Steps items={[
-                <>Clique em <Kbd>Adicionar vídeo</Kbd>, informe o título e, se quiser, uma descrição e a categoria (ex.: Atendimento, Campanhas).</>,
-                "Escolha o arquivo (.mp4, .webm ou .mov, até 2 GB) e clique em Publicar vídeo. A barra mostra o progresso; mantenha a janela aberta até terminar.",
-                "Use o lápis para editar título, descrição ou categoria, as setas para mudar a ordem e a lixeira para excluir.",
-              ]} />
-              <Note kind="tip">Prefira vídeos curtos (até 10 minutos) em .mp4: carregam mais rápido e funcionam em qualquer navegador e no celular.</Note>
-            </Sub>
-          </Chapter>
-
-          {/* 20 */}
-          <Chapter number={20} id="guias" title="Guias passo a passo por perfil" description="Rotinas recomendadas para cada função." tags={["rotina", "boas-praticas"]}>
-            <Sub id="guia-atendente" number="20.1" title="O dia a dia do atendente">
+          <Chapter number={19} id="guias" title="Guias passo a passo por perfil" description="Rotinas recomendadas para cada função." tags={["rotina", "boas-praticas"]}>
+            <Sub id="guia-atendente" number="19.1" title="O dia a dia do atendente">
               <Steps items={[
                 "Ao chegar, abra o Atendimento e confira a aba Lembretes (vencidos em vermelho).",
                 "Atenda a aba Aguardando pela ordem, priorizando as conversas em alerta (mais de 10 min).",
@@ -1103,7 +1057,7 @@ export default function ManualPage() {
                 "Saindo para intervalo, peça ao supervisor para pausar sua distribuição.",
               ]} />
             </Sub>
-            <Sub id="guia-supervisor" number="20.2" title="O dia a dia do supervisor">
+            <Sub id="guia-supervisor" number="19.2" title="O dia a dia do supervisor">
               <Steps items={[
                 "Acompanhe em Filas quem está esperando, a maior espera e a carga de cada pessoa.",
                 "Ajuste limites e pausas conforme a escala do dia.",
@@ -1113,7 +1067,7 @@ export default function ManualPage() {
                 "Mantenha respostas prontas e o menu atualizados.",
               ]} />
             </Sub>
-            <Sub id="guia-marketing" number="20.3" title="O dia a dia do marketing">
+            <Sub id="guia-marketing" number="19.3" title="O dia a dia do marketing">
               <Steps items={[
                 "Monte o público em Segmentos, preferindo critérios.",
                 "Crie ou confirme um modelo aprovado em Modelos WhatsApp.",
@@ -1123,7 +1077,7 @@ export default function ManualPage() {
                 "Use os segmentos RFV-P de /clientes-vip para campanhas certeiras (ex.: reativar “Em Risco / Hibernando”) e confira no passo Público quantos clientes únicos vão receber.",
               ]} />
             </Sub>
-            <Sub id="guia-admin" number="20.4" title="O dia a dia do administrador">
+            <Sub id="guia-admin" number="19.4" title="O dia a dia do administrador">
               <Steps items={[
                 "Cadastre usuários e atribua cargos. Bloqueie acessos de quem saiu.",
                 "Revise em Permissões as telas e ações de cada cargo.",
@@ -1136,9 +1090,9 @@ export default function ManualPage() {
             </Sub>
           </Chapter>
 
-          {/* 21 */}
-          <Chapter number={21} id="faq" title="Glossário e perguntas frequentes" description="Termos usados no sistema e respostas para as dúvidas mais comuns." tags={["glossario", "faq", "suporte"]}>
-            <Sub id="glossario" number="21.1" title="Glossário">
+          {/* 20 */}
+          <Chapter number={20} id="faq" title="Glossário e perguntas frequentes" description="Termos usados no sistema e respostas para as dúvidas mais comuns." tags={["glossario", "faq", "suporte"]}>
+            <Sub id="glossario" number="20.1" title="Glossário">
               <Table
                 head={["Termo", "Significado"]}
                 rows={[
@@ -1162,7 +1116,7 @@ export default function ManualPage() {
                 ]}
               />
             </Sub>
-            <Sub id="perguntas" number="21.2" title="Perguntas frequentes">
+            <Sub id="perguntas" number="20.2" title="Perguntas frequentes">
               <div className="space-y-4">
                 {[
                   { q: "Não consigo responder um cliente: aparece que só posso enviar modelo.", a: "A janela de 24 horas está fechada. Envie um modelo aprovado; quando o cliente responder, a janela reabre e o texto livre volta a ser permitido." },
@@ -1178,6 +1132,7 @@ export default function ManualPage() {
                   { q: "A campanha criada com IA não deixa disparar.", a: "O modelo novo está aguardando aprovação da Meta. Assim que for aprovado, a campanha fica Pronta para envio. Se for rejeitado, gere nova versão e reenvie." },
                   { q: "A IA respondeu algo errado sobre uma política da loja.", a: "Cadastre ou corrija a informação em /ia › Regras da Empresa (ou na Base de Conhecimento) e teste no Simulador." },
                   { q: "O RFV-P de um cliente está desatualizado.", a: "O cálculo roda todo dia às 6h com os dados do VMSet. Para atualizar na hora, use Recalcular RFV-P em /clientes-vip." },
+                  { q: "Onde estão os vídeos de treinamento?", a: "No topo do manual, troque para Vídeos & Treinamentos. As aulas tocam em sequência com a reprodução automática ligada. Administradores publicam, editam, reordenam e excluem pelo botão Adicionar vídeo e pelo menu “...” de cada aula." },
                   { q: "Minha automação não está disparando.", a: "Confira se ela está Ativa (não em Rascunho), se o gatilho e os filtros batem com o contato e veja as métricas por nó para saber onde os contatos param. Use Testar fluxo para simular." },
                 ].map((item) => (
                   <div key={item.q} className="rounded-xl border border-[#e2e6ee] p-4 dark:border-slate-800">
@@ -1189,15 +1144,15 @@ export default function ManualPage() {
             </Sub>
           </Chapter>
 
-          <footer className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#051647] px-6 py-4 text-sm text-slate-300">
+          <footer className="mt-16 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-6 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
             <span>CRM Óticas Brasil · Manual do sistema</span>
-            <span className="flex gap-4">
-              <a href="#manual" className="cursor-pointer text-[#C4D600] hover:text-white">Voltar ao topo</a>
-              <Link href="/" className="cursor-pointer text-[#C4D600] hover:text-white">Ir para o CRM</Link>
+            <span className="flex gap-5">
+              <a href="#manual" className="cursor-pointer font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Voltar ao topo</a>
+              <Link href="/" className="cursor-pointer font-medium text-[#002187] hover:underline dark:text-[#C4D600]">Ir para o CRM</Link>
             </span>
           </footer>
-        </main>
-      </div>
+        </>} />
+      </Suspense>
     </div>
   );
 }

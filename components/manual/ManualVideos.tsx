@@ -1,7 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Clapperboard, FileVideo, Loader2, Pencil, PlayCircle, Plus, Search, Trash2, Upload } from "lucide-react";
+import { createPortal } from "react-dom";
+import {
+  ArrowDown,
+  ArrowUp,
+  Clapperboard,
+  FileVideo,
+  ListVideo,
+  Loader2,
+  MoreVertical,
+  Pencil,
+  Play,
+  Plus,
+  Search,
+  SkipBack,
+  SkipForward,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -17,6 +35,7 @@ type Video = {
   duration: number | null;
   sizeBytes: number;
   order: number;
+  createdAt?: string;
 };
 
 /** Categorias dos treinamentos (acompanham os módulos do CRM). */
@@ -37,10 +56,11 @@ const VIDEO_CATEGORIES = [
 ];
 const NO_CATEGORY = "Sem categoria";
 
-const ACCEPT =".mp4,.webm,.mov,.m4v,video/mp4,video/webm,video/quicktime";
+const ACCEPT = ".mp4,.webm,.mov,.m4v,video/mp4,video/webm,video/quicktime";
 const ALLOWED_EXTENSIONS = ["mp4", "webm", "mov", "m4v"];
 const MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const CHUNK_BYTES = 8 * 1024 * 1024;
+const AUTOPLAY_KEY = "manual:videos:autoplay";
 
 const normalize = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const formatDuration = (seconds: number | null) => {
@@ -51,10 +71,12 @@ const formatDuration = (seconds: number | null) => {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
 };
 const formatSize = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`);
+const formatDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric", timeZone: "America/Sao_Paulo" }) : "");
 
 const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 const primaryButton = "inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#051647] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#d4e400]";
 const ghostButton = "inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+const navButton = "inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-slate-100 px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15";
 
 /** Lê duração e um quadro (miniatura JPEG) do arquivo local, sem enviar nada. Falha silenciosa: os dois são opcionais. */
 function probeVideo(file: File): Promise<{ duration: number | null; thumbnail: string | null }> {
@@ -102,7 +124,32 @@ async function readJson<T>(response: Response): Promise<T & { error?: string }> 
   return (await response.json().catch(() => ({}))) as T & { error?: string };
 }
 
-/** Seção "Vídeos & Treinamentos": galeria com busca e player; administradores enviam, editam, ordenam e excluem. */
+function readAutoplay() {
+  try {
+    return window.localStorage.getItem(AUTOPLAY_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/** Miniatura do vídeo (quadro capturado no envio) com duração no canto. */
+function Thumb({ video, className }: { video: Video; className: string }) {
+  return (
+    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-[#051647] ${className}`}>
+      {video.thumbnailUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- miniatura privada servida pela API
+        <img src={video.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+      ) : (
+        <FileVideo className="h-6 w-6 text-[#C4D600]/80" />
+      )}
+      {video.duration ? <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1 py-px text-[10px] font-semibold tabular-nums text-white">{formatDuration(video.duration)}</span> : null}
+    </span>
+  );
+}
+
+type MenuState = { video: Video; top: number; left: number };
+
+/** Vídeos & Treinamentos: player grande à esquerda e playlist à direita (estilo YouTube). */
 export function ManualVideos() {
   const toast = useToast();
   const [videos, setVideos] = useState<Video[]>([]);
@@ -112,8 +159,13 @@ export function ManualVideos() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [currentId, setCurrentId] = useState<string | null>(null);
+  const [autoStart, setAutoStart] = useState(false);
+  const [autoplay, setAutoplay] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [form, setForm] = useState<{ mode: "new" | "edit"; video?: Video } | null>(null);
   const [deleting, setDeleting] = useState<Video | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const activeItemRef = useRef<HTMLLIElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -138,7 +190,7 @@ export function ManualVideos() {
         if (active) setVideos(body.data ?? []);
       })
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : "Não foi possível carregar os vídeos."); })
-      .finally(() => { if (active) setLoading(false); });
+      .finally(() => { if (active) { setLoading(false); setAutoplay(readAutoplay()); } });
     fetch("/api/me/permissions")
       .then((response) => (response.ok ? response.json() : null))
       .then((body: { data?: { isAdmin?: boolean } } | null) => { if (active) setIsAdmin(body?.data?.isAdmin === true); })
@@ -146,27 +198,65 @@ export function ManualVideos() {
     return () => { active = false; };
   }, []);
 
+  // Menu "..." fecha ao rolar, redimensionar ou apertar Esc.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
   const categories = useMemo(() => [...new Set(videos.map((video) => video.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR")), [videos]);
-  const filtered = useMemo(() => {
+  const playlist = useMemo(() => {
     const term = normalize(query.trim());
     return videos.filter((video) =>
       (!category || video.category === category) &&
       (!term || normalize(`${video.title} ${video.description} ${video.category}`).includes(term)));
   }, [videos, query, category]);
-  const current = filtered.find((video) => video.id === currentId) ?? filtered[0] ?? null;
+  const current = videos.find((video) => video.id === currentId) ?? playlist[0] ?? videos[0] ?? null;
+  const position = current ? playlist.findIndex((video) => video.id === current.id) : -1;
+  const previous = position > 0 ? playlist[position - 1] : null;
+  const next = position >= 0 && position < playlist.length - 1 ? playlist[position + 1] : null;
+  const filtering = Boolean(query.trim() || category);
+
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({ block: "nearest" });
+  }, [current?.id]);
+
+  const play = (video: Video, start = true) => {
+    setCurrentId(video.id);
+    setAutoStart(start);
+    setExpanded(false);
+  };
+
+  const toggleAutoplay = () => {
+    setAutoplay((value) => {
+      try { window.localStorage.setItem(AUTOPLAY_KEY, value ? "0" : "1"); } catch { /* preferência só deste navegador */ }
+      return !value;
+    });
+  };
 
   const move = async (video: Video, direction: -1 | 1) => {
     const index = videos.findIndex((item) => item.id === video.id);
     const target = index + direction;
     if (index < 0 || target < 0 || target >= videos.length) return;
-    const next = [...videos];
-    [next[index], next[target]] = [next[target], next[index]];
-    setVideos(next);
-    const response = await fetch("/api/manual/videos/reorder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: next.map((item) => item.id) }) });
+    const reordered = [...videos];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setVideos(reordered);
+    const response = await fetch("/api/manual/videos/reorder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: reordered.map((item) => item.id) }) });
     if (!response.ok) {
       toast.error("Não foi possível mudar a ordem", (await readJson(response)).error);
       void load();
+      return;
     }
+    toast.success("Ordem atualizada", `"${video.title}" foi movido para a posição ${target + 1}.`);
   };
 
   const remove = async () => {
@@ -176,104 +266,195 @@ export function ManualVideos() {
       toast.error("Não foi possível excluir o vídeo", (await readJson(response)).error);
       return;
     }
-    toast.success("Vídeo excluído", `"${deleting.title}" saiu da galeria.`);
+    toast.success("Vídeo excluído", `"${deleting.title}" saiu da playlist.`);
+    if (currentId === deleting.id) setCurrentId(null);
     setVideos((items) => items.filter((item) => item.id !== deleting.id));
     setDeleting(null);
   };
 
-  return (
-    <div className="space-y-4 text-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <label className="relative min-w-0 flex-1">
-          <span className="sr-only">Buscar vídeo</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por título, descrição ou categoria" className={`${inputClass} pl-9`} />
-        </label>
-        {categories.length > 0 && (
-          <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filtrar por categoria" className={`${inputClass} cursor-pointer sm:w-56`}>
-            <option value="">Todas as categorias</option>
-            {categories.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-        )}
-        {isAdmin && (
-          <button type="button" onClick={() => setForm({ mode: "new" })} className={primaryButton}>
-            <Plus className="h-4 w-4" /> Adicionar vídeo
-          </button>
-        )}
-      </div>
+  const openMenu = (video: Video, button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect();
+    const width = 200;
+    setMenu({ video, top: Math.min(rect.bottom + 4, window.innerHeight - 190), left: Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)) });
+  };
 
-      {loading ? (
-        <p className="flex items-center gap-2 text-slate-500 dark:text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Carregando vídeos...</p>
-      ) : loadError ? (
-        <p role="alert" className="text-sm font-medium text-[#9a3d12] dark:text-[#F7915E]">{loadError}</p>
-      ) : videos.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          <Clapperboard className="h-8 w-8 text-slate-400" />
-          <p className="font-semibold text-slate-700 dark:text-slate-200">Nenhum vídeo de treinamento ainda</p>
-          <p className="text-xs">{isAdmin ? "Use \"Adicionar vídeo\" para publicar o primeiro treinamento." : "Os vídeos publicados pela administração aparecem aqui."}</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <p className="text-slate-500 dark:text-slate-400">Nenhum vídeo encontrado para essa busca.</p>
-      ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          {current && (
-            <div className="min-w-0 space-y-2">
-              <div className="overflow-hidden rounded-xl bg-black">
-                <video
-                  key={current.id}
-                  src={current.videoUrl}
-                  poster={current.thumbnailUrl ?? undefined}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  controlsList="nodownload"
-                  className="aspect-video w-full bg-black"
-                />
-              </div>
-              <div className="min-w-0 break-words">
-                <h4 className="text-base font-semibold text-slate-900 dark:text-white">{current.title}</h4>
-                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  {[current.category, formatDuration(current.duration)].filter(Boolean).join(" · ")}
-                </p>
-                {current.description && <p className="mt-2 whitespace-pre-line text-slate-600 dark:text-slate-300">{current.description}</p>}
-              </div>
+  if (loading) {
+    return <p className="flex items-center gap-2 py-16 text-sm text-slate-500 dark:text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Carregando treinamentos...</p>;
+  }
+  if (loadError) return <p role="alert" className="py-16 text-sm font-medium text-[#9a3d12] dark:text-[#F7915E]">{loadError}</p>;
+
+  const description = current?.description ?? "";
+  const longDescription = description.length > 220 || description.split("\n").length > 3;
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,7fr)_minmax(340px,3fr)]">
+      {/* Coluna principal: player e informações da aula */}
+      <section aria-label="Player" className="min-w-0">
+        {current ? (
+          <>
+            <div className="overflow-hidden rounded-2xl bg-black shadow-sm">
+              <video
+                key={current.id}
+                src={current.videoUrl}
+                poster={current.thumbnailUrl ?? undefined}
+                controls
+                autoPlay={autoStart}
+                playsInline
+                preload="metadata"
+                controlsList="nodownload"
+                onEnded={() => { if (autoplay && next) play(next); }}
+                className="aspect-video h-auto w-full bg-black"
+              />
             </div>
-          )}
-          <ol aria-label="Lista de vídeos" className="max-h-[560px] min-w-0 space-y-2 overflow-y-auto pr-1">
-            {filtered.map((video) => {
-              const active = current?.id === video.id;
-              const globalIndex = videos.findIndex((item) => item.id === video.id);
-              return (
-                <li key={video.id} className={`flex min-w-0 gap-2 rounded-xl border p-2 transition ${active ? "border-[#002187] bg-[#002187]/5 dark:border-[#C4D600] dark:bg-[#C4D600]/10" : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800/60"}`}>
-                  <button type="button" onClick={() => setCurrentId(video.id)} className="flex min-w-0 flex-1 cursor-pointer gap-3 text-left" aria-current={active ? "true" : undefined}>
-                    <span className="relative grid aspect-video w-28 shrink-0 place-items-center overflow-hidden rounded-lg bg-[#051647]">
-                      {video.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- miniatura privada servida pela API
-                        <img src={video.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-                      ) : (
-                        <FileVideo className="h-6 w-6 text-[#C4D600]" />
-                      )}
-                      <PlayCircle className="absolute h-7 w-7 text-white/90 drop-shadow" />
-                      {video.duration ? <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] font-semibold text-white">{formatDuration(video.duration)}</span> : null}
-                    </span>
-                    <span className="min-w-0 break-words">
-                      <span className="line-clamp-2 text-xs font-semibold text-slate-900 dark:text-white">{video.title}</span>
-                      {video.category && <span className="mt-1 block truncate text-[10px] text-slate-500 dark:text-slate-400">{video.category}</span>}
-                    </span>
-                  </button>
-                  {isAdmin && (
-                    <span className="flex shrink-0 flex-col gap-0.5">
-                      <button type="button" title="Subir na lista" aria-label={`Subir ${video.title}`} disabled={globalIndex <= 0 || Boolean(query || category)} onClick={() => void move(video, -1)} className="cursor-pointer rounded p-1 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-slate-700"><ArrowUp className="h-3.5 w-3.5" /></button>
-                      <button type="button" title="Descer na lista" aria-label={`Descer ${video.title}`} disabled={globalIndex >= videos.length - 1 || Boolean(query || category)} onClick={() => void move(video, 1)} className="cursor-pointer rounded p-1 text-slate-500 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-slate-700"><ArrowDown className="h-3.5 w-3.5" /></button>
-                      <button type="button" title="Editar" aria-label={`Editar ${video.title}`} onClick={() => setForm({ mode: "edit", video })} className="cursor-pointer rounded p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button type="button" title="Excluir" aria-label={`Excluir ${video.title}`} onClick={() => setDeleting(video)} className="cursor-pointer rounded p-1 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </span>
+            <div className="mt-4 min-w-0 break-words">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                {current.category && <span className="rounded-full bg-[#C4D600]/25 px-2.5 py-0.5 font-semibold text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{current.category}</span>}
+                {current.duration ? <span className="tabular-nums">{formatDuration(current.duration)}</span> : null}
+                {current.createdAt && <span>Publicado em {formatDate(current.createdAt)}</span>}
+              </div>
+              <h2 className="mt-2 text-xl font-semibold leading-snug text-[#051647] sm:text-2xl dark:text-white">{current.title}</h2>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button type="button" disabled={!previous} onClick={() => previous && play(previous)} className={navButton}><SkipBack className="h-4 w-4" /> Anterior</button>
+                <button type="button" disabled={!next} onClick={() => next && play(next)} className={navButton}>Próximo <SkipForward className="h-4 w-4" /></button>
+                <button type="button" role="switch" aria-checked={autoplay} onClick={toggleAutoplay} className="ml-auto inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                  <span className={`relative h-5 w-9 rounded-full transition ${autoplay ? "bg-[#002187] dark:bg-[#C4D600]" : "bg-slate-300 dark:bg-slate-600"}`}>
+                    <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${autoplay ? "left-[18px]" : "left-0.5"}`} />
+                  </span>
+                  Reprodução automática
+                </button>
+              </div>
+
+              {description && (
+                <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 dark:bg-white/5 dark:text-slate-300">
+                  <p className={`whitespace-pre-line ${expanded ? "" : "line-clamp-3"}`}>{description}</p>
+                  {longDescription && (
+                    <button type="button" onClick={() => setExpanded((value) => !value)} className="mt-1 cursor-pointer text-sm font-semibold text-[#051647] hover:underline dark:text-white">
+                      {expanded ? "Mostrar menos" : "Mostrar mais"}
+                    </button>
                   )}
-                </li>
-              );
-            })}
-          </ol>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex aspect-video flex-col items-center justify-center gap-3 rounded-2xl bg-[#051647] px-6 text-center text-white">
+            <Clapperboard className="h-10 w-10 text-[#C4D600]" />
+            <p className="text-lg font-semibold">Nenhum treinamento publicado ainda</p>
+            <p className="max-w-sm text-sm text-slate-300">{isAdmin ? "Use “Adicionar vídeo” na playlist para publicar a primeira aula." : "Assim que a administração publicar as aulas, elas aparecem aqui."}</p>
+          </div>
+        )}
+      </section>
+
+      {/* Coluna lateral: playlist */}
+      <aside aria-label="Playlist" className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start dark:border-slate-800 dark:bg-[#07194f]/40">
+        <div className="space-y-3 border-b border-slate-200 p-4 dark:border-slate-800">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 truncate font-semibold text-[#051647] dark:text-white"><ListVideo className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />{category || "Todos os treinamentos"}</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {playlist.length === 0 ? "Nenhuma aula" : position >= 0 ? `Aula ${position + 1} de ${playlist.length}` : `${playlist.length} aula${playlist.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            {isAdmin && (
+              <button type="button" onClick={() => setForm({ mode: "new" })} className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#051647] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#d4e400]">
+                <Plus className="h-3.5 w-3.5" /> Adicionar vídeo
+              </button>
+            )}
+          </div>
+          {videos.length > 0 && (
+            <>
+              <label className="relative block">
+                <span className="sr-only">Buscar aula</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar aula" className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-[#C4D600]" />
+                {query && <button type="button" onClick={() => setQuery("")} aria-label="Limpar busca" className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"><X className="h-3.5 w-3.5" /></button>}
+              </label>
+              {categories.length > 0 && (
+                <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5" role="group" aria-label="Filtrar por módulo">
+                  {["", ...categories].map((item) => {
+                    const selected = category === item;
+                    return (
+                      <button
+                        key={item || "todos"}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setCategory(item)}
+                        className={`shrink-0 cursor-pointer rounded-full px-3 py-1 text-xs font-medium transition ${selected ? "bg-[#051647] text-white dark:bg-white dark:text-[#051647]" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-300 dark:hover:bg-white/15"}`}
+                      >
+                        {item || "Todos"}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </div>
+
+        <ol className="min-h-0 flex-1 overflow-y-auto p-2 lg:max-h-none">
+          {playlist.map((video, index) => {
+            const active = current?.id === video.id;
+            return (
+              <li key={video.id} ref={active ? activeItemRef : undefined} className={`group relative flex items-start gap-1 rounded-xl transition ${active ? "bg-[#002187]/[0.07] dark:bg-[#C4D600]/10" : "hover:bg-slate-50 dark:hover:bg-white/5"}`}>
+                <button type="button" onClick={() => play(video)} aria-current={active ? "true" : undefined} className="flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 p-2 text-left">
+                  <span className="mt-6 w-5 shrink-0 text-center text-xs tabular-nums text-slate-400">
+                    {active ? <Play className="mx-auto h-3 w-3 fill-[#002187] text-[#002187] dark:fill-[#C4D600] dark:text-[#C4D600]" /> : index + 1}
+                  </span>
+                  <Thumb video={video} className="aspect-video w-32 sm:w-36" />
+                  <span className="min-w-0 flex-1 break-words pr-6">
+                    <span className={`line-clamp-2 text-sm leading-snug ${active ? "font-semibold text-[#051647] dark:text-white" : "font-medium text-slate-800 dark:text-slate-100"}`}>{video.title}</span>
+                    {video.category && <span className="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">{video.category}</span>}
+                  </span>
+                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    aria-label={`Ações de ${video.title}`}
+                    aria-haspopup="menu"
+                    onClick={(event) => openMenu(video, event.currentTarget)}
+                    className="absolute right-1.5 top-2 cursor-pointer rounded-full p-1.5 text-slate-400 opacity-100 transition hover:bg-slate-200 hover:text-slate-700 lg:opacity-0 lg:group-hover:opacity-100 lg:focus:opacity-100 dark:hover:bg-white/10 dark:hover:text-white"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                )}
+              </li>
+            );
+          })}
+          {videos.length > 0 && playlist.length === 0 && <li className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">Nenhuma aula encontrada.</li>}
+          {videos.length === 0 && <li className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">A playlist está vazia.</li>}
+        </ol>
+      </aside>
+
+      {menu && createPortal(
+        <>
+          <div className="fixed inset-0 z-[90]" onMouseDown={() => setMenu(null)} aria-hidden />
+          <div role="menu" style={{ top: menu.top, left: menu.left }} className="fixed z-[95] w-[200px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl dark:border-slate-700 dark:bg-[#07194f]">
+            {(() => {
+              const index = videos.findIndex((item) => item.id === menu.video.id);
+              const items = [
+                { label: "Editar", icon: Pencil, onClick: () => setForm({ mode: "edit", video: menu.video }), disabled: false },
+                { label: "Mover para cima", icon: ArrowUp, onClick: () => void move(menu.video, -1), disabled: filtering || index <= 0 },
+                { label: "Mover para baixo", icon: ArrowDown, onClick: () => void move(menu.video, 1), disabled: filtering || index >= videos.length - 1 },
+              ];
+              return (
+                <>
+                  {items.map((item) => (
+                    <button key={item.label} type="button" role="menuitem" disabled={item.disabled} onClick={() => { setMenu(null); item.onClick(); }} className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-200 dark:hover:bg-white/5">
+                      <item.icon className="h-4 w-4 text-slate-400" /> {item.label}
+                    </button>
+                  ))}
+                  {filtering && <p className="px-3 pb-1 text-[11px] text-slate-400">Limpe a busca e o filtro para reordenar.</p>}
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                  <button type="button" role="menuitem" onClick={() => { setDeleting(menu.video); setMenu(null); }} className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40">
+                    <Trash2 className="h-4 w-4" /> Excluir
+                  </button>
+                </>
+              );
+            })()}
+          </div>
+        </>,
+        document.body,
       )}
 
       {form && (
@@ -284,7 +465,7 @@ export function ManualVideos() {
           onClose={() => setForm(null)}
           onSaved={(saved) => {
             setVideos((items) => (form.mode === "new" ? [...items, saved] : items.map((item) => (item.id === saved.id ? saved : item))));
-            if (form.mode === "new") setCurrentId(saved.id);
+            if (form.mode === "new") play(saved, false);
             setForm(null);
           }}
         />
@@ -292,7 +473,7 @@ export function ManualVideos() {
       {deleting && (
         <ConfirmDialog
           title="Excluir vídeo"
-          description={`"${deleting.title}" será removido da galeria e o arquivo será apagado. Essa ação não pode ser desfeita.`}
+          description={`"${deleting.title}" será removido da playlist e o arquivo será apagado. Essa ação não pode ser desfeita.`}
           confirmLabel="Excluir vídeo"
           variant="destructive"
           onConfirm={remove}
