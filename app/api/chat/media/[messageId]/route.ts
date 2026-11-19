@@ -22,8 +22,7 @@ export async function GET(request: Request, context: Context) {
   const { messageId } = await context.params;
 
   const message = await prisma.chatMessage.findFirst({
-    // Mensagem apagada não serve mais o arquivo.
-    where: { id: messageId, deletedAt: null, conversation: scopeWhere(guard.actor) },
+    where: { id: messageId, conversation: scopeWhere(guard.actor) },
     select: { attachment: true },
   });
   const attachment = message?.attachment as ChatAttachment | null | undefined;

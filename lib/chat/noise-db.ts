@@ -11,8 +11,8 @@ import { phoneVariants } from "@/lib/chat/phone";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 
 /** Mensagem do cliente que conta como atendimento engajado (não é ruído, resposta automática nem "oi"/"quero aproveitar"). */
-export function isEngagingCustomerMessage(message: { text: string; authorName: string | null; attachment: unknown; deletedAt?: Date | null }) {
-  if (message.deletedAt || message.authorName === NOISE_AUTHOR || message.authorName === AUTO_REPLY_AUTHOR) return false;
+export function isEngagingCustomerMessage(message: { text: string; authorName: string | null; attachment: unknown }) {
+  if (message.authorName === NOISE_AUTHOR || message.authorName === AUTO_REPLY_AUTHOR) return false;
   const kind = (message.attachment as { kind?: string } | null)?.kind;
   if (kind && kind !== "sticker") return true;
   const text = message.text.trim();
@@ -30,7 +30,7 @@ export async function conversationEngaged(conversation: { id: string; status: st
     where: { conversationId: conversation.id, author: "customer" },
     orderBy: { createdAt: "desc" },
     take: 30,
-    select: { text: true, authorName: true, attachment: true, deletedAt: true },
+    select: { text: true, authorName: true, attachment: true },
   });
   return messages.some(isEngagingCustomerMessage);
 }

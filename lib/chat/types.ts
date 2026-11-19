@@ -116,10 +116,7 @@ export type ChatMessageItem = {
   /** Áudio do cliente transcrito automaticamente (pending | done | failed). */
   transcription?: { status: string; text: string | null } | null;
   /** Presente quando a mensagem saiu como lista interativa; o texto fica só como alternativa. */
-  interactive?: ChatInteractiveList | null;
-  /** Mensagem apagada: "me" = só no CRM; "everyone" = revogada também no WhatsApp do cliente. */
-  deleted?: { scope: "me" | "everyone"; by: string | null; at: string | Date } | null;
-};
+  interactive?: ChatInteractiveList | null;};
 
 export const PRIORITY_LABELS: Record<ChatPriority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
 export const STATUS_LABELS: Record<ChatStatus, string> = { bot: "No menu", waiting: "Na fila", in_progress: "Em atendimento", closed: "Encerrada" };

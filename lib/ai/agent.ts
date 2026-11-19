@@ -1205,7 +1205,7 @@ async function respond(conversationId: string, messageId: string) {
   const consumed = consumedUntil.get(conversationId);
   const lastOther = consumed ? await prisma.chatMessage.findFirst({ where: { conversationId, internal: false, OR: [{ author: "agent" }, { author: "bot", NOT: { authorName: AI_AUTHOR } }] }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }) : null;
   const pendingSince = consumed ? (lastOther && lastOther.createdAt > consumed ? lastOther.createdAt : consumed) : lastAnswer?.createdAt ?? sessionStart ?? undefined;
-  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", deletedAt: null, OR: [{ authorName: null }, { authorName: { not: NOISE_AUTHOR } }], ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { id: true, text: true, attachment: true, metaMedia: true, createdAt: true } });
+  const pending = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", OR: [{ authorName: null }, { authorName: { not: NOISE_AUTHOR } }], ...(pendingSince ? { createdAt: { gt: pendingSince } } : {}) }, orderBy: { createdAt: "asc" }, select: { id: true, text: true, attachment: true, metaMedia: true, createdAt: true } });
   if (!pending.length) return;
   consumedUntil.set(conversationId, pending[pending.length - 1].createdAt);
   // Na espera assistida, o limite de respostas conta só as respostas depois do transbordo.
@@ -1213,7 +1213,7 @@ async function respond(conversationId: string, messageId: string) {
   const inStage = stageStart ? { createdAt: { gt: stageStart } } : {};
   const aiReplies = await prisma.chatMessage.count({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, ...inStage } });
   // Mensagens anteriores do cliente: insistência em tentativa de manipulação leva para a equipe.
-  const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", deletedAt: null, OR: [{ authorName: null }, { authorName: { not: NOISE_AUTHOR } }], ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt, ...(sessionStart ? { gt: sessionStart } : {}) } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
+  const earlier = await prisma.chatMessage.findMany({ where: { conversationId, author: "customer", OR: [{ authorName: null }, { authorName: { not: NOISE_AUTHOR } }], ...(lastAnswer ? { createdAt: { lte: lastAnswer.createdAt, ...(sessionStart ? { gt: sessionStart } : {}) } } : { id: { in: [] } }) }, orderBy: { createdAt: "desc" }, take: 20, select: { text: true } });
   const meta = { feature: "agent", conversationId };
   // Fotos já enviadas: na fila, só as mandadas depois da transferência (perguntar de novo na fila reenvia a foto).
   const photos = await prisma.chatMessage.findMany({ where: { conversationId, author: "bot", authorName: AI_AUTHOR, NOT: { metaMedia: { equals: Prisma.DbNull } }, ...inStage }, orderBy: { createdAt: "desc" }, take: 30, select: { metaMedia: true } });
