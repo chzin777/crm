@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { DEFAULT_ATTENDANT_FALLBACK } from "@/lib/attendant-variables";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { WhatsAppSettings } from "@/components/WhatsAppSettings";
@@ -31,6 +32,8 @@ interface CrmSettings {
   // Atendimento: minutos sem interação até o operador ir para Ausente (0 desliga) e assinatura nas mensagens.
   operatorAutoAwayMinutes?: string;
   signMessagesWithName?: boolean;
+  /** Substitui {{nome_atendente}}/{{primeiro_nome_atendente}} em disparos para contato sem operador. */
+  attendantFallbackName?: string;
   }
 
 const defaultSettings: CrmSettings = {
@@ -240,7 +243,9 @@ export default function ConfiguracoesPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <SettingsTextField label="Tempo de inatividade para pausa automática do operador (minutos)" value={settings.operatorAutoAwayMinutes ?? "15"} type="number" onChange={(value) => updateSetting("operatorAutoAwayMinutes", value)} />
               <SettingsToggle label="Assinar mensagens com o nome do atendente" description="Envia como *Nome do Atendente:* em negrito na primeira linha (não vale para notas internas, modelos e mídias)." checked={Boolean(settings.signMessagesWithName)} onChange={(checked) => updateSetting("signMessagesWithName", checked)} />
+              <SettingsTextField label="Nome usado quando o contato ainda não tem atendente" value={settings.attendantFallbackName ?? ""} placeholder={DEFAULT_ATTENDANT_FALLBACK} onChange={(value) => updateSetting("attendantFallbackName", value)} />
             </div>
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">As variáveis {"{{nome_atendente}}"} e {"{{primeiro_nome_atendente}}"} usam o operador da conversa; em campanhas e envios em massa para contatos sem operador atribuído, usam este nome (em branco: {DEFAULT_ATTENDANT_FALLBACK}).</p>
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Operador Online sem cliques ou digitação por esse tempo vai para Ausente e para de receber novos atendimentos; ao voltar a usar o CRM, retorna a Online. Use 0 para desativar.</p>
           </SettingsCard>
 

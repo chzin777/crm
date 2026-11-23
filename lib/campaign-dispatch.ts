@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
 import { findTemplate, getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { phoneVariants } from "@/lib/chat/phone";
+import { assignedAttendantValues } from "@/lib/attendant-db";
+import { hasAttendantToken, isAttendantField } from "@/lib/attendant-variables";
 import { brDay, formatBr } from "@/lib/br-time";
 import { firstDispatch } from "@/lib/chat/conversation";
 import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
@@ -214,6 +216,10 @@ async function sendToRecipient(
     segmento: recipient.segmento,
     data_nascimento: recipient.dataNascimento,
   };
+  // Atendente do contato (conversa aberta com operador) ou o nome da equipe: só consulta quando a campanha usa.
+  if (campaign.modelo ? campaign.modelo.params.some(isAttendantField) : hasAttendantToken(campaign.mensagem)) {
+    Object.assign(values, await assignedAttendantValues({ contactId: recipient.id, phone: recipient.telefone }));
+  }
   if (campaign.modelo) {
     const params = campaign.modelo.params.map((field) => values[field] || "-");
     const quickReplyPayloads = (campaign.metaTemplateDraft?.buttons ?? campaign.modelo.buttons ?? [])
@@ -221,7 +227,7 @@ async function sendToRecipient(
     const sent = await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header, [], quickReplyPayloads);
     return { messageId: sent.messages?.[0]?.id ?? null, text: renderTemplateText(templateInfo, campaign.modelo.name, params) };
   }
-  const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento)\}\}/g, (_match, key: string) => values[key] ?? "");
+  const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento|nome_atendente|primeiro_nome_atendente)\}\}/g, (_match, key: string) => values[key] ?? "");
   const media = (campaign.anexos ?? []).filter((file) => file.url);
   if (media.length === 0) {
     const sent = await sendText(recipient.telefone, text);

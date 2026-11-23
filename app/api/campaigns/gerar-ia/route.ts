@@ -44,7 +44,7 @@ const campaignSchema = strictObject({
     }),
   },
   body: { type: "string" },
-  params: { type: "array", items: { type: "string", enum: ["nome", "email", "telefone", "segmento", "data_nascimento"] } },
+  params: { type: "array", items: { type: "string", enum: ["nome", "email", "telefone", "segmento", "data_nascimento", "nome_atendente", "primeiro_nome_atendente"] } },
   headerFormat: { type: "string", enum: ["NONE", "TEXT"] },
   headerText: { type: "string" },
   footer: { type: "string" },
@@ -58,7 +58,7 @@ const templateSchema = strictObject({
   headerText: { type: "string" },
   body: { type: "string" },
   footer: { type: "string" },
-  params: { type: "array", items: { type: "string", enum: ["nome", "email", "telefone", "segmento", "data_nascimento"] } },
+  params: { type: "array", items: { type: "string", enum: ["nome", "email", "telefone", "segmento", "data_nascimento", "nome_atendente", "primeiro_nome_atendente"] } },
   examples: { type: "array", items: { type: "string" } },
   buttons: { type: "array", items: quickReplySchema },
 });

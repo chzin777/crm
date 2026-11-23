@@ -4,7 +4,7 @@ import { requireModule } from "@/lib/api-auth";
 import { patchCampaign, upsertCampaign, type CampaignRecord } from "@/lib/campaigns";
 import { createTemplate, type TemplateButton } from "@/lib/meta-whatsapp";
 
-const CONTACT_FIELDS = new Set(["nome", "email", "telefone", "segmento", "data_nascimento"]);
+const CONTACT_FIELDS = new Set(["nome", "email", "telefone", "segmento", "data_nascimento", "nome_atendente", "primeiro_nome_atendente"]);
 
 type RequestBody = {
   campaign?: Record<string, unknown>;

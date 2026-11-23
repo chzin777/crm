@@ -1,4 +1,5 @@
 import { brClock } from "@/lib/br-time";
+import { attendantValues } from "@/lib/attendant-variables";
 
 /** Troca travessões por hífen na saída para o cliente. */
 /** Garantia final: o marcador de bolhas (---SPLIT--- / [SPLIT]) nunca chega ao cliente; vira quebra de parágrafo. */
@@ -22,6 +23,8 @@ export const TEXT_VARIABLES = [
   { mark: "{nome}", description: "primeiro nome do cliente" },
   { mark: "{cliente_completo}", description: "nome completo do cliente" },
   { mark: "{atendente}", description: "primeiro nome de quem atende" },
+  { mark: "{{nome_atendente}}", description: "nome completo de quem atende" },
+  { mark: "{{primeiro_nome_atendente}}", description: "primeiro nome de quem atende" },
   { mark: "{fila}", description: "fila da conversa" },
   { mark: "{saudacao}", description: "bom dia, boa tarde ou boa noite" },
 ];
@@ -47,8 +50,11 @@ export function fillVariables(text: string, data: TextVariables = {}, now = new 
     atendente: agent ? firstName(agent) : "nossa equipe",
     fila: (data.queue ?? "").trim(),
     saudacao: greetingFor(now),
+    // {{nome_atendente}} / {{primeiro_nome_atendente}}: sem atendente, o nome da equipe (nunca vazio).
+    ...attendantValues(agent),
   };
   return text
+    .replace(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g, (mark, key: string) => values[key.toLowerCase()] ?? mark)
     .replace(/\{([a-zA-Z_]+)\}/g, (mark, key: string) => (key.toLowerCase() === "menu" ? mark : values[key.toLowerCase()] ?? ""))
     .split("\n")
     .map((line) => line.replace(/[ \t]{2,}/g, " ").replace(/\s+([,.;:!?])/g, "$1").replace(/[ \t]+$/g, ""))

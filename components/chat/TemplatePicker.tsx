@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { Clock } from "lucide-react";
+import { ATTENDANT_FIELDS, attendantValues, fillAttendantTokens } from "@/lib/attendant-variables";
 
 type Template = { name: string; language: string; status: string; body: string };
 
 export type TemplateChoice = { name: string; language: string; params: string[] };
 
-export function TemplatePicker({ onSend, requireNotice = true }: { onSend: (template: TemplateChoice) => Promise<void>; requireNotice?: boolean }) {
+export function TemplatePicker({ onSend, requireNotice = true, customerName, agentName }: { onSend: (template: TemplateChoice) => Promise<void>; requireNotice?: boolean; customerName?: string | null; agentName?: string | null }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selected, setSelected] = useState("");
   const [params, setParams] = useState<string[]>([]);
@@ -33,10 +34,27 @@ export function TemplatePicker({ onSend, requireNotice = true }: { onSend: (temp
   const template = templates.find((item) => `${item.name}|${item.language}` === selected);
   const count = useMemo(() => new Set(template?.body.match(/\{\{\d+\}\}/g) ?? []).size, [template]);
 
+  // Variáveis do cliente e do atendente (operador logado): {{nome_atendente}} e afins viram o valor real no envio.
+  const attendant = useMemo(() => attendantValues(agentName), [agentName]);
+  const resolve = (value: string) => {
+    const customer = (customerName ?? "").trim();
+    return fillAttendantTokens(value, attendant)
+      .replace(/\{\{\s*primeiro_nome\s*\}\}/gi, customer.split(/\s+/)[0] ?? "")
+      .replace(/\{\{\s*nome\s*\}\}/gi, customer);
+  };
+  const sources = [
+    ...(customerName?.trim() ? [{ label: "Nome do cliente", value: "{{nome}}" }, { label: "Primeiro nome do cliente", value: "{{primeiro_nome}}" }] : []),
+    ...ATTENDANT_FIELDS.map((item) => ({ label: item.label, value: `{{${item.value}}}` })),
+  ];
+  const setParam = (index: number, value: string) => setParams((current) => { const next = [...current]; next[index] = value; return next; });
+  const preview = template
+    ? template.body.replace(/\{\{(\d+)\}\}/g, (mark, number: string) => resolve(params[Number(number) - 1] ?? "").trim() || mark)
+    : "";
+
   const send = async () => {
     if (!template || sending) return;
     setSending(true);
-    await onSend({ name: template.name, language: template.language, params: Array.from({ length: count }, (_, index) => params[index] ?? "") });
+    await onSend({ name: template.name, language: template.language, params: Array.from({ length: count }, (_, index) => resolve(params[index] ?? "").trim()) });
     setSending(false);
   };
 
@@ -54,11 +72,22 @@ export function TemplatePicker({ onSend, requireNotice = true }: { onSend: (temp
         <option value="">Selecione um modelo</option>
         {templates.map((item) => <option key={`${item.name}|${item.language}`} value={`${item.name}|${item.language}`}>{item.name} ({item.language})</option>)}
       </select>
-      {template && <p className="whitespace-pre-wrap rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{template.body}</p>}
+      {template && <p aria-label="Pré-visualização do modelo" className="whitespace-pre-wrap break-words rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{preview}</p>}
       {Array.from({ length: count }, (_, index) => (
-        <input key={index} aria-label={`Variável ${index + 1}`} placeholder={`Variável {{${index + 1}}}`} value={params[index] ?? ""} onChange={(event) => setParams((current) => { const next = [...current]; next[index] = event.target.value; return next; })} className={field} />
+        <div key={index} className="space-y-1">
+          <input aria-label={`Variável ${index + 1}`} placeholder={`Variável {{${index + 1}}}`} value={params[index] ?? ""} onChange={(event) => setParam(index, event.target.value)} className={field} />
+          {sources.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {sources.map((source) => (
+                <button key={source.label} type="button" onClick={() => setParam(index, source.value)} title={source.value} className="cursor-pointer rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600]">
+                  {source.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       ))}
-      <button type="button" onClick={() => void send()} disabled={!template || sending || Array.from({ length: count }).some((_, index) => !params[index]?.trim())} className="h-9 cursor-pointer rounded-lg bg-[#051647] px-4 text-sm font-medium text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647]">
+      <button type="button" onClick={() => void send()} disabled={!template || sending || Array.from({ length: count }).some((_, index) => !resolve(params[index] ?? "").trim())} className="h-9 cursor-pointer rounded-lg bg-[#051647] px-4 text-sm font-medium text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647]">
         {sending ? "Enviando..." : "Enviar modelo"}
       </button>
     </div>

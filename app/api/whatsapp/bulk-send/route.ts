@@ -8,7 +8,7 @@ import { forbidUnless } from "@/lib/api-auth";
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const ALLOWED = (type: string) => type.startsWith("image/") || type.startsWith("video/") || type === "application/pdf";
-const SOURCES: BulkParamSource[] = ["primeiro_nome", "nome", "telefone", "manual"];
+const SOURCES: BulkParamSource[] = ["primeiro_nome", "nome", "telefone", "nome_atendente", "primeiro_nome_atendente", "manual"];
 
 function parseTemplateParams(raw: FormDataEntryValue | null): BulkTemplateParam[] | null {
   if (!raw) return [];

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { assignedAttendantValues } from "@/lib/attendant-db";
+import { isAttendantField, type AttendantValues } from "@/lib/attendant-variables";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
@@ -7,7 +9,7 @@ import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/
 import { phoneVariants } from "@/lib/chat/phone";
 import { reportError } from "@/lib/monitoring/error-reporter";
 
-export type BulkParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
+export type BulkParamSource = "primeiro_nome" | "nome" | "telefone" | "nome_atendente" | "primeiro_nome_atendente" | "manual";
 export type BulkTemplateParam = { source: BulkParamSource; value: string };
 export type BulkItemStatus = "PENDING" | "SENDING" | "SENT" | "FAILED" | "CANCELLED";
 export type BulkItem = { contactId: string; nome: string; telefone: string; status: BulkItemStatus; error?: string };
@@ -123,7 +125,8 @@ async function writeJob(job: BulkJob) {
   });
 }
 
-function resolveParam(param: BulkTemplateParam, item: BulkItem) {
+function resolveParam(param: BulkTemplateParam, item: BulkItem, attendant?: AttendantValues) {
+  if (param.source === "nome_atendente" || param.source === "primeiro_nome_atendente") return attendant?.[param.source] || "-";
   if (param.source === "primeiro_nome") return item.nome.trim().split(/\s+/)[0] || "-";
   if (param.source === "nome") return item.nome.trim() || "-";
   if (param.source === "telefone") return item.telefone;
@@ -168,7 +171,8 @@ type Prepared = {
 /** Envia e devolve o id da mensagem na Meta (o da primeira, quando há vários anexos) e o texto enviado. */
 async function sendOne(job: BulkJob, item: BulkItem, prepared: Prepared): Promise<{ messageId: string | null; text: string }> {
   if (job.template) {
-    const params = job.template.params.map((param) => resolveParam(param, item));
+    const attendant = job.template.params.some((param) => isAttendantField(param.source)) ? await assignedAttendantValues({ contactId: item.contactId, phone: item.telefone }) : undefined;
+    const params = job.template.params.map((param) => resolveParam(param, item, attendant));
     const sent = await sendTemplate(item.telefone, job.template.name, job.template.language, params, prepared.header);
     return { messageId: sent.messages?.[0]?.id ?? null, text: renderTemplateText(prepared.templateInfo, job.template.name, params) };
   }

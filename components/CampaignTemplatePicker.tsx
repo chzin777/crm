@@ -22,6 +22,8 @@ const FIELDS = [
   { value: "telefone", label: "Telefone" },
   { value: "segmento", label: "Segmento" },
   { value: "data_nascimento", label: "Data de nascimento" },
+  { value: "nome_atendente", label: "Nome do atendente (completo)" },
+  { value: "primeiro_nome_atendente", label: "Primeiro nome do atendente" },
 ];
 
 const selectClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600] cursor-pointer";

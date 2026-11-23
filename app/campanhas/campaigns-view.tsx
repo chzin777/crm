@@ -301,6 +301,8 @@ const messageVariables = [
   { label: "Telefone", value: "{{telefone}}" },
   { label: "Segmento", value: "{{segmento}}" },
   { label: "Data de nascimento", value: "{{data_nascimento}}" },
+  { label: "Nome do atendente", value: "{{nome_atendente}}" },
+  { label: "Primeiro nome do atendente", value: "{{primeiro_nome_atendente}}" },
 ];
 
 const formatFileSize = (size: number) => {
@@ -867,14 +869,14 @@ export function CampaignsView() {
       if (!current) return current;
       const indices = [...new Set(body.match(/\{\{\d+\}\}/g) ?? [])].map((item) => Number(item.slice(2, -2))).sort((a, b) => a - b);
       const params = indices.map((_, index) => current.params[index] ?? "nome");
-      const examplesByField: Record<string, string> = { nome: "Maria", email: "maria@example.com", telefone: "+5511999999999", segmento: "Clientes especiais", data_nascimento: "15/05/1990" };
+      const examplesByField: Record<string, string> = { nome: "Maria", email: "maria@example.com", telefone: "+5511999999999", segmento: "Clientes especiais", data_nascimento: "15/05/1990", nome_atendente: "Ana Souza", primeiro_nome_atendente: "Ana" };
       return { ...current, body, params, examples: params.map((field) => examplesByField[field] ?? "Exemplo") };
     });
     setFormError("");
   };
 
   const updateGeneratedTemplateParam = (index: number, field: string) => {
-    const examplesByField: Record<string, string> = { nome: "Maria", email: "maria@example.com", telefone: "+5511999999999", segmento: "Clientes especiais", data_nascimento: "15/05/1990" };
+    const examplesByField: Record<string, string> = { nome: "Maria", email: "maria@example.com", telefone: "+5511999999999", segmento: "Clientes especiais", data_nascimento: "15/05/1990", nome_atendente: "Ana Souza", primeiro_nome_atendente: "Ana" };
     setAiTemplateDraft((current) => current ? {
       ...current,
       params: current.params.map((item, i) => i === index ? field : item),

@@ -1,5 +1,6 @@
 "use client";
 
+import { ATTENDANT_FIELDS } from "@/lib/attendant-variables";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowLeft, ArrowRight, Check, CheckCircle2, FileText, Image as ImageIcon, Loader2, MessageSquareText, Paperclip, Receipt, Send, Users, Video, X, XCircle } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
@@ -31,16 +32,19 @@ function formatSize(bytes: number) { return bytes >= 1048576 ? `${(bytes / 10485
 function FileIcon({ file }: { file: File }) { const c = "h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]"; if (file.type.startsWith("image/")) return <ImageIcon className={c} />; if (file.type.startsWith("video/")) return <Video className={c} />; return <FileText className={c} />; }
 function variableCount(body: string) { return new Set(body.match(/\{\{\d+\}\}/g) ?? []).size; }
 
-type ParamSource = "primeiro_nome" | "nome" | "telefone" | "manual";
+type ParamSource = "primeiro_nome" | "nome" | "telefone" | "nome_atendente" | "primeiro_nome_atendente" | "manual";
 type TemplateParam = { source: ParamSource; value: string };
 const PARAM_SOURCES: { value: ParamSource; label: string }[] = [
   { value: "primeiro_nome", label: "Primeiro nome" },
   { value: "nome", label: "Nome do contato" },
   { value: "telefone", label: "Telefone" },
+  ...ATTENDANT_FIELDS.map((field) => ({ value: field.value, label: field.label })),
   { value: "manual", label: "Valor fixo" },
 ];
 function resolveParam(param: TemplateParam, recipient?: BulkRecipient) {
   if (param.source === "manual") return param.value;
+  // Resolvido no envio: operador da conversa aberta do contato; sem operador, o nome da equipe (/configuracoes).
+  if (param.source === "nome_atendente" || param.source === "primeiro_nome_atendente") return param.source === "nome_atendente" ? "[atendente do contato]" : "[primeiro nome do atendente]";
   if (!recipient) return "";
   if (param.source === "primeiro_nome") return recipient.nome.trim().split(/\s+/)[0] ?? "";
   if (param.source === "nome") return recipient.nome.trim();

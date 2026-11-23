@@ -70,6 +70,8 @@ function maxVariable(body: string) {
 // Valores de exemplo exigidos pela Meta na análise; não são enviados aos clientes.
 const VARIABLE_PRESETS = [
   { label: "Nome do cliente", example: "Maria" },
+  { label: "Nome do atendente", example: "Ana Souza" },
+  { label: "Primeiro nome do atendente", example: "Ana" },
   { label: "Loja", example: "Óticas Brasil Centro" },
   { label: "Data", example: "25/10/2026" },
   { label: "Valor", example: "R$ 150,00" },
