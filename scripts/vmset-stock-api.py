@@ -18,6 +18,8 @@ GET /catalog/products[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [
   - retrato em memória por 60 min (a consulta de preços varre a PRECO_VENDA e leva ~30 s), renovado em segundo plano;
 GET /catalog/stock[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [[codigo, unidade, nomeUnidade, disponivel, reservado]]}
   - saldo de todas as unidades que vendem, retrato de 2 min (mesma regra do /stock);
+GET /orders/pending?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "status", "release", "issuedAt", "updatedAt", "total", "customer", "store", "seller", "mode"}]}
+  - pedidos de venda ativos ainda não faturados (A Liberar / Reservado) para o painel de pedidos;
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -297,6 +299,37 @@ def price_value(value):
     return round(float(value), 2) if value is not None and float(value) > 0 else None
 
 
+# Pedidos de venda ainda não faturados (painel de pedidos): A Liberar (aguardando liberação) e Reservado
+# (estoque reservado, aguardando NF). Só pedidos ativos, emitidos nos últimos :days dias.
+PENDING_ORDERS_SQL = """
+SELECT PS.PEDIDO_SAIDA_ID, PS.PDSD_NR_PEDIDO, PS.PDSD_STATUS, PS.PDSD_SIT_LIBERACAO, PS.PDSD_DT_EMISSAO, PS.DATA_ALTERACAO,
+       PS.PDSD_VLR_TOTAL, P.PRCR_NOME, UE.PRCR_NOME, V.PRCR_NOME, PS.PDSD_MODO_VD
+FROM PEDIDO_SAIDA PS
+LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
+LEFT JOIN PARCEIRO UE ON UE.PARCEIRO_ID = PS.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
+WHERE PS.PDSD_STATUS IN ('A Liberar', 'Reservado') AND TRIM(PS.STATUS) = 'Ativo'
+  AND PS.PDSD_DT_EMISSAO >= TRUNC(SYSDATE) - :days
+ORDER BY PS.PDSD_DT_EMISSAO DESC
+"""
+MAX_ORDERS = 2000
+
+
+def moment(value):
+    return value.strftime("%Y-%m-%dT%H:%M:%S") if value else None
+
+
+def pending_orders(days):
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        cur.execute(PENDING_ORDERS_SQL, days=days)
+        return [{
+            "id": str(order_id), "number": str(number or ""), "status": text(status), "release": text(release),
+            "issuedAt": moment(issued), "updatedAt": moment(updated), "total": round(float(total or 0), 2),
+            "customer": text(customer), "store": text(store), "seller": text(seller), "mode": text(mode),
+        } for order_id, number, status, release, issued, updated, total, customer, store, seller, mode in cur.fetchmany(MAX_ORDERS)]
+
+
 def catalog_products():
     categories = ",".join(f":k{i}" for i in range(len(CATALOG_CATEGORIES)))
     with pool.acquire() as conn:
@@ -382,7 +415,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path not in ("/stock", "/installments", "/events", "/punctuality", *catalog_cache):
+        if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
@@ -393,6 +426,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:
                 log(f"ERRO catálogo {url.path}: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
+        if url.path == "/orders/pending":
+            try:
+                days = min(max(int(parse_qs(url.query).get("days", ["30"])[0]), 1), 365)
+            except ValueError:
+                return self._send(400, {"error": "days precisa ser número"})
+            try:
+                items = pending_orders(days)
+            except Exception as error:
+                log(f"ERRO pedidos a faturar: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+            return self._send(200, {"at": int(time.time() * 1000), "items": items})
         if url.path == "/punctuality":
             query = parse_qs(url.query)
             try:
