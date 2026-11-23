@@ -100,6 +100,7 @@ const STOCK_SCENARIO_LABELS: Record<StockLog["scenario"], string> = {
   sem_estoque_na_cidade: "sem estoque na cidade",
   unavailable_api: "VMSet não respondeu (transfere)",
   produto_nao_encontrado: "produto não encontrado",
+  todos_ja_mostrados: "todos já mostrados na conversa",
 };
 const QUEUE_SOURCE_LABELS: Record<NonNullable<PlaygroundResult["handoffQueueSource"]>, string> = {
   ai: " (escolhida pela IA)",

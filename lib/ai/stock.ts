@@ -138,7 +138,7 @@ export function storeCity(store: StoreInfo | undefined) {
   return DF_PLACES.test(plain) && !/\(DF\)/.test(name) ? `${name} (DF)` : name;
 }
 export type StockProduct = { codigo: string; produto: string; marca: string | null; preco: number | null; lojasComEstoque: StockStore[] };
-export type StockScenario = "disponivel_na_regiao" | "esgotado_na_regiao_disponivel_em_outras" | "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
+export type StockScenario = "disponivel_na_regiao" | "esgotado_na_regiao_disponivel_em_outras" | "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado" | "todos_ja_mostrados";
 export type StockToolProduct = StockProduct & {
   lojasNaRegiao: StockStore[];
   nomeProduto: string;
@@ -198,6 +198,7 @@ export function stockInCity(units: StockUnit[], stores: Map<string, StoreInfo>, 
 }
 
 const GUIDANCE: Record<StockScenario, string> = {
+  todos_ja_mostrados: "Todos os modelos desta busca já foram mostrados nesta conversa: não repita nenhum; ofereça outra marca, estilo ou faixa de preço.",
   disponivel_na_regiao: "Confirme objetivamente que há unidades disponíveis na loja da região pedida e informe o endereço comercial dela.",
   esgotado_na_regiao_disponivel_em_outras: "Informe que na loja pedida está esgotado no momento e liste exatamente as outras lojas com estoque (nome e endereço).",
   disponivel_em_lojas: "Informe objetivamente em quais lojas há unidades disponíveis agora (nome e endereço) e pergunte qual fica melhor para o cliente.",

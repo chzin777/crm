@@ -6,7 +6,13 @@
 import { cleanReference, commercialName } from "@/lib/ai/product-card";
 import { expandModelNicknames, KNOWN_BRANDS } from "@/lib/ai/product-names";
 import { mainPrice, stockInCity, type StockLookup, type StoreInfo } from "@/lib/ai/stock";
-import { modelFamilyKey } from "@/lib/ai/product-names";
+import { modelFamilyKey, referenceKey } from "@/lib/ai/product-names";
+
+/** Identificadores de um modelo exibido (códigos e referência-base): base da memória "já mostrei esse". */
+export function modelShownIds(model: { codigos?: string[]; referencia?: string | null; sku?: string | null }) {
+  const ref = model.referencia && !model.referencia.startsWith("#") ? referenceKey(model.referencia) : "";
+  return [...new Set([...(model.codigos ?? []), model.sku ?? "", ref ? `ref:${ref}` : ""].filter(Boolean))];
+}
 
 export type SearchKind = "marca_ampla" | "modelo_especifico";
 
@@ -73,7 +79,9 @@ export type ShowcaseCandidate = { code: string; description: string; brand: stri
 export type ShowcaseModel = { nomeComercial: string; referencia: string | null; categoriaModelo: string | null; precoVenda: string | null; /** Cores/lentes com preços diferentes: a vitrine mostra "a partir de" o menor. */ precoVaria?: boolean; totalDisponivelRede: number; codigos: string[]; /** Lojas com saldo (nome curto, na cidade pedida) para a legenda do catálogo com foto. */ lojas?: string[] };
 export type ShowcaseResult = {
   tipoBusca: "marca_ampla";
-  cenario: "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado";
+  cenario: "disponivel_em_lojas" | "sem_estoque_na_cidade" | "sem_estoque_na_rede" | "unavailable_api" | "produto_nao_encontrado" | "todos_ja_mostrados";
+  /** Todos os modelos com estoque desta busca já foram mostrados na conversa. */
+  todosJaMostrados?: boolean;
   termoBusca: string;
   regiao: string;
   regiaoReconhecida: false;
@@ -258,6 +266,8 @@ export function buildShowcaseResult(input: {
   brand?: string | null;
   /** Faixa de valor e ordenação pedidas pelo cliente (preço de venda nas lojas com estoque). */
   price?: PriceFilter;
+  /** Modelos já mostrados na conversa (códigos e "ref:"): saem antes do corte, para a vitrine trazer modelos novos. */
+  exclude?: string[];
 }): ShowcaseResult {
   const base = { tipoBusca: "marca_ampla" as const, termoBusca: input.term, regiao: "", regiaoReconhecida: false as const, produtos: [] as [], ...(input.brand ? { marcaResolvida: input.brand } : {}) };
   const brandMissing = input.brand ? `Não há modelos da marca ${input.brand} em estoque${input.city ? ` em ${input.city}` : ""} no momento: diga isso com clareza, sem listar produtos de outras marcas.` : "";
@@ -295,6 +305,12 @@ export function buildShowcaseResult(input: {
   // Busca por orçamento sem marca: no máximo 2 modelos por marca, para a vitrine ter variedade de verdade.
   const varied = (input.price?.minPrice || input.price?.maxPrice || input.price?.sortBy || input.price?.floor) && !input.brand ? diverseByBrand(priced, 2) : priced;
   models.splice(0, models.length, ...(varied.length >= 3 ? varied : priced));
+  const excluded = new Set(input.exclude ?? []);
+  if (excluded.size && models.length) {
+    const fresh = models.filter((model) => !modelShownIds(model).some((id) => excluded.has(id)));
+    if (!fresh.length) return { ...base, cenario: "todos_ja_mostrados", todosJaMostrados: true, modelos: [], vitrineFormatada: null, orientacao: "Todos os modelos com estoque desta busca já foram mostrados nesta conversa: NÃO repita nenhum. Diga com naturalidade que esses são os que a loja tem dessa linha agora e ofereça outro caminho (outra marca, outro estilo ou faixa de preço, ou conhecer de perto na loja mais próxima)." };
+    models.splice(0, models.length, ...fresh);
+  }
   models.splice(SHOWCASE_MAX_MODELS);
   const range = priceRangeLabel(input.price);
   if (!models.length && range) return { ...base, cenario: input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: `Não há modelos com estoque ${range}${input.city ? ` em ${input.city}` : ""} agora. Diga isso com naturalidade e ofereça as opções mais próximas do orçamento (nova busca sem o limite de valor) ou ajuda de um atendente.` };

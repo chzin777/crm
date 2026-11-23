@@ -3,7 +3,15 @@ import { explicitBrand, normalizeBrandQuery, normalizeTerm } from "@/lib/ai/cata
 /** activeBrand: marca pedida que vale nos turnos seguintes (estilo, cidade) até o cliente trocar; brand é o mesmo valor. */
 /** Item do último catálogo com fotos, na ordem exibida ("gostei da 2ª foto" → index 2), sem expor a referência. */
 export type ShownProduct = { index: number; id: string; ref: string | null; name: string; price: number | null; stores: string[] };
-export type CatalogContext = { preferredCity: string; brand: string; activeBrand: string; category: string; lastCatalogFilterHash: string; lastShownProducts?: ShownProduct[] };
+export type CatalogContext = { preferredCity: string; brand: string; activeBrand: string; category: string; lastCatalogFilterHash: string; lastShownProducts?: ShownProduct[]; /** Códigos e referências-base de todos os modelos já mostrados na conversa (nunca repetir). */ shownIds?: string[] };
+
+/** Até 120 identificadores: o mais recente fica no fim. */
+export const MAX_SHOWN_IDS = 120;
+export function rememberShown(context: CatalogContext, ids: string[]) {
+  const next = [...(context.shownIds ?? []).filter((id) => !ids.includes(id)), ...ids].slice(-MAX_SHOWN_IDS);
+  context.shownIds = next;
+  return next;
+}
 export const EMPTY_CATALOG_CONTEXT: CatalogContext = { preferredCity: "", brand: "", activeBrand: "", category: "", lastCatalogFilterHash: "" };
 
 function sanitizeShown(value: unknown): ShownProduct[] {
@@ -96,7 +104,8 @@ export function sanitizeCatalogContext(value: unknown): CatalogContext {
   const field = (key: string) => typeof raw[key] === "string" ? raw[key].slice(0, 100) : "";
   const brand = field("activeBrand") || field("brand");
   const shown = sanitizeShown(raw.lastShownProducts);
-  return { preferredCity: field("preferredCity"), brand, activeBrand: brand, category: field("category"), lastCatalogFilterHash: field("lastCatalogFilterHash"), ...(shown.length ? { lastShownProducts: shown } : {}) };
+  const shownIds = Array.isArray(raw.shownIds) ? raw.shownIds.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 60).slice(-MAX_SHOWN_IDS) : [];
+  return { preferredCity: field("preferredCity"), brand, activeBrand: brand, category: field("category"), lastCatalogFilterHash: field("lastCatalogFilterHash"), ...(shown.length ? { lastShownProducts: shown } : {}), ...(shownIds.length ? { shownIds } : {}) };
 }
 
 export function isBroadBrandRequest(text: string, brand: string): boolean {

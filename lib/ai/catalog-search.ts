@@ -1,6 +1,7 @@
 import { formatBrl } from "@/lib/ai/stock";
 import { documentKind, EXTRACTION_SCHEMA, formatExtraction, type DocumentExtraction, type DocumentKind } from "@/lib/ai/document-extract";
-import { iconicModel } from "@/lib/ai/product-names";
+import { iconicModel, referenceKey } from "@/lib/ai/product-names";
+import { cleanReference } from "@/lib/ai/product-card";
 import { formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 /**
  * Foto de produto enviada pelo cliente: a IA identifica o produto em silêncio (JSON interno), o CRM busca
@@ -471,13 +472,46 @@ const priceNumber = (price: string | null) => {
   return Number.isFinite(value) && value > 0 ? value : null;
 };
 
-/** "1. Ray-Ban Aviator — R$ 899,00" + "Lojas em Goiânia: Setor Marista, Jardim Goiás". */
-export function catalogCaption(item: { index: number; name: string; price: string | null; varies?: boolean; stores: string[] }, city: string) {
-  const price = item.price ? ` — ${item.varies ? "a partir de " : ""}${item.price}` : "";
-  const stores = item.stores.slice(0, 3);
-  const where = stores.length ? `\n${stores.length === 1 ? "Loja" : "Lojas"}${city ? ` em ${city}` : ""}: ${stores.join(", ")}${item.stores.length > 3 ? " e outras" : ""}` : "";
-  return `${item.index}. ${item.name.replace(/\s*\(Ref\.[^)]*\)/gi, "").trim()}${price}${where}`;
+/**
+ * Nome que diferencia o modelo na vitrine: nome comercial + referência legível quando o nome sozinho é só a marca
+ * ("Ray-Ban" + "0RB4340" → "Ray-Ban RB4340"; "Ray-Ban Justin" fica igual). Código interno (#) nunca aparece.
+ */
+export function modelDisplayName(model: { nomeComercial: string; referencia: string | null }) {
+  const name = model.nomeComercial.replace(/\s*\(Ref\.[^)]*\)/gi, "").replace(/\s+/g, " ").trim();
+  const ref = (cleanReference(model.referencia) ?? "").replace(/^0(?=[A-Z])/i, "").trim();
+  if (!ref || ref.startsWith("#")) return name;
+  // Nome que já contém a referência não repete; senão a referência entra (dois Ray-Ban nunca saem com o mesmo nome).
+  if (name.toUpperCase().replace(/[^A-Z0-9]/g, "").includes(ref.toUpperCase().replace(/[^A-Z0-9]/g, ""))) return name;
+  return `${name} ${ref}`;
 }
+
+/** Tipo do modelo na legenda: "óculos de sol", "armação de grau" ou nada (lente de contato / desconhecido). */
+export function modelKindLabel(categoria: string | null | undefined) {
+  if (!categoria) return "";
+  if (/lente/i.test(categoria)) return "";
+  return /sol|solar/i.test(categoria) ? "óculos de sol" : "armação de grau";
+}
+
+/** "1. Ray-Ban RB4340, óculos de sol, a partir de R$ 990,00": sem traço e sem bloco fixo de lojas. */
+export function catalogCaption(item: { index: number; name: string; price: string | null; varies?: boolean; kind?: string }) {
+  return [`${item.index}. ${item.name}`, item.kind ?? "", item.price ? `${item.varies ? "a partir de " : ""}${item.price}` : ""].filter(Boolean).join(", ");
+}
+
+/**
+ * Orientação da vitrine conforme o que de fato vai ao cliente: singular com 1 modelo, diferenciais reais (tipo,
+ * preço) e fechamento com pergunta para escolher ou visitar a loja. Sem traços na escrita.
+ */
+export function showcaseGuidance(models: { nomeComercial: string; referencia: string | null; categoriaModelo: string | null; precoVenda: string | null }[]) {
+  if (!models.length) return "";
+  const kinds = [...new Set(models.map((model) => modelKindLabel(model.categoriaModelo)).filter(Boolean))];
+  return [
+    models.length === 1 ? "Só 1 modelo vai para o cliente: fale no SINGULAR (nada de \"separei algumas opções\")." : `${models.length} modelos distintos vão para o cliente: apresente como ${models.length} opções.`,
+    kinds.length > 1 ? "A lista mistura óculos de sol e armações de grau: deixe claro qual é qual." : "",
+    "Comente em poucas palavras o que diferencia os modelos (formato, estilo, preço), sem repetir a lista nem os nomes de lojas em cada item, sem travessões ou hífens, e termine com uma pergunta natural para a pessoa escolher ou combinar a visita à loja mais próxima.",
+  ].filter(Boolean).join(" ");
+}
+
+export { modelShownIds } from "@/lib/ai/stock-showcase";
 
 /** Mensagem curta que abre a vitrine com fotos ("Separei 3 opções de óculos de sol em Goiânia 👇"). */
 export function catalogOpening(input: { count: number; category?: string; city?: string; budget?: boolean }) {
@@ -489,8 +523,9 @@ export function catalogOpening(input: { count: number; category?: string; city?:
 export const CATALOG_CLOSINGS = ["Qual dessas fotos chamou mais sua atenção?", "Qual delas você mais gostou?", "Alguma dessas te agradou? Me fala o número da foto."];
 
 /**
- * Curadoria do catálogo visual: na ordem da vitrine, só modelos com foto válida (qualquer código da variante),
- * até VISUAL_CATALOG_MAX. null quando nenhum tem foto (aí a vitrine sai em texto limpo).
+ * Curadoria do catálogo visual: na ordem da vitrine, até VISUAL_CATALOG_MAX modelos distintos. Modelo com foto
+ * válida (qualquer código da variante) vai como foto + legenda; sem foto (ou com a mesma foto de outro), vai só
+ * a legenda em texto, em vez de sumir da vitrine. null quando nenhum tem foto (aí a vitrine sai em texto limpo).
  */
 export function buildVisualCatalog(input: { models: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number }): VisualCatalog | null {
   const items: CatalogPhoto[] = [];
@@ -501,20 +536,20 @@ export function buildVisualCatalog(input: { models: ShowcaseModel[]; images: Rec
   const imageKey = (url: string) => url.trim().replace(/#.*$/, "");
   for (const model of input.models) {
     if (items.length >= (input.max ?? VISUAL_CATALOG_MAX)) break;
-    const sku = model.codigos.find((code) => !!input.images[code] && !seenImages.has(imageKey(input.images[code])));
-    if (!sku) continue;
-    const modelKeys = [model.referencia && !model.referencia.startsWith("#") ? `ref:${key(model.referencia)}` : "", ...model.codigos.map((code) => `cod:${code}`)].filter(Boolean);
+    const modelKeys = [model.referencia && !model.referencia.startsWith("#") ? `ref:${key(referenceKey(model.referencia) || model.referencia)}` : "", ...model.codigos.map((code) => `cod:${code}`)].filter(Boolean);
     if (modelKeys.some((value) => seenModels.has(value))) continue;
     modelKeys.forEach((value) => seenModels.add(value));
-    seenImages.add(imageKey(input.images[sku]));
+    const sku = model.codigos.find((code) => !!input.images[code] && !seenImages.has(imageKey(input.images[code])));
+    if (sku) seenImages.add(imageKey(input.images[sku]));
     const index = items.length + 1;
     const stores = model.lojas ?? [];
+    const name = modelDisplayName(model);
     items.push({
-      index, sku, ref: model.referencia, name: model.nomeComercial, price: model.precoVenda, priceValue: priceNumber(model.precoVenda), stores, imageUrl: input.images[sku],
-      caption: catalogCaption({ index, name: model.nomeComercial, price: model.precoVenda, varies: model.precoVaria, stores }, input.city),
+      index, sku: sku ?? model.codigos[0] ?? "", ref: model.referencia, name, price: model.precoVenda, priceValue: priceNumber(model.precoVenda), stores, imageUrl: sku ? input.images[sku] : "",
+      caption: catalogCaption({ index, name, price: model.precoVenda, varies: model.precoVaria, kind: modelKindLabel(model.categoriaModelo) }),
     });
   }
-  return items.length ? { opening: input.opening, items, closing: input.closing } : null;
+  return items.some((item) => item.imageUrl) ? { opening: input.opening, items, closing: input.closing } : null;
 }
 
 /** Ordem exibida para o aiContext (lastShownProducts): "gostei da 2ª foto" resolve sem mostrar referência. */

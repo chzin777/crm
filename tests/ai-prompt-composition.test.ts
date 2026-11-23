@@ -271,8 +271,9 @@ describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
     expect(catalog.items.map((item) => item.imageUrl)).toEqual(["https://img.test/r1.jpg", "https://img.test/r2.jpg", "https://img.test/r3.jpg"]);
     for (const [position, item] of catalog.items.entries()) {
       expect(item.caption.startsWith(`${position + 1}. `)).toBe(true);
-      expect(item.caption).toMatch(/^\d\. [^\n]+ — R\$ 999,00\nLoja em Goiânia: Setor Marista$/);
-      expect(item.caption).not.toMatch(/Ref\.|RB910/);
+      // Modelo real (marca + referência legível) e tipo, sem traço e sem bloco fixo de lojas em toda legenda.
+      expect(item.caption).toMatch(/^\d\. Ray-Ban RB910\d, óculos de sol, R\$ 999,00$/);
+      expect(item.caption).not.toMatch(/Ref\.|Lojas? em|[—–]/);
     }
     // Abertura e pergunta são as do modelo (nada fixo do código); as legendas são dados do sistema.
     expect(catalog.opening).toBe(opening);

@@ -114,7 +114,7 @@ function orderByBudget(products: IndexedProduct[], price?: PriceFilter) {
  * Nunca lança erro: falha ou lentidão da API vira o cenário "unavailable_api".
  */
 export async function consultarEstoqueProduto(
-  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; publicoInfantil?: unknown; _pisoTicket?: unknown },
+  args: { termoBusca?: unknown; regiaoOuLoja?: unknown; cidade?: unknown; tipoBusca?: unknown; marca?: unknown; nomeModelo?: unknown; referenciaOuSku?: unknown; textoVisivelNaImagem?: unknown; tipo?: unknown; minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; publicoInfantil?: unknown; _pisoTicket?: unknown; /** Modelos já mostrados na conversa (nunca repetir na vitrine). */ _excluir?: unknown },
   deps: { products: () => Promise<IndexedProduct[]>; withPrices: boolean },
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
@@ -157,7 +157,8 @@ export async function consultarEstoqueProduto(
     const limits = generic ? { groups: GENERIC_CANDIDATES, codesPerModel: SHOWCASE_CODES_PER_MODEL } : city || price ? { groups: candidates.length, codesPerModel: candidates.length } : undefined;
     const groups = showcaseCandidates(candidates.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), limits);
     const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;
-    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city, price });
+    const exclude = Array.isArray(args._excluir) ? args._excluir.filter((id): id is string => typeof id === "string") : [];
+    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city, price, exclude });
     const log: StockLog = { term, region, scenario: result.cenario, products: result.modelos.length, stores: 0, ms: Date.now() - started, cached: !!lookup && lookup.requested === 0, kind };
     console.log(`[ai][estoque] busca ampla: ${log.scenario}, ${log.products} modelos, ${log.ms} ms`);
     return { result, log };

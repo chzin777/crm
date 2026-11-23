@@ -29,9 +29,9 @@ import { readFile } from "@/lib/minio";
 import { transcribeMessageAudio } from "@/lib/chat/transcription";
 import { activeSourceNotes, type KnowledgeSourceKey } from "@/lib/ai/knowledge-sources";
 import { emitAiHandoff, hasActiveHandoffFlow } from "@/lib/automations/ai-handoff";
-import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, modelShownIds, showcaseGuidance, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
-import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
+import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, rememberShown, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
 import { needsQualificationFirst, qualifyFirstBlock, qualifyGatedResult } from "@/lib/ai/sales-consultant";
 import { classifyVague, vagueMessageBlock } from "@/lib/ai/vague-message";
 import { NOISE_AUTHOR } from "@/lib/chat/noise";
@@ -753,6 +753,9 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
       if (wantsKids) query.publicoInfantil = true;
       else delete query.publicoInfantil;
+      // Vitrine nunca repete modelo já mostrado na conversa (salvo pedido explícito de ver de novo).
+      // Exceção: o cliente corrigiu a busca anterior ("errou", "pedi armação"): a vitrine refaz do zero.
+      if (!chosen && !anchoredProduct && !intent.correction && !asksListAgain(input.pendingText) && catalogState.shownIds?.length) query._excluir = catalogState.shownIds;
       let { result, log } = await consultarEstoqueProduto(query, { products: catalogProducts, withPrices: settings.canQuotePrices });
       stock.push(log);
       // Só 1 modelo na cidade: nada de lista "1." nem "quer que eu veja as lojas?" — já abre a ficha com foto e lojas.
@@ -788,7 +791,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
         const brandName = typeof query.marca === "string" && query.marca.trim() ? query.marca : explicitBrand(String(query.termoBusca ?? "")) ?? "";
         // Marca sem saldo na cidade: no mesmo payload, a mesma marca em outras praças (transferência) e até 3
         // opções reais de marcas parecidas na cidade do cliente. Quem escreve a resposta é o modelo.
-        if (!models.length && !result.vitrineFormatada && query.tipoBusca !== "modelo_especifico" && city && brandName && "cenario" in result && result.cenario !== "unavailable_api") {
+        if (!models.length && !result.vitrineFormatada && !("todosJaMostrados" in result && result.todosJaMostrados) && query.tipoBusca !== "modelo_especifico" && city && brandName && "cenario" in result && result.cenario !== "unavailable_api") {
           const fallback = await localBrandFallback(brandName, city);
           if (fallback && !fallback.unavailable) {
             shownModels.push(...fallback.alternatives);
@@ -807,10 +810,12 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
             };
           }
         }
-        shownModels.push(...models);
-        interactiveList = buildShowcaseList(models, null);
+        // Modelos já mostrados na conversa saem na própria busca (query._excluir), antes do corte da vitrine.
+        const fresh = models;
+        shownModels.push(...fresh);
+        interactiveList = buildShowcaseList(fresh, null);
         toolShowcase = result.vitrineFormatada ?? null;
-        return { ...result, fotosNoCatalogo: await catalogPhotosFor(models) };
+        return { ...result, fotosNoCatalogo: await catalogPhotosFor(fresh), quantidadeDeModelos: fresh.length, orientacaoDaVitrine: showcaseGuidance(fresh) };
       }
       if (!allowsProductPhoto(result)) return result;
       // Referência pedida (ou o produto fixado) primeiro: a ficha e a foto nunca saem de outro modelo da lista.
@@ -1114,12 +1119,14 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     if (visualCatalog) {
       outcome = { ...outcome, reply: [before, ...visualCatalog.items.map((item) => item.caption), after].filter(Boolean).join("\n---SPLIT---\n") };
       catalogState.lastShownProducts = shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })));
+      rememberShown(catalogState, visualCatalog.items.flatMap((item) => [...modelShownIds({ sku: item.sku, referencia: item.ref }), ...modelShownIds(ordered.find((model) => model.codigos.includes(item.sku)) ?? {})]));
       interactiveList = null;
     } else {
       // Sem foto cadastrada: a vitrine segue em texto, sem código interno (o modelo já sabia que não havia fotos).
       bubbles[showcaseAt] = withoutShowcaseRefs(bubbles[showcaseAt]);
       outcome = { ...outcome, reply: bubbles.join("\n---SPLIT---\n") };
       catalogState.lastShownProducts = shownProductsOf(items.map((item, position) => ({ index: item.index, sku: item.sku ?? ordered[position].codigos[0] ?? null, ref: item.referencia, name: item.nomeComercial, priceValue: item.preco, stores: ordered[position].lojas ?? [] })));
+      rememberShown(catalogState, ordered.flatMap(modelShownIds));
     }
   }
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
@@ -1440,7 +1447,9 @@ async function sendVisualCatalog(conversation: ChatConversation, catalog: Visual
   for (const [position, item] of catalog.items.entries()) {
     if (position > 0 || sent) await wait(CATALOG_PHOTO_GAP_MS);
     // Foto recusada (URL quebrada/Meta): a legenda sai em texto e a foto é marcada inválida no cache.
-    sent = (await sendAutomaticImage(conversation, item.imageUrl, item.caption, AI_AUTHOR, () => invalidateProductImage(item.sku), item.sku)) ?? sent;
+    sent = (item.imageUrl
+      ? await sendAutomaticImage(conversation, item.imageUrl, item.caption, AI_AUTHOR, () => invalidateProductImage(item.sku), item.sku)
+      : await sendAutomaticMessage(conversation, item.caption, undefined, undefined, AI_AUTHOR)) ?? sent;
   }
   await sendTypingIndicator(typingMessageId).catch(() => undefined);
   await wait(CATALOG_PHOTO_GAP_MS);
