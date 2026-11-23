@@ -8,7 +8,7 @@ import { ChoiceCards, DurationField, MessageField, SettingCard, Switch, SwitchRo
 import { CUSTOMER_VARIABLES, MenuOptionFields, menuActionSummary, type MenuPeople } from "@/components/chat/MenuOptionFields";
 import { MenuSimulator } from "@/components/chat/MenuSimulator";
 import { ClosingSimulator } from "@/components/chat/ClosingSimulator";
-import { DEFAULT_CHAT_SETTINGS, NPS_SCORE_LABELS, npsScoreLine, addToTree, moveInTree, newMenuOption, removeFromTree, updateTree, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
+import { DEFAULT_CHAT_SETTINGS, NPS_SCORE_LABELS, npsScoreLine, addToTree, moveInTree, newMenuOption, removeFromTree, silenceDurationText, updateTree, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
 
 const MenuFlowCanvas = dynamic(() => import("@/components/chat/MenuFlowCanvas").then((module) => module.MenuFlowCanvas), {
   ssr: false,
@@ -189,7 +189,7 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
 
   const sections: { id: Section; label: string; status: string; icon: typeof Timer }[] = [
     { id: "menu", label: "Menu do WhatsApp", status: `${settings.enabled ? "Ligado" : "Desligado"} · ${settings.options.length} ${settings.options.length === 1 ? "opção" : "opções"}`, icon: ListTree },
-    { id: "silence", label: "Silêncio do cliente", status: settings.silenceEnabled ? `${settings.silenceAskMinutes} min + ${settings.silenceCloseMinutes} min` : "Desligado", icon: Timer },
+    { id: "silence", label: "Silêncio do cliente", status: settings.silenceEnabled ? `${silenceDurationText(settings.silenceAskMinutes)} + ${silenceDurationText(settings.silenceCloseMinutes)}` : "Desligado", icon: Timer },
     { id: "closing", label: "Encerramento e fila", status: `${settings.farewellText.trim() ? "Despedida ativa" : "Sem despedida"} · ${settings.npsEnabled ? "com pesquisa" : "sem pesquisa"}`, icon: CheckCircle2 },
   ];
 
@@ -323,18 +323,18 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
             <SettingCard
               icon={Timer}
               title="Silêncio do cliente"
-              description={settings.silenceEnabled ? `Sem resposta do cliente, a conversa encerra em ${settings.silenceAskMinutes + settings.silenceCloseMinutes} minutos (menu, IA ou atendente). Se a última mensagem for do cliente, nunca encerra sozinha.` : "Desligado: conversas paradas ficam abertas."}
+              description={settings.silenceEnabled ? `Sem resposta do cliente, a pergunta sai depois de ${silenceDurationText(settings.silenceAskMinutes)} e a conversa encerra ${silenceDurationText(settings.silenceCloseMinutes)} depois dela (menu, IA ou atendente). Se a última mensagem for do cliente, nunca encerra sozinha.` : "Desligado: conversas paradas ficam abertas."}
               action={<Switch checked={settings.silenceEnabled} onChange={(value) => set("silenceEnabled", value)} label="Cuidar do silêncio do cliente" />}
             >
               {settings.silenceEnabled && (
                 <ol>
                   <TimelineStep number={1} title="Cliente para de responder" description="O tempo conta a partir da última mensagem da equipe, da IA ou do menu. Se a última for do cliente, nada acontece." />
                   <TimelineStep number={2} title="Perguntar se ainda está aí" description="Se ele responder, o menu continua normalmente.">
-                    <DurationField label="Esperar antes de perguntar" value={settings.silenceAskMinutes} onChange={(value) => set("silenceAskMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[5, 10, 15, 30].map((value) => ({ value, label: `${value} min` }))} />
-                    <MessageField id="menu-silence-ask" label="Pergunta" rows={2} value={settings.silenceAskText} onChange={(value) => set("silenceAskText", value)} variables={[{ mark: "{minutos}", label: "Tempo até encerrar" }]} />
+                    <DurationField label="Esperar antes de perguntar" value={settings.silenceAskMinutes} onChange={(value) => set("silenceAskMinutes", value)} unit="min" min={60} max={1440} step={60} presets={[720, 1440].map((value) => ({ value, label: silenceDurationText(value) }))} />
+                    <MessageField id="menu-silence-ask" label="Pergunta" rows={2} value={settings.silenceAskText} onChange={(value) => set("silenceAskText", value)} variables={[{ mark: "{tempo}", label: "Tempo até encerrar" }]} hint="Sai só se a janela de 24 h do WhatsApp ainda estiver aberta; fechada, a conversa encerra no mesmo prazo sem mensagem." />
                   </TimelineStep>
                   <TimelineStep number={3} title="Encerrar a conversa" description="Acontece se o cliente não responder à pergunta dentro do tempo abaixo. Se ele voltar depois, começa uma conversa nova." last>
-                    <DurationField label="Esperar depois da pergunta" value={settings.silenceCloseMinutes} onChange={(value) => set("silenceCloseMinutes", value)} unit="min" min={1} max={1440} step={1} presets={[2, 3, 5, 10].map((value) => ({ value, label: `${value} min` }))} />
+                    <DurationField label="Esperar depois da pergunta" value={settings.silenceCloseMinutes} onChange={(value) => set("silenceCloseMinutes", value)} unit="min" min={60} max={1440} step={60} presets={[60, 240, 720, 1440].map((value) => ({ value, label: silenceDurationText(value) }))} />
                     <div>
                       <SwitchRow
                         title="Personalizar mensagem ao encerrar por inatividade"

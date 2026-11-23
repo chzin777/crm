@@ -11,7 +11,7 @@ import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conver
 import { readMenuState, saveMenuState, sendMenu } from "@/lib/chat/menu";
 import { expireSurveys, isSurveyMessage, resendSurvey } from "@/lib/chat/nps";
 import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
-import { silenceFarewell } from "@/lib/chat/settings";
+import { silenceAskMessage, silenceFarewell } from "@/lib/chat/settings";
 import { ChatRuleError, resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
@@ -198,17 +198,20 @@ export async function runClock() {
       }
       if (action === "warn") {
         // Só com interação real do cliente: conversa que tem apenas o disparo da campanha não recebe aviso.
-        if (!isWindowOpen(row.lastInboundAt) || !(await customerInteracted(row.id))) continue;
+        if (!(await customerInteracted(row.id))) continue;
         // Menu/IA: "oi"/"quero aproveitar"/ruído depois do disparo não conta como atendimento engajado.
         if (!row.assigneeId && row.status !== "in_progress" && !(await conversationEngaged(row))) continue;
         // Trava no banco: duas execuções do relógio ao mesmo tempo nunca mandam o aviso duas vezes para o mesmo silêncio.
         if (!(await firstDispatch(`silence-warn:${row.id}:${last!.createdAt.toISOString()}`))) continue;
-        await sendAutomaticMessage(row, settings.silenceAskText.replaceAll("{minutos}", String(settings.silenceCloseMinutes)));
+        // Janela de 24 h do WhatsApp fechada: texto livre não sai. O aviso fica marcado sem envio e o encerramento
+        // segue o mesmo prazo (closeConversation também não manda despedida com a janela fechada).
+        const canSend = isWindowOpen(row.lastInboundAt);
+        if (canSend) await sendAutomaticMessage(row, silenceAskMessage(settings));
         // Gravado depois do envio: o próprio aviso não conta como "equipe escreveu depois do aviso".
         state.warnedAt = new Date().toISOString();
         await saveMenuState(row.id, state);
         summary.silenceAsked += 1;
-        await sleep(SILENCE_SEND_GAP_MS);
+        if (canSend) await sleep(SILENCE_SEND_GAP_MS);
         continue;
       }
       if (!(await firstDispatch(`silence-close:${row.id}:${state.warnedAt}`))) continue;

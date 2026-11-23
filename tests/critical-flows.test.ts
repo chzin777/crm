@@ -45,16 +45,16 @@ const minutes = (value: number) => value * 60 * 1000;
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 23, 12, minute));
 
 describe("fila e inatividade", () => {
-  it("aviso de 3 minutos só quando a última mensagem é do operador/IA", () => {
-    const base = { warnedAt: null, now: at(30), askMs: minutes(3), closeMs: minutes(3) };
+  it("aviso de 24 h só quando a última mensagem é do operador/IA", () => {
+    const base = { warnedAt: null, now: at(24 * 60 + 30), askMs: minutes(24 * 60), closeMs: minutes(24 * 60) };
     expect(planInactivity({ ...base, lastAuthor: "agent", lastAt: at(20) })).toBe("warn");
     expect(planInactivity({ ...base, lastAuthor: "bot", lastAt: at(20) })).toBe("warn");
-    expect(planInactivity({ ...base, lastAuthor: "agent", lastAt: at(29) })).toBe("none");
+    expect(planInactivity({ ...base, lastAuthor: "agent", lastAt: at(40) })).toBe("none");
   });
 
   it("última mensagem do cliente: ticket continua aberto, sem aviso nem encerramento", () => {
-    expect(planInactivity({ lastAuthor: "customer", lastAt: at(0), warnedAt: null, now: at(59), askMs: minutes(3), closeMs: minutes(3) })).toBe("none");
-    expect(planInactivity({ lastAuthor: "customer", lastAt: at(25), warnedAt: at(22), now: at(59), askMs: minutes(3), closeMs: minutes(3) })).toBe("reset");
+    expect(planInactivity({ lastAuthor: "customer", lastAt: at(0), warnedAt: null, now: at(3 * 24 * 60), askMs: minutes(24 * 60), closeMs: minutes(24 * 60) })).toBe("none");
+    expect(planInactivity({ lastAuthor: "customer", lastAt: at(25), warnedAt: at(22), now: at(59), askMs: minutes(24 * 60), closeMs: minutes(24 * 60) })).toBe("reset");
   });
 
   it("posição na fila é só interna (planejamento não gera texto para o cliente)", () => {

@@ -46,6 +46,11 @@ export type ChatMenuSettings = {
   canvas: MenuCanvas;
 };
 
+/** Silêncio do cliente: o "ainda está por aí?" sai no dia seguinte (24 h) e o encerramento outras 24 h depois. */
+export const SILENCE_DAY_MINUTES = 24 * 60;
+export const SILENCE_ASK_TEXT = "Oi! Passando para saber se ainda posso te ajudar com alguma coisa. Se não tiver retorno, este atendimento será encerrado em {tempo}, mas é só mandar uma mensagem quando quiser.";
+const LEGACY_SILENCE_ASK_TEXTS = ["Você ainda está por aí? Em caso de inatividade, este atendimento será encerrado automaticamente em {minutos} minutos."];
+
 export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   enabled: false,
   greeting: "Olá, {cliente}! Como podemos ajudar?\n\n{menu}",
@@ -57,9 +62,9 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   invalidOptionText: "Não entendi essa opção. Responda com o número de uma das opções abaixo.",
   farewellText: "Atendimento encerrado. Quando precisar, é só mandar uma mensagem.",
   silenceEnabled: true,
-  silenceAskMinutes: 10,
-  silenceCloseMinutes: 3,
-  silenceAskText: "Você ainda está por aí? Em caso de inatividade, este atendimento será encerrado automaticamente em {minutos} minutos.",
+  silenceAskMinutes: SILENCE_DAY_MINUTES,
+  silenceCloseMinutes: SILENCE_DAY_MINUTES,
+  silenceAskText: SILENCE_ASK_TEXT,
   silenceCloseCustom: false,
   silenceCloseText: "",
   npsEnabled: true,
@@ -83,6 +88,20 @@ export const NPS_LEGACY_SCALES = [
   NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label} ${NPS_SCORE_EMOJIS[index]}`).join("\n"),
 ];
 export const npsPrompt = (settings: ChatMenuSettings) => settings.npsPromptText.trim() || DEFAULT_CHAT_SETTINGS.npsPromptText;
+
+/** 30 minutos, 1 hora, 24 horas, 2 dias: o tempo por extenso para a mensagem ao cliente. */
+export function silenceDurationText(minutes: number) {
+  if (minutes < 60 || minutes % 60) return `${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
+  const hours = minutes / 60;
+  if (hours <= 24 || hours % 24) return `${hours} ${hours === 1 ? "hora" : "horas"}`;
+  return `${hours / 24} dias`;
+}
+
+/** {tempo} sai por extenso ("24 horas"); {minutos} continua valendo para textos antigos. */
+export const silenceAskMessage = (settings: ChatMenuSettings) =>
+  settings.silenceAskText
+    .replaceAll("{tempo}", silenceDurationText(settings.silenceCloseMinutes))
+    .replaceAll("{minutos}", String(settings.silenceCloseMinutes));
 
 /** Texto personalizado vazio ou desligado cai na despedida padrão. */
 export const silenceFarewell = (settings: ChatMenuSettings) =>
@@ -208,9 +227,14 @@ export function mergeChatSettings(stored: unknown): ChatMenuSettings {
   // Aviso de posição na fila ao cliente foi removido do sistema: a chave antiga gravada no banco é descartada.
   const { notifyQueuePosition: _removed, ...value } = raw;
   void _removed;
+  // Timers curtos antigos (10 min + 3 min) viram 24 h; o texto padrão antigo ("em 3 minutos") vira o novo.
+  const silenceMinutes = (minutes: unknown) => (typeof minutes === "number" && minutes >= 60 ? minutes : SILENCE_DAY_MINUTES);
   return {
     ...DEFAULT_CHAT_SETTINGS,
     ...value,
+    silenceAskMinutes: silenceMinutes(value.silenceAskMinutes),
+    silenceCloseMinutes: silenceMinutes(value.silenceCloseMinutes),
+    silenceAskText: !value.silenceAskText || LEGACY_SILENCE_ASK_TEXTS.includes(value.silenceAskText) ? SILENCE_ASK_TEXT : value.silenceAskText,
     options: (value.options ?? []).map(withOptionDefaults),
     canvas: {
       positions: value.canvas?.positions ?? {},
