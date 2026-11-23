@@ -938,6 +938,31 @@ export function CampaignsView() {
     toast.success("Rascunho salvo", `"${campaign.nome}" ficou salva para disparar depois.`);
   };
 
+  /**
+   * Troca o atendimento pós-campanha (IA x fila humana) em qualquer status, inclusive enviando, pausada ou concluída.
+   * Grava só esse campo no servidor (o disparo segue atualizando o progresso em paralelo) e vale para a próxima resposta.
+   */
+  const changeCampaignAiMode = async (campaign: Campaign, enabled: boolean) => {
+    const previous = campaign.aiAutoReplyEnabled !== false;
+    if (selectedCampaign?.id === campaign.id) {
+      setCampaignAiReply(enabled);
+      setSelectedCampaign((current) => (current && current.id === campaign.id ? { ...current, aiAutoReplyEnabled: enabled } : current));
+    }
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiAutoReplyEnabled: enabled }) });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(data.error || "Tente novamente.");
+      await reloadCampaigns().catch(() => null);
+      toast.success("Atendimento atualizado", enabled ? `A IA responde e qualifica as respostas de "${campaign.nome}".` : `Respostas de "${campaign.nome}" vão direto para a fila humana.`);
+    } catch (cause) {
+      if (selectedCampaign?.id === campaign.id) {
+        setCampaignAiReply(previous);
+        setSelectedCampaign((current) => (current && current.id === campaign.id ? { ...current, aiAutoReplyEnabled: previous } : current));
+      }
+      toast.error("Não foi possível alterar o atendimento", cause instanceof Error ? cause.message : "Tente novamente.");
+    }
+  };
+
   const startEditingCampaign = (campaign: Campaign) => {
     setSelectedCampaign(campaign);
     clearSelectedAttachments();
@@ -1604,19 +1629,16 @@ export function CampaignsView() {
                           <span className="min-w-0"><span className="block max-w-56 truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{row.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">{row.origem}</span>{row.kind === "campaign" && row.campaign && (() => {
                             const campaign = row.campaign;
                             const aiOn = campaign.aiAutoReplyEnabled !== false;
-                            const canToggle = row.status !== "Concluído";
                             const BadgeIcon = aiOn ? Bot : Headset;
                             return (
                               <button
                                 type="button"
-                                disabled={!canToggle}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  setCampaigns((current) => current.map((item) => item.id === campaign.id ? { ...item, aiAutoReplyEnabled: !aiOn } : item));
-                                  toast.success("Atendimento atualizado", aiOn ? `Respostas de "${campaign.nome}" vão direto para a fila humana.` : `A IA volta a atender as respostas de "${campaign.nome}".`);
+                                  void changeCampaignAiMode(campaign, !aiOn);
                                 }}
-                                title={canToggle ? "Clique para alternar o atendimento ao responder" : "Campanha concluída"}
-                                className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${aiOn ? "bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" : "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]"} ${canToggle ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+                                title={aiOn ? "IA responde e qualifica o lead. Clique para mandar as respostas direto para a fila humana." : "Apenas fila humana. Clique para a IA responder e qualificar o lead."}
+                                className={`mt-1 inline-flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold hover:opacity-80 ${aiOn ? "bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" : "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]"}`}
                               >
                                 <BadgeIcon className="h-3 w-3" />{aiOn ? "IA Ativa" : "Direto p/ Fila Humana"}
                               </button>
@@ -2108,6 +2130,8 @@ export function CampaignsView() {
                 {selectedLocked || selectedMetaPending ? (
                   <section aria-label="Conteúdo enviado" className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
                     <p className="text-xs font-bold text-slate-800 dark:text-slate-100">{selectedMetaPending ? "Aguardando análise da Meta" : "Conteúdo enviado"}</p>
+                    {/* Mesmo depois do disparo, o atendimento das respostas pode mudar a qualquer momento (vale na hora). */}
+                    <CampaignAiReplyChoice value={selectedCampaign.aiAutoReplyEnabled !== false} onChange={(enabled) => void changeCampaignAiMode(selectedCampaign, enabled)} />
                     {selectedMetaPending && <p role="status" className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">O disparo está bloqueado. A campanha será liberada automaticamente quando o webhook ou a consulta de status confirmar a aprovação do template.</p>}
                     {selectedCampaign.metaApprovalStatus === "REJECTED" && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">A Meta rejeitou o template: {selectedCampaign.metaApprovalReason || "motivo não informado"}</p>}
                     <dl className="grid gap-2 text-xs sm:grid-cols-2">
@@ -2149,7 +2173,7 @@ export function CampaignsView() {
                     />
                     {audienceOverlapNotice}
                     <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                    <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
+                    <CampaignAiReplyChoice value={campaignAiReply} onChange={(enabled) => void changeCampaignAiMode(selectedCampaign, enabled)} />
                     <CampaignDeliverySettings value={deliverySettings} onChange={setDeliverySettings} />
                     {(selectedCampaign.metaApprovalStatus === "REJECTED" || selectedCampaign.metaApprovalStatus === "SUBMISSION_FAILED") && <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/30"><p className="text-xs font-semibold text-red-800 dark:text-red-200">{selectedCampaign.metaApprovalStatus === "REJECTED" ? `Rejeitada pela Meta: ${selectedCampaign.metaApprovalReason || "motivo não informado"}` : `Não foi possível submeter: ${selectedCampaign.metaApprovalReason || "verifique a integração e tente novamente"}`}</p><div className="flex gap-2"><input value={templatePrompt} onChange={(event) => setTemplatePrompt(event.target.value)} placeholder="Orientação para uma nova versão do template" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={isGeneratingTemplate} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar nova versão"}</button></div></div>}
                     {aiTemplateDraft && <div className="space-y-2 rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/5 p-3"><p className="text-xs font-semibold text-slate-800 dark:text-white">Template para reenviar à análise</p><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label><button type="button" disabled={isSubmittingTemplate} onClick={() => void submitTemplateForMeta({ ...selectedCampaign, nome: form.nome.trim(), publico: selectedAudienceSegments.join(", "), audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id), criteriaFilters: campaignCriteriaFilters, objective: campaignObjective, audienceDescription: campaignAudienceDescription, metaCategory: campaignCategory, mensagem: form.mensagem.trim(), metaTemplateDraft: { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory } }, { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory }, false)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Send className="h-3.5 w-3.5" />{isSubmittingTemplate ? "Enviando..." : "Aprovar e reenviar para análise"}</button></div>}
