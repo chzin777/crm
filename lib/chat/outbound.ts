@@ -11,6 +11,10 @@ import { estimateVoiceSeconds } from "@/lib/chat/presence";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import type { ChatInteractiveList } from "@/lib/chat/types";
 import { withoutDashes } from "@/lib/chat/text";
+import { AI_AUTHOR_NAME, sanitizeAiResponse } from "@/lib/ai/sanitize";
+
+/** Texto da IA: sem travessão/hífen como pontuação (trava em código, além da regra do prompt). */
+const automaticText = (rawText: string, authorName: string) => (authorName === AI_AUTHOR_NAME ? sanitizeAiResponse(rawText) : withoutDashes(rawText));
 import { readOperatorSettings } from "@/lib/chat/operator-presence";
 import { signWithName } from "@/lib/chat/presence-status";
 import { deliverImageOrText, downloadImage } from "@/lib/ai/product-image";
@@ -50,7 +54,7 @@ async function deliver(messageId: string, send: () => Promise<{ messages?: { id:
  */
 export async function sendAutomaticImage(conversation: Pick<ChatConversation, "id" | "phone">, imageUrl: string, rawText: string, authorName: string, invalidate: () => Promise<unknown>, productSku?: string) {
   if (await isBlocked(conversation.phone)) return null;
-  const text = withoutDashes(rawText);
+  const text = automaticText(rawText, authorName);
   await deliverImageOrText({
     sendImage: async (caption) => {
       const file = await downloadImage(imageUrl);
@@ -251,7 +255,7 @@ export async function sendAutomaticMessage(conversation: Pick<ChatConversation, 
     console.log(`[bot] ${conversation.id}: mensagem automática não enviada (número bloqueado)`);
     return null;
   }
-  const text = withoutDashes(rawText);
+  const text = automaticText(rawText, authorName);
   const now = new Date();
   const message = await prisma.chatMessage.create({
     data: {

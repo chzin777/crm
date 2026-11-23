@@ -611,8 +611,8 @@ describe("vitrine Radda sem loop: \"tem radda?\" → \"esse de 120\" → \"esse 
     const history: PlaygroundMessage[] = [{ from: "customer", text: "ta, tem radda?" }];
     const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-radda", knownCity: "Goiânia" });
     // Sem foto cadastrada: vitrine em texto limpo, sem código "Ref."; a ordem fica em lastShownProducts.
-    expect(turn1.messages[0]).toContain("1. 👓 *Radda* — R$ 120,00");
-    expect(turn1.messages[0]).toContain("3. 👓 *Radda* — R$ 120,00");
+    expect(turn1.messages[0]).toContain("1. 👓 *Radda*, R$ 120,00");
+    expect(turn1.messages[0]).toContain("3. 👓 *Radda*, R$ 120,00");
     expect(turn1.messages[0]).not.toMatch(/Ref\./);
     // A ferramenta já avisou o modelo de que não há fotos (fotosNoCatalogo: 0); o aviso é dele, não do código.
     expect(turn1.messages.join("\n")).toContain("As fotos não estão no sistema agora");
@@ -690,7 +690,7 @@ describe("vitrine como Lista Interativa nativa do WhatsApp", () => {
     expect(String(calls.stock.at(-1)?.termoBusca)).toContain("PS 07RV");
     expect(turn2.image?.sku).toBe("900701");
     expect(turn2.messages[0]).toContain("Ref. PS 07RV");
-    expect(turn2.messages[0]).toContain("📍 *Loja Jardim Goiás* - Goiânia (Av. Deputado Jamel Cecilio, 3300) — 2 unidades");
+    expect(turn2.messages[0]).toContain("📍 *Loja Jardim Goiás*, Goiânia (Av. Deputado Jamel Cecilio, 3300), 2 unidades");
     expect(turn2.interactiveList).toBeUndefined();
   });
 });

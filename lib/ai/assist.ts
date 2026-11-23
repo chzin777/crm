@@ -10,6 +10,7 @@ import { readAiSettings } from "@/lib/ai/store";
 import { loadStudioContext } from "@/lib/ai/studio-db";
 import { composeSystemPrompt } from "@/lib/ai/prompt-composer";
 import { buildCopilotPrompt } from "@/lib/ai/reply-copilot";
+import { sanitizeAiResponse } from "@/lib/ai/sanitize";
 import { classifyVague, vagueMessageBlock } from "@/lib/ai/vague-message";
 import { campaignNames } from "@/lib/chat/campaign-origin";
 
@@ -121,7 +122,8 @@ export async function suggestReply(conversation: ConversationRef & { campaignId?
     { role: "system", content: system },
     { role: "user", content: context.text },
   ], { maxTokens: 700, feature: "reply", conversationId: conversation.id, userId, settings, temperature: conversationTemperature(settings) });
-  const reply = result.reply?.trim();
+  // Copiloto: o texto que vai para o composer já sai sem travessão/hífen como pontuação.
+  const reply = sanitizeAiResponse(result.reply?.trim() ?? "");
   if (!reply) throw new Error("A IA não sugeriu nenhuma resposta.");
   return { reply };
 }

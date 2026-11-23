@@ -57,6 +57,7 @@ import { applySkillsToSettings, filterToolsBySkills, skillEnabled } from "@/lib/
 import { loadSkills, loadStudioContext } from "@/lib/ai/studio-db";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { AI_AUTHOR_NAME, sanitizeAiResponse } from "@/lib/ai/sanitize";
 import { listFieldDefinitions, setContactFields } from "@/lib/contact-fields-db";
 import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
 import { catalogImages, imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
@@ -93,7 +94,7 @@ export async function releaseFromAi(conversation: ChatConversation) {
 }
 
 /** Nome gravado nas mensagens da IA (o atendimento vê quem respondeu). */
-export const AI_AUTHOR = "Assistente IA";
+export const AI_AUTHOR = AI_AUTHOR_NAME;
 /** Marca da mensagem de sistema da transferência: depois dela a IA só ajuda na espera (fila sem atendente). */
 export const AI_HANDOFF_MARK = "IA transferiu o atendimento";
 /**
@@ -1552,8 +1553,9 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
   const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue, outcome.staffQueueId) : null;
   return {
     ...outcome,
-    messages: run.visualCatalog ? [run.visualCatalog.opening, ...run.visualCatalog.items.map((item) => item.caption), run.visualCatalog.closing].filter(Boolean)
-      : run.interactiveList || run.singleReply ? [withoutSplitMarkers(outcome.reply)] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name }),
+    // Teste em /ia mostra o mesmo texto que sairia no WhatsApp (já sem travessões).
+    messages: (run.visualCatalog ? [run.visualCatalog.opening, ...run.visualCatalog.items.map((item) => item.caption), run.visualCatalog.closing].filter(Boolean)
+      : run.interactiveList || run.singleReply ? [withoutSplitMarkers(outcome.reply)] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name })).map(sanitizeAiResponse),
     visualCatalog: run.visualCatalog ?? undefined,
     assignee: outcome.assigneeName,
     handoffQueue: target?.name ?? "",

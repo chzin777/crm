@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { sanitizeAiResponse } from "@/lib/ai/sanitize";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreInfo } from "@/lib/ai/stock";
@@ -277,7 +278,8 @@ describe("catálogo visual: foto + legenda curta, sem Ref.", () => {
     expect(catalog.opening).toBe(opening);
     expect(catalog.closing).toBe(closing);
     // O que o cliente recebe (e o /ia mostra): comentário, 1 legenda por foto, pergunta do modelo.
-    expect(run.messages).toEqual([catalog.opening, ...catalog.items.map((item) => item.caption), catalog.closing]);
+    expect(run.messages).toEqual([catalog.opening, ...catalog.items.map((item) => item.caption), catalog.closing].map(sanitizeAiResponse));
+    expect(run.messages.join(" ")).not.toMatch(/[–—]/);
     expect(run.interactiveList).toBeUndefined();
     expect(run.catalogContext?.lastShownProducts).toEqual(catalog.items.map((item) => ({ index: item.index, id: item.sku, ref: item.ref, name: item.name, price: 999, stores: ["Setor Marista"] })));
 

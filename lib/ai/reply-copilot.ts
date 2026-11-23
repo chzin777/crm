@@ -45,6 +45,7 @@ export function buildCopilotPrompt(input: { brandRules: string; modules: string;
     "- Aqui você não tem ferramentas (estoque, mapa, catálogo): ignore instruções acima sobre chamá-las e não invente disponibilidade.",
     "- Nunca diga que vai consultar algo e voltar depois sem necessidade; se faltar informação (estoque, preço, receita), faça uma pergunta objetiva ou ofereça o próximo passo concreto.",
     "- Mensagem curta, adequada ao WhatsApp, sem markdown além de *negrito* pontual e sem assinatura.",
+    "PROIBIÇÃO ABSOLUTA DE TRAVESSÕES E HÍFENS: nunca use travessão (—), meia-risca (–) ou hífen (-) para separar ideias, pausas, listas ou explicações. Use só vírgulas, pontos finais, pontos de interrogação ou quebras de linha (hífen só dentro de palavras e códigos, como Ray-Ban).",
     input.turnHint ?? "",
     customerProfileBlock(input.customer),
     input.knowledge ? `Informações que você pode usar:\n${input.knowledge}` : "",
