@@ -11,6 +11,8 @@ import { estimateVoiceSeconds } from "@/lib/chat/presence";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import type { ChatInteractiveList } from "@/lib/chat/types";
 import { withoutDashes } from "@/lib/chat/text";
+import { readOperatorSettings } from "@/lib/chat/operator-presence";
+import { signWithName } from "@/lib/chat/presence-status";
 import { deliverImageOrText, downloadImage } from "@/lib/ai/product-image";
 
 export class ChatRuleError extends Error {
@@ -201,7 +203,10 @@ export async function sendAgentMessage(actor: ChatActor, conversation: ChatConve
   await assumeFor(actor, conversation);
 
   const now = new Date();
-  const text = withoutDashes(input.text);
+  // Assinatura do atendente (/configuracoes): só em texto livre, nunca em nota interna, modelo ou legenda de mídia.
+  const plain = withoutDashes(input.text);
+  const sign = !input.template && !input.attachment && (await readOperatorSettings()).signMessagesWithName;
+  const text = sign ? signWithName(plain, actor.name) : plain;
   const template = input.template ? await templateText(input.template) : null;
   const quote = await loadQuote(conversation.id, input.replyToId);
   const isAudio = input.attachment?.kind === "audio";

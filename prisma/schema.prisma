@@ -487,8 +487,16 @@ model ChatAgent {
   capacity   Int       @default(0)
   paused     Boolean   @default(false)
   lastSeenAt DateTime?
-  /// Código ERP da loja do atendente ("13"), para o rodízio por loja.
+  /// Legado (v1.101.0): loja única; o vínculo atual é `stores`.
   store      String?
+  /// Lojas do ERP VMSet do usuário ("13", "5"): o rodízio por loja prioriza estes atendentes.
+  stores     String[]  @default([])
+  /// Escolha do operador: ONLINE (recebe novos), AWAY (ausente/pausa) ou OFFLINE. `paused` acompanha (≠ ONLINE).
+  presenceStatus String @default("ONLINE")
+  /// Última interação real (clique, digitação, envio) no CRM; base da pausa automática por inatividade.
+  lastActivityAt DateTime?
+  /// Ausente colocado pelo sistema (inatividade): a próxima interação volta para Online sozinha.
+  awayAuto   Boolean   @default(false)
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 

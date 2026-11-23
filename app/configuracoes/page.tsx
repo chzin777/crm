@@ -28,6 +28,9 @@ interface CrmSettings {
   metaCustoMarketing?: string;
   metaCustoUtilidade?: string;
   janelaConversaoDias?: string;
+  // Atendimento: minutos sem interação até o operador ir para Ausente (0 desliga) e assinatura nas mensagens.
+  operatorAutoAwayMinutes?: string;
+  signMessagesWithName?: boolean;
   }
 
 const defaultSettings: CrmSettings = {
@@ -47,6 +50,8 @@ const defaultSettings: CrmSettings = {
   metaCustoMarketing: "0.34",
   metaCustoUtilidade: "0.04",
   janelaConversaoDias: "7",
+  operatorAutoAwayMinutes: "15",
+  signMessagesWithName: false,
 };
 
 function SettingsCard({ title, description, icon: Icon, children }: {
@@ -162,6 +167,12 @@ export default function ConfiguracoesPage() {
       setLoadError("A janela de conversão deve ser um número inteiro de dias maior que zero.");
       return;
     }
+    const autoAway = settings.operatorAutoAwayMinutes ?? "15";
+    if (autoAway !== "" && !(Number.isInteger(Number(autoAway)) && Number(autoAway) >= 0 && Number(autoAway) <= 1440)) {
+      setSaveMessage("");
+      setLoadError("O tempo de inatividade deve ser um número inteiro de minutos entre 0 e 1440 (0 desativa).");
+      return;
+    }
     setLoadError("");
     setSaveMessage("");
     try {
@@ -223,6 +234,14 @@ export default function ConfiguracoesPage() {
               <SettingsTextField label="Limite de cards por etapa" value={String(settings.pipelineMaxCardsPerStage)} type="number" onChange={(value) => updateSetting("pipelineMaxCardsPerStage", Number(value))} />
               <p className="text-xs text-slate-500 dark:text-slate-400">As regras de cada etapa (filtros, posição, prazo e nome) são editadas na página Pipelines, pelo ícone de lápis no cabeçalho de cada etapa.</p>
             </div>
+          </SettingsCard>
+
+          <SettingsCard title="Atendimento dos operadores" description="Presença no /chat e como as mensagens do atendente chegam ao cliente no WhatsApp." icon={Users}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SettingsTextField label="Tempo de inatividade para pausa automática do operador (minutos)" value={settings.operatorAutoAwayMinutes ?? "15"} type="number" onChange={(value) => updateSetting("operatorAutoAwayMinutes", value)} />
+              <SettingsToggle label="Assinar mensagens com o nome do atendente" description="Envia como *Nome do Atendente:* em negrito na primeira linha (não vale para notas internas, modelos e mídias)." checked={Boolean(settings.signMessagesWithName)} onChange={(checked) => updateSetting("signMessagesWithName", checked)} />
+            </div>
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Operador Online sem cliques ou digitação por esse tempo vai para Ausente e para de receber novos atendimentos; ao voltar a usar o CRM, retorna a Online. Use 0 para desativar.</p>
           </SettingsCard>
 
           <SettingsCard title="Custos e conversão das campanhas" description="Preço que a Meta cobra por mensagem de modelo entregue no Brasil (R$) e prazo para atribuir uma venda do ERP à campanha." icon={DollarSign}>

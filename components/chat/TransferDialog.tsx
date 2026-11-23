@@ -2,8 +2,12 @@
 import { useEffect, useState } from "react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { PresenceDot } from "@/components/PresenceSelector";
+import { PRESENCE_LABELS, type PresenceStatus } from "@/lib/chat/presence-status";
 
-type Member = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean };
+type Member = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean; presence?: PresenceStatus };
+
+const presenceOf = (member: Member): PresenceStatus => member.presence ?? (member.paused ? "AWAY" : member.online ? "ONLINE" : "OFFLINE");
 type Queue = { id: string; name: string; members: Member[] };
 
 export function TransferDialog({ conversationId, currentQueueId, onClose, onDone }: { conversationId: string; currentQueueId: string | null; onClose: () => void; onDone: () => void }) {
@@ -72,10 +76,20 @@ export function TransferDialog({ conversationId, currentQueueId, onClose, onDone
               <option value="">Deixar na fila</option>
               {members.map((member) => (
                 <option key={member.userId} value={member.userId} disabled={member.paused}>
-                  {member.name} · {member.open}/{member.capacity}{member.online ? " · online" : ""}{member.paused ? " · pausada" : ""}
+                  {member.name} · {member.open}/{member.capacity} · {PRESENCE_LABELS[presenceOf(member)]}
                 </option>
               ))}
             </select>
+            {members.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                {members.map((member) => (
+                  <li key={member.userId} className="flex min-w-0 items-center gap-1.5 break-words">
+                    <PresenceDot status={presenceOf(member)} />
+                    <span className={member.userId === assigneeId ? "font-semibold text-slate-800 dark:text-white" : ""}>{member.name}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <div>
             <label htmlFor="transfer-reason" className={label}>Motivo</label>

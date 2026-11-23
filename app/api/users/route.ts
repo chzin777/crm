@@ -3,6 +3,20 @@ import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
+import { storeErpCode } from "@/lib/stores";
+import { effectivePresence } from "@/lib/chat/presence-status";
+
+/** Lojas do ERP VMSet vinculadas ao usuário (códigos "13", "5"); undefined = não mexe. */
+function parseStores(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return [...new Set(value.map((code) => String(code).trim()).filter((code) => code && code.length <= 20))].slice(0, 50);
+}
+
+async function saveStores(userId: string, stores: string[] | undefined) {
+  if (!stores) return [];
+  await prisma.chatAgent.upsert({ where: { userId }, create: { userId, stores, store: stores[0] ?? null }, update: { stores, store: stores[0] ?? null } });
+  return stores;
+}
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -25,10 +39,20 @@ export async function GET(request: NextRequest) {
         banned: true,
         createdAt: true,
         image: true,
+        chatAgent: { select: { presenceStatus: true, paused: true, lastSeenAt: true, lastActivityAt: true, stores: true } },
       },
     });
+    // Lojas do ERP VMSet para o vínculo do usuário (código "13" extraído do nome cadastrado).
+    const storeRows = await prisma.store.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { name: true } });
+    const stores = storeRows.flatMap((store) => {
+      const code = storeErpCode(store.name);
+      return code ? [{ code, name: store.name }] : [];
+    });
 
-    return NextResponse.json({ data: users });
+    return NextResponse.json({
+      stores,
+      data: users.map(({ chatAgent, ...user }) => ({ ...user, presence: effectivePresence(chatAgent), stores: chatAgent?.stores ?? [] })),
+    });
   } catch (error) {
     console.error("Erro ao listar usuários:", error);
     return NextResponse.json({ error: "Não foi possível carregar os usuários." }, { status: 500 });
@@ -79,7 +103,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ data: user }, { status: 201 });
+    const stores = await saveStores(user.id, parseStores(body.stores));
+    return NextResponse.json({ data: { ...user, presence: "OFFLINE", stores } }, { status: 201 });
   } catch (error) {
     console.error("Erro ao criar usuário:", error);
     return NextResponse.json({ error: "Não foi possível criar o usuário." }, { status: 500 });
@@ -131,7 +156,9 @@ export async function PATCH(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({ data: user });
+    const requested = parseStores(body.stores);
+    await saveStores(id, requested);
+    return NextResponse.json({ data: { ...user, stores: requested ?? [] } });
   } catch (error) {
     console.error("Erro ao atualizar usuário:", error);
     return NextResponse.json({ error: "Não foi possível atualizar o usuário." }, { status: 500 });

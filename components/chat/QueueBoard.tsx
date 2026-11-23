@@ -8,7 +8,7 @@ import { initials, waitingLabel } from "@/lib/chat/format";
 
 export type QueueMember = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean; store?: string | null };
 export type QueueRecord = { id: string; name: string; description: string; color: string; hours: string; firstResponseSlaMin: number; order: number; waiting: number; oldestWaiting: string | null; members: QueueMember[]; distribution?: "manual" | "round_robin"; storePriority?: boolean };
-export type QueueAgent = { id: string; name: string; email: string; hasChatAccess: boolean; capacity: number; paused: boolean; online: boolean; open: number; queueIds: string[]; store?: string | null };
+export type QueueAgent = { id: string; name: string; email: string; hasChatAccess: boolean; capacity: number; paused: boolean; online: boolean; open: number; queueIds: string[]; store?: string | null; stores?: string[]; presence?: "ONLINE" | "AWAY" | "OFFLINE" };
 /** Loja para o vínculo do atendente: código ERP ("13") e nome cadastrado. */
 export type StoreOption = { code: string; name: string };
 

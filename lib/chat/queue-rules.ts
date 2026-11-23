@@ -31,8 +31,8 @@ export type QueueDistribution = "manual" | "round_robin";
 export const QUEUE_DISTRIBUTIONS: QueueDistribution[] = ["manual", "round_robin"];
 
 /** Rodízio 1 a 1; com prioridade por loja, primeiro os atendentes da loja do cliente e, sem nenhum livre, todos. */
-export function pickRoundRobin<T extends { store: string | null }>(pool: T[], cursor: number, customerStore: string | null, storePriority: boolean) {
-  const local = storePriority && customerStore ? pool.filter((item) => item.store === customerStore) : [];
+export function pickRoundRobin<T extends { store?: string | null; stores?: string[] }>(pool: T[], cursor: number, customerStore: string | null, storePriority: boolean) {
+  const local = storePriority && customerStore ? pool.filter((item) => item.store === customerStore || (item.stores ?? []).includes(customerStore)) : [];
   const candidates = local.length > 0 ? local : pool;
   if (candidates.length === 0) return null;
   return { pick: candidates[cursor % candidates.length], byStore: local.length > 0 };

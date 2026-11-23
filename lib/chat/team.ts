@@ -1,4 +1,5 @@
 import "server-only";
+import { effectivePresence } from "@/lib/chat/presence-status";
 import { prisma } from "@/lib/prisma";
 
 const ONLINE_MS = 2 * 60 * 1000;
@@ -40,6 +41,8 @@ export async function loadQueueBoard() {
       capacity: member.user.chatAgent?.capacity ?? 0,
       paused: member.user.chatAgent?.paused ?? false,
       store: member.user.chatAgent?.store ?? null,
+      stores: member.user.chatAgent?.stores ?? [],
+      presence: effectivePresence(member.user.chatAgent),
     })),
   }));
 }

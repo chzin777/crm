@@ -102,18 +102,33 @@ function AgentCard({ agent, queues, act, stores }: { agent: QueueAgent; queues: 
 
       <LimitSlider agent={agent} onCommit={(capacity) => void act("/api/chat/team", "PATCH", { userId: agent.id, capacity }, "Limite salvo.")} />
 
-      <label className="block space-y-1 text-xs text-slate-500 dark:text-slate-400">
-        <span className="flex items-center gap-1.5"><Store className="h-3.5 w-3.5" />Loja do atendente (rodízio por loja)</span>
-        <select
-          value={agent.store ?? ""}
-          onChange={(event) => void act("/api/chat/team", "PATCH", { userId: agent.id, store: event.target.value || null }, "Loja salva.")}
-          className="h-9 w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-[#C4D600]"
-        >
-          <option value="">Sem loja (atende qualquer cliente)</option>
-          {agent.store && !stores.some((store) => store.code === agent.store) && <option value={agent.store}>Loja {agent.store}</option>}
-          {stores.map((store) => <option key={store.code} value={store.code}>{store.name}</option>)}
-        </select>
-      </label>
+      <div className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <span className="flex items-center gap-1.5"><Store className="h-3.5 w-3.5" />Lojas do atendente (rodízio por loja)</span>
+        {(() => {
+          const linked = agent.stores ?? (agent.store ? [agent.store] : []);
+          const options = [...stores, ...linked.filter((code) => !stores.some((store) => store.code === code)).map((code) => ({ code, name: `Loja ${code}` }))];
+          return (
+            <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+              {options.map((store) => {
+                const selected = linked.includes(store.code);
+                return (
+                  <button
+                    key={store.code}
+                    type="button"
+                    aria-pressed={selected}
+                    title={store.name}
+                    onClick={() => void act("/api/chat/team", "PATCH", { userId: agent.id, stores: selected ? linked.filter((code) => code !== store.code) : [...linked, store.code] }, "Lojas salvas.")}
+                    className={`cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-semibold transition ${selected ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-200 text-slate-600 hover:border-[#002187] dark:border-slate-700 dark:text-slate-300"}`}
+                  >
+                    {store.code}
+                  </button>
+                );
+              })}
+              {options.length === 0 && <span className="text-[11px] text-slate-400">Nenhuma loja cadastrada.</span>}
+            </div>
+          );
+        })()}
+      </div>
 
       <div>
         <div className="mb-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">

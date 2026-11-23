@@ -1,17 +1,17 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { isOnline } from "@/lib/chat/team";
+import { effectivePresence } from "@/lib/chat/presence-status";
 import { addSystemMessage } from "@/lib/chat/conversation";
 import { pickRoundRobin } from "@/lib/chat/queue-rules";
 
-type Candidate = { id: string; name: string; store: string | null; load: number; capacity: number };
+type Candidate = { id: string; name: string; store: string | null; stores: string[]; load: number; capacity: number };
 
 /** Atendentes da fila que podem receber agora: online, sem pausa e com vaga (capacidade > carga). Ordem da fila. */
 async function eligibleMembers(queueId: string): Promise<Candidate[]> {
   const members = await prisma.chatQueueMember.findMany({
     where: { queueId, user: { banned: false } },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
-    select: { user: { select: { id: true, name: true, chatAgent: { select: { lastSeenAt: true, paused: true, capacity: true, store: true } } } } },
+    select: { user: { select: { id: true, name: true, chatAgent: { select: { lastSeenAt: true, lastActivityAt: true, paused: true, presenceStatus: true, capacity: true, store: true, stores: true } } } } },
   });
   const ids = members.map((member) => member.user.id);
   if (ids.length === 0) return [];
@@ -19,10 +19,11 @@ async function eligibleMembers(queueId: string): Promise<Candidate[]> {
   const load = new Map(loads.map((row) => [row.assigneeId, row._count._all]));
   return members.flatMap(({ user }) => {
     const agent = user.chatAgent;
-    if (!agent || agent.paused || !isOnline(agent.lastSeenAt)) return [];
+    // Só quem está Online (escolha do operador) e com o CRM aberto; Ausente/Offline ficam fora do rodízio.
+    if (!agent || effectivePresence(agent) !== "ONLINE") return [];
     const current = load.get(user.id) ?? 0;
     if (agent.capacity <= current) return [];
-    return [{ id: user.id, name: user.name, store: agent.store?.trim() || null, load: current, capacity: agent.capacity }];
+    return [{ id: user.id, name: user.name, store: agent.store?.trim() || null, stores: agent.stores.map((code) => code.trim()).filter(Boolean), load: current, capacity: agent.capacity }];
   });
 }
 

@@ -6,6 +6,8 @@ import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
+import { PresenceDot } from "@/components/PresenceSelector";
+import { PRESENCE_LABELS, type PresenceStatus } from "@/lib/chat/presence-status";
 
 interface RoleOption {
   id: string;
@@ -20,7 +22,11 @@ interface UserRecord {
   banned: boolean;
   createdAt: string;
   image: string | null;
+  presence?: PresenceStatus;
+  stores?: string[];
 }
+
+type StoreOption = { code: string; name: string };
 
 const emptyForm = {
   name: "",
@@ -28,6 +34,7 @@ const emptyForm = {
   roleId: "",
   banned: false,
   password: "",
+  stores: [] as string[],
 };
 
 const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#051647] dark:text-white";
@@ -38,6 +45,7 @@ export default function UsuariosPage() {
   const toast = useToast();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [stores, setStores] = useState<StoreOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -71,11 +79,12 @@ export default function UsuariosPage() {
       params.set("sortBy", activeSort.field);
       params.set("sortOrder", activeSort.order);
       const response = await fetch(`/api/users?${params.toString()}`, { signal });
-      const result = await response.json().catch(() => ({})) as { data?: UserRecord[]; error?: string };
+      const result = await response.json().catch(() => ({})) as { data?: UserRecord[]; stores?: StoreOption[]; error?: string };
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar os usuários.");
       const list = result.data ?? [];
       if (signal?.aborted) return;
       setUsers(list);
+      setStores(result.stores ?? []);
       setPage(1);
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -110,6 +119,7 @@ export default function UsuariosPage() {
       roleId: user.roleId ?? "",
       banned: user.banned,
       password: "",
+      stores: user.stores ?? [],
     });
     setFormError("");
   };
@@ -136,6 +146,7 @@ export default function UsuariosPage() {
           email: form.email.trim(),
           roleId: form.roleId || null,
           banned: form.banned,
+          stores: form.stores,
           ...(form.password ? { password: form.password } : {}),
         }),
       });
@@ -243,7 +254,15 @@ export default function UsuariosPage() {
                       onClick={() => openForm(user)}
                       className="group cursor-pointer transition-colors hover:bg-slate-50/80 focus-visible:outline-2 focus-visible:outline-[#002187] dark:hover:bg-slate-800/30 dark:focus-visible:outline-[#C4D600]"
                     >
-                      <td className="px-4 py-2 xl:px-6 xl:py-4 font-medium text-slate-900 dark:text-white">{user.name}</td>
+                      <td className="px-4 py-2 xl:px-6 xl:py-4 font-medium text-slate-900 dark:text-white">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <PresenceDot status={user.presence ?? "OFFLINE"} />
+                          <span className="min-w-0 break-words">{user.name}</span>
+                        </span>
+                        {(user.stores ?? []).length > 0 && (
+                          <span className="mt-0.5 block pl-[18px] text-[11px] font-normal text-slate-500 dark:text-slate-400">Loja {(user.stores ?? []).join(", ")}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-2 xl:px-6 xl:py-4 text-slate-500 dark:text-slate-400">{user.email}</td>
                       <td className="px-4 py-2 xl:px-6 xl:py-4">
                         <span className="inline-flex items-center gap-1 rounded-full bg-[#051647]/10 px-2.5 py-0.5 text-xs font-medium text-[#051647] dark:bg-[#C4D600]/20 dark:text-[#C4D600]">
@@ -298,6 +317,31 @@ export default function UsuariosPage() {
                 {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </label>
+            <fieldset className="space-y-1.5">
+              <legend className={labelClass}>Lojas vinculadas (ERP VMSet)</legend>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Nas filas com rodízio por loja, clientes dessas lojas vão primeiro para este atendente.</p>
+              {editing !== "new" && (editing as UserRecord).presence && (
+                <p className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400"><PresenceDot status={(editing as UserRecord).presence ?? "OFFLINE"} />Agora: {PRESENCE_LABELS[(editing as UserRecord).presence ?? "OFFLINE"]}</p>
+              )}
+              <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+                {[...stores, ...form.stores.filter((code) => !stores.some((store) => store.code === code)).map((code) => ({ code, name: `Loja ${code}` }))].map((store) => {
+                  const selected = form.stores.includes(store.code);
+                  return (
+                    <button
+                      key={store.code}
+                      type="button"
+                      aria-pressed={selected}
+                      title={store.name}
+                      onClick={() => setForm({ ...form, stores: selected ? form.stores.filter((code) => code !== store.code) : [...form.stores, store.code] })}
+                      className={`cursor-pointer rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${selected ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-200 text-slate-600 hover:border-[#002187] dark:border-slate-700 dark:text-slate-300"}`}
+                    >
+                      Loja {store.code}
+                    </button>
+                  );
+                })}
+                {stores.length === 0 && form.stores.length === 0 && <span className="text-[11px] text-slate-400">Nenhuma loja cadastrada.</span>}
+              </div>
+            </fieldset>
             {editing !== "new" && (
               <button
                 type="button"

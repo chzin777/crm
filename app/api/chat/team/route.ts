@@ -6,6 +6,7 @@ import { chatError, requireChatActor } from "@/lib/chat/access";
 import { openCount } from "@/lib/chat/actions";
 import { addAudit } from "@/lib/chat/conversation";
 import { isOnline } from "@/lib/chat/team";
+import { effectivePresence } from "@/lib/chat/presence-status";
 import { storeErpCode } from "@/lib/stores";
 
 export async function GET() {
@@ -38,6 +39,8 @@ export async function GET() {
       capacity: user.chatAgent?.capacity ?? 0,
       paused: user.chatAgent?.paused ?? false,
       store: user.chatAgent?.store ?? null,
+      stores: user.chatAgent?.stores ?? [],
+      presence: effectivePresence(user.chatAgent),
       online: isOnline(user.chatAgent?.lastSeenAt),
       open: loadByUser.get(user.id) ?? 0,
       queueIds: user.chatQueues.map((item) => item.queueId),
@@ -46,7 +49,7 @@ export async function GET() {
 }
 
 // store: código ERP da loja do atendente ("13"), usado no rodízio por loja; null tira o vínculo.
-const patch = z.object({ userId: z.string().min(1), capacity: z.number().int().min(0).max(200).optional(), paused: z.boolean().optional(), store: z.string().trim().max(20).nullable().optional() });
+const patch = z.object({ userId: z.string().min(1), capacity: z.number().int().min(0).max(200).optional(), paused: z.boolean().optional(), store: z.string().trim().max(20).nullable().optional(), stores: z.array(z.string().trim().min(1).max(20)).max(50).optional() });
 
 export async function PATCH(request: Request) {
   const guard = await requireChatActor("chat.queues", ["filas"]);
@@ -59,7 +62,13 @@ export async function PATCH(request: Request) {
     const open = await openCount(userId);
     if (fields.capacity < open) return chatError(`Esta pessoa tem ${open} conversa(s) aberta(s); a capacidade não pode ficar abaixo disso.`, 409);
   }
-  await prisma.chatAgent.upsert({ where: { userId }, create: { userId, ...fields }, update: fields });
+  // Pausar/retomar pelo gestor acompanha o status de presença (Ausente / Online); lojas: lista sem repetição.
+  const data = {
+    ...fields,
+    ...(fields.paused !== undefined ? { presenceStatus: fields.paused ? "AWAY" : "ONLINE", awayAuto: false } : {}),
+    ...(fields.stores ? { stores: [...new Set(fields.stores)], store: fields.stores[0] ?? null } : {}),
+  };
+  await prisma.chatAgent.upsert({ where: { userId }, create: { userId, ...data }, update: data });
   await addAudit({ userId: guard.actor.id, action: "agent.update", targetId: userId, after: fields });
   return NextResponse.json({ ok: true });
 }

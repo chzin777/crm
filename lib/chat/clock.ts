@@ -17,6 +17,7 @@ import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operat
 import { planQueuePositions } from "@/lib/chat/queue-rules";
 import { listDispatchJobs, runCampaignFollowUps } from "@/lib/campaign-dispatch";
 import { distributeWaiting } from "@/lib/chat/distribution";
+import { autoAwayInactive } from "@/lib/chat/operator-presence";
 import { penalizeUnreadCampaigns } from "@/lib/engagement";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
@@ -229,6 +230,11 @@ export async function runClock() {
   // A trava de 3 min sem progresso evita retomar em paralelo com a outra cor do blue/green.
   await block("disparos de campanha", async () => {
     await listDispatchJobs();
+  });
+
+  // Pausa automática: Online sem interação além do limite de /configuracoes vira Ausente (sai do rodízio).
+  await block("pausa automática dos operadores", async () => {
+    await autoAwayInactive(new Date(now));
   });
 
   // Filas em rodízio: quem entrou na fila pela IA, menu ou transferência é atribuído sem esperar nova mensagem.

@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { authClient } from "@/lib/auth-client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { canAccessModule, moduleForPath } from "@/lib/permissions";
+import { PresenceSelector } from "@/components/PresenceSelector";
 import {
   Kanban,
   LayoutDashboard,
@@ -283,6 +284,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
 
         {/* Footer: perfil + ver site */}
         <div className={`border-t border-[#e2e6ee] p-4 dark:border-slate-800 ${isCollapsed ? "space-y-3" : "space-y-2"}`}>
+          <PresenceSelector collapsed={isCollapsed} />
           <div ref={profileMenuRef} className="relative">
             {isProfileMenuOpen && (
               <div
