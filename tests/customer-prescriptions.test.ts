@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[], seq: 0, user: { id: "u1" } as { id: string } | null }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/api-auth", () => ({ requireApiSession: vi.fn(async () => db.user) }));
+// Permissão por cargo tem teste próprio (security-api-guards); aqui só a sessão: sem usuário, 401.
+vi.mock("@/lib/api-auth", () => ({
+  requireApiSession: vi.fn(async () => db.user),
+  forbidUnless: vi.fn(async () => (db.user ? null : Response.json({ error: "Não autenticado." }, { status: 401 }))),
+}));
 vi.mock("@/lib/prisma", () => {
   const match = (row: Record<string, unknown>, where: Record<string, unknown>) => Object.entries(where).every(([key, value]) => row[key] === value);
   return {

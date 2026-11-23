@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requireApiSession } from "@/lib/api-auth";
 import { sendEcommerceIntegrationEvent } from "@/lib/ecommerce-integration";
+import { forbidUnless } from "@/lib/api-auth";
 
 const promotionSchema = z.object({
   campaignId: z.string().trim().min(1).max(120),
@@ -16,6 +17,8 @@ const promotionSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("integrations/ecommerce/promotions", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = promotionSchema.safeParse(await request.json().catch(() => null));

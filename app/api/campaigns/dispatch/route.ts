@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
 import { CONTACT_COOLDOWN_DAYS, DispatchError, listDispatchJobs, resumeDispatch, startDispatch, stopDispatch, type DispatchRecipient } from "@/lib/campaign-dispatch";
+import { forbidUnless } from "@/lib/api-auth";
 
 export async function GET() {
+  const forbidden = await forbidUnless("campaigns/dispatch", "GET");
+  if (forbidden) return forbidden;
   if (!(await requireApiSession())) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   try {
     return NextResponse.json({ jobs: await listDispatchJobs(), cooldownDays: CONTACT_COOLDOWN_DAYS });
@@ -20,6 +23,8 @@ const isRecipient = (value: unknown): value is DispatchRecipient => {
 };
 
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("campaigns/dispatch", "POST");
+  if (forbidden) return forbidden;
   if (!(await requireApiSession())) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   const body = await request.json().catch(() => null) as { action?: string; campaignId?: string; recipients?: unknown; ignoreCooldown?: unknown } | null;
   if (!body || typeof body.campaignId !== "string" || !body.campaignId) {

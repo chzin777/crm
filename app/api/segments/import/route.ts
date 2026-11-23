@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { parseSpreadsheet } from "@/lib/spreadsheet";
 import { invalidateCache } from "@/lib/cache";
+import { forbidUnless } from "@/lib/api-auth";
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_ROWS = 50_000;
@@ -73,6 +74,8 @@ function detectColumns(header: string[]): Columns {
  * Contatos já existentes não são alterados.
  */
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("segments/import", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 

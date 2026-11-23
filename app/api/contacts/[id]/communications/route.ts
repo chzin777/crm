@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { campaignNames } from "@/lib/chat/campaign-origin";
+import { forbidUnless } from "@/lib/api-auth";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const forbidden = await forbidUnless("contacts/[id]/communications", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 

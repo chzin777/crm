@@ -3,6 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
+import { forbidUnless } from "@/lib/api-auth";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -66,6 +67,8 @@ function toContact(contact: Prisma.ContactGetPayload<{ select: typeof CONTACT_SE
 
 /** Ficha completa de um contato (abre o modal a partir de outras telas, ex.: /clientes-vip). */
 export async function GET(_request: Request, context: RouteContext<"/api/contacts/[id]">) {
+  const forbidden = await forbidUnless("contacts/[id]", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;
@@ -75,6 +78,8 @@ export async function GET(_request: Request, context: RouteContext<"/api/contact
 }
 
 export async function PATCH(request: Request, context: RouteContext<"/api/contacts/[id]">) {
+  const forbidden = await forbidUnless("contacts/[id]", "PATCH");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = contactSchema.safeParse(await request.json().catch(() => null));

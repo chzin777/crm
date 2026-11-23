@@ -3,6 +3,7 @@ import { getUserAccess, requireApiSession } from "@/lib/api-auth";
 import { ensureInstance, listTemplates } from "@/lib/meta-whatsapp";
 import { ensureBucket, uploadFile } from "@/lib/minio";
 import { friendlyError, listBulkJobs, startBulkJob, toView, type BulkAttachment, type BulkParamSource, type BulkTemplateParam } from "@/lib/bulk-dispatch";
+import { forbidUnless } from "@/lib/api-auth";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
@@ -28,6 +29,8 @@ function parseTemplateParams(raw: FormDataEntryValue | null): BulkTemplateParam[
  * Sem recent: histórico completo; administradores veem todos e podem filtrar por userId.
  */
 export async function GET(request: Request) {
+  const forbidden = await forbidUnless("whatsapp/bulk-send", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const url = new URL(request.url);
@@ -46,6 +49,8 @@ export async function GET(request: Request) {
 
 /** Cria o lote e responde na hora; os envios seguem em fila no servidor. */
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("whatsapp/bulk-send", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 

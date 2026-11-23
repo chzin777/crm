@@ -4,7 +4,7 @@ import { requireSessionOrSyncToken } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
 
 export async function POST(request: NextRequest) {
-  const denied = await requireSessionOrSyncToken(request);
+  const denied = await requireSessionOrSyncToken(request, ["lojas"]);
   if (denied) return denied;
   try {
     const body = await request.json();

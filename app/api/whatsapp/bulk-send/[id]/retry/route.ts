@@ -1,8 +1,11 @@
 import { getUserAccess, requireApiSession } from "@/lib/api-auth";
 import { BulkDispatchError, getBulkJob, retryFailures, toView } from "@/lib/bulk-dispatch";
+import { forbidUnless } from "@/lib/api-auth";
 
 /** Cria um novo lote só com os contatos que falharam neste. */
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const forbidden = await forbidUnless("whatsapp/bulk-send/[id]/retry", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const isAdmin = (await getUserAccess(user.id))?.isAdmin ?? false;

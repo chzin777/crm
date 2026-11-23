@@ -2,6 +2,7 @@ import { requireApiSession } from "@/lib/api-auth";
 import { STAGE_DEFINITIONS, type StageId } from "@/lib/pipeline-stages";
 import { SALES_PIPELINE } from "@/lib/sales-pipeline";
 import { contactOpportunity, createOpportunity, updateOpportunity } from "@/lib/sales-pipeline-db";
+import { forbidUnless } from "@/lib/api-auth";
 
 type Context = RouteContext<"/api/contacts/[id]/opportunity">;
 
@@ -9,6 +10,8 @@ const SALES_COLUMNS = new Set<string>(STAGE_DEFINITIONS.filter((stage) => stage.
 
 /** Oportunidade do contato no funil de vendas (aberta ou a última ganha) e as etapas configuradas. */
 export async function GET(_request: Request, context: Context) {
+  const forbidden = await forbidUnless("contacts/[id]/opportunity", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;
@@ -17,6 +20,8 @@ export async function GET(_request: Request, context: Context) {
 
 /** Seletor rápido de etapa no atendimento (movimento manual) e pausa da automação do card. */
 export async function PATCH(request: Request, context: Context) {
+  const forbidden = await forbidUnless("contacts/[id]/opportunity", "PATCH");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;
@@ -37,6 +42,8 @@ export async function PATCH(request: Request, context: Context) {
 
 /** "+ Criar oportunidade": abre o card do contato no funil de vendas em 1 clique. */
 export async function POST(request: Request, context: Context) {
+  const forbidden = await forbidUnless("contacts/[id]/opportunity", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;

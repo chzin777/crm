@@ -53,6 +53,7 @@ import { DispatchCostCalculator } from "@/components/DispatchCostCalculator";
 import { useMetaPricing } from "@/hooks/useMetaPricing";
 import { dedupeRecipients, summarizeSegmentOverlap, type SegmentOverlapSummary } from "@/lib/campaign-audience";
 import type { CampaignCadence, CampaignFollowUp, CampaignSendWindow } from "@/lib/campaign-schedule";
+import { sortCampaignRows, type CampaignSortField } from "@/lib/campaign-sort";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
@@ -705,28 +706,7 @@ export function CampaignsView() {
   ];
 
   // Disparos "Enviando" ficam sempre no topo, do início mais recente para o mais antigo; o resto segue a ordenação escolhida.
-  const sendingStart = (row: UnifiedRow) => {
-    const started = new Date(row.job?.startedAt ?? row.bulk?.createdAt ?? 0).getTime();
-    return Number.isNaN(started) || started === 0 ? row.updatedAt : started;
-  };
-  const sortedRows = [...rows].sort((a, b) => {
-    const aSending = a.status === "Enviando";
-    const bSending = b.status === "Enviando";
-    if (aSending !== bSending) return aSending ? -1 : 1;
-    if (aSending) return sendingStart(b) - sendingStart(a);
-    const dir = sortConfig.order === "asc" ? 1 : -1;
-    switch (sortConfig.field) {
-      case "nome": return dir * a.nome.localeCompare(b.nome, "pt-BR");
-      case "mensagem": return dir * a.mensagem.localeCompare(b.mensagem, "pt-BR");
-      case "publico": return dir * a.publico.localeCompare(b.publico, "pt-BR");
-      case "status": return dir * a.status.localeCompare(b.status, "pt-BR");
-      case "total": return dir * (a.total - b.total);
-      case "enviados": return dir * (a.stats.sent - b.stats.sent);
-      case "respostas": return dir * (a.stats.replied - b.stats.replied);
-      case "atualizacao": return dir * (a.updatedAt - b.updatedAt);
-      default: return 0;
-    }
-  });
+  const sortedRows = sortCampaignRows(rows, sortConfig.field as CampaignSortField, sortConfig.order);
 
   const filteredRows = sortedRows.filter((row) => {
     const matchesSearch = `${row.nome} ${row.publico} ${row.mensagem} ${row.status}`.toLocaleLowerCase("pt-BR").includes(searchTerm.trim().toLocaleLowerCase("pt-BR"));

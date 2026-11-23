@@ -1,5 +1,6 @@
 import { getUserAccess, requireApiSession } from "@/lib/api-auth";
 import { BulkDispatchError, controlBulkJob, getBulkJob, toView } from "@/lib/bulk-dispatch";
+import { forbidUnless } from "@/lib/api-auth";
 
 async function loadJob(params: Promise<{ id: string }>) {
   const user = await requireApiSession();
@@ -12,6 +13,8 @@ async function loadJob(params: Promise<{ id: string }>) {
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const forbidden = await forbidUnless("whatsapp/bulk-send/[id]", "GET");
+  if (forbidden) return forbidden;
   const result = await loadJob(params);
   if (result.response) return result.response;
   // Andamento ao vivo: nenhum cache (navegador, proxy ou Cloudflare) pode guardar esta resposta.
@@ -20,6 +23,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** Pausar, retomar ou cancelar o restante do lote. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const forbidden = await forbidUnless("whatsapp/bulk-send/[id]", "PATCH");
+  if (forbidden) return forbidden;
   const result = await loadJob(params);
   if (result.response) return result.response;
   const body = await request.json().catch(() => null) as { action?: string } | null;

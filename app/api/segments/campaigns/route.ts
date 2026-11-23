@@ -1,11 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { bulkCampaignId, listBulkJobs } from "@/lib/bulk-dispatch";
+import { forbidUnless } from "@/lib/api-auth";
 
 export type DispatchedCampaignOption = { id: string; nome: string; enviadaEm: string; enviados: number };
 
 /** Disparos já enviados (campanhas e envios em massa), mais recentes primeiro, para as regras de conversão. */
 export async function GET() {
+  const forbidden = await forbidUnless("segments/campaigns", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 

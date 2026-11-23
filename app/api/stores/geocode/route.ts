@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { cachePlace, geocodePlace, pendingPlaces, placeKey, sleep } from "@/lib/geocode";
+import { forbidUnless } from "@/lib/api-auth";
 
 export const maxDuration = 60;
 
@@ -8,6 +9,8 @@ const BATCH = 6;
 
 // Each call geocodes the store (if needed) and a small batch of contact neighborhoods, respecting the 1 request/second limit of Nominatim.
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("stores/geocode", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const body = await request.json().catch(() => null) as { id?: unknown } | null;

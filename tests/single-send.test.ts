@@ -34,7 +34,7 @@ vi.mock("@/lib/meta-whatsapp", async (importOriginal) => ({
   sendTemplate: meta.sendTemplate,
   listTemplates: meta.listTemplates,
 }));
-vi.mock("@/lib/api-auth", () => ({ requireApiSession: vi.fn(async () => ({ id: "user-1", name: "Operador Teste" })) }));
+vi.mock("@/lib/api-auth", () => ({ requireApiSession: vi.fn(async () => ({ id: "user-1", name: "Operador Teste" })), forbidUnless: vi.fn(async () => null) }));
 
 import { MetaApiError, normalizePhone } from "@/lib/meta-whatsapp";
 import { markBulkItemFailed, recordSingleSend, toView, type BulkJob } from "@/lib/bulk-dispatch";

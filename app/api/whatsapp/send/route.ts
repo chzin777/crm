@@ -3,6 +3,7 @@ import { requireApiSession } from "@/lib/api-auth";
 import { ensureInstance, listTemplates, sendMedia, sendTemplate, sendText } from "@/lib/meta-whatsapp";
 import { friendlyError, recordSingleSend } from "@/lib/bulk-dispatch";
 import { renderTemplateText } from "@/lib/chat/dispatch-history";
+import { forbidUnless } from "@/lib/api-auth";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
@@ -17,6 +18,8 @@ const firstId = (result: Sent) => result?.messages?.[0]?.id ?? null;
  * a confirmação de entrega ou a falha posterior chega pelo webhook e atualiza o mesmo registro.
  */
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("whatsapp/send", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
 

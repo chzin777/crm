@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
 import { phoneVariants } from "@/lib/chat/phone";
+import { forbidUnless } from "@/lib/api-auth";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -61,6 +62,8 @@ const toContact = (contact: {
 });
 
 export async function GET(request: Request) {
+  const forbidden = await forbidUnless("contacts", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 
@@ -144,6 +147,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("contacts", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = contactSchema.safeParse(await request.json().catch(() => null));

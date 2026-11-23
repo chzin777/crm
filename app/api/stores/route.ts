@@ -5,6 +5,7 @@ import { cached, invalidateCache } from "@/lib/cache";
 import { normalizePlace, normalizePlaceList } from "@/lib/store-places";
 import { clearStoreDirectory } from "@/lib/ai/stock-db";
 import { coordinatesFromMapsLink } from "@/lib/store-pin";
+import { forbidUnless } from "@/lib/api-auth";
 
 const storeSchema = z.object({
   number: z.number().int().positive(),
@@ -125,6 +126,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("stores", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = storeSchema.safeParse(await request.json().catch(() => null));
@@ -141,6 +144,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const forbidden = await forbidUnless("stores", "PATCH");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const body = await request.json().catch(() => null) as { id?: unknown } | null;
@@ -163,6 +168,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const forbidden = await forbidUnless("stores", "DELETE");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const id = new URL(request.url).searchParams.get("id") ?? "";

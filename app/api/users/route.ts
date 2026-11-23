@@ -127,6 +127,8 @@ export async function PATCH(request: NextRequest) {
     if (email !== undefined) updateData.email = email.trim().toLowerCase();
     if (roleId !== undefined) updateData.roleId = roleId || null;
     if (banned !== undefined) updateData.banned = banned;
+    // Bloqueado sai na hora: derruba as sessões abertas (antes seguia logado até a sessão expirar).
+    if (banned === true) await prisma.session.deleteMany({ where: { userId: id } });
 
     if (password) {
       if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {

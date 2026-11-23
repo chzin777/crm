@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
+import { forbidUnless } from "@/lib/api-auth";
 
 const responseSchema = z.object({
   surveyKey: z.enum(["atendimento", "produto"]),
@@ -11,6 +12,8 @@ const responseSchema = z.object({
 });
 
 export async function GET() {
+  const forbidden = await forbidUnless("nps", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const responses = await prisma.npsResponse.findMany({
@@ -21,6 +24,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("nps", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = responseSchema.safeParse(await request.json().catch(() => null));

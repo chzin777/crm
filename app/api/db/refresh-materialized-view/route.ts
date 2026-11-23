@@ -1,10 +1,12 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const expectedToken = process.env.SYNC_API_TOKEN || "vmset-sync-token-2026";
-  if (authHeader !== `Bearer ${expectedToken}`) {
+  // Só com SYNC_API_TOKEN configurado no servidor (sem senha padrão no código) e comparação em tempo constante.
+  const expected = process.env.SYNC_API_TOKEN;
+  const provided = request.headers.get("authorization")?.replace(/^Bearers+/i, "") ?? "";
+  if (!expected || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -39,8 +41,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, view, concurrently });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("[db/refresh-materialized-view]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[db/refresh-materialized-view]", error instanceof Error ? error.message : error);
+    return NextResponse.json({ error: "Falha ao atualizar a view." }, { status: 500 });
   }
 }

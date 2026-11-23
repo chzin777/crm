@@ -3,9 +3,12 @@ import { getUserAccess, requireApiSession } from "@/lib/api-auth";
 import { bulkCampaignId, getBulkJob } from "@/lib/bulk-dispatch";
 import { campaignMetrics } from "@/lib/campaign-metrics";
 import { listTemplates } from "@/lib/meta-whatsapp";
+import { forbidUnless } from "@/lib/api-auth";
 
 /** type=bulk&id=<lote> (envio em massa) ou type=campaign&id=<campanha>. */
 export async function GET(request: Request) {
+  const forbidden = await forbidUnless("metrics/campaign", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const access = await getUserAccess(user.id);

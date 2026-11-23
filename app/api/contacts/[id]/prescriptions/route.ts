@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { parsePrescriptionInput, serializePrescription, sortPrescriptions } from "@/lib/prescriptions";
+import { forbidUnless } from "@/lib/api-auth";
 
 /** Receituário do contato: mais recente primeiro (data da receita; sem data, a criação). */
 export async function GET(_request: Request, context: RouteContext<"/api/contacts/[id]/prescriptions">) {
+  const forbidden = await forbidUnless("contacts/[id]/prescriptions", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;
@@ -13,6 +16,8 @@ export async function GET(_request: Request, context: RouteContext<"/api/contact
 
 /** Receita lançada pelo atendente (origem "manual", já conferida por quem digitou). */
 export async function POST(request: Request, context: RouteContext<"/api/contacts/[id]/prescriptions">) {
+  const forbidden = await forbidUnless("contacts/[id]/prescriptions", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = parsePrescriptionInput(await request.json().catch(() => null));

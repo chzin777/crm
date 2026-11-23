@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { startOfBrazilDay } from "@/lib/chat/format";
+import { forbidUnless } from "@/lib/api-auth";
 
 const DAY_MS = 86_400_000;
 const LATEST_LIMIT = 100;
@@ -12,6 +13,8 @@ function periodStart(period: string | null) {
 }
 
 export async function GET(request: Request) {
+  const forbidden = await forbidUnless("nps/whatsapp", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 

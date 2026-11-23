@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { getDuplicateContactIds } from "@/lib/contact-duplicates";
+import { forbidUnless } from "@/lib/api-auth";
 
 /**
  * Variações em dígitos de um termo que parece telefone (só números e máscara, ao menos 4 dígitos), ou null.
@@ -19,6 +20,8 @@ function phoneSearchDigits(term: string): string[] | null {
 }
 
 export async function GET(request: Request) {
+  const forbidden = await forbidUnless("contacts/search", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
@@ -245,6 +248,8 @@ export async function GET(request: Request) {
 }
 /** Contatos de uma lista de IDs (ex.: selecionados no segmento), paginados e com busca restrita a esse subconjunto. */
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("contacts/search", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   const body = await request.json().catch(() => null) as { ids?: unknown; q?: unknown; page?: unknown; limit?: unknown } | null;

@@ -9,6 +9,7 @@ import { matchesBirthday, type BirthdayOperator, type BirthParts } from "@/lib/b
 import { storeErpCode } from "@/lib/stores";
 import { brDay, purchaseWindow } from "@/lib/br-time";
 import { MAX_RULES, normalizeRuleText, ruleSchema, splitRuleList, validateRule, type SegmentRule } from "@/lib/segment-rules";
+import { forbidUnless } from "@/lib/api-auth";
 
 const criterionSchema = z.object({
   id: z.string().max(200),
@@ -328,6 +329,8 @@ function criterionCondition(criterion: z.infer<typeof criterionSchema>, stores: 
 }
 
 export async function GET() {
+  const forbidden = await forbidUnless("segments/audience", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const stores = await prisma.store.findMany({ orderBy: { number: "asc" }, select: { number: true, name: true, active: true } });
@@ -398,6 +401,8 @@ async function computeGroupCount(key: string, criteria: z.infer<typeof criterion
 }
 
 export async function POST(request: Request) {
+  const forbidden = await forbidUnless("segments/audience", "POST");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));

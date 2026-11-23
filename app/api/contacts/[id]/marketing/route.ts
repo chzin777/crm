@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { cancelAutomationsForContacts } from "@/lib/automations/engine-db";
+import { forbidUnless } from "@/lib/api-auth";
 
 const select = {
   marketingOptOut: true, marketingOptOutAt: true, marketingOptOutReason: true,
@@ -9,6 +10,8 @@ const select = {
 
 /** Situação de opt-out de campanhas do contato. */
 export async function GET(_request: Request, context: RouteContext<"/api/contacts/[id]/marketing">) {
+  const forbidden = await forbidUnless("contacts/[id]/marketing", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;
@@ -19,6 +22,8 @@ export async function GET(_request: Request, context: RouteContext<"/api/contact
 
 /** Alteração manual (cliente pediu pelo telefone/balcão). */
 export async function PATCH(request: Request, context: RouteContext<"/api/contacts/[id]/marketing">) {
+  const forbidden = await forbidUnless("contacts/[id]/marketing", "PATCH");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const body = (await request.json().catch(() => null)) as { optOut?: unknown } | null;

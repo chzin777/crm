@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
 import { connectInstance, ensureInstance, getConnectedNumber, getConnectionState, getMessagingInfo, getPhoneInfo, logoutInstance } from "@/lib/meta-whatsapp";
+import { forbidUnless } from "@/lib/api-auth";
 
 async function guard() {
   return (await requireApiSession()) ? null : NextResponse.json({ error: "Não autorizado" }, { status: 401 });
@@ -23,6 +24,8 @@ export async function GET() {
 
 // Gera o QR Code para parear o WhatsApp
 export async function POST() {
+  const forbidden = await forbidUnless("whatsapp/connection", "POST");
+  if (forbidden) return forbidden;
   const denied = await guard();
   if (denied) return denied;
   try {
@@ -35,6 +38,8 @@ export async function POST() {
 }
 
 export async function DELETE() {
+  const forbidden = await forbidUnless("whatsapp/connection", "DELETE");
+  if (forbidden) return forbidden;
   const denied = await guard();
   if (denied) return denied;
   try {

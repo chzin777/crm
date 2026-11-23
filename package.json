@@ -9,6 +9,8 @@
     "lint": "eslint",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:security": "vitest run tests/security-api-guards.test.ts tests/auth-rate-limit.test.ts",
+    "test:ci": "tsc --noEmit && vitest run",
     "db:generate": "prisma generate",
     "db:sync": "prisma db push",
     "db:import": "node --import tsx --env-file=.env scripts/import-contacts.mjs",

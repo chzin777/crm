@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiSession } from "@/lib/api-auth";
+import { getUserAccess, requireApiSession } from "@/lib/api-auth";
+import { allowsAny, CRM_RESOURCE_WRITE } from "@/lib/api-policy";
 import { invalidateCache } from "@/lib/cache";
 import { emitStageChanges } from "@/lib/automations/engine-db";
 
@@ -61,6 +62,11 @@ export async function PUT(request: Request, context: RouteContext<"/api/crm/[res
 
   const { resource } = await context.params;
   if (!allowedResources.has(resource)) return Response.json({ error: "Recurso não encontrado." }, { status: 404 });
+  // Gravar campanhas, configurações, pipeline etc. exige o módulo da lista (ler segue liberado às telas que usam).
+  const access = await getUserAccess(user.id);
+  if (!access || !allowsAny(access.modules, CRM_RESOURCE_WRITE[resource] ?? [])) {
+    return Response.json({ error: "Sem permissão para alterar estes dados." }, { status: 403 });
+  }
 
   const rawBody = await request.text();
   const payloadSize = new TextEncoder().encode(rawBody).byteLength;

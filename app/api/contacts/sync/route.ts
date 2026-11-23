@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSessionOrSyncToken } from "@/lib/api-auth";
 
 export async function POST(request: NextRequest) {
-  const denied = await requireSessionOrSyncToken(request);
+  const denied = await requireSessionOrSyncToken(request, ["contatos"]);
   if (denied) return denied;
   try {
     const body = await request.json();

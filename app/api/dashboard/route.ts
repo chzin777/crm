@@ -1,10 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { cached } from "@/lib/cache";
+import { forbidUnless } from "@/lib/api-auth";
 
 type DailySale = { day: string; revenue: number | string; sales: number | bigint };
 
 export async function GET() {
+  const forbidden = await forbidUnless("dashboard", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   return Response.json({ data: await cached("dashboard", 60, loadDashboard) });

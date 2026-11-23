@@ -12,6 +12,7 @@ import {
   type StageCriteria,
   type StageId,
 } from "@/lib/pipeline-stages";
+import { forbidUnless } from "@/lib/api-auth";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -164,6 +165,8 @@ function buildCriteriaConditions(criteria: StageCriteria, now: Date): Prisma.Sql
 }
 
 export async function POST() {
+  const forbidden = await forbidUnless("pipeline/sync", "POST");
+  if (forbidden) return forbidden;
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   let phase = "autenticação";

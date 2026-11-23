@@ -1,6 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
+import { forbidUnless } from "@/lib/api-auth";
 
 interface PurchaseRow {
   produto: string | null;
@@ -19,6 +20,8 @@ function formatPurchaseDate(day: string | null, raw: string | null) {
 }
 
 export async function GET(_request: Request, context: RouteContext<"/api/contacts/[id]/purchases">) {
+  const forbidden = await forbidUnless("contacts/[id]/purchases", "GET");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 

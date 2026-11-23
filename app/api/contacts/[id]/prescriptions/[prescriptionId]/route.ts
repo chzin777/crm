@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { parsePrescriptionInput, serializePrescription } from "@/lib/prescriptions";
+import { forbidUnless } from "@/lib/api-auth";
 
 type Context = RouteContext<"/api/contacts/[id]/prescriptions/[prescriptionId]">;
 
@@ -12,6 +13,8 @@ async function findOwned(context: Context) {
 
 /** Corrige graus extraídos pela IA ou marca/desmarca "Conferido". */
 export async function PATCH(request: Request, context: Context) {
+  const forbidden = await forbidUnless("contacts/[id]/prescriptions/[prescriptionId]", "PATCH");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const parsed = parsePrescriptionInput(await request.json().catch(() => null), true);
@@ -25,6 +28,8 @@ export async function PATCH(request: Request, context: Context) {
 
 /** Remove receita inválida ou duplicada. */
 export async function DELETE(_request: Request, context: Context) {
+  const forbidden = await forbidUnless("contacts/[id]/prescriptions/[prescriptionId]", "DELETE");
+  if (forbidden) return forbidden;
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const owned = await findOwned(context);
