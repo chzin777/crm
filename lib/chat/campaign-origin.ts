@@ -9,6 +9,17 @@ export async function campaignNames() {
   return new Map(list.map((campaign) => [campaign.id, campaign.nome]));
 }
 
+/**
+ * Atendimento ao responder a campanha: `aiAutoReplyEnabled: false` manda a resposta de pessoa direto para a fila humana
+ * (a IA não escreve nada). Sem o campo (campanhas antigas) ou campanha excluída, a IA atende como antes.
+ */
+export async function campaignAiReplyEnabled(campaignId: string | null | undefined) {
+  if (!campaignId) return true;
+  const row = await prisma.crmWorkspaceData.findUnique({ where: { key: "campaigns" }, select: { value: true } });
+  const list = Array.isArray(row?.value) ? (row.value as unknown as { id: string; aiAutoReplyEnabled?: boolean }[]) : [];
+  return list.find((campaign) => campaign.id === campaignId)?.aiAutoReplyEnabled !== false;
+}
+
 // O cadastro tem telefones repetidos: o disparo pode ter saído por outro contato do mesmo número.
 async function samePhoneContactIds(contactId: string, phone: string) {
   const contacts = await prisma.contact.findMany({ where: { phone: { in: phoneVariants(phone) } }, select: { id: true } });

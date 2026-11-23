@@ -9,6 +9,7 @@ import type { RecordedInbound } from "@/lib/chat/inbound";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { fillVariables } from "@/lib/chat/text";
 import { aiTakeOver, releaseFromAi } from "@/lib/ai/agent";
+import { campaignAiReplyEnabled } from "@/lib/chat/campaign-origin";
 
 const AUTOMATIC_GAP_MS = 3 * 60 * 1000;
 
@@ -60,6 +61,21 @@ export async function runAutomation(recorded: RecordedInbound) {
   // Resposta automática do aparelho do contato (ausência/saudação do WhatsApp Business): nada de menu, evita o ciclo robô × robô.
   if (recorded.autoReply) {
     console.log(`[bot] ${conversation.id}: sem automação (resposta automática do contato: ${recorded.autoReply})`);
+    return;
+  }
+
+  // Campanha "Apenas fila humana": a resposta (já validada como de pessoa pela triagem) vai direto para a fila,
+  // sem IA, menu ou resposta rápida automática.
+  if (conversation.campaignId && !(await campaignAiReplyEnabled(conversation.campaignId))) {
+    if (await releaseFromAi(conversation).catch((error) => { console.error("[ai] devolver para a fila:", error); return false; })) return;
+    if (await handleOffHours(conversation)) return;
+    if (conversation.status === "bot") {
+      const state = readMenuState(conversation.menuState);
+      state.stopped = true;
+      await saveMenuState(conversation.id, state);
+      await prisma.chatConversation.update({ where: { id: conversation.id }, data: { status: "waiting", waitingSince: new Date() } });
+    }
+    console.log(`[bot] ${conversation.id}: resposta de campanha sem IA -> direto para a fila humana`);
     return;
   }
 

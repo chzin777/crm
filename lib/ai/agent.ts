@@ -68,6 +68,7 @@ import { aiShouldAttend, asksForHuman, bubbleDelayFor, type AiSettings } from "@
 import { buildSystemPrompt, carriesProductExtras, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 import { reportError } from "@/lib/monitoring/error-reporter";
+import { campaignAiReplyEnabled } from "@/lib/chat/campaign-origin";
 
 /**
  * A IA vinha atendendo, mas deixou de poder (horário, configuração, crédito): a conversa volta para a fila humana
@@ -152,6 +153,8 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
   if (!aiConfigured()) return false;
   const settings = await readAiSettings();
   if (!settings.autonomousEnabled) return false;
+  // Campanha configurada como "Apenas fila humana": a IA não responde nada nessa conversa.
+  if (!(await campaignAiReplyEnabled(conversation.campaignId))) return false;
   const now = new Date();
   // Humano assumiu, escreveu depois do transbordo ou pausou a IA: silêncio. Na fila sem atendente: espera assistida.
   const { mode } = await conversationMode(conversation);

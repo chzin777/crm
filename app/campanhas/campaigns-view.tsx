@@ -6,12 +6,14 @@ import { useSearchParams } from "next/navigation";
 import { Pagination } from "@/components/dashboard/DashboardKit";
 import {
   AlertTriangle,
+  Bot,
   CheckCheck,
   ChevronUp,
   ChevronsUpDown,
   Clock3,
   Eye,
   FileText,
+  Headset,
   Film,
   Image as ImageIcon,
   MessageCircleReply,
@@ -132,6 +134,43 @@ interface Campaign {
   mensagem: string;
   anexos?: { name: string; size: number; type: string; key?: string; url?: string }[];
   modelo?: CampaignTemplate | null;
+  /** Atendimento ao responder: false = direto para a fila humana (IA não responde). Ausente = IA atende. */
+  aiAutoReplyEnabled?: boolean;
+}
+
+/** Atendimento ao responder a campanha: IA qualifica o lead ou a resposta vai direto para a fila humana. */
+function CampaignAiReplyChoice({ value, onChange }: { value: boolean; onChange: (value: boolean) => void }) {
+  const options = [
+    { enabled: true, icon: Bot, title: "IA responde e qualifica o lead", description: "A IA inicia o atendimento comercial e passa para a fila quando necessário." },
+    { enabled: false, icon: Headset, title: "Apenas fila humana (IA não responde)", description: "Robôs e auto-respostas continuam filtrados em silêncio; resposta de pessoa vai direto para os operadores." },
+  ];
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">Atendimento ao responder a campanha</legend>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {options.map((option) => {
+          const active = value === option.enabled;
+          const Icon = option.icon;
+          return (
+            <button
+              key={option.title}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => onChange(option.enabled)}
+              className={`flex min-w-0 items-start gap-2.5 rounded-lg border p-3 text-left transition-colors cursor-pointer ${active ? "border-[#002187] bg-[#002187]/5 dark:border-[#C4D600] dark:bg-[#C4D600]/10" : "border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600"}`}
+            >
+              <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? "text-[#002187] dark:text-[#C4D600]" : "text-slate-400"}`} />
+              <span className="min-w-0 break-words">
+                <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">{option.title}</span>
+                <span className="mt-0.5 block text-[11px] font-normal text-slate-500 dark:text-slate-400">{option.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
 }
 
 interface QuickStats { total: number; sent: number; delivered: number; read: number; replied: number; failed: number }
@@ -302,6 +341,7 @@ export function CampaignsView() {
   const [campaignObjective, setCampaignObjective] = useState("");
   const [campaignAudienceDescription, setCampaignAudienceDescription] = useState("");
   const [campaignCategory, setCampaignCategory] = useState<"MARKETING" | "UTILITY">("MARKETING");
+  const [campaignAiReply, setCampaignAiReply] = useState(true);
   const [campaignPrompt, setCampaignPrompt] = useState("");
   const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
   const [campaignAiError, setCampaignAiError] = useState("");
@@ -608,6 +648,7 @@ export function CampaignsView() {
     setCampaignObjective("");
     setCampaignAudienceDescription("");
     setCampaignCategory("MARKETING");
+    setCampaignAiReply(true);
     setCampaignPrompt("");
     setIsGeneratingCampaign(false);
     setCampaignAiError("");
@@ -645,6 +686,7 @@ export function CampaignsView() {
       objective: campaignObjective,
       audienceDescription: campaignAudienceDescription,
       metaCategory: campaignCategory,
+      aiAutoReplyEnabled: campaignAiReply,
       ...(aiTemplateDraft ? { metaTemplateDraft: { ...aiTemplateDraft, body: mensagem, category: campaignCategory }, metaApprovalStatus: "TEMPLATE_DRAFT" } : {}),
       status: "Rascunho",
       disparos: 0,
@@ -822,6 +864,7 @@ export function CampaignsView() {
     setCampaignObjective(campaign.objective ?? "");
     setCampaignAudienceDescription(campaign.audienceDescription ?? "");
     setCampaignCategory(campaign.metaCategory ?? "MARKETING");
+    setCampaignAiReply(campaign.aiAutoReplyEnabled !== false);
     setForm({ nome: campaign.nome, publico: campaign.publico, mensagem: campaign.mensagem });
     setCampaignTemplate(campaign.metaApprovalStatus === "REJECTED" || campaign.metaApprovalStatus === "SUBMISSION_FAILED" ? null : campaign.modelo ?? null);
     setAiTemplateDraft(campaign.metaTemplateDraft ?? null);
@@ -941,6 +984,7 @@ export function CampaignsView() {
       objective: campaignObjective,
       audienceDescription: campaignAudienceDescription,
       metaCategory: campaignCategory,
+      aiAutoReplyEnabled: campaignAiReply,
       mensagem,
       ...(metaTemplateChanged ? { status: "Rascunho" as const, metaApprovalStatus: undefined, metaApprovalReason: "", metaTemplateId: "" } : {}),
       ...(aiTemplateDraft ? { metaTemplateDraft: { ...aiTemplateDraft, body: mensagem, category: campaignCategory } } : {}),
@@ -1422,7 +1466,27 @@ export function CampaignsView() {
                       <td className="px-4 py-2 xl:py-3.5">
                         <div className="flex min-w-0 items-center gap-3">
                           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#C4D600]/20 text-[#051647] dark:bg-[#C4D600]/15 dark:text-[#C4D600]"><WhatsAppIcon className="h-4 w-4 fill-current" /></span>
-                          <span className="min-w-0"><span className="block max-w-56 truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{row.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">{row.origem}</span></span>
+                          <span className="min-w-0"><span className="block max-w-56 truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{row.nome}</span><span className="mt-0.5 block text-[10px] text-slate-400">{row.origem}</span>{row.kind === "campaign" && row.campaign && (() => {
+                            const campaign = row.campaign;
+                            const aiOn = campaign.aiAutoReplyEnabled !== false;
+                            const canToggle = row.status !== "Concluído";
+                            const BadgeIcon = aiOn ? Bot : Headset;
+                            return (
+                              <button
+                                type="button"
+                                disabled={!canToggle}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setCampaigns((current) => current.map((item) => item.id === campaign.id ? { ...item, aiAutoReplyEnabled: !aiOn } : item));
+                                  toast.success("Atendimento atualizado", aiOn ? `Respostas de "${campaign.nome}" vão direto para a fila humana.` : `A IA volta a atender as respostas de "${campaign.nome}".`);
+                                }}
+                                title={canToggle ? "Clique para alternar o atendimento ao responder" : "Campanha concluída"}
+                                className={`mt-1 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${aiOn ? "bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" : "bg-[#F7915E]/15 text-[#9a3d12] dark:text-[#F7915E]"} ${canToggle ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+                              >
+                                <BadgeIcon className="h-3 w-3" />{aiOn ? "IA Ativa" : "Direto p/ Fila Humana"}
+                              </button>
+                            );
+                          })()}</span>
                         </div>
                       </td>
                       <td className="max-w-48 truncate px-4 py-2 xl:py-3.5 text-xs text-slate-600 dark:text-slate-300" title={row.mensagem}>{row.mensagem}</td>
@@ -1593,6 +1657,7 @@ export function CampaignsView() {
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className={inputClass} /></label>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Objetivo</span><input value={campaignObjective} onChange={(event) => setCampaignObjective(event.target.value)} placeholder="Ex.: Recuperar clientes inativos" className={inputClass} /></label>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Categoria do template Meta</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING — promoções e ofertas</option><option value="UTILITY">UTILITY — mensagens transacionais</option></select></label>
+                <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
                 {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>
             </Step>
@@ -1936,6 +2001,7 @@ export function CampaignsView() {
                     />
                     {audienceOverlapNotice}
                     <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
+                    <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
                     {(selectedCampaign.metaApprovalStatus === "REJECTED" || selectedCampaign.metaApprovalStatus === "SUBMISSION_FAILED") && <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/30"><p className="text-xs font-semibold text-red-800 dark:text-red-200">{selectedCampaign.metaApprovalStatus === "REJECTED" ? `Rejeitada pela Meta: ${selectedCampaign.metaApprovalReason || "motivo não informado"}` : `Não foi possível submeter: ${selectedCampaign.metaApprovalReason || "verifique a integração e tente novamente"}`}</p><div className="flex gap-2"><input value={templatePrompt} onChange={(event) => setTemplatePrompt(event.target.value)} placeholder="Orientação para uma nova versão do template" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={isGeneratingTemplate} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar nova versão"}</button></div></div>}
                     {aiTemplateDraft && <div className="space-y-2 rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/5 p-3"><p className="text-xs font-semibold text-slate-800 dark:text-white">Template para reenviar à análise</p><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label><button type="button" disabled={isSubmittingTemplate} onClick={() => void submitTemplateForMeta({ ...selectedCampaign, nome: form.nome.trim(), publico: selectedAudienceSegments.join(", "), audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id), criteriaFilters: campaignCriteriaFilters, objective: campaignObjective, audienceDescription: campaignAudienceDescription, metaCategory: campaignCategory, mensagem: form.mensagem.trim(), metaTemplateDraft: { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory } }, { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory }, false)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Send className="h-3.5 w-3.5" />{isSubmittingTemplate ? "Enviando..." : "Aprovar e reenviar para análise"}</button></div>}
                     {templateAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{templateAiError}</p>}
