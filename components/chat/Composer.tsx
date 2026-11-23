@@ -66,6 +66,8 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
     void fetch("/api/chat/typing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conversation.id }) }).catch(() => undefined);
   };
   const [suggesting, setSuggesting] = useState(false);
+  /** Sugestão do copiloto aguardando decisão do atendente (presa à conversa em que foi pedida). */
+  const [suggestion, setSuggestion] = useState<{ conversationId: string; text: string } | null>(null);
   /** Texto congelado ao abrir "Agendar envio"; null enquanto o diálogo está fechado. */
   const [scheduling, setScheduling] = useState<string | null>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
@@ -159,24 +161,37 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
     requestAnimationFrame(() => field.current?.focus());
   }, [draft]);
 
-  /** A IA só preenche o campo: quem atende revisa e decide enviar. */
+  /**
+   * Copiloto de resposta: a IA sugere, o atendente revisa. A sugestão aparece num cartão acima do campo (o que já foi
+   * digitado fica intacto); "Usar no campo" só preenche o texto. Nada é enviado sem o atendente clicar em Enviar/Enter.
+   */
   const suggestReply = async () => {
     if (suggesting) return;
+    const conversationId = conversation.id;
     setSuggesting(true);
     try {
-      const response = await fetch(`/api/chat/conversations/${conversation.id}/ai`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reply" }) });
+      const response = await fetch(`/api/chat/conversas/${conversationId}/sugerir-resposta`, { method: "POST" });
       const data = (await response.json().catch(() => ({}))) as { reply?: string; error?: string };
-      if (!response.ok || !data.reply) onError(data.error ?? "Não foi possível sugerir uma resposta.");
-      else {
-        setText(data.reply);
-        requestAnimationFrame(() => field.current?.focus());
-      }
+      if (!response.ok || !data.reply?.trim()) toast.error("Não foi possível sugerir uma resposta", data.error ?? "Tente novamente em instantes.");
+      else setSuggestion({ conversationId, text: data.reply.trim() });
     } catch {
-      onError("Não foi possível falar com a IA. Verifique a conexão.");
+      toast.error("Não foi possível falar com a IA", "Verifique a conexão e tente novamente.");
     } finally {
       setSuggesting(false);
     }
   };
+  const applySuggestion = (value: string) => {
+    setText(value);
+    setSuggestion(null);
+    requestAnimationFrame(() => {
+      const element = field.current;
+      if (!element) return;
+      element.focus();
+      element.setSelectionRange(value.length, value.length);
+    });
+  };
+  // Sugestão de outra conversa nunca aparece aqui (o operador pode trocar de conversa enquanto a IA gera).
+  const visibleSuggestion = suggestion && suggestion.conversationId === conversation.id ? suggestion.text : null;
 
   useEffect(() => {
     let active = true;
@@ -310,6 +325,30 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
           </div>
         </ComposerPopover>
       )}
+      {!blocked && !windowClosed && (suggesting || visibleSuggestion) && (
+        <div role="status" aria-live="polite" className="mb-2 rounded-xl border border-[#002187]/20 bg-[#002187]/5 p-3 dark:border-[#C4D600]/25 dark:bg-[#C4D600]/10">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#002187] dark:text-[#C4D600]">
+            {suggesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {suggesting ? "Gerando sugestão..." : "Sugestão da IA · revise antes de enviar"}
+          </p>
+          {visibleSuggestion && (
+            <>
+              <p className="mt-1.5 max-h-40 min-w-0 overflow-y-auto whitespace-pre-wrap break-words text-sm text-slate-800 dark:text-slate-100">{visibleSuggestion}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" onClick={() => applySuggestion(visibleSuggestion)} disabled={suggesting} className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-[#051647] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#002187] disabled:cursor-wait disabled:opacity-60 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#b3c400]">
+                  <Check className="h-3.5 w-3.5" /> Usar no campo
+                </button>
+                <button type="button" onClick={() => void suggestReply()} disabled={suggesting} className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white disabled:cursor-wait disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-white/10">
+                  <Sparkles className="h-3.5 w-3.5" /> Gerar outra
+                </button>
+                <button type="button" onClick={() => setSuggestion(null)} disabled={suggesting} className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-white hover:text-slate-800 disabled:cursor-wait disabled:opacity-60 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white">
+                  <X className="h-3.5 w-3.5" /> Descartar
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {blocked ? (
         <p className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300"><Lock className="h-4 w-4 shrink-0" />Este número está bloqueado e não recebe mensagens. Você ainda pode registrar notas internas.</p>
       ) : windowClosed ? (
@@ -358,7 +397,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
               </>
             )}
             {!internal && (
-              <button type="button" title="Sugerir resposta com IA" aria-label="Sugerir resposta com IA" disabled={suggesting} onClick={() => void suggestReply()} className={`${toolButton} text-[#002187] dark:text-[#C4D600]`}>
+              <button type="button" title={suggesting ? "Gerando sugestão..." : "Sugerir resposta com IA"} aria-label={suggesting ? "Gerando sugestão..." : "Sugerir resposta com IA"} aria-busy={suggesting} disabled={suggesting} onClick={() => void suggestReply()} className={`${toolButton} text-[#002187] disabled:cursor-wait disabled:opacity-70 dark:text-[#C4D600]`}>
                 {suggesting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
               </button>
             )}

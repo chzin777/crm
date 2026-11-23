@@ -196,7 +196,8 @@ export async function aiTakeOver(conversation: ChatConversation, messageId: stri
   return true;
 }
 
-async function knowledge(settings: AiSettings) {
+/** Base de conhecimento do agente (lojas, horários, preços médios, documentos ligados); também usada pelo copiloto do /chat. */
+export async function aiKnowledge(settings: AiSettings) {
   const parts: string[] = [];
   // Fontes automáticas: documentos Markdown ligados na Base de Conhecimento (instrução editável + dados ao vivo).
   const notes = await activeSourceNotes().catch(() => ({} as Awaited<ReturnType<typeof activeSourceNotes>>));
@@ -592,7 +593,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const conversationText = [customerText, ...(input.earlierCustomerTexts ?? []).slice(0, 4)].join("\n");
   const [context, info, queues, studioContext] = await Promise.all([
     input.buildContext(media),
-    knowledge(settings),
+    aiKnowledge(settings),
     settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
     loadStudioContext(customerText, { userId: input.meta.userId, conversationId: input.meta.conversationId }).catch(() => ({ skills })),
   ]);

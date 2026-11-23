@@ -5,6 +5,11 @@ import { BRAND_RULES, formatContext, transcriptLine, type TranscriptRow } from "
 import { loadCustomerHistory } from "@/lib/chat/customer-history";
 import { aiJson } from "@/lib/ai/openai";
 import { sessionRows } from "@/lib/ai/session-anchor";
+import { readAiSettings } from "@/lib/ai/store";
+import { loadStudioContext } from "@/lib/ai/studio-db";
+import { composeSystemPrompt } from "@/lib/ai/prompt-composer";
+import { buildCopilotPrompt } from "@/lib/ai/reply-copilot";
+import { campaignNames } from "@/lib/chat/campaign-origin";
 
 const MESSAGES_LIMIT = 40;
 const CATALOG_LIMIT = 60;
@@ -75,15 +80,44 @@ export function catalog() {
 
 export type ReplySuggestion = { reply: string };
 
-export async function suggestReply(conversation: ConversationRef, agentName: string, userId?: string): Promise<ReplySuggestion> {
-  const context = await conversationContext(conversation);
-  const result = await aiJson<{ reply?: string }>([
-    {
-      role: "system",
-      content: `${BRAND_RULES}\nSua tarefa: escrever a PRÓXIMA mensagem do atendente ${agentName.split(" ")[0]} para o cliente, respondendo ao que ficou pendente na conversa. Use as notas internas apenas como contexto. Não se apresente de novo se a conversa já começou. Responda em JSON: {"reply": "texto da mensagem"}.`,
+/**
+ * Copiloto do atendente (botão no composer do /chat): mesmas instruções comerciais, regras do Estúdio e tom de /ia,
+ * com o atendimento autônomo ligado ou não. Só devolve o texto: nada sai para o WhatsApp.
+ */
+export async function suggestReply(conversation: ConversationRef & { campaignId?: string | null }, agentName: string, userId?: string): Promise<ReplySuggestion> {
+  const [context, settings, contact, campaigns, lastCustomer] = await Promise.all([
+    conversationContext(conversation),
+    readAiSettings(),
+    prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true, city: true, store: true, tier: true, rfvpSegment: true } }),
+    conversation.campaignId ? campaignNames() : null,
+    prisma.chatMessage.findMany({ where: { conversationId: conversation.id, author: "customer" }, orderBy: { createdAt: "desc" }, take: 4, select: { text: true } }),
+  ]);
+  const customerText = lastCustomer.map((row) => row.text).join("\n");
+  // Base de conhecimento (lojas, horários, preços médios, documentos ligados) e regras/skills do Estúdio de IA.
+  const { aiKnowledge } = await import("@/lib/ai/agent");
+  const [knowledge, studio] = await Promise.all([
+    aiKnowledge(settings).catch(() => ""),
+    loadStudioContext(customerText, { userId, conversationId: conversation.id }).catch(() => undefined),
+  ]);
+  const system = buildCopilotPrompt({
+    brandRules: BRAND_RULES,
+    modules: composeSystemPrompt({ hasGreetedInSession: true, text: lastCustomer[0]?.text ?? "", conversationText: customerText, preferredCity: contact?.city ?? undefined, studio }),
+    settings,
+    agentName,
+    knowledge,
+    customer: {
+      name: contact?.name ?? null,
+      city: contact?.city?.trim() || null,
+      store: contact?.store?.trim() || null,
+      tier: contact?.tier ?? null,
+      rfvpSegment: contact?.rfvpSegment ?? null,
+      campaign: conversation.campaignId ? campaigns?.get(conversation.campaignId) ?? null : null,
     },
+  });
+  const result = await aiJson<{ reply?: string }>([
+    { role: "system", content: system },
     { role: "user", content: context.text },
-  ], { maxTokens: 600, feature: "reply", conversationId: conversation.id, userId });
+  ], { maxTokens: 700, feature: "reply", conversationId: conversation.id, userId, settings });
   const reply = result.reply?.trim();
   if (!reply) throw new Error("A IA não sugeriu nenhuma resposta.");
   return { reply };
