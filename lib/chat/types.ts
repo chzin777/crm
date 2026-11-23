@@ -1,5 +1,8 @@
 export type ChatTab = "queue" | "mine" | "all" | "closed" | "unread" | "campaigns" | "followups";
 
+/** Teto do limite de conversas simultâneas por atendente (0 = fora do atendimento). */
+export const MAX_AGENT_CAPACITY = 999;
+
 /** Contadores das abas, mais os lembretes vencidos do atendente e as conversas com espera acima do limite. */
 export type ChatCounts = Record<ChatTab, number> & { followupsOverdue: number; slaBreached: number };
 

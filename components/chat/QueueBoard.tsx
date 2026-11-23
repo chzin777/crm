@@ -5,6 +5,7 @@ import { EntityDialog } from "@/components/EntityDialog";
 import { AddMembersDialog } from "@/components/chat/AddMembersDialog";
 import { QueueWaitingList } from "@/components/chat/QueueWaitingList";
 import { initials, waitingLabel } from "@/lib/chat/format";
+import { MAX_AGENT_CAPACITY } from "@/lib/chat/types";
 
 export type QueueMember = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean; store?: string | null };
 export type QueueRecord = { id: string; name: string; description: string; color: string; hours: string; firstResponseSlaMin: number; order: number; waiting: number; oldestWaiting: string | null; members: QueueMember[]; distribution?: "manual" | "round_robin"; storePriority?: boolean };
@@ -171,12 +172,14 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
                         <input
                           type="number"
                           min={0}
-                          max={200}
+                          max={MAX_AGENT_CAPACITY}
                           key={`${member.userId}-${member.capacity}`}
                           defaultValue={member.capacity}
                           aria-label={`Limite de conversas de ${member.name}`}
+                          title={`De 0 a ${MAX_AGENT_CAPACITY} conversas`}
                           onBlur={(event) => {
-                            const value = Number(event.target.value);
+                            const value = Math.min(Math.max(Math.round(Number(event.target.value) || 0), 0), MAX_AGENT_CAPACITY);
+                            event.target.value = String(value);
                             if (value !== member.capacity) void act("/api/chat/team", "PATCH", { userId: member.userId, capacity: value }, "Limite salvo.");
                           }}
                           className="h-9 w-16 rounded-lg border border-slate-200 bg-slate-50 px-2 text-sm text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]"

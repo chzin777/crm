@@ -8,6 +8,7 @@ import { addAudit } from "@/lib/chat/conversation";
 import { isOnline } from "@/lib/chat/team";
 import { effectivePresence } from "@/lib/chat/presence-status";
 import { storeErpCode } from "@/lib/stores";
+import { MAX_AGENT_CAPACITY } from "@/lib/chat/types";
 
 export async function GET() {
   const guard = await requireChatActor("chat.queues", ["filas"]);
@@ -49,13 +50,16 @@ export async function GET() {
 }
 
 // store: código ERP da loja do atendente ("13"), usado no rodízio por loja; null tira o vínculo.
-const patch = z.object({ userId: z.string().min(1), capacity: z.number().int().min(0).max(200).optional(), paused: z.boolean().optional(), store: z.string().trim().max(20).nullable().optional(), stores: z.array(z.string().trim().min(1).max(20)).max(50).optional() });
+const patch = z.object({ userId: z.string().min(1), capacity: z.number().int().min(0).max(MAX_AGENT_CAPACITY).optional(), paused: z.boolean().optional(), store: z.string().trim().max(20).nullable().optional(), stores: z.array(z.string().trim().min(1).max(20)).max(50).optional() });
 
 export async function PATCH(request: Request) {
   const guard = await requireChatActor("chat.queues", ["filas"]);
   if (guard.response) return guard.response;
   const parsed = patch.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return chatError("Dados inválidos.", 400);
+  if (!parsed.success) {
+    const capacityIssue = parsed.error.issues.some((issue) => issue.path[0] === "capacity");
+    return chatError(capacityIssue ? `O limite de conversas simultâneas vai de 0 a ${MAX_AGENT_CAPACITY}.` : "Dados inválidos.", 400);
+  }
   const { userId, ...fields } = parsed.data;
 
   if (fields.capacity !== undefined) {

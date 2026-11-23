@@ -4,6 +4,7 @@ import { AlertTriangle, CircleDot, MessagesSquare, PauseCircle, Search, Store, U
 import { Switch } from "@/components/chat/MenuFormParts";
 import { Metric, type QueueAgent, type QueueRecord, type StoreOption } from "@/components/chat/QueueBoard";
 import { initials } from "@/lib/chat/format";
+import { MAX_AGENT_CAPACITY } from "@/lib/chat/types";
 
 type Filter = "all" | "online" | "paused" | "noAccess";
 
@@ -32,7 +33,13 @@ function LimitSlider({ agent, onCommit }: { agent: QueueAgent; onCommit: (capaci
     latest.current = agent.capacity;
   }, [agent.capacity]);
 
-  const max = Math.max(SLIDER_MAX, agent.capacity);
+  // Até 30 no arraste; acima disso o campo numérico aceita até MAX_AGENT_CAPACITY e a régua acompanha.
+  const max = Math.min(Math.max(SLIDER_MAX, agent.capacity, value), MAX_AGENT_CAPACITY);
+  const setTyped = (raw: string) => {
+    const typed = Math.min(Math.max(Math.round(Number(raw) || 0), agent.open), MAX_AGENT_CAPACITY);
+    latest.current = typed;
+    setValue(typed);
+  };
   const percent = (value / max) * 100;
   const lockedAtLoad = agent.open > 0 && value === agent.open;
 
@@ -44,7 +51,30 @@ function LimitSlider({ agent, onCommit }: { agent: QueueAgent; onCommit: (capaci
     <div>
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Limite simultâneo</span>
-        <span className="text-sm font-bold text-[#002187] dark:text-[#C4D600]">{value === 0 ? "Fora do atendimento" : `${value} ${value === 1 ? "conversa" : "conversas"}`}</span>
+        <span className="flex items-center gap-1.5 text-sm font-bold text-[#002187] dark:text-[#C4D600]">
+          {value === 0 ? (
+            "Fora do atendimento"
+          ) : (
+            <>
+              <input
+                type="number"
+                min={0}
+                max={MAX_AGENT_CAPACITY}
+                step={1}
+                value={value}
+                aria-label={`Limite de conversas de ${agent.name} (0 a ${MAX_AGENT_CAPACITY})`}
+                title={`De 0 a ${MAX_AGENT_CAPACITY} conversas`}
+                onChange={(event) => setTyped(event.target.value)}
+                onBlur={commit}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") commit();
+                }}
+                className="h-7 w-16 rounded-md border border-slate-200 bg-slate-50 px-1.5 text-right text-sm font-bold text-[#002187] outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-[#C4D600] dark:focus:border-[#C4D600]"
+              />
+              {value === 1 ? "conversa" : "conversas"}
+            </>
+          )}
+        </span>
       </div>
       <input
         type="range"
