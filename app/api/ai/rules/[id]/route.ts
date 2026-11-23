@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { syncBusinessRules } from "@/lib/ai/vector-memory-db";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeRuleInput, type BusinessRuleInput } from "@/lib/ai/studio";
@@ -18,6 +19,7 @@ export async function PUT(request: Request, { params }: Context) {
   const taken = await prisma.aiBusinessRule.findFirst({ where: { slug: data.slug, id: { not: id } }, select: { id: true } });
   if (taken) return NextResponse.json({ error: `Já existe uma regra com o slug "${data.slug}".` }, { status: 409 });
   const rule = await prisma.aiBusinessRule.update({ where: { id }, data });
+  void syncBusinessRules({ userId: guard.user.id }).catch(() => 0);
   return NextResponse.json({ rule });
 }
 
@@ -26,5 +28,6 @@ export async function DELETE(_request: Request, { params }: Context) {
   if (guard.response) return guard.response;
   const { id } = await params;
   await prisma.aiBusinessRule.delete({ where: { id } }).catch(() => null);
+  void syncBusinessRules({ userId: guard.user.id }).catch(() => 0);
   return NextResponse.json({ ok: true });
 }

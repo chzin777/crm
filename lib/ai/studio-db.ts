@@ -1,4 +1,5 @@
 import "server-only";
+import { loadSemanticMemory, syncKnowledgeDocumentVectors } from "@/lib/ai/vector-memory-db";
 import { prisma } from "@/lib/prisma";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
 import { readAiSettings } from "@/lib/ai/store";
@@ -119,6 +120,8 @@ export async function indexKnowledgeDocument(documentId: string, userId: string)
     prisma.knowledgeChunk.createMany({ data: chunks.map((content, index) => ({ documentId, index, content, embedding: embeddings[index] ?? [] })) }),
     prisma.knowledgeDocument.update({ where: { id: documentId }, data: { chunkCount: chunks.length, status: !chunks.length ? "erro" : embeddings.length === chunks.length ? "indexado" : "parcial", error: !chunks.length ? "Documento sem texto." : error } }),
   ]);
+  // Memória vetorial (busca semântica da IA) acompanha o documento salvo, reaproveitando os embeddings acima.
+  await syncKnowledgeDocumentVectors(documentId, { userId }).catch((cause: unknown) => console.warn("[ai][memoria] documento não vetorizado:", cause instanceof Error ? cause.message : cause));
 }
 
 /** Top-K trechos da base ativa para a pergunta (híbrido: embedding da pergunta + termos). */
@@ -134,15 +137,16 @@ export async function searchKnowledge(query: string, options: { topK?: number; u
 }
 
 /** Contexto do Estúdio para uma resposta da IA: regras ativas, skills e RAG da pergunta atual. */
-export async function loadStudioContext(text: string, meta: { userId?: string | null; conversationId?: string | null }): Promise<StudioPromptContext> {
+export async function loadStudioContext(text: string, meta: { userId?: string | null; conversationId?: string | null; /** Mensagem atual + contexto imediato para a busca semântica (sem ele, usa text). */ memoryText?: string }): Promise<StudioPromptContext> {
   const safe = async <T,>(run: () => Promise<T>, fallback: T) => { try { return await run(); } catch { return fallback; } };
-  const [rules, skills, knowledge] = await Promise.all([
+  const [rules, skills, knowledge, memory] = await Promise.all([
     safe(async () => {
       await migrateLegacyTopics().catch(() => 0);
       return prisma.aiBusinessRule.findMany({ where: { active: true }, orderBy: [{ order: "asc" }, { title: "asc" }], select: RULE_SELECT });
     }, [] as BusinessRule[]),
     loadSkills(),
     shouldSearchKnowledge(text) ? safe(() => searchKnowledge(text, meta), [] as KnowledgeChunkHit[]) : Promise.resolve([] as KnowledgeChunkHit[]),
+    safe(() => loadSemanticMemory(meta.memoryText ?? text, meta), undefined),
   ]);
-  return { rules, skills, knowledge };
+  return { rules, skills, knowledge, memory };
 }

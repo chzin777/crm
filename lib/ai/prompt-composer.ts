@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { isProductBrowseRequest } from "@/lib/ai/catalog-context";
 import { isInstallmentQuestion } from "@/lib/ai/installments";
+import { semanticMemoryBlock } from "@/lib/ai/vector-memory";
 import { businessRulesBlock, knowledgePromptBlock, selectBusinessRules, skillEnabled, skillsPromptBlock, type StudioPromptContext } from "@/lib/ai/studio";
 
 /**
@@ -95,5 +96,6 @@ export function composeSystemPrompt(state: PromptState): string {
     studio?.rules ? businessRulesBlock(selectBusinessRules(studio.rules, state.conversationText ?? state.text ?? "")) : "",
     skillsPromptBlock(studio?.skills),
     knowledgePromptBlock(studio?.knowledge ?? []),
+    semanticMemoryBlock(studio?.memory, (studio?.knowledge ?? []).map((hit) => hit.content)),
   ].filter(Boolean).join("\n\n");
 }

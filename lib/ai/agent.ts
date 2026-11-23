@@ -597,7 +597,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     input.buildContext(media),
     aiKnowledge(settings),
     settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
-    loadStudioContext(customerText, { userId: input.meta.userId, conversationId: input.meta.conversationId }).catch(() => ({ skills })),
+    loadStudioContext(customerText, { userId: input.meta.userId, conversationId: input.meta.conversationId, memoryText: [customerText, ...(input.earlierCustomerTexts ?? []).slice(0, 2)].join("\n") }).catch(() => ({ skills })),
   ]);
   const directory = await storeDirectory();
   const cities = [...directory.values()].map((store) => store.city ?? "");

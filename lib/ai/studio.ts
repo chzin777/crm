@@ -1,3 +1,4 @@
+import type { SemanticMemory } from "@/lib/ai/vector-memory";
 import type { AiSettings } from "@/lib/ai/settings";
 
 /**
@@ -416,4 +417,4 @@ export function knowledgePromptBlock(hits: KnowledgeChunkHit[]): string {
 }
 
 /** Contexto do Estúdio que o motor passa ao composeSystemPrompt. */
-export type StudioPromptContext = { rules?: BusinessRule[]; skills?: AiSkill[]; knowledge?: KnowledgeChunkHit[] };
+export type StudioPromptContext = { rules?: BusinessRule[]; skills?: AiSkill[]; knowledge?: KnowledgeChunkHit[]; /** Busca semântica (pgvector): fatos da loja e atendimentos parecidos. */ memory?: SemanticMemory };

@@ -898,6 +898,25 @@ model KnowledgeChunk {
   @@index([documentId, index])
 }
 
+/// Memória vetorial da IA (prisma/ai-knowledge-vector.sql): base de conhecimento, catálogo, atendimentos padrão ouro e
+/// correções do copiloto. Com pgvector no servidor, a coluna "embeddingVec" vector(1536) + HNSW (fora do Prisma) acelera a busca.
+model AiKnowledgeVector {
+  id          String   @id @default(cuid())
+  /// KNOWLEDGE_BASE | PRODUCT_CATALOG | CLOSED_CONVERSATION | COPILOT_CORRECTION
+  sourceType  String
+  sourceId    String
+  title       String   @default("")
+  content     String
+  metadata    Json     @default("{}")
+  embedding   Float[]  @default([]) @db.Real
+  contentHash String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sourceType, sourceId], map: "AiKnowledgeVector_source_key")
+  @@index([sourceType])
+}
+
 /// Automação visual (/automacoes): grafo do fluxo (nós e conexões em JSON) e o gatilho que o inicia.
 model AutomationFlow {
   id            String                @id @default(cuid())

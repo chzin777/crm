@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Database, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Award, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Database, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import { CampaignBadge } from "@/components/chat/CampaignBadge";
@@ -473,6 +473,17 @@ function ChatWorkspace() {
   const headerInfo = open
     ? [formatPhone(open.phone), STATUS_LABELS[open.status], open.assignee?.name, open.queue?.name, waiting ? `esperando há ${waiting}` : lastContact].filter(Boolean).join(" · ")
     : "";
+  /** Gerente marca o atendimento como exemplo (anonimizado) para a IA conduzir conversas parecidas. */
+  const saveGoldConversation = async (conversationId: string) => {
+    try {
+      const response = await fetch(`/api/chat/conversations/${conversationId}/padrao-ouro`, { method: "POST" });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (response.ok) toast.success("Atendimento salvo como padrão ouro", "A IA vai usar esta condução como referência em conversas parecidas.");
+      else toast.error("Não foi possível salvar o atendimento", data.error);
+    } catch {
+      toast.error("Não foi possível salvar o atendimento", "Verifique a conexão e tente novamente.");
+    }
+  };
   /**
    * Ações da conversa: as mesmas nos 3 pontinhos e no clique direito da lista.
    * `blocked` só vem com o detalhe carregado; até lá a opção de bloqueio fica oculta.
@@ -485,6 +496,8 @@ function ChatWorkspace() {
       { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => run("/assume", "Atendimento assumido"), hidden: !canWrite || !!conversation.closedAt || !!conversation.assignee },
       { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
       { label: "Resumir atendimento (IA)", icon: <Sparkles className="h-4 w-4" />, onSelect: () => setSummaryTarget({ id: conversation.id, name: conversation.name }) },
+      // eslint-disable-next-line react-hooks/refs
+      { label: "Salvar como atendimento padrão ouro", icon: <Award className="h-4 w-4" />, onSelect: () => void saveGoldConversation(conversation.id), hidden: !capabilities["chat.queues"] },
       { label: "Agendar retorno", icon: <CalendarClock className="h-4 w-4" />, onSelect: () => setShowFollowUp(true), hidden: !canWrite },
       { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(conversation.contactId)}&contato=${encodeURIComponent(conversation.name)}`, hidden: !canWrite },
       { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!conversation.closedAt },

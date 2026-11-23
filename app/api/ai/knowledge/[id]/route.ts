@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { indexKnowledgeDocument } from "@/lib/ai/studio-db";
+import { deleteVectors, syncKnowledgeDocumentVectors } from "@/lib/ai/vector-memory-db";
 import { invalidateAiSettingsCache } from "@/lib/ai/store";
 
 type Context = { params: Promise<{ id: string }> };
@@ -36,6 +37,8 @@ export async function PATCH(request: Request, { params }: Context) {
   // Fonte automática entra inteira no prompt (sem trechos de RAG); os demais reindexam ao mudar o texto.
   if (exists.systemKey) invalidateAiSettingsCache();
   else if (body?.reindex === true || content !== null) await indexKnowledgeDocument(id, guard.user.id);
+  // Ligar/desligar: o documento entra ou sai da memória vetorial na hora.
+  else if (typeof body?.active === "boolean") await syncKnowledgeDocumentVectors(id, { userId: guard.user.id }).catch(() => 0);
   return NextResponse.json({ document: await prisma.knowledgeDocument.findUnique({ where: { id }, select }) });
 }
 
@@ -46,5 +49,6 @@ export async function DELETE(_request: Request, { params }: Context) {
   const document = await prisma.knowledgeDocument.findUnique({ where: { id }, select: { systemKey: true } });
   if (document?.systemKey) return NextResponse.json({ error: "Fonte automática não pode ser excluída: desligue o documento para a IA deixar de usá-la." }, { status: 400 });
   await prisma.knowledgeDocument.delete({ where: { id } }).catch(() => null);
+  await deleteVectors("KNOWLEDGE_BASE", { prefix: `doc:${id}:` }).catch(() => 0);
   return NextResponse.json({ ok: true });
 }

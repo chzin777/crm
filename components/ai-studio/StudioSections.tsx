@@ -668,6 +668,64 @@ function KnowledgeCreateDialog({ onClose, onCreated }: { onClose: () => void; on
   );
 }
 
+type MemoryStats = { knowledge: number; products: number; conversations: number; corrections: number; engine: "pgvector" | "aplicativo"; updatedAt: string | null; configured: boolean };
+
+/** Card compacto da memória vetorial (busca semântica): o que está vetorizado e o botão de reindexação. */
+function VectorMemoryCard() {
+  const toast = useToast();
+  const [stats, setStats] = useState<MemoryStats | null>(null);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    api<MemoryStats>("/api/ai/memory").then((data) => { if (active) setStats(data); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  const reindex = async () => {
+    setRunning(true);
+    try {
+      const data = await api<{ knowledge: number; catalog: number; products: number; stats: MemoryStats }>("/api/ai/memory", { method: "POST" });
+      setStats(data.stats);
+      toast.success("Memória da IA reindexada", `${data.products} produtos do catálogo conferidos; ${data.knowledge + data.catalog} trecho${data.knowledge + data.catalog === 1 ? "" : "s"} novo${data.knowledge + data.catalog === 1 ? "" : "s"} ou alterado${data.knowledge + data.catalog === 1 ? "" : "s"}.`);
+    } catch (cause) {
+      toast.error("Não foi possível reindexar", cause instanceof Error ? cause.message : "Tente de novo.");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const items = [
+    { label: "Trechos da base", value: stats?.knowledge },
+    { label: "Produtos", value: stats?.products },
+    { label: "Atendimentos ouro", value: stats?.conversations },
+    { label: "Correções do copiloto", value: stats?.corrections },
+  ];
+  return (
+    <Panel
+      title="Memória da IA (busca semântica)"
+      hint="A cada resposta, a IA busca os 3 trechos mais parecidos da base e do catálogo e até 2 atendimentos bem-sucedidos semelhantes."
+      action={<button type="button" onClick={reindex} disabled={running || stats?.configured === false} className={primary}>{running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{running ? "Reindexando..." : "Reindexar base agora"}</button>}
+    >
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {items.map((item) => (
+          <div key={item.label} className="min-w-0 rounded-lg border border-slate-200/70 px-3 py-2 dark:border-slate-800">
+            <p className="text-lg font-semibold text-[#051647] dark:text-white">{item.value === undefined ? "–" : item.value.toLocaleString("pt-BR")}</p>
+            <p className="break-words text-[11px] text-slate-500 dark:text-slate-400">{item.label}</p>
+          </div>
+        ))}
+      </div>
+      {stats && (
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          Motor: {stats.engine === "pgvector" ? "pgvector no PostgreSQL (índice HNSW)" : "busca no aplicativo (pgvector ainda não instalado no banco)"}
+          {stats.updatedAt ? ` · atualizado em ${new Date(stats.updatedAt).toLocaleString("pt-BR")}` : ""}
+          {stats.configured ? "" : " · IA sem chave configurada no servidor"}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 export function KnowledgeSection() {
   const toast = useToast();
   const [documents, setDocuments] = useState<KnowledgeDoc[] | null>(null);
@@ -741,6 +799,7 @@ export function KnowledgeSection() {
 
   return (
     <div className="space-y-6">
+      <VectorMemoryCard />
       <Panel
         title="Base de conhecimento"
         hint="Manuais, tabelas e textos longos. A cada pergunta, a IA recebe só os trechos mais relevantes."

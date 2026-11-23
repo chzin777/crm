@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { syncBusinessRules } from "@/lib/ai/vector-memory-db";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeRuleInput, type BusinessRuleInput } from "@/lib/ai/studio";
@@ -19,5 +20,6 @@ export async function POST(request: Request) {
   const taken = await prisma.aiBusinessRule.findUnique({ where: { slug: data.slug }, select: { id: true } });
   if (taken) return NextResponse.json({ error: `Já existe uma regra com o slug "${data.slug}".` }, { status: 409 });
   const rule = await prisma.aiBusinessRule.create({ data });
+  void syncBusinessRules({ userId: guard.user.id }).catch(() => 0);
   return NextResponse.json({ rule }, { status: 201 });
 }

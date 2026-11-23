@@ -68,6 +68,8 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   const [suggesting, setSuggesting] = useState(false);
   /** Sugestão do copiloto aguardando decisão do atendente (presa à conversa em que foi pedida). */
   const [suggestion, setSuggestion] = useState<{ conversationId: string; text: string } | null>(null);
+  /** Sugestão colocada no campo: ao enviar, o texto final volta como correção silenciosa para o copiloto aprender. */
+  const usedSuggestion = useRef<{ conversationId: string; text: string } | null>(null);
   /** Texto congelado ao abrir "Agendar envio"; null enquanto o diálogo está fechado. */
   const [scheduling, setScheduling] = useState<string | null>(null);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
@@ -181,6 +183,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
     }
   };
   const applySuggestion = (value: string) => {
+    usedSuggestion.current = { conversationId: conversation.id, text: value };
     setText(value);
     setSuggestion(null);
     requestAnimationFrame(() => {
@@ -247,6 +250,14 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
     setText("");
     const sent = await onSend({ text: value, internal, replyTo });
     if (!sent) setText(value);
+    const used = usedSuggestion.current;
+    if (sent && used) {
+      usedSuggestion.current = null;
+      // Só conta como correção se foi ao cliente nesta conversa; o servidor ignora quando o texto não mudou.
+      if (!internal && used.conversationId === conversation.id) {
+        void fetch(`/api/chat/conversas/${used.conversationId}/sugerir-resposta/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suggestion: used.text, sent: value }) }).catch(() => undefined);
+      }
+    }
     setSending(false);
   };
 
