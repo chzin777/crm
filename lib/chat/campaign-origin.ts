@@ -20,6 +20,9 @@ export async function campaignAiReplyEnabled(campaignId: string | null | undefin
   return list.find((campaign) => campaign.id === campaignId)?.aiAutoReplyEnabled !== false;
 }
 
+/** Prefixo dos envios de follow-up (mesmo valor de FOLLOW_UP_PREFIX em lib/campaign-dispatch, sem importar o worker). */
+const FOLLOW_UP_PREFIX = "followup:";
+
 // O cadastro tem telefones repetidos: o disparo pode ter saído por outro contato do mesmo número.
 async function samePhoneContactIds(contactId: string, phone: string) {
   const contacts = await prisma.contact.findMany({ where: { phone: { in: phoneVariants(phone) } }, select: { id: true } });
@@ -78,9 +81,17 @@ export async function attributeCampaignReply({ conversation, contactId, phone, r
   if (!message) return;
 
   await prisma.campaignMessage.updateMany({ where: { id: message.id, repliedAt: null }, data: { repliedAt: receivedAt, status: "replied" } });
-  if (conversation.campaignId === message.campaignId) return;
-  const campaignName = (await campaignNames()).get(message.campaignId);
-  if (campaignName) await prisma.chatConversation.update({ where: { id: conversation.id }, data: { campaignId: message.campaignId, campaignName } });
+  // Resposta ao follow-up ("followup:<id>") conta também como resposta ao disparo principal da campanha.
+  const campaignId = message.campaignId.startsWith(FOLLOW_UP_PREFIX) ? message.campaignId.slice(FOLLOW_UP_PREFIX.length) : message.campaignId;
+  if (campaignId !== message.campaignId) {
+    await prisma.campaignMessage.updateMany({
+      where: { campaignId, contactId: { in: contactIds }, repliedAt: null, sentAt: { not: null }, status: { not: "failed" } },
+      data: { repliedAt: receivedAt, status: "replied" },
+    });
+  }
+  if (conversation.campaignId === campaignId) return;
+  const campaignName = (await campaignNames()).get(campaignId);
+  if (campaignName) await prisma.chatConversation.update({ where: { id: conversation.id }, data: { campaignId, campaignName } });
 }
 
 /**

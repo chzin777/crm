@@ -7,7 +7,10 @@ import { Pagination } from "@/components/dashboard/DashboardKit";
 import {
   AlertTriangle,
   Bot,
+  CalendarClock,
   CheckCheck,
+  Copy,
+  Repeat,
   ChevronUp,
   ChevronsUpDown,
   Clock3,
@@ -49,6 +52,7 @@ import { Calculator } from "lucide-react";
 import { DispatchCostCalculator } from "@/components/DispatchCostCalculator";
 import { useMetaPricing } from "@/hooks/useMetaPricing";
 import { dedupeRecipients, summarizeSegmentOverlap, type SegmentOverlapSummary } from "@/lib/campaign-audience";
+import type { CampaignCadence, CampaignFollowUp, CampaignSendWindow } from "@/lib/campaign-schedule";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
 const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
@@ -136,6 +140,87 @@ interface Campaign {
   modelo?: CampaignTemplate | null;
   /** Atendimento ao responder: false = direto para a fila humana (IA não responde). Ausente = IA atende. */
   aiAutoReplyEnabled?: boolean;
+  /** Ritmo, janela de horário, follow-up e janela de atribuição de vendas (opcionais). */
+  cadence?: CampaignCadence | null;
+  sendWindow?: CampaignSendWindow | null;
+  followUp?: CampaignFollowUp | null;
+  attributionWindowDays?: number | null;
+  /** Campanha de reenvio para não engajados: id da campanha original. */
+  resendOf?: string;
+}
+
+type DeliverySettings = Pick<Campaign, "cadence" | "sendWindow" | "followUp" | "attributionWindowDays">;
+const EMPTY_DELIVERY: DeliverySettings = { cadence: null, sendWindow: null, followUp: null, attributionWindowDays: null };
+const deliveryOf = (campaign: Campaign): DeliverySettings => ({
+  cadence: campaign.cadence ?? null,
+  sendWindow: campaign.sendWindow ?? null,
+  followUp: campaign.followUp ?? null,
+  attributionWindowDays: campaign.attributionWindowDays ?? null,
+});
+
+/** Ritmo do disparo, janela de horário, follow-up para quem não respondeu e janela de atribuição de vendas. */
+function CampaignDeliverySettings({ value, onChange }: { value: DeliverySettings; onChange: (value: DeliverySettings) => void }) {
+  const field = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-[#C4D600]";
+  const toggle = "h-4 w-4 shrink-0 cursor-pointer accent-[#002187] dark:accent-[#C4D600]";
+  const label = "block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300";
+  const box = "space-y-2.5 rounded-lg border border-slate-200 p-3 dark:border-slate-700";
+  const head = "flex cursor-pointer items-start gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100";
+  const hint = "block text-[11px] font-normal text-slate-500 dark:text-slate-400";
+  const windowValid = !value.sendWindow || value.sendWindow.start < value.sendWindow.end;
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><CalendarClock className="h-3.5 w-3.5" />Ritmo, horário e follow-up (opcional)</legend>
+
+      <div className={box}>
+        <label className={head}>
+          <input type="checkbox" className={toggle} checked={Boolean(value.cadence)} onChange={(event) => onChange({ ...value, cadence: event.target.checked ? { batchSize: 50, intervalSeconds: 60, randomDelay: true } : null })} />
+          <span className="min-w-0 break-words">Cadência por lotes<span className={hint}>Protege a qualidade do número na Meta enviando aos poucos.</span></span>
+        </label>
+        {value.cadence && (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className={label}><span>Mensagens por lote</span><input type="number" min={1} max={5000} value={value.cadence.batchSize} onChange={(event) => onChange({ ...value, cadence: { ...value.cadence!, batchSize: Number(event.target.value) } })} className={field} /></label>
+            <label className={label}><span>Pausa entre lotes (s)</span><input type="number" min={5} max={3600} value={value.cadence.intervalSeconds} onChange={(event) => onChange({ ...value, cadence: { ...value.cadence!, intervalSeconds: Number(event.target.value) } })} className={field} /></label>
+            <label className="flex cursor-pointer items-center gap-2 pt-4 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><input type="checkbox" className={toggle} checked={value.cadence.randomDelay === true} onChange={(event) => onChange({ ...value, cadence: { ...value.cadence!, randomDelay: event.target.checked } })} />Intervalo aleatório (1 a 4 s) entre envios</label>
+          </div>
+        )}
+      </div>
+
+      <div className={box}>
+        <label className={head}>
+          <input type="checkbox" className={toggle} checked={Boolean(value.sendWindow)} onChange={(event) => onChange({ ...value, sendWindow: event.target.checked ? { start: "08:30", end: "18:30", skipSundays: true } : null })} />
+          <span className="min-w-0 break-words">Janela de horário permitido<span className={hint}>Fora do horário o envio pausa sozinho e retoma no próximo período permitido.</span></span>
+        </label>
+        {value.sendWindow && (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className={label}><span>Início</span><input type="time" value={value.sendWindow.start} onChange={(event) => onChange({ ...value, sendWindow: { ...value.sendWindow!, start: event.target.value } })} className={field} /></label>
+            <label className={label}><span>Fim</span><input type="time" value={value.sendWindow.end} onChange={(event) => onChange({ ...value, sendWindow: { ...value.sendWindow!, end: event.target.value } })} className={field} /></label>
+            <label className="flex cursor-pointer items-center gap-2 pt-4 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><input type="checkbox" className={toggle} checked={value.sendWindow.skipSundays === true} onChange={(event) => onChange({ ...value, sendWindow: { ...value.sendWindow!, skipSundays: event.target.checked } })} />Não enviar aos domingos</label>
+            {!windowValid && <p role="alert" className="text-[11px] font-medium text-[#9a3d12] sm:col-span-3 dark:text-[#F7915E]">O início precisa ser antes do fim.</p>}
+          </div>
+        )}
+      </div>
+
+      <div className={box}>
+        <label className={head}>
+          <input type="checkbox" className={toggle} checked={Boolean(value.followUp?.enabled)} onChange={(event) => onChange({ ...value, followUp: event.target.checked ? { enabled: true, afterHours: 24, modelo: value.followUp?.modelo ?? null } : null })} />
+          <span className="min-w-0 break-words">Follow-up para quem não respondeu<span className={hint}>Segundo modelo aprovado enviado depois do prazo. Cancelado sozinho se o cliente responder no chat ou comprar no VMSet.</span></span>
+        </label>
+        {value.followUp?.enabled && (
+          <div className="space-y-2">
+            <label className={label}><span>Enviar depois de (horas sem resposta)</span><input type="number" min={1} max={168} value={value.followUp.afterHours} onChange={(event) => onChange({ ...value, followUp: { ...value.followUp!, afterHours: Number(event.target.value) } })} className={field} /></label>
+            <CampaignTemplatePicker value={(value.followUp.modelo as CampaignTemplate | null) ?? null} onChange={(modelo) => onChange({ ...value, followUp: { ...value.followUp!, modelo } })} />
+            {!value.followUp.modelo && <p className="text-[11px] font-medium text-[#9a3d12] dark:text-[#F7915E]">Escolha o modelo do follow-up; sem ele nada é enviado.</p>}
+          </div>
+        )}
+      </div>
+
+      <label className={`${box} block`}>
+        <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">Janela de atribuição de vendas (dias)</span>
+        <span className={hint}>Venda no VMSet até esse prazo após o envio conta para a campanha. Em branco: padrão geral (7 dias).</span>
+        <input type="number" min={1} max={90} placeholder="7" value={value.attributionWindowDays ?? ""} onChange={(event) => onChange({ ...value, attributionWindowDays: event.target.value ? Number(event.target.value) : null })} className={`${field} mt-1.5 max-w-32`} />
+      </label>
+    </fieldset>
+  );
 }
 
 /** Atendimento ao responder a campanha: IA qualifica o lead ou a resposta vai direto para a fila humana. */
@@ -342,6 +427,7 @@ export function CampaignsView() {
   const [campaignAudienceDescription, setCampaignAudienceDescription] = useState("");
   const [campaignCategory, setCampaignCategory] = useState<"MARKETING" | "UTILITY">("MARKETING");
   const [campaignAiReply, setCampaignAiReply] = useState(true);
+  const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>(EMPTY_DELIVERY);
   const [campaignPrompt, setCampaignPrompt] = useState("");
   const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
   const [campaignAiError, setCampaignAiError] = useState("");
@@ -649,6 +735,7 @@ export function CampaignsView() {
     setCampaignAudienceDescription("");
     setCampaignCategory("MARKETING");
     setCampaignAiReply(true);
+    setDeliverySettings(EMPTY_DELIVERY);
     setCampaignPrompt("");
     setIsGeneratingCampaign(false);
     setCampaignAiError("");
@@ -687,6 +774,7 @@ export function CampaignsView() {
       audienceDescription: campaignAudienceDescription,
       metaCategory: campaignCategory,
       aiAutoReplyEnabled: campaignAiReply,
+      ...deliverySettings,
       ...(aiTemplateDraft ? { metaTemplateDraft: { ...aiTemplateDraft, body: mensagem, category: campaignCategory }, metaApprovalStatus: "TEMPLATE_DRAFT" } : {}),
       status: "Rascunho",
       disparos: 0,
@@ -865,6 +953,7 @@ export function CampaignsView() {
     setCampaignAudienceDescription(campaign.audienceDescription ?? "");
     setCampaignCategory(campaign.metaCategory ?? "MARKETING");
     setCampaignAiReply(campaign.aiAutoReplyEnabled !== false);
+    setDeliverySettings(deliveryOf(campaign));
     setForm({ nome: campaign.nome, publico: campaign.publico, mensagem: campaign.mensagem });
     setCampaignTemplate(campaign.metaApprovalStatus === "REJECTED" || campaign.metaApprovalStatus === "SUBMISSION_FAILED" ? null : campaign.modelo ?? null);
     setAiTemplateDraft(campaign.metaTemplateDraft ?? null);
@@ -985,6 +1074,7 @@ export function CampaignsView() {
       audienceDescription: campaignAudienceDescription,
       metaCategory: campaignCategory,
       aiAutoReplyEnabled: campaignAiReply,
+      ...deliverySettings,
       mensagem,
       ...(metaTemplateChanged ? { status: "Rascunho" as const, metaApprovalStatus: undefined, metaApprovalReason: "", metaTemplateId: "" } : {}),
       ...(aiTemplateDraft ? { metaTemplateDraft: { ...aiTemplateDraft, body: mensagem, category: campaignCategory } } : {}),
@@ -1307,10 +1397,60 @@ export function CampaignsView() {
   const openDispatchConfirm = (ids: string[], mode: "single" | "batch") => {
     setDispatchTarget({ mode, ids });
     setDispatchError("");
-    setIgnoreCooldown(false);
+    // Reenvio para não engajados vai justamente para quem acabou de receber: a trava de descanso já vem ignorada.
+    setIgnoreCooldown(ids.length > 0 && ids.every((id) => Boolean(campaigns.find((campaign) => campaign.id === id)?.resendOf)));
     setDispatchConfirmOpen(true);
     void estimateByIds(ids);
   };
+
+  /** Novo rascunho editável com toda a configuração da original (template, IA, público, ritmo, follow-up). */
+  const cloneCampaign = (source: Campaign, overrides: Partial<Campaign>) => {
+    const clone: Campaign = {
+      ...source,
+      // eslint-disable-next-line react-hooks/purity -- chamado só em handlers de clique
+      id: `camp-${Date.now()}`,
+      nome: `${source.nome} (cópia)`,
+      status: "Rascunho",
+      disparos: 0,
+      rotuloDisparos: "contatos no público",
+      taxaResposta: 0,
+      dataAtualizacao: new Date().toISOString(),
+      resendOf: undefined,
+      ...overrides,
+    };
+    setCampaigns((current) => [clone, ...current]);
+    setActiveFilter("Todas");
+    setSearchTerm("");
+    startEditingCampaign(clone);
+    return clone;
+  };
+
+  const duplicateCampaign = (source: Campaign) => {
+    cloneCampaign(source, {});
+    toast.success("Campanha duplicada", `"${source.nome} (cópia)" foi criada como rascunho.`);
+  };
+
+  /** Reenvio só para quem recebeu a original e não leu / não respondeu (falhas e descadastrados ficam de fora). */
+  const createResendCampaign = (source: Campaign, mode: "not_read" | "not_replied") => {
+    const label = mode === "not_read" ? "não lidos" : "não respondidos";
+    cloneCampaign(source, {
+      nome: `${source.nome} · reenvio (${label})`,
+      resendOf: source.id,
+      audienceDescription: `Quem recebeu "${source.nome}" e ${mode === "not_read" ? "não leu" : "não respondeu"}.`,
+      criteriaFilters: [
+        ...(source.criteriaFilters ?? []),
+        {
+          id: `resend-${source.id}-${mode}`,
+          nome: `${mode === "not_read" ? "Não leram" : "Não responderam"} "${source.nome}"`,
+          tipo: "geral",
+          regras: [{ campo: "campaignConversion", operador: mode, valor: source.id, valor2: source.nome }],
+        },
+      ],
+    });
+    toast.success("Reenvio criado", `Rascunho para os ${label} de "${source.nome}". Revise e dispare.`);
+  };
+  /** Reenvio só faz sentido depois que a original enviou algo. */
+  const canResend = (campaign: Campaign) => campaign.status !== "Enviando" && (["Enviada", "Envio parcial"].includes(campaign.status) || (campaign.disparos ?? 0) > 0);
 
   const openRow = (row: UnifiedRow) => {
     if (row.kind === "bulk") setBulkDetailsId(row.id);
@@ -1425,7 +1565,8 @@ export function CampaignsView() {
                 {pageRows.map((row) => {
                   const selectable = row.kind === "campaign" && row.campaign !== undefined && !isDispatchBlocked(row.campaign);
                   const isSelected = selectable && selectedCampaignIds.has(row.id);
-                  const percent = row.total > 0 ? Math.min(100, Math.round((row.processed / row.total) * 100)) : 0;
+                  const rowCampaign = row.kind === "campaign" ? row.campaign : undefined;
+                  const percent =row.total > 0 ? Math.min(100, Math.round((row.processed / row.total) * 100)) : 0;
                   const busy = jobBusy === row.id;
                   const bulk = row.bulk;
                   return (
@@ -1524,6 +1665,8 @@ export function CampaignsView() {
                           {bulk && bulk.status === "paused" && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "resume")} aria-label="Retomar lote" title="Retomar" className={iconAction}><Play className="h-3.5 w-3.5" /></button>}
                           {bulk && (bulk.status === "running" || bulk.status === "paused") && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "cancel")} aria-label="Cancelar lote" title="Cancelar" className={`${iconAction} text-red-600! dark:text-red-400!`}><XCircle className="h-3.5 w-3.5" /></button>}
                           {bulk && (bulk.status === "completed" || bulk.status === "cancelled") && bulk.failed > 0 && <button type="button" disabled={busy} onClick={() => void controlBulk(bulk, "retry")} aria-label="Reenviar falhas" title="Reenviar falhas" className={iconAction}><RotateCcw className="h-3.5 w-3.5" /></button>}
+                          {rowCampaign && <button type="button" onClick={() => duplicateCampaign(rowCampaign)} aria-label={`Duplicar ${row.nome}`} title="Duplicar campanha" className={iconAction}><Copy className="h-3.5 w-3.5" /></button>}
+                          {rowCampaign && canResend(rowCampaign) && <button type="button" onClick={() => createResendCampaign(rowCampaign, "not_replied")} aria-label={`Reenviar para não engajados de ${row.nome}`} title="Criar reenvio para quem não respondeu" className={iconAction}><Repeat className="h-3.5 w-3.5" /></button>}
                           <button type="button" onClick={() => openRow(row)} aria-label={`Ver detalhes de ${row.nome}`} title="Ver detalhes" className={iconAction}><Eye className="h-3.5 w-3.5" /></button>
                         </div>
                       </td>
@@ -1658,6 +1801,7 @@ export function CampaignsView() {
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Objetivo</span><input value={campaignObjective} onChange={(event) => setCampaignObjective(event.target.value)} placeholder="Ex.: Recuperar clientes inativos" className={inputClass} /></label>
                 <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Categoria do template Meta</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING — promoções e ofertas</option><option value="UTILITY">UTILITY — mensagens transacionais</option></select></label>
                 <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
+                <CampaignDeliverySettings value={deliverySettings} onChange={setDeliverySettings} />
                 {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>
             </Step>
@@ -1905,6 +2049,15 @@ export function CampaignsView() {
           <div className="flex h-full min-h-0 flex-col">
             <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
               <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
+                <section aria-label="Ações rápidas" className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => duplicateCampaign(selectedCampaign)} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-[#002187] hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] cursor-pointer"><Copy className="h-3.5 w-3.5" />Duplicar campanha</button>
+                  {canResend(selectedCampaign) && (
+                    <>
+                      <button type="button" onClick={() => createResendCampaign(selectedCampaign, "not_read")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-[#002187] hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] cursor-pointer"><Repeat className="h-3.5 w-3.5" />Reenviar para não lidos</button>
+                      <button type="button" onClick={() => createResendCampaign(selectedCampaign, "not_replied")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-[#002187] hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-[#C4D600] dark:hover:border-[#C4D600] cursor-pointer"><Repeat className="h-3.5 w-3.5" />Reenviar para não respondidos</button>
+                    </>
+                  )}
+                </section>
                 <section aria-label="Andamento do disparo" className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${displayStyles[selectedDisplay]}`}>{selectedDisplay === "Enviando" && <RefreshCw className="h-3 w-3 animate-spin" />}{selectedDisplay}</span>
@@ -2002,6 +2155,7 @@ export function CampaignsView() {
                     {audienceOverlapNotice}
                     <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
                     <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
+                    <CampaignDeliverySettings value={deliverySettings} onChange={setDeliverySettings} />
                     {(selectedCampaign.metaApprovalStatus === "REJECTED" || selectedCampaign.metaApprovalStatus === "SUBMISSION_FAILED") && <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/30"><p className="text-xs font-semibold text-red-800 dark:text-red-200">{selectedCampaign.metaApprovalStatus === "REJECTED" ? `Rejeitada pela Meta: ${selectedCampaign.metaApprovalReason || "motivo não informado"}` : `Não foi possível submeter: ${selectedCampaign.metaApprovalReason || "verifique a integração e tente novamente"}`}</p><div className="flex gap-2"><input value={templatePrompt} onChange={(event) => setTemplatePrompt(event.target.value)} placeholder="Orientação para uma nova versão do template" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs dark:border-slate-700 dark:bg-slate-900" /><button type="button" disabled={isGeneratingTemplate} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar nova versão"}</button></div></div>}
                     {aiTemplateDraft && <div className="space-y-2 rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/5 p-3"><p className="text-xs font-semibold text-slate-800 dark:text-white">Template para reenviar à análise</p><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label><label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label><button type="button" disabled={isSubmittingTemplate} onClick={() => void submitTemplateForMeta({ ...selectedCampaign, nome: form.nome.trim(), publico: selectedAudienceSegments.join(", "), audienceSegmentIds: segments.filter((segment) => selectedAudienceSegments.includes(segment.nome)).map((segment) => segment.id), criteriaFilters: campaignCriteriaFilters, objective: campaignObjective, audienceDescription: campaignAudienceDescription, metaCategory: campaignCategory, mensagem: form.mensagem.trim(), metaTemplateDraft: { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory } }, { ...aiTemplateDraft, body: form.mensagem.trim(), category: campaignCategory }, false)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] cursor-pointer"><Send className="h-3.5 w-3.5" />{isSubmittingTemplate ? "Enviando..." : "Aprovar e reenviar para análise"}</button></div>}
                     {templateAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{templateAiError}</p>}

@@ -463,9 +463,14 @@ function CampaignEditor({ rule, update }: EditorProps) {
     <div className="space-y-3">
       <Pills
         label="Resultado"
-        value={rule.operador === "not_converted" ? "not_converted" : "converted"}
+        value={["not_converted", "not_read", "not_replied"].includes(rule.operador) ? rule.operador : "converted"}
         onChange={(next) => update({ operador: next })}
-        options={[{ value: "converted", label: "Converteram após receber" }, { value: "not_converted", label: "Receberam e não compraram" }]}
+        options={[
+          { value: "converted", label: "Converteram após receber" },
+          { value: "not_converted", label: "Receberam e não compraram" },
+          { value: "not_read", label: "Receberam e não leram" },
+          { value: "not_replied", label: "Receberam e não responderam" },
+        ]}
       />
       <select
         aria-label="Campanha"

@@ -15,7 +15,7 @@ import { silenceFarewell } from "@/lib/chat/settings";
 import { ChatRuleError, resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
-import { listDispatchJobs } from "@/lib/campaign-dispatch";
+import { listDispatchJobs, runCampaignFollowUps } from "@/lib/campaign-dispatch";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/engine-db";
@@ -227,6 +227,12 @@ export async function runClock() {
   // A trava de 3 min sem progresso evita retomar em paralelo com a outra cor do blue/green.
   await block("disparos de campanha", async () => {
     await listDispatchJobs();
+  });
+
+  // Follow-up das campanhas para quem não respondeu nem comprou (auto-cancelado por resposta ou venda no VMSet).
+  await block("follow-up de campanhas", async () => {
+    const result = await runCampaignFollowUps(new Date(now));
+    if (result.sent || result.cancelled || result.failed) console.log(`[campaign-followup] ${result.sent} enviados, ${result.cancelled} cancelados, ${result.failed} falhas`);
   });
 
   await block("pesquisa", async () => {

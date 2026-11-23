@@ -193,6 +193,9 @@ export function CampaignMetricsPanel({ type, id }: { type: "bulk" | "campaign"; 
 
       <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
         {categoryLabel ? `Modelo de ${categoryLabel}: ${brl(metrics.unitPrice)}/msg` : "Mensagem livre: sem cobrança"} · vendas até {metrics.windowDays} dia(s) após o envio · ERP até {dateBr(metrics.lastSaleDate ?? "")}
+        {metrics.followUp && metrics.followUp.sent + metrics.followUp.failed > 0 && (
+          <> · follow-up: {metrics.followUp.sent.toLocaleString("pt-BR")} enviado(s), {metrics.followUp.replied.toLocaleString("pt-BR")} resposta(s){metrics.followUp.failed > 0 ? `, ${metrics.followUp.failed.toLocaleString("pt-BR")} falha(s)` : ""}</>
+        )}
       </p>
 
       <section className="rounded-xl border border-slate-200 p-4 dark:border-slate-700" aria-label="Funil de conversão">

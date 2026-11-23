@@ -20,7 +20,7 @@ const criterionSchema = z.object({
 });
 
 /** Destinatários e convertidos de cada campanha citada nas regras, resolvidos antes de montar o SQL. */
-type CampaignSets = Map<string, { delivered: string[]; converted: string[] }>;
+type CampaignSets = Map<string, { delivered: string[]; converted: string[]; notRead?: string[]; notReplied?: string[] }>;
 /** Dados resolvidos antes de montar o SQL das regras que dependem de cálculo fora do banco. */
 type RuleContext = { campaigns: CampaignSets; birthDates: string[] };
 
@@ -82,6 +82,8 @@ function campaignCondition(rule: SegmentRule, campaigns: CampaignSets): Prisma.S
     const converted = new Set(sets.converted);
     return Prisma.sql`c.id = ANY(${sets.delivered.filter((id) => !converted.has(id))}::text[])`;
   }
+  if (rule.operador === "not_read") return Prisma.sql`c.id = ANY(${sets.notRead ?? []}::text[])`;
+  if (rule.operador === "not_replied") return Prisma.sql`c.id = ANY(${sets.notReplied ?? []}::text[])`;
   return Prisma.sql`FALSE`;
 }
 
@@ -92,7 +94,7 @@ async function loadCampaignSets(criteria: z.infer<typeof criterionSchema>[]): Pr
     .map((rule) => rule.valor as string)));
   const sets: CampaignSets = new Map();
   await Promise.all([...ids].map(async (id) => {
-    sets.set(id, await cached(`audience:campaign:${id}`, 120, () => campaignAudienceSets(id)));
+    sets.set(id, await cached(`audience:campaign:v2:${id}`, 120, () => campaignAudienceSets(id)));
   }));
   return sets;
 }

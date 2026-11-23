@@ -69,6 +69,9 @@ const purchaseOperators: RuleOperator[] = [
 const campaignOperators: RuleOperator[] = [
   { id: "converted", label: "converteram após receber", input: "one" },
   { id: "not_converted", label: "receberam e não compraram", input: "one" },
+  // Reenvio para não engajados: envio aceito pela Meta (números inválidos ficam de fora) sem leitura / sem resposta.
+  { id: "not_read", label: "receberam e não leram", input: "one" },
+  { id: "not_replied", label: "receberam e não responderam", input: "one" },
 ];
 
 // Aniversário (dia/mês, ignorando o ano) ou idade; "month" usa valor = 1..12, "age" usa valor = mínima e valor2 = máxima.
@@ -229,6 +232,8 @@ export function describeRule(rule: SegmentRule): string {
   if (field.type === "birthday") return describeBirthday(operator.id, rule.valor, rule.valor2);
   if (field.type === "campaign") {
     const name = `"${rule.valor2 || rule.valor || ""}"`;
+    if (operator.id === "not_read") return `Receberam a campanha ${name} e não leram`;
+    if (operator.id === "not_replied") return `Receberam a campanha ${name} e não responderam`;
     return operator.id === "converted" ? `Converteram após receber a campanha ${name}` : `Receberam a campanha ${name} e não compraram`;
   }
   if (field.type === "purchase") {

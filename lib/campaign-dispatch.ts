@@ -3,12 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
 import { findTemplate, getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { phoneVariants } from "@/lib/chat/phone";
-import { formatBr } from "@/lib/br-time";
+import { brDay, formatBr } from "@/lib/br-time";
+import { firstDispatch } from "@/lib/chat/conversation";
+import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 import { withoutOptedOut } from "@/lib/marketing-opt-out";
 import { dedupeRecipients } from "@/lib/campaign-audience";
 import { loadOptOutKeys } from "@/lib/marketing-opt-out-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
+import { cadenceWaitMs, insideWindow, nextWindowStart, normalizeCadence, normalizeFollowUp, normalizeWindow } from "@/lib/campaign-schedule";
 
 /** `origens`: segmentos da campanha em que o contato aparece (métrica; o envio continua sendo um só). */
 export type DispatchRecipient = { id: string; nome: string; telefone: string; email: string; dataNascimento: string; segmento: string; origens?: string[] };
@@ -29,7 +32,8 @@ type CampaignRecord = {
   [key: string]: unknown;
 };
 
-export type PauseReason = { kind: "payment" | "rate_limit" | "auth" | "account" | "template" | "network" | "consecutive" | "manual" | "media"; code?: number; message: string };
+/** `schedule`: fora da janela de horário da campanha; o relógio retoma sozinho em `resumeAt`. */
+export type PauseReason = { kind: "payment" | "rate_limit" | "auth" | "account" | "template" | "network" | "consecutive" | "manual" | "media" | "schedule"; code?: number; message: string; resumeAt?: string };
 
 export type DispatchJob = {
   campaignId: string;
@@ -268,6 +272,21 @@ async function loadRecentlyReached(campaignId: string, withCooldown: boolean) {
 
 const recipientKeys = (recipient: DispatchRecipient) => [recipient.id, ...phoneVariants(recipient.telefone)];
 
+/**
+ * Pausa entre lotes: em trechos de até 1 min, gravando o progresso (sem isso, após 3 min parado a outra cor do
+ * blue/green acharia o disparo órfão e retomaria em paralelo). Pausa/cancelamento pedidos interrompem a espera.
+ */
+async function waitWithHeartbeat(campaignId: string, job: DispatchJob, ms: number) {
+  let left = ms;
+  while (left > 0) {
+    const step = Math.min(left, 60_000);
+    await sleep(step);
+    left -= step;
+    if (control.has(campaignId)) return;
+    if (left > 0) await writeJob(job);
+  }
+}
+
 function addError(job: DispatchJob, message: string) {
   if (job.errors.length < MAX_STORED_ERRORS) job.errors.push(message);
 }
@@ -299,6 +318,9 @@ async function runJob(campaignId: string) {
     // Opt-out (SAIR/PARAR): relido a cada execução, inclusive na retomada; quem saiu durante o disparo é pulado.
     const optedOut = await loadOptOutKeys();
     let consecutiveApiFailures = 0;
+    // Ritmo e janela de horário configurados na campanha (opcionais).
+    const cadence = normalizeCadence(campaign.cadence);
+    const sendWindow = normalizeWindow(campaign.sendWindow);
     while (job.cursor < job.total) {
       const requested = control.get(campaignId);
       if (requested) {
@@ -311,6 +333,20 @@ async function runJob(campaignId: string) {
         return;
       }
 
+      // Fora da janela: pausa e o relógio do chat retoma sozinho no próximo início de janela.
+      if (sendWindow && !insideWindow(sendWindow)) {
+        const resumeAt = nextWindowStart(sendWindow);
+        job = {
+          ...job,
+          status: "paused",
+          pause: { kind: "schedule", message: `Fora do horário permitido (${sendWindow.start} às ${sendWindow.end}). Retoma sozinho em ${formatBr(resumeAt)}.`, resumeAt: resumeAt.toISOString() },
+        };
+        await writeJob(job);
+        await syncCampaign(job);
+        return;
+      }
+
+      const sentBefore = job.sent;
       const recipient = recipients[job.cursor];
       if (recipient?.telefone?.trim() && recipientKeys(recipient).some((key) => reached.has(key) || optedOut.has(key))) {
         job.skipped += 1;
@@ -386,7 +422,10 @@ async function runJob(campaignId: string) {
 
       job.cursor += 1;
       await writeJob(job);
-      if (job.cursor < job.total) await sleep(SEND_DELAY_MS);
+      if (job.cursor < job.total) {
+        const wait = job.sent > sentBefore ? cadenceWaitMs(cadence, job.sent, SEND_DELAY_MS) : SEND_DELAY_MS;
+        await waitWithHeartbeat(campaignId, job, wait);
+      }
     }
 
     job = { ...job, status: "completed", finishedAt: new Date().toISOString(), pause: undefined };
@@ -526,14 +565,142 @@ export const recentlyActive = (updatedAt: Date, now = Date.now()) => now - updat
 
 // Lista os disparos e retoma os que ficaram "em andamento" após reinício do servidor.
 export async function listDispatchJobs(): Promise<DispatchJob[]> {
-  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "dispatch:" } }, select: { value: true, updatedAt: true } });
+  const rows = await prisma.crmWorkspaceData.findMany({ where: { key: { startsWith: "dispatch:" } }, select: { key: true, value: true, updatedAt: true } });
   const jobs = rows.map((row) => row.value as unknown as DispatchJob);
-  rows.forEach((row, index) => {
+  for (const [index, row] of rows.entries()) {
     const job = jobs[index];
     // Atualizado há pouco = outra instância (deploy blue/green) ainda está enviando: não retoma em paralelo.
     if (job.status === "running" && !running.has(job.campaignId) && !recentlyActive(row.updatedAt)) enqueue(job.campaignId);
-  });
+    // Pausado por horário: volta sozinho ao chegar a hora. A gravação condicional (mesmo updatedAt) garante que
+    // só uma instância retoma, mesmo com os relógios das duas cores rodando juntos.
+    if (job.status === "paused" && job.pause?.kind === "schedule" && job.pause.resumeAt && new Date(job.pause.resumeAt).getTime() <= Date.now()) {
+      const resumed: DispatchJob = { ...job, status: "running", pause: undefined };
+      const claimed = await prisma.crmWorkspaceData.updateMany({ where: { key: row.key, updatedAt: row.updatedAt }, data: { value: asJson(resumed) } }).catch(() => ({ count: 0 }));
+      if (claimed.count === 1) {
+        jobs[index] = resumed;
+        await syncCampaign(resumed).catch(() => undefined);
+        enqueue(job.campaignId);
+      }
+    }
+  }
   return jobs;
+}
+
+/** Envios do follow-up ficam num disparo próprio (não somam no funil do principal); a resposta conta para a campanha. */
+export const FOLLOW_UP_PREFIX = "followup:";
+export const followUpCampaignId = (campaignId: string) => `${FOLLOW_UP_PREFIX}${campaignId}`;
+/** Id da campanha de origem de um envio (o follow-up responde pela campanha principal). */
+export const baseCampaignId = (campaignId: string) => campaignId.startsWith(FOLLOW_UP_PREFIX) ? campaignId.slice(FOLLOW_UP_PREFIX.length) : campaignId;
+
+/** Follow-up por minuto do relógio (com o espaçamento normal entre envios). */
+const FOLLOW_UP_PER_TICK = 40;
+/** Só quem recebeu o principal nas últimas (prazo + 48 h): ligar o follow-up numa campanha antiga não dispara para todos. */
+const FOLLOW_UP_GRACE_MS = 48 * 60 * 60 * 1000;
+const followUpKey = (messageId: string) => `campaign-followup:${messageId}`;
+
+/** O contato engajou depois do envio: escreveu no chat (mensagem de pessoa) ou tem venda no VMSet. */
+async function engagedSince(contactId: string | null, phone: string, sentAt: Date) {
+  const variants = phoneVariants(phone);
+  const contactFilter = contactId ? [{ contactId }, { phone: { in: variants } }] : [{ phone: { in: variants } }];
+  const replied = await prisma.chatMessage.findFirst({
+    where: {
+      author: "customer",
+      createdAt: { gt: sentAt },
+      OR: [{ authorName: null }, { authorName: { not: AUTO_REPLY_AUTHOR } }],
+      conversation: { OR: contactFilter },
+    },
+    select: { id: true },
+  });
+  if (replied) return "resposta";
+  const contacts = await prisma.contact.findMany({ where: { OR: [...(contactId ? [{ id: contactId }] : []), { phone: { in: variants } }] }, select: { sourceKey: true } });
+  if (contacts.length === 0) return null;
+  const sale = await prisma.$queryRaw<{ found: number }[]>`
+    SELECT 1 AS found FROM "VmsetSale"
+    WHERE "sourceKey" = ANY(${contacts.map((contact) => contact.sourceKey)}::text[]) AND "type" = 'Venda' AND "orderDate" >= ${brDay(sentAt)}::date
+    LIMIT 1
+  `;
+  return sale.length > 0 ? "venda" : null;
+}
+
+/**
+ * Follow-up em cascata (relógio do chat, a cada minuto): quem recebeu o disparo principal (entrega confirmada) e,
+ * depois de `afterHours`, não respondeu nem comprou recebe o 2º template. Resposta no chat ou venda no VMSet
+ * cancela o follow-up do contato. Respeita a janela de horário, o descadastro e nunca envia duas vezes (trava no banco).
+ */
+export async function runCampaignFollowUps(now: Date = new Date()) {
+  const summary = { sent: 0, cancelled: 0, failed: 0 };
+  const row = await prisma.crmWorkspaceData.findUnique({ where: { key: "campaigns" }, select: { value: true } });
+  const campaigns = Array.isArray(row?.value) ? (row.value as unknown as CampaignRecord[]) : [];
+  let budget = FOLLOW_UP_PER_TICK;
+  let optedOut: Set<string> | null = null;
+  for (const campaign of campaigns) {
+    if (budget <= 0) break;
+    const followUp = normalizeFollowUp(campaign.followUp);
+    if (!followUp?.modelo || !insideWindow(normalizeWindow(campaign.sendWindow), now)) continue;
+    const dueBefore = new Date(now.getTime() - followUp.afterHours * 60 * 60 * 1000);
+    const candidates = await prisma.campaignMessage.findMany({
+      where: { campaignId: campaign.id, status: { in: ["delivered", "read"] }, repliedAt: null, sentAt: { lte: dueBefore, gte: new Date(dueBefore.getTime() - FOLLOW_UP_GRACE_MS) } },
+      orderBy: { sentAt: "asc" },
+      select: { id: true, contactId: true, phone: true, sentAt: true },
+      take: 1000,
+    });
+    if (candidates.length === 0) continue;
+    const done = new Set((await prisma.chatDispatch.findMany({ where: { key: { in: candidates.map((item) => followUpKey(item.id)) } }, select: { key: true } })).map((item) => item.key));
+    const pending = candidates.filter((item) => !done.has(followUpKey(item.id)));
+    if (pending.length === 0) continue;
+
+    optedOut ??= await loadOptOutKeys();
+    const followCampaign: CampaignRecord = { ...campaign, modelo: followUp.modelo, metaTemplateDraft: undefined, anexos: [] };
+    const templateInfo = (await listTemplates().catch(() => [])).find((item) => item.name === followUp.modelo?.name && item.language === followUp.modelo?.language);
+    if (templateInfo && templateInfo.status !== "APPROVED") continue;
+    let header: Awaited<ReturnType<typeof resolveHeader>>;
+    try {
+      header = await resolveHeader(followCampaign);
+    } catch (error) {
+      console.warn(`[campaign-followup] ${campaign.nome}: imagem do modelo indisponível (${error instanceof Error ? error.message : error})`);
+      continue;
+    }
+
+    for (const message of pending) {
+      if (budget <= 0) break;
+      const sentAt = message.sentAt as Date;
+      const blocked = (message.contactId && optedOut.has(message.contactId)) || phoneVariants(message.phone).some((key) => optedOut?.has(key));
+      const engaged = blocked ? "descadastro" : await engagedSince(message.contactId, message.phone, sentAt);
+      if (engaged) {
+        // Auto-cancelamento: o follow-up deste contato não sai mais.
+        if (await firstDispatch(followUpKey(message.id))) summary.cancelled += 1;
+        continue;
+      }
+      if (!(await firstDispatch(followUpKey(message.id)))) continue;
+      budget -= 1;
+      const contact = message.contactId
+        ? await prisma.contact.findUnique({ where: { id: message.contactId }, select: { id: true, name: true, email: true, birthDate: true, segment: true } })
+        : null;
+      const recipient: DispatchRecipient = {
+        id: contact?.id ?? message.contactId ?? "",
+        nome: contact?.name ?? "",
+        telefone: message.phone,
+        email: contact?.email ?? "",
+        dataNascimento: contact?.birthDate ?? "",
+        segmento: contact?.segment ?? "",
+      };
+      try {
+        const { messageId, text } = await sendToRecipient(followCampaign, recipient, header, templateInfo);
+        await recordMessage(followUpCampaignId(campaign.id), recipient, { messageId });
+        if (recipient.id) {
+          await recordDispatchInChat({ contactId: recipient.id, phone: chatPhone(recipient.telefone), text, externalId: messageId, authorName: `Campanha · ${campaign.nome} (follow-up)`, campaignId: campaign.id, campaignName: campaign.nome });
+        }
+        summary.sent += 1;
+      } catch (error) {
+        summary.failed += 1;
+        await recordMessage(followUpCampaignId(campaign.id), recipient, { failure: error instanceof Error ? error.message : "Falha no envio" });
+        // Limite, pagamento, conta ou template: para tudo neste minuto e tenta de novo no próximo com os demais.
+        if (describePause(error)) return summary;
+      }
+      await sleep(SEND_DELAY_MS);
+    }
+  }
+  return summary;
 }
 
 export class DispatchError extends Error {

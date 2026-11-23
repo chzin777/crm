@@ -21,7 +21,8 @@ export async function GET() {
   ]);
 
   const data: DispatchedCampaignOption[] = groups
-    .filter((group) => group._min.sentAt)
+    // Follow-up ("followup:<id>") faz parte da campanha principal; não aparece como disparo separado.
+    .filter((group) => group._min.sentAt && !group.campaignId.startsWith("followup:"))
     .map((group) => ({
       id: group.campaignId,
       nome: names.get(group.campaignId) ?? "Disparo removido",

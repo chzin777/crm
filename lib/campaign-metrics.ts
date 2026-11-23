@@ -52,6 +52,8 @@ export type CampaignMetrics = {
   roas: number | null;
   sales: ConvertedSale[];
   lastSaleDate: string | null;
+  /** Follow-up em cascata da campanha (envios próprios, fora do funil principal). */
+  followUp: { sent: number; replied: number; failed: number };
 };
 
 type Recipient = { contactId: string; phone: string; sentDay: string; sentAt: Date };
@@ -64,17 +66,34 @@ type SaleItemSqlRow = Omit<SaleItemRow, "amount" | "syncedAt"> & { amount: numbe
  * Venda atribuída: pedido do ERP (tipo Venda) do próprio contato ou de outro cadastro com o mesmo
  * telefone, feito depois da mensagem e até `windowDays` dias após o dia do envio. Só contam contatos com entrega confirmada.
  */
+/** Envios do follow-up ficam em "followup:<id>" (ver lib/campaign-dispatch); contam como toque da própria campanha. */
+const FOLLOW_UP_PREFIX = "followup:";
+const baseCampaignId = (id: string) => (id.startsWith(FOLLOW_UP_PREFIX) ? id.slice(FOLLOW_UP_PREFIX.length) : id);
+
+/** Janela de atribuição própria da campanha (1 a 90 dias), se configurada. */
+async function attributionWindowOf(campaignId: string): Promise<number | null> {
+  if (campaignId.startsWith("bulk:")) return null;
+  const row = await prisma.crmWorkspaceData.findUnique({ where: { key: "campaigns" }, select: { value: true } });
+  const list = Array.isArray(row?.value) ? (row.value as unknown as { id: string; attributionWindowDays?: unknown }[]) : [];
+  const days = Number(list.find((item) => item.id === campaignId)?.attributionWindowDays);
+  return Number.isFinite(days) && days >= 1 ? Math.min(90, Math.round(days)) : null;
+}
+
 export async function campaignMetrics(campaignId: string, category: string | null): Promise<CampaignMetrics> {
-  const [pricing, messages, stores] = await Promise.all([
+  const [pricing, messages, stores, followUps, campaignWindow] = await Promise.all([
     getMetaPricing(),
     prisma.campaignMessage.findMany({
       where: { campaignId },
       select: { contactId: true, phone: true, status: true, sentAt: true, deliveredAt: true, readAt: true, repliedAt: true },
     }),
     prisma.store.findMany({ select: { number: true, name: true } }),
+    prisma.campaignMessage.groupBy({ by: ["status"], where: { campaignId: `${FOLLOW_UP_PREFIX}${campaignId}` }, _count: { _all: true } }),
+    attributionWindowOf(campaignId),
   ]);
   const unitPrice = priceFor(pricing, category);
-  const windowDays = pricing.conversionWindowDays;
+  // Janela de atribuição: a da campanha (se definida) ou a geral de /campanhas (padrão 7 dias).
+  const windowDays = campaignWindow ?? pricing.conversionWindowDays;
+  const followUpCount = (statuses: string[]) => followUps.filter((row) => statuses.includes(row.status)).reduce((sum, row) => sum + row._count._all, 0);
 
   let dispatched = 0;
   let delivered = 0;
@@ -164,7 +183,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       { campaignId, sentAt: owner.sentAt },
       ...otherTouches
         .filter((touch) => (owner.contactId && touch.contactId === owner.contactId) || variants.has(touch.phone))
-        .map((touch) => ({ campaignId: touch.campaignId, sentAt: touch.sentAt as Date })),
+        .map((touch) => ({ campaignId: baseCampaignId(touch.campaignId), sentAt: touch.sentAt as Date })),
     ];
   };
 
@@ -226,6 +245,7 @@ export async function campaignMetrics(campaignId: string, category: string | nul
     roas: financials.roas,
     sales: convertedSales,
     lastSaleDate: lastSale[0]?.last ?? null,
+    followUp: { sent: followUpCount(["sent", "delivered", "read", "replied"]), replied: followUpCount(["replied"]), failed: followUpCount(["failed"]) },
   };
 }
 
@@ -233,22 +253,31 @@ export async function campaignMetrics(campaignId: string, category: string | nul
  * Contatos de um disparo para segmentação: quem recebeu (entrega confirmada) e quem converteu,
  * pela mesma regra de atribuição das métricas da campanha.
  */
-export async function campaignAudienceSets(campaignId: string): Promise<{ delivered: string[]; converted: string[] }> {
+export async function campaignAudienceSets(campaignId: string): Promise<{ delivered: string[]; converted: string[]; notRead: string[]; notReplied: string[] }> {
   const [metrics, messages] = await Promise.all([
     campaignMetrics(campaignId, null),
+    // Envios aceitos pela Meta (falha = número inválido/bloqueado nunca entra nos conjuntos).
     prisma.campaignMessage.findMany({
-      where: {
-        campaignId,
-        contactId: { not: null },
-        sentAt: { not: null },
-        status: { not: "failed" },
-        OR: [{ deliveredAt: { not: null } }, { readAt: { not: null } }, { repliedAt: { not: null } }],
-      },
-      select: { contactId: true },
+      where: { campaignId, contactId: { not: null }, sentAt: { not: null }, status: { not: "failed" } },
+      select: { contactId: true, deliveredAt: true, readAt: true, repliedAt: true },
     }),
   ]);
+  // Mesmo contato com mais de um envio: leu/respondeu em qualquer um, conta como engajado.
+  const sent = new Set<string>();
+  const delivered = new Set<string>();
+  const read = new Set<string>();
+  const replied = new Set<string>();
+  for (const message of messages) {
+    const id = message.contactId as string;
+    sent.add(id);
+    if (message.deliveredAt || message.readAt || message.repliedAt) delivered.add(id);
+    if (message.readAt || message.repliedAt) read.add(id);
+    if (message.repliedAt) replied.add(id);
+  }
   return {
-    delivered: [...new Set(messages.map((message) => message.contactId).filter((id): id is string => Boolean(id)))],
+    delivered: [...delivered],
     converted: [...new Set(metrics.sales.map((sale) => sale.contactId).filter(Boolean))],
+    notRead: [...sent].filter((id) => !read.has(id)),
+    notReplied: [...sent].filter((id) => !replied.has(id)),
   };
 }
