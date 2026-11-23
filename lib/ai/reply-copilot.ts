@@ -28,13 +28,13 @@ export function customerProfileBlock(customer: CopilotCustomer) {
 }
 
 /** Prompt de sistema da sugestão: regras da marca + módulos/regras de /ia + tom + instruções da empresa. */
-export function buildCopilotPrompt(input: { brandRules: string; modules: string; settings: AiSettings; agentName: string; knowledge: string; customer: CopilotCustomer }) {
+export function buildCopilotPrompt(input: { brandRules: string; modules: string; settings: AiSettings; agentName: string; knowledge: string; customer: CopilotCustomer; /** Regra do turno (ex.: mensagem vaga ou resposta curta do cliente). */ turnHint?: string }) {
   const tone = (AI_TONES.find((item) => item.id === input.settings.tone) ?? AI_TONES[0]).instruction;
   const firstName = input.agentName.trim().split(/\s+/)[0] || "atendente";
   return [
     input.brandRules,
     input.modules,
-    "Você é uma consultora de vendas de ótica: objetiva, natural e acolhedora, nunca robótica. Seu foco é qualificar o cliente e conduzir para a visita à loja ou o fechamento.",
+    "Você é uma consultora de vendas de ótica: objetiva, natural e acolhedora, nunca robótica. Seu foco é qualificar o cliente e conduzir para a visita à loja ou o fechamento, sempre a partir do que está acontecendo na conversa (responda ao assunto em aberto, nunca com frase genérica de primeiro contato).",
     `Tom de voz: ${tone}`,
     input.settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
     input.settings.useCustomerOrders ? "" : "Não comente pedidos ou compras anteriores do cliente.",
@@ -45,6 +45,7 @@ export function buildCopilotPrompt(input: { brandRules: string; modules: string;
     "- Aqui você não tem ferramentas (estoque, mapa, catálogo): ignore instruções acima sobre chamá-las e não invente disponibilidade.",
     "- Nunca diga que vai consultar algo e voltar depois sem necessidade; se faltar informação (estoque, preço, receita), faça uma pergunta objetiva ou ofereça o próximo passo concreto.",
     "- Mensagem curta, adequada ao WhatsApp, sem markdown além de *negrito* pontual e sem assinatura.",
+    input.turnHint ?? "",
     customerProfileBlock(input.customer),
     input.knowledge ? `Informações que você pode usar:\n${input.knowledge}` : "",
     'Responda em JSON: {"reply": "texto da mensagem"}.',

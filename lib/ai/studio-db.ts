@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
 import { readAiSettings } from "@/lib/ai/store";
-import { chunkText, DEFAULT_SKILLS, LEGACY_ESTOQUE_MD, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
+import { chunkText, CONSULTORIA_POS_CAMPANHA_MD, DEFAULT_SKILLS, LEGACY_CONSULTORIA_POS_CAMPANHA_MD, LEGACY_ESTOQUE_MD, LEGACY_ESTOQUE_MD_V2, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
 
 /** Estúdio de IA no banco: regras, skills e base de conhecimento (RAG). Falha de banco nunca derruba a resposta. */
 
@@ -62,7 +62,9 @@ async function addMissingNativeSkills(rows: AiSkill[]): Promise<boolean> {
   const estoque = DEFAULT_SKILLS.find((skill) => skill.slug === "estoque_cidade");
   let upgraded = 0;
   try {
-    if (estoque) upgraded = (await prisma.aiSkill.updateMany({ where: { slug: "estoque_cidade", instructionsMd: LEGACY_ESTOQUE_MD }, data: { instructionsMd: estoque.instructionsMd } })).count;
+    if (estoque) upgraded = (await prisma.aiSkill.updateMany({ where: { slug: "estoque_cidade", instructionsMd: { in: [LEGACY_ESTOQUE_MD, LEGACY_ESTOQUE_MD_V2] } }, data: { instructionsMd: estoque.instructionsMd } })).count;
+    // Skill pós-campanha nunca editada: sai o roteiro fixo de perguntas, entra a leitura do contexto da campanha.
+    upgraded += (await prisma.aiSkill.updateMany({ where: { slug: "consultoria_pos_campanha", instructionsMd: LEGACY_CONSULTORIA_POS_CAMPANHA_MD }, data: { instructionsMd: CONSULTORIA_POS_CAMPANHA_MD } })).count;
   } catch (error) {
     console.warn("[ai][estudio] protocolo novo da skill de estoque não aplicado:", error instanceof Error ? error.message : error);
   }

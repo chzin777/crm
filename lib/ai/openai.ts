@@ -27,6 +27,8 @@ export type ChatMessage =
 export type AiTool = { definition: { type: "function"; function: { name: string; description: string; parameters: object } }; run: (args: Record<string, unknown>) => Promise<unknown> };
 export type AiCallMeta = {
   feature: string; conversationId?: string | null; userId?: string | null; maxTokens?: number; settings?: AiSettings; tools?: AiTool[];
+  /** Temperatura desta chamada (sem ela, a de /ia). null = padrão do modelo. */
+  temperature?: number | null;
   /** Structured Outputs: a resposta segue exatamente este JSON Schema (strict). Sem ele, json_object livre. */
   jsonSchema?: { name: string; schema: object };
   /** Modelo próprio para tarefas simples e frequentes (ex.: triagem); sem ele, o modelo configurado em /ia. */
@@ -34,6 +36,8 @@ export type AiCallMeta = {
 };
 /** Rodadas de ferramenta por resposta (evita laço e custo descontrolado). */
 const MAX_TOOL_ROUNDS = 2;
+
+const NO_TEMPERATURE_MODELS = new Set<string>();
 
 /** Erros da OpenAI traduzidos para a equipe: nunca expõe a chave nem o corpo bruto. */
 function friendlyError(status: number, code: string | undefined, type: string | undefined) {
@@ -78,7 +82,8 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
     return { response, body: (await response.json().catch(() => ({}))) as Body };
   };
 
-  let temperature = settings.temperature;
+  // Modelo que já recusou temperatura neste processo vai direto sem ela (sem uma chamada perdida por resposta).
+  let temperature = NO_TEMPERATURE_MODELS.has(model) ? null : meta.temperature !== undefined ? meta.temperature : settings.temperature;
   let body: Body = {};
   for (let round = 0; ; round += 1) {
     let response: Response;
@@ -88,6 +93,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
       // Modelo que só aceita a temperatura padrão: repete sem ela em vez de falhar.
       if (response.status === 400 && temperature !== null && body.error?.param === "temperature") {
         temperature = null;
+        NO_TEMPERATURE_MODELS.add(model);
         ({ response, body } = await call(null, withTools));
       }
     } catch {

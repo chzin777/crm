@@ -34,10 +34,23 @@ const AUTHOR_LABEL = { customer: "Cliente", agent: "Atendente", bot: "Robô", sy
 export type TranscriptRow = { author: keyof typeof AUTHOR_LABEL; authorName: string | null; text: string; internal: boolean; attachment: { kind?: string; name?: string } | null; createdAt: Date };
 
 /** Uma linha da conversa como a IA lê (mesmo formato no WhatsApp e no teste). */
+/**
+ * Quem falou, do jeito que a IA precisa ler o fio: disparo de campanha é "Loja (mensagem da campanha ...)", não uma
+ * atendente chamada "Campanha"; mensagens automáticas e de atendentes ficam identificadas.
+ */
+export function speakerLabel(row: Pick<TranscriptRow, "author" | "authorName">) {
+  const name = row.authorName?.trim() ?? "";
+  const campaign = name.match(/^Campanha\s*[·:-]\s*(.+)$/i);
+  if (campaign) return `Loja (mensagem da campanha "${campaign[1].trim()}" enviada ao cliente)`;
+  if (row.author === "agent" && name) return `Atendente ${name.split(" ")[0]}`;
+  if (row.author === "bot" && name && name !== "Assistente IA") return `Loja (${name.toLowerCase()})`;
+  return AUTHOR_LABEL[row.author];
+}
+
 export function transcriptLine(row: TranscriptRow) {
   const body = limitText(row.text.trim(), MESSAGE_TEXT_LIMIT) || (row.attachment ? `[${row.attachment.kind ?? "arquivo"}${row.attachment.name ? `: ${row.attachment.name}` : ""}]` : "");
   if (!body) return null;
-  const who = row.author === "agent" && row.authorName ? `Atendente ${row.authorName.split(" ")[0]}` : AUTHOR_LABEL[row.author];
+  const who = speakerLabel(row);
   return `[${formatBr(row.createdAt, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}] ${who}${row.internal ? " (nota interna, o cliente não vê)" : ""}: ${body}`;
 }
 
@@ -64,11 +77,13 @@ export function greetingName(contactName: string | null | undefined) {
   return first.length >= 3 ? first : "";
 }
 
-export function formatContext(input: { contactName: string | null; queueName: string | null; subject: string; includeHistory: boolean; history: CustomerHistory | null; conversation: string }) {
+export function formatContext(input: { contactName: string | null; queueName: string | null; subject: string; includeHistory: boolean; history: CustomerHistory | null; conversation: string; /** Cidade e loja do cadastro (não pergunte de novo). */ registered?: { city?: string | null; store?: string | null } }) {
+  const registered = [input.registered?.city?.trim() && `cidade ${input.registered.city.trim()}`, input.registered?.store?.trim() && `loja ${input.registered.store.trim()}`].filter(Boolean).join(" · ");
   return [
     // O nome do contato é escolhido pelo cliente no WhatsApp: também é dado não confiável.
     `Cliente: ${input.contactName ? wrapUntrusted(input.contactName, "nome do contato", 80) : "não identificado"}`,
     `Primeiro nome para a saudação: ${greetingName(input.contactName) || "(sem nome válido: saúde sem nome)"}`,
+    ...(registered ? [`Cadastro: ${registered} (já sabido: não pergunte de novo, no máximo confirme)`] : []),
     `Fila: ${input.queueName ?? "sem fila"}${input.subject ? ` · Assunto: ${input.subject}` : ""}`,
     "",
     "Histórico do cliente no ERP:",

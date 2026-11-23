@@ -4,11 +4,13 @@ import { cached } from "@/lib/cache";
 import { BRAND_RULES, formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
 import { loadCustomerHistory } from "@/lib/chat/customer-history";
 import { aiJson } from "@/lib/ai/openai";
+import { conversationTemperature } from "@/lib/ai/temperature";
 import { sessionRows } from "@/lib/ai/session-anchor";
 import { readAiSettings } from "@/lib/ai/store";
 import { loadStudioContext } from "@/lib/ai/studio-db";
 import { composeSystemPrompt } from "@/lib/ai/prompt-composer";
 import { buildCopilotPrompt } from "@/lib/ai/reply-copilot";
+import { classifyVague, vagueMessageBlock } from "@/lib/ai/vague-message";
 import { campaignNames } from "@/lib/chat/campaign-origin";
 
 const MESSAGES_LIMIT = 40;
@@ -48,14 +50,14 @@ async function transcript(conversationId: string, sessionOnly: boolean) {
 export async function conversationContext(conversation: ConversationRef, options: { includeHistory?: boolean; sessionOnly?: boolean } = {}) {
   const includeHistory = options.includeHistory ?? true;
   const [contact, queue, messages, history] = await Promise.all([
-    prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true } }),
+    prisma.contact.findUnique({ where: { id: conversation.contactId }, select: { name: true, city: true, store: true } }),
     conversation.queueId ? prisma.chatQueue.findUnique({ where: { id: conversation.queueId }, select: { name: true } }) : null,
     transcript(conversation.id, !!options.sessionOnly),
     includeHistory ? loadCustomerHistory(conversation) : null,
   ]);
   return {
     contactName: contact?.name ?? "Cliente",
-    text: formatContext({ contactName: contact?.name ?? null, queueName: queue?.name ?? null, subject: conversation.subject, includeHistory, history, conversation: messages }),
+    text: formatContext({ contactName: contact?.name ?? null, queueName: queue?.name ?? null, subject: conversation.subject, includeHistory, history, conversation: messages, registered: { city: contact?.city, store: contact?.store } }),
   };
 }
 
@@ -105,6 +107,7 @@ export async function suggestReply(conversation: ConversationRef & { campaignId?
     settings,
     agentName,
     knowledge,
+    turnHint: vagueMessageBlock(classifyVague(lastCustomer[0]?.text ?? "")),
     customer: {
       name: contact?.name ?? null,
       city: contact?.city?.trim() || null,
@@ -117,7 +120,7 @@ export async function suggestReply(conversation: ConversationRef & { campaignId?
   const result = await aiJson<{ reply?: string }>([
     { role: "system", content: system },
     { role: "user", content: context.text },
-  ], { maxTokens: 700, feature: "reply", conversationId: conversation.id, userId, settings });
+  ], { maxTokens: 700, feature: "reply", conversationId: conversation.id, userId, settings, temperature: conversationTemperature(settings) });
   const reply = result.reply?.trim();
   if (!reply) throw new Error("A IA não sugeriu nenhuma resposta.");
   return { reply };

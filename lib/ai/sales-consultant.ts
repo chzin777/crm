@@ -230,7 +230,7 @@ export function oneQualifyingQuestion(reply: string, step: "city" | "type") {
 export function typeFirstBlock(askBudget: boolean) {
   return [
     "TIPO DE ÓCULOS DESCONHECIDO (regra desta resposta): o cliente pediu \"óculos\" sem dizer se é de grau ou de sol.",
-    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Com suas palavras, de forma simples e leve, pergunte só se ele procura óculos de grau ou de sol.",
+    "NÃO consulte nem liste produtos ainda (não misture sol e grau). Descubra isso de forma leve, com suas palavras e ligado ao que ele disse (sem pergunta pronta), aproveitando o que já se sabe da conversa.",
     "UMA PERGUNTA SÓ: não pergunte valor nesta mensagem; isso vem depois.",
   ].join("\n");
 }
@@ -319,9 +319,10 @@ export function needsQualificationFirst(input: { category: string; brand: string
 
 export function qualifyFirstBlock() {
   return [
-    "QUALIFICAÇÃO ANTES DE PRODUTOS (regra desta resposta): o cliente ainda não disse o que procura (respondeu algo genérico, como \"Quero aproveitar!\", \"Tenho interesse\" ou \"Oi\").",
-    "PROIBIDO consultar o estoque, listar produtos ou mandar fotos nesta resposta.",
-    "Responda como consultora de ótica experiente: curta, natural e humana (sem soar robô), agradecendo o interesse, e faça no máximo 2 perguntas rápidas: se procura óculos de grau ou de sol e, se ainda não souber, em qual cidade ou loja quer ser atendido (ou o estilo/para quem é).",
+    "SEM PRODUTOS NESTA RESPOSTA (regra desta resposta): a pessoa ainda não disse o que procura (mensagem curta ou genérica, como \"Quero aproveitar!\", \"Tenho interesse\", \"Oi\", \"ok\" ou \"?\").",
+    "Não consulte o estoque, não liste produtos e não mande fotos agora.",
+    "Antes de tudo, releia a última mensagem da loja e responda a ELA: se a loja perguntou algo (como estão os óculos, se pode reservar, se recebeu o pedido), a mensagem do cliente é a resposta a isso. Se a mensagem parece cortada ou acidental, reaja como gente (ex.: comente que parece ter cortado e retome o assunto).",
+    "Só se o fio mostrar que a pessoa quer comprar ou ver opções sem dizer o quê, descubra com suas palavras o que ela procura (uma pergunta, sem fórmula pronta e sem repetir o que já está no cadastro).",
   ].join("\n");
 }
 

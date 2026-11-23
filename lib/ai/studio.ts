@@ -130,7 +130,13 @@ export const SKILL_TOOLS: Record<SkillKey, { tools: string[]; flows: string }> =
 /** Texto padrão antigo da skill de estoque: bases que nunca editaram recebem a versão nova (3 opções e ticket mínimo). */
 export const LEGACY_ESTOQUE_MD = "## Protocolo\n1. Confirme a **cidade** do cliente antes de buscar (sem cidade, pergunte a cidade e a faixa de valor).\n2. Busque o estoque **na mesma rodada**, sem pedir permissão para buscar.\n3. Mostre só modelos com saldo em lojas da cidade do cliente; nunca ofereça produto disponível apenas em cidades distantes.\n4. Apresente no máximo 4 opções, com legenda curta (marca, modelo e preço).\n5. Se nada for encontrado, diga isso com clareza e ofereça alternativas próximas (outra marca ou faixa de preço).";
 
-export const CONSULTORIA_POS_CAMPANHA_MD = [
+/** Texto padrão anterior da skill de estoque (v2): bases que nunca editaram recebem ESTOQUE_MD (ver studio-db). */
+export const LEGACY_ESTOQUE_MD_V2 = "## Protocolo\n1. Confirme a **cidade** do cliente e se é **grau ou sol** antes de buscar.\n2. Busque o estoque **na mesma rodada**, sem pedir permissão para buscar.\n3. Mostre só modelos com saldo em lojas da cidade do cliente; nunca ofereça produto disponível apenas em cidades distantes.\n4. Apresente no máximo 3 opções distintas (nunca o mesmo modelo ou a mesma foto duas vezes), com legenda curta (marca, modelo e preço).\n5. Não priorize os mais baratos: sem pedido de algo em conta, respeite o ticket mínimo configurado em /ia.\n6. Se nada for encontrado, diga isso com clareza e ofereça alternativas próximas (outra marca ou faixa de preço).";
+
+export const ESTOQUE_MD = "## Protocolo\n1. Para mostrar estoque você precisa da **cidade** (use a do cadastro ou da conversa; só pergunte se não souber) e saber se é **grau ou sol**; descubra o que faltar com naturalidade, sem pergunta pronta.\n2. Busque o estoque **na mesma rodada**, sem pedir permissão para buscar.\n3. Mostre só modelos com saldo em lojas da cidade do cliente; nunca ofereça produto disponível apenas em cidades distantes.\n4. Apresente no máximo 3 opções distintas (nunca o mesmo modelo ou a mesma foto duas vezes), com legenda curta (marca, modelo e preço).\n5. Não priorize os mais baratos: sem pedido de algo em conta, respeite o ticket mínimo configurado em /ia.\n6. Se nada for encontrado, diga isso com clareza e ofereça alternativas próximas (outra marca ou faixa de preço).";
+
+/** Texto padrão anterior da skill pós-campanha (roteiro fixo de perguntas). */
+export const LEGACY_CONSULTORIA_POS_CAMPANHA_MD = [
   "## Protocolo",
   "1. Cliente respondeu a uma campanha com frase genérica (\"Quero aproveitar!\", \"Tenho interesse\", \"Oi\"): **NÃO** mande fotos nem lista de produtos nesta resposta.",
   "2. Responda como consultora de ótica experiente: curta, natural e humana (1 a 2 frases), agradecendo o interesse, e faça **1 ou 2 perguntas rápidas** de qualificação: se procura **óculos de grau ou de sol**, o estilo/para quem é e em qual **cidade ou loja** quer ser atendido.",
@@ -138,6 +144,17 @@ export const CONSULTORIA_POS_CAMPANHA_MD = [
   "4. Sugestões por iniciativa da IA respeitam o **ticket mínimo** configurado em /ia (padrão R$ 450,00); valores abaixo disso só se o cliente pedir algo mais barato ou der um orçamento menor.",
   "5. Mostre no máximo **3 opções distintas**, sem repetir modelo nem foto.",
 ].join("\n");
+
+export const CONSULTORIA_POS_CAMPANHA_MD = [
+  "## Protocolo",
+  "1. Leia a mensagem da campanha que a loja enviou e responda **ao assunto dela** (oferta, reativação, pós-venda, convite): a resposta do cliente é uma reação àquilo, não um primeiro contato.",
+  "2. Resposta genérica (\"Quero aproveitar!\", \"Tenho interesse\", \"Oi\", \"ok\"): **não** mande fotos nem lista de produtos ainda. Agradeça o interesse com naturalidade e descubra, com suas palavras e uma pergunta por vez, o que a pessoa procura (sem roteiro fixo e sem perguntar o que já está no cadastro, como a cidade).",
+  "3. Mensagem vaga ou acidental (\"aa\", \"?\"): reaja como gente, comentando que parece ter cortado e retomando o assunto da campanha.",
+  "4. Só depois que o cliente disser o que busca, consulte o catálogo com o filtro de categoria, cidade/loja e preço.",
+  "5. Sugestões por iniciativa da IA respeitam o **ticket mínimo** configurado em /ia (padrão R$ 450,00); valores abaixo disso só se o cliente pedir algo mais barato ou der um orçamento menor.",
+  "6. Mostre no máximo **3 opções distintas**, sem repetir modelo nem foto.",
+].join("\n");
+
 
 /** Antigo bloco "Quando a IA resolve sozinha" de /ia: mesmas regras de encerramento, agora editáveis. */
 export const ENCERRAMENTO_MD = [
@@ -153,7 +170,7 @@ export const DEFAULT_SKILLS: Omit<AiSkill, "id">[] = [
     name: "Consultar Estoque por Cidade",
     slug: "estoque_cidade",
     triggerDescription: "Cliente pergunta por modelo, marca, armação, óculos de sol, preço ou disponibilidade.",
-    instructionsMd: "## Protocolo\n1. Confirme a **cidade** do cliente e se é **grau ou sol** antes de buscar.\n2. Busque o estoque **na mesma rodada**, sem pedir permissão para buscar.\n3. Mostre só modelos com saldo em lojas da cidade do cliente; nunca ofereça produto disponível apenas em cidades distantes.\n4. Apresente no máximo 3 opções distintas (nunca o mesmo modelo ou a mesma foto duas vezes), com legenda curta (marca, modelo e preço).\n5. Não priorize os mais baratos: sem pedido de algo em conta, respeite o ticket mínimo configurado em /ia.\n6. Se nada for encontrado, diga isso com clareza e ofereça alternativas próximas (outra marca ou faixa de preço).",
+    instructionsMd: ESTOQUE_MD,
     isActive: true,
     sortOrder: 10,
     builtin: true,

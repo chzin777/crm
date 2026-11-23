@@ -21,6 +21,7 @@ import { ChatRuleError, sendAutomaticImage, sendAutomaticMessage } from "@/lib/c
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables, withoutSplitMarkers } from "@/lib/chat/text";
 import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
+import { conversationTemperature } from "@/lib/ai/temperature";
 import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, baseType, extensionOf, TRANSCRIBABLE_VIDEO, unsupportedReason, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
@@ -32,6 +33,7 @@ import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, br
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
 import { needsQualificationFirst, qualifyFirstBlock, qualifyGatedResult } from "@/lib/ai/sales-consultant";
+import { classifyVague, vagueMessageBlock } from "@/lib/ai/vague-message";
 import { NOISE_AUTHOR } from "@/lib/chat/noise";
 import { withToolContent, withoutRedundantStoreQuestion, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
@@ -663,7 +665,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     // Módulos de lib/ai/prompts escolhidos pelo assunto desta mensagem e pelo estado da sessão.
     // Estúdio de IA: regras da empresa ligadas ao assunto, skills e trechos do RAG entram no composeSystemPrompt.
     prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length, studio: { ...studioContext, skills }, conversationText },
-    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : bareNameHint(input.pendingText, input.contactName)],
+    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
@@ -1044,7 +1046,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       { role: "system", content: [system, ...turnFacts].join("\n\n") },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), ...(await contactFieldTools(input.contactId))] },
+    { ...input.meta, maxTokens: 700, temperature: conversationTemperature(settings), tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), ...(await contactFieldTools(input.contactId))] },
   );
   let outcome = interpretDecision(decision);
   // Transferência já decidida (pessoa pelo nome, documento lido): a confirmação é a que o modelo escreveu; a frase

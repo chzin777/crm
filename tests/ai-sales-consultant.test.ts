@@ -201,7 +201,7 @@ describe("redação de vendedora, sem respostas enlatadas", () => {
   });
   it("regras proíbem clichês de robô e pedem argumento de venda e espelhamento", () => {
     for (const piece of ["CONSULTORIA GENUÍNA", "comente brevemente, com suas palavras, por que aquelas peças combinam", "GEOGRAFIA", "lentes são orçadas conforme a receita"]) expect(SALES_CONSULTANT_RULES).toContain(piece);
-    for (const piece of ["bordões de telemarketing", "Espelhamento sutil", "Uma coisa de cada vez", "Ritmo real de WhatsApp"]) expect(loadPromptModule("core")).toContain(piece);
+    for (const piece of ["LEIA O FIO INTEIRO", "MENSAGENS VAGAS", "Sem bordões", "Como gente no WhatsApp", "ESCOPO E LIMITES"]) expect(loadPromptModule("core")).toContain(piece);
   });
   it("abertura da ficha varia entre respostas", () => {
     expect(new Set([0, 1, 2].map((variant) => cardOpening("Me mostra o Aviator", variant))).size).toBe(3);
