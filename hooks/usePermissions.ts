@@ -8,7 +8,13 @@ let cached: Promise<ModuleAccess | null> | null = null;
 
 const loadPermissions = () => {
   cached ??= fetch("/api/me/permissions")
-    .then(async (res) => (res.ok ? (((await res.json()) as { data: { modules: ModuleAccess } }).data.modules) : null))
+    .then(async (res) => {
+      if (res.ok) return ((await res.json()) as { data: { modules: ModuleAccess } }).data.modules;
+      // Senha provisória: nenhuma tela do CRM abre antes de criar a senha definitiva.
+      const body = (await res.json().catch(() => null)) as { code?: string } | null;
+      if (body?.code === "MUST_CHANGE_PASSWORD") window.location.replace("/primeiro-acesso");
+      return null;
+    })
     .catch(() => null);
   return cached;
 };

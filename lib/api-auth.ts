@@ -4,10 +4,19 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole, resolveAccess, type ModuleAccess, type ModuleKey } from "@/lib/permissions";
 
-export async function requireApiSession() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  return session?.user ?? null;
+/** Sessão válida, inclusive de quem ainda está com senha provisória (só para a tela de primeiro acesso). */
+export async function getAuthSession() {
+  return auth.api.getSession({ headers: await headers() });
 }
+
+/** Sessão liberada para o CRM: com senha provisória (`mustChangePassword`), nenhuma API de negócio responde. */
+export async function requireApiSession() {
+  const session = await getAuthSession();
+  if (!session?.user || session.user.mustChangePassword) return null;
+  return session.user;
+}
+
+export const MUST_CHANGE_PASSWORD = "MUST_CHANGE_PASSWORD";
 
 export async function getUserAccess(userId: string): Promise<{ isAdmin: boolean; modules: ModuleAccess } | null> {
   const record = await prisma.user.findUnique({

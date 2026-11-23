@@ -121,6 +121,12 @@ function LoginContent() {
         document.cookie = `better-auth.session_token=${result.data.token}; path=/; max-age=86400; SameSite=Lax; Secure`;
       }
 
+      // Senha provisória (usuário novo ou senha redefinida pelo administrador): primeiro cria a senha definitiva.
+      if ((result.data?.user as { mustChangePassword?: boolean } | undefined)?.mustChangePassword) {
+        window.location.href = "/primeiro-acesso";
+        return;
+      }
+
       const callbackUrl = searchParams.get("callbackUrl");
       const destination =
         callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")

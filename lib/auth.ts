@@ -4,6 +4,7 @@ import { betterAuth } from "better-auth";
 import { admin } from "better-auth/plugins";
 import { Resend } from "resend";
 import { createDatabaseUrl } from "@/lib/database-url";
+import { prisma } from "@/lib/prisma";
 
 async function sendResetEmail(to: string, url: string) {
   const apiKey = process.env.RESEND_API_KEY;
@@ -43,12 +44,18 @@ export const auth = betterAuth({
       // Sem await: evita revelar por tempo de resposta se o e-mail existe.
       void sendResetEmail(user.email, url).catch((error) => console.error("[auth] enviar e-mail de redefinição:", error));
     },
+    // Quem criou a própria senha pelo link do e-mail já não usa a senha provisória.
+    onPasswordReset: async ({ user }) => {
+      await prisma.user.update({ where: { id: user.id }, data: { mustChangePassword: false } }).catch((error) => console.error("[auth] liberar primeiro acesso:", error));
+    },
   },
   user: {
     additionalFields: {
       jobTitle: { type: "string", required: false },
       teamLevel: { type: "string", required: false, defaultValue: "Operador" },
       roleId: { type: "string", required: false },
+      // Senha provisória (usuário criado ou senha redefinida pelo administrador): só entra no CRM depois de trocar.
+      mustChangePassword: { type: "boolean", required: false, defaultValue: false, input: false },
     },
   },
   plugins: [admin()],

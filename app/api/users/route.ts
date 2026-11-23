@@ -62,6 +62,8 @@ export async function POST(request: NextRequest) {
         email: email.trim().toLowerCase(),
         emailVerified: true,
         roleId: roleId || null,
+        // Senha inicial é provisória: no primeiro acesso o usuário cria a dele.
+        mustChangePassword: true,
         accounts: {
           create: { id: randomUUID(), accountId: id, providerId: "credential", password: await hashPassword(password) },
         },
@@ -111,6 +113,8 @@ export async function PATCH(request: NextRequest) {
         await prisma.account.create({ data: { id: randomUUID(), accountId: id, providerId: "credential", userId: id, password: hashed } });
       }
       await prisma.session.deleteMany({ where: { userId: id } });
+      // Senha definida pelo administrador é provisória: troca obrigatória no próximo acesso.
+      updateData.mustChangePassword = true;
     }
 
     const user = await prisma.user.update({
