@@ -28,6 +28,12 @@ const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
 const DISPATCH_RETENTION_DAYS = 30;
 const RESEND_WINDOW_MINUTES = 15;
+// Avisos/despedidas de inatividade em sequência: rajada de dezenas de envios em segundos faz a Meta
+// recusar parte deles com (#131000) Something went wrong.
+const SILENCE_SEND_GAP_MS = 1_500;
+// Erro genérico e passageiro da Meta: a mensagem automática é reenviada uma vez pelo relógio.
+const isTransientMetaFailure = (reason: string | null) => !!reason && reason.includes("(#131000)");
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const MEDIA_RETRY_HOURS = 48;
 const MEDIA_RETRY_BATCH = 5;
 
@@ -199,6 +205,7 @@ export async function runClock() {
         state.warnedAt = new Date().toISOString();
         await saveMenuState(row.id, state);
         summary.silenceAsked += 1;
+        await sleep(SILENCE_SEND_GAP_MS);
         continue;
       }
       if (!(await firstDispatch(`silence-close:${row.id}:${state.warnedAt}`))) continue;
@@ -208,6 +215,7 @@ export async function runClock() {
       try {
         await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings));
         summary.silenceClosed += 1;
+        await sleep(SILENCE_SEND_GAP_MS);
       } catch (error) {
         // Já encerrada por outra execução ou pelo atendente: segue para as próximas.
         if (!(error instanceof ChatRuleError)) throw error;
@@ -231,15 +239,19 @@ export async function runClock() {
       where: {
         author: "bot",
         delivery: "failed",
-        failureReason: { startsWith: "Não foi possível conectar" },
+        OR: [{ failureReason: { startsWith: "Não foi possível conectar" } }, { failureReason: { contains: "(#131000)" } }],
         createdAt: { gte: new Date(now - RESEND_WINDOW_MINUTES * MINUTE), lte: new Date(now - MINUTE) },
       },
       include: { conversation: true },
       orderBy: { createdAt: "asc" },
-      take: 20,
+      take: 60,
     });
     for (const row of rows) {
-      if (!isConnectFailure(row.failureReason) || !isWindowOpen(row.conversation.lastInboundAt)) continue;
+      if (!isWindowOpen(row.conversation.lastInboundAt)) continue;
+      if (isTransientMetaFailure(row.failureReason)) {
+        // Uma única nova tentativa por mensagem (nunca fica reenviando em loop).
+        if (!(await firstDispatch(`resend-131000:${row.id}`))) continue;
+      } else if (!isConnectFailure(row.failureReason)) continue;
       const sent = isSurveyMessage(row.text)
         ? await resendSurvey(row, row.conversation)
         : await resendAutomatic(row.id, () => sendText(row.conversation.phone, row.text));
