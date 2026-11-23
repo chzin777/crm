@@ -112,6 +112,7 @@ interface DispatchJobView {
   failed: number;
   skipped: number;
   duplicatesRemoved?: number;
+  coldRemoved?: number;
   errors: string[];
   pause?: { kind: string; code?: number; message: string };
   startedAt?: string;
@@ -145,17 +146,20 @@ interface Campaign {
   sendWindow?: CampaignSendWindow | null;
   followUp?: CampaignFollowUp | null;
   attributionWindowDays?: number | null;
+  /** Exclui do disparo quem não leu nem respondeu as últimas X campanhas (leads frios). */
+  excludeColdLeads?: number | null;
   /** Campanha de reenvio para não engajados: id da campanha original. */
   resendOf?: string;
 }
 
-type DeliverySettings = Pick<Campaign, "cadence" | "sendWindow" | "followUp" | "attributionWindowDays">;
-const EMPTY_DELIVERY: DeliverySettings = { cadence: null, sendWindow: null, followUp: null, attributionWindowDays: null };
+type DeliverySettings = Pick<Campaign, "cadence" | "sendWindow" | "followUp" | "attributionWindowDays" | "excludeColdLeads">;
+const EMPTY_DELIVERY: DeliverySettings = { cadence: null, sendWindow: null, followUp: null, attributionWindowDays: null, excludeColdLeads: null };
 const deliveryOf = (campaign: Campaign): DeliverySettings => ({
   cadence: campaign.cadence ?? null,
   sendWindow: campaign.sendWindow ?? null,
   followUp: campaign.followUp ?? null,
   attributionWindowDays: campaign.attributionWindowDays ?? null,
+  excludeColdLeads: campaign.excludeColdLeads ?? null,
 });
 
 /** Ritmo do disparo, janela de horário, follow-up para quem não respondeu e janela de atribuição de vendas. */
@@ -212,6 +216,16 @@ function CampaignDeliverySettings({ value, onChange }: { value: DeliverySettings
             {!value.followUp.modelo && <p className="text-[11px] font-medium text-[#9a3d12] dark:text-[#F7915E]">Escolha o modelo do follow-up; sem ele nada é enviado.</p>}
           </div>
         )}
+      </div>
+
+      <div className={box}>
+        <label className={head}>
+          <input type="checkbox" className={toggle} checked={Boolean(value.excludeColdLeads)} onChange={(event) => onChange({ ...value, excludeColdLeads: event.target.checked ? 3 : null })} />
+          <span className="min-w-0 break-words">Excluir leads frios<span className={hint}>Não envia para quem não leu nem respondeu nenhuma das últimas campanhas recebidas. Descadastrados e números sem WhatsApp já ficam sempre de fora.</span></span>
+        </label>
+        {value.excludeColdLeads ? (
+          <label className={label}><span>Sem leitura nas últimas (campanhas)</span><input type="number" min={1} max={20} value={value.excludeColdLeads} onChange={(event) => onChange({ ...value, excludeColdLeads: Math.max(1, Math.min(20, Number(event.target.value) || 1)) })} className={`${field} max-w-32`} /></label>
+        ) : null}
       </div>
 
       <label className={`${box} block`}>
@@ -2079,6 +2093,7 @@ export function CampaignsView() {
                         {int(selectedJob.cursor)} de {int(selectedJob.total)} contatos processados · {int(selectedJob.sent)} enviadas · {int(selectedJob.failed)} falhas
                         {selectedJob.skipped > 0 && ` · ${int(selectedJob.skipped)} pulados (receberam campanha nos últimos ${cooldownDays} dias)`}
                         {(selectedJob.duplicatesRemoved ?? 0) > 0 && ` · ${int(selectedJob.duplicatesRemoved ?? 0)} repetidos entre segmentos unificados (1 mensagem por cliente)`}
+                        {(selectedJob.coldRemoved ?? 0) > 0 && ` · ${int(selectedJob.coldRemoved ?? 0)} leads frios fora do envio`}
                       </p>
                       {selectedJob.status === "paused" && selectedJob.pause && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{selectedJob.pause.message}</p>}
                       {selectedJob.errors.length > 0 && (

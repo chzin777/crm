@@ -2,7 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { cancelAutomationsForContacts } from "@/lib/automations/engine-db";
 
-const select = { marketingOptOut: true, marketingOptOutAt: true, marketingOptOutReason: true } as const;
+const select = {
+  marketingOptOut: true, marketingOptOutAt: true, marketingOptOutReason: true,
+  invalidWhatsApp: true, invalidWhatsAppAt: true, invalidWhatsAppReason: true, engagementScore: true,
+} as const;
 
 /** Situação de opt-out de campanhas do contato. */
 export async function GET(_request: Request, context: RouteContext<"/api/contacts/[id]/marketing">) {

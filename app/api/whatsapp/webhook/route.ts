@@ -12,6 +12,8 @@ import { sendAutomaticMessage } from "@/lib/chat/outbound";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { emitInboundMessageById } from "@/lib/automations/engine-db";
 import { syncCampaignTemplateStatus } from "@/lib/campaigns";
+import { addEngagement, clearInvalidWhatsApp, ENGAGEMENT_POINTS, INVALID_NUMBER_CODES, markInvalidWhatsApp } from "@/lib/engagement";
+import { distributeWaiting } from "@/lib/chat/distribution";
 
 /** Descadastro/reativação de campanhas pedido pelo próprio cliente. */
 async function handleOptOutCommand(conversationId: string, phone: string, command: OptOutCommand, text: string) {
@@ -88,6 +90,12 @@ async function updateChatDelivery(event: StatusEvent) {
 // Atualiza o registro da mensagem da campanha; nunca retrocede o status (ex.: read não volta para delivered).
 async function updateMessageStatus(event: StatusEvent) {
   await updateChatDelivery(event).catch((failure) => console.error("[whatsapp/webhook] atualizar entrega do chat:", failure));
+  // Número sem WhatsApp (campanha, envio em massa ou chat): sai dos próximos disparos pagos.
+  const failure = event.status === "failed" ? event.errors?.[0] : undefined;
+  if (failure?.code && INVALID_NUMBER_CODES.has(failure.code) && event.recipient_id) {
+    await markInvalidWhatsApp(event.recipient_id, `${failure.code}: ${failure.error_data?.details ?? failure.title ?? failure.message ?? "número indisponível"}`)
+      .catch((error) => console.error("[whatsapp/webhook] marcar número inválido:", error));
+  }
   if (!event.id || !event.status) return;
   const message = await prisma.campaignMessage.findUnique({ where: { whatsappMsgId: event.id }, select: { id: true, status: true, campaignId: true, contactId: true, phone: true } });
   if (!message) return;
@@ -106,6 +114,8 @@ async function updateMessageStatus(event: StatusEvent) {
     where: { id: message.id },
     data: { status: event.status, ...(event.status === "sent" ? { sentAt: at } : event.status === "delivered" ? { deliveredAt: at } : { readAt: at }) },
   });
+  // Score de engajamento: leitura da campanha (o status nunca retrocede, então conta uma vez por envio).
+  if (event.status === "read") await addEngagement(message.contactId, ENGAGEMENT_POINTS.read);
 }
 
 // Salva a mensagem recebida; a resposta à campanha é registrada em recordInbound.
@@ -129,6 +139,8 @@ async function handleInboundMessage(msg: InboundMessageEvent) {
   });
 
   console.log(`[whatsapp/webhook] inbound de ${msg.from} (${msg.id})${contact ? ` → contato ${contact.id}` : " → sem contato"}`);
+  // Quem escreve tem WhatsApp: desfaz uma marcação antiga de número inválido.
+  await clearInvalidWhatsApp(msg.from).catch((error) => console.error("[whatsapp/webhook] limpar número inválido:", error));
 }
 
 // Registra o status de entrega (sent/delivered/read/failed) e o motivo das falhas nos logs.
@@ -230,6 +242,8 @@ export async function POST(request: Request) {
               console.error("[whatsapp/webhook] fluxo automático:", failure);
               void reportError("whatsapp.automation", failure, { conversationId: recorded.conversationId });
             });
+            // Fila em rodízio: a conversa que acabou de entrar na fila já sai atribuída a um atendente.
+            await distributeWaiting().catch((failure) => console.error("[whatsapp/webhook] rodízio da fila:", failure));
             notifyChatChange();
           }
         }

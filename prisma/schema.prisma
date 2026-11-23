@@ -116,6 +116,13 @@ model Contact {
   marketingOptOut           Boolean                @default(false)
   marketingOptOutAt         DateTime?
   marketingOptOutReason     String?
+  /// Número sem WhatsApp (erro 131026 da Meta): fora dos disparos pagos até o cliente escrever de novo.
+  invalidWhatsApp           Boolean                @default(false)
+  invalidWhatsAppAt         DateTime?
+  invalidWhatsAppReason     String?
+  /// Score de engajamento no WhatsApp: +5 leu campanha, +15 respondeu, −5 por campanha não lida em 72 h.
+  engagementScore           Int                    @default(0)
+  engagementUpdatedAt       DateTime?
   /// Lead Score: pontos alterados pelas automações (nó Alterar pontuação) e pela equipe.
   score                     Int                    @default(0)
   /// Nível pelas faixas configuradas em /clientes-vip: BRONZE | PRATA | OURO | DIAMANTE.
@@ -369,6 +376,8 @@ model CampaignMessage {
   repliedAt     DateTime?
   failedAt      DateTime?
   failureReason String?
+  /// Avaliado pela regra de engajamento (−5 se ficou 72 h sem leitura). Envios anteriores ao recurso já vêm preenchidos.
+  engagementPenalizedAt DateTime?
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
 
@@ -447,6 +456,11 @@ model ChatQueue {
   color               String             @default("#002187")
   hours               String             @default("")
   firstResponseSlaMin Int                @default(15)
+  /// "manual" (atendentes pegam da fila) ou "round_robin" (rodízio 1 a 1 entre online com vaga).
+  distribution        String             @default("manual")
+  /// Rodízio prioriza atendentes da loja do cliente (Contact.store) antes do transbordo geral.
+  storePriority       Boolean            @default(false)
+  rrCursor            Int                @default(0)
   order               Int                @default(0)
   archivedAt          DateTime?
   createdAt           DateTime           @default(now())
@@ -473,6 +487,8 @@ model ChatAgent {
   capacity   Int       @default(0)
   paused     Boolean   @default(false)
   lastSeenAt DateTime?
+  /// Código ERP da loja do atendente ("13"), para o rodízio por loja.
+  store      String?
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 

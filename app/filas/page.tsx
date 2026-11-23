@@ -8,13 +8,13 @@ import { useToast } from "@/components/ToastProvider";
 import { BlockedPanel } from "@/components/chat/BlockedPanel";
 import { MenuSettingsPanel } from "@/components/chat/MenuSettingsPanel";
 import { OperatingHoursPanel } from "@/components/chat/OperatingHoursPanel";
-import { QueueBoard, type QueueAgent, type QueueRecord } from "@/components/chat/QueueBoard";
+import { QueueBoard, type QueueAgent, type QueueRecord, type StoreOption } from "@/components/chat/QueueBoard";
 import { QuickRepliesPanel } from "@/components/chat/QuickRepliesPanel";
 import { TeamPanel } from "@/components/chat/TeamPanel";
 
-type QueueForm = { name: string; description: string; color: string; hours: string; firstResponseSlaMin: number; order: number };
+type QueueForm = { name: string; description: string; color: string; hours: string; firstResponseSlaMin: number; order: number; distribution: "manual" | "round_robin"; storePriority: boolean };
 
-const emptyForm: QueueForm = { name: "", description: "", color: "#002187", hours: "", firstResponseSlaMin: 15, order: 0 };
+const emptyForm: QueueForm = { name: "", description: "", color: "#002187", hours: "", firstResponseSlaMin: 15, order: 0, distribution: "manual", storePriority: false };
 const field = "h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 const labelClass = "mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300";
 
@@ -28,6 +28,7 @@ export default function FilasPage() {
   const [view, setView] = useState("queues");
   const [queues, setQueues] = useState<QueueRecord[] | null>(null);
   const [agents, setAgents] = useState<QueueAgent[]>([]);
+  const [stores, setStores] = useState<StoreOption[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [editing, setEditing] = useState<QueueRecord | "new" | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -37,7 +38,11 @@ export default function FilasPage() {
     const [queueResponse, teamResponse] = await Promise.all([fetch("/api/chat/queues", { cache: "no-store" }), fetch("/api/chat/team", { cache: "no-store" })]);
     setQueues(queueResponse.ok ? ((await queueResponse.json()) as { data: QueueRecord[] }).data : []);
     setCanManage(teamResponse.ok);
-    if (teamResponse.ok) setAgents(((await teamResponse.json()) as { data: QueueAgent[] }).data);
+    if (teamResponse.ok) {
+      const team = (await teamResponse.json()) as { data: QueueAgent[]; stores?: StoreOption[] };
+      setAgents(team.data);
+      setStores(team.stores ?? []);
+    }
   }, []);
 
   useEffect(() => {
@@ -60,7 +65,7 @@ export default function FilasPage() {
   const openForm = (queue: QueueRecord | "new") => {
     setEditing(queue);
     setFormError("");
-    setForm(queue === "new" ? emptyForm : { name: queue.name, description: queue.description, color: queue.color, hours: queue.hours, firstResponseSlaMin: queue.firstResponseSlaMin, order: queue.order });
+    setForm(queue === "new" ? emptyForm : { name: queue.name, description: queue.description, color: queue.color, hours: queue.hours, firstResponseSlaMin: queue.firstResponseSlaMin, order: queue.order, distribution: queue.distribution ?? "manual", storePriority: queue.storePriority ?? false });
   };
 
   const saveQueue = async () => {
@@ -118,7 +123,7 @@ export default function FilasPage() {
           <QueueBoard queues={queues} agents={agents} canManage={canManage} onEdit={openForm} act={act} />
         )
       ) : (
-        <TeamPanel agents={agents} queues={queues} act={act} />
+        <TeamPanel agents={agents} queues={queues} act={act} stores={stores} />
       )}
 
       {editing && (
@@ -133,6 +138,19 @@ export default function FilasPage() {
               <div><label htmlFor="queue-order" className={labelClass}>Ordem</label><input id="queue-order" type="number" min={0} value={form.order} onChange={(event) => setForm({ ...form, order: Number(event.target.value) })} className={field} /></div>
               <div><label htmlFor="queue-color" className={labelClass}>Cor</label><input id="queue-color" type="color" value={form.color} onChange={(event) => setForm({ ...form, color: event.target.value })} className={`${field} cursor-pointer p-1`} /></div>
             </div>
+            <div>
+              <label htmlFor="queue-distribution" className={labelClass}>Distribuição das conversas</label>
+              <select id="queue-distribution" value={form.distribution} onChange={(event) => setForm({ ...form, distribution: event.target.value as QueueForm["distribution"] })} className={`${field} cursor-pointer`}>
+                <option value="manual">Manual: atendentes pegam da fila</option>
+                <option value="round_robin">Rodízio (1 a 1 igualitário entre atendentes online com vaga)</option>
+              </select>
+            </div>
+            {form.distribution === "round_robin" && (
+              <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                <input type="checkbox" checked={form.storePriority} onChange={(event) => setForm({ ...form, storePriority: event.target.checked })} className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[#002187] dark:accent-[#C4D600]" />
+                <span className="min-w-0 break-words">Priorizar atendentes da loja do cliente<span className="block text-[11px] text-slate-500 dark:text-slate-400">Cliente com loja no cadastro/VMSet vai primeiro para os atendentes daquela loja (vínculo na aba Equipe); sem ninguém livre lá, segue o rodízio geral.</span></span>
+              </label>
+            )}
             <div className="mt-auto flex justify-end gap-2">
               <button type="button" onClick={() => setEditing(null)} className="h-10 cursor-pointer rounded-lg px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">Cancelar</button>
               <button type="button" onClick={() => void saveQueue()} disabled={!form.name.trim()} className="h-10 cursor-pointer rounded-lg bg-[#051647] px-4 text-sm font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647]">Salvar</button>

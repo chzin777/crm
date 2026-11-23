@@ -6,9 +6,11 @@ import { AddMembersDialog } from "@/components/chat/AddMembersDialog";
 import { QueueWaitingList } from "@/components/chat/QueueWaitingList";
 import { initials, waitingLabel } from "@/lib/chat/format";
 
-export type QueueMember = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean };
-export type QueueRecord = { id: string; name: string; description: string; color: string; hours: string; firstResponseSlaMin: number; order: number; waiting: number; oldestWaiting: string | null; members: QueueMember[] };
-export type QueueAgent = { id: string; name: string; email: string; hasChatAccess: boolean; capacity: number; paused: boolean; online: boolean; open: number; queueIds: string[] };
+export type QueueMember = { userId: string; name: string; online: boolean; open: number; capacity: number; paused: boolean; store?: string | null };
+export type QueueRecord = { id: string; name: string; description: string; color: string; hours: string; firstResponseSlaMin: number; order: number; waiting: number; oldestWaiting: string | null; members: QueueMember[]; distribution?: "manual" | "round_robin"; storePriority?: boolean };
+export type QueueAgent = { id: string; name: string; email: string; hasChatAccess: boolean; capacity: number; paused: boolean; online: boolean; open: number; queueIds: string[]; store?: string | null };
+/** Loja para o vínculo do atendente: código ERP ("13") e nome cadastrado. */
+export type StoreOption = { code: string; name: string };
 
 type Props = {
   queues: QueueRecord[];
@@ -96,7 +98,7 @@ export function QueueBoard({ queues, agents, canManage, onEdit, act }: Props) {
               <span className="truncate">{queue.name}</span>
             </h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{queue.description || "Sem descrição"}</p>
-            <p className="mt-1 text-xs text-slate-400">{queue.hours || "Horário não definido"} · 1ª resposta em {queue.firstResponseSlaMin} min</p>
+            <p className="mt-1 text-xs text-slate-400">{queue.hours || "Horário não definido"} · 1ª resposta em {queue.firstResponseSlaMin} min{queue.distribution === "round_robin" ? ` · rodízio automático${queue.storePriority ? " por loja" : ""}` : ""}</p>
           </div>
           {canManage && (
             <div className="flex shrink-0 gap-1">

@@ -6,6 +6,7 @@ import { chatError, requireChatActor } from "@/lib/chat/access";
 import { openCount } from "@/lib/chat/actions";
 import { addAudit } from "@/lib/chat/conversation";
 import { isOnline } from "@/lib/chat/team";
+import { storeErpCode } from "@/lib/stores";
 
 export async function GET() {
   const guard = await requireChatActor("chat.queues", ["filas"]);
@@ -20,8 +21,15 @@ export async function GET() {
     prisma.chatConversation.groupBy({ by: ["assigneeId"], where: { assigneeId: { not: null }, closedAt: null }, _count: { _all: true } }),
   ]);
   const loadByUser = new Map(loads.map((row) => [row.assigneeId, row._count._all]));
+  // Lojas para o vínculo do atendente (rodízio por loja): código ERP extraído do nome "LJ 13 ...".
+  const storeRows = await prisma.store.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { name: true } });
+  const stores = storeRows.flatMap((store) => {
+    const code = storeErpCode(store.name);
+    return code ? [{ code, name: store.name }] : [];
+  });
 
   return NextResponse.json({
+    stores,
     data: users.map((user) => ({
       id: user.id,
       name: user.name,
@@ -29,6 +37,7 @@ export async function GET() {
       hasChatAccess: resolveAccess(user.role, user.roleRef?.permissions).chat,
       capacity: user.chatAgent?.capacity ?? 0,
       paused: user.chatAgent?.paused ?? false,
+      store: user.chatAgent?.store ?? null,
       online: isOnline(user.chatAgent?.lastSeenAt),
       open: loadByUser.get(user.id) ?? 0,
       queueIds: user.chatQueues.map((item) => item.queueId),
@@ -36,7 +45,8 @@ export async function GET() {
   });
 }
 
-const patch = z.object({ userId: z.string().min(1), capacity: z.number().int().min(0).max(200).optional(), paused: z.boolean().optional() });
+// store: código ERP da loja do atendente ("13"), usado no rodízio por loja; null tira o vínculo.
+const patch = z.object({ userId: z.string().min(1), capacity: z.number().int().min(0).max(200).optional(), paused: z.boolean().optional(), store: z.string().trim().max(20).nullable().optional() });
 
 export async function PATCH(request: Request) {
   const guard = await requireChatActor("chat.queues", ["filas"]);

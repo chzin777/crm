@@ -16,6 +16,8 @@ import { ChatRuleError, resendAutomatic, sendAutomaticMessage } from "@/lib/chat
 import { dispatchScheduledMessages, notifyDueFollowUps } from "@/lib/chat/operations";
 import { planQueuePositions } from "@/lib/chat/queue-rules";
 import { listDispatchJobs, runCampaignFollowUps } from "@/lib/campaign-dispatch";
+import { distributeWaiting } from "@/lib/chat/distribution";
+import { penalizeUnreadCampaigns } from "@/lib/engagement";
 import { syncWonOpportunities } from "@/lib/sales-pipeline-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/engine-db";
@@ -227,6 +229,16 @@ export async function runClock() {
   // A trava de 3 min sem progresso evita retomar em paralelo com a outra cor do blue/green.
   await block("disparos de campanha", async () => {
     await listDispatchJobs();
+  });
+
+  // Filas em rodízio: quem entrou na fila pela IA, menu ou transferência é atribuído sem esperar nova mensagem.
+  await block("rodízio das filas", async () => {
+    await distributeWaiting();
+  });
+
+  // Score de engajamento: −5 por campanha que passou 72 h sem leitura nem resposta.
+  await block("score de engajamento", async () => {
+    await penalizeUnreadCampaigns(new Date(now));
   });
 
   // Follow-up das campanhas para quem não respondeu nem comprou (auto-cancelado por resposta ou venda no VMSet).

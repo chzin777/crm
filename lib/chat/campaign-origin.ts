@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { phoneVariants } from "@/lib/chat/phone";
+import { addEngagement, ENGAGEMENT_POINTS } from "@/lib/engagement";
 
 /** As campanhas ficam na lista JSON do workspace; uma campanha excluída some deste mapa. */
 export async function campaignNames() {
@@ -80,7 +81,9 @@ export async function attributeCampaignReply({ conversation, contactId, phone, r
   const message = await findRepliedCampaign(contactIds, receivedAt, quotedId);
   if (!message) return;
 
-  await prisma.campaignMessage.updateMany({ where: { id: message.id, repliedAt: null }, data: { repliedAt: receivedAt, status: "replied" } });
+  const firstReply = await prisma.campaignMessage.updateMany({ where: { id: message.id, repliedAt: null }, data: { repliedAt: receivedAt, status: "replied" } });
+  // Score de engajamento: +15 na primeira resposta a cada envio de campanha.
+  if (firstReply.count > 0) await addEngagement(contactId, ENGAGEMENT_POINTS.reply);
   // Resposta ao follow-up ("followup:<id>") conta também como resposta ao disparo principal da campanha.
   const campaignId = message.campaignId.startsWith(FOLLOW_UP_PREFIX) ? message.campaignId.slice(FOLLOW_UP_PREFIX.length) : message.campaignId;
   if (campaignId !== message.campaignId) {

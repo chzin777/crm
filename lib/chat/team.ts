@@ -28,6 +28,8 @@ export async function loadQueueBoard() {
     hours: queue.hours,
     firstResponseSlaMin: queue.firstResponseSlaMin,
     order: queue.order,
+    distribution: queue.distribution === "round_robin" ? ("round_robin" as const) : ("manual" as const),
+    storePriority: queue.storePriority,
     waiting: waitingByQueue.get(queue.id)?._count._all ?? 0,
     oldestWaiting: waitingByQueue.get(queue.id)?._min.waitingSince ?? null,
     members: queue.members.map((member) => ({
@@ -37,6 +39,7 @@ export async function loadQueueBoard() {
       open: loadByUser.get(member.user.id) ?? 0,
       capacity: member.user.chatAgent?.capacity ?? 0,
       paused: member.user.chatAgent?.paused ?? false,
+      store: member.user.chatAgent?.store ?? null,
     })),
   }));
 }

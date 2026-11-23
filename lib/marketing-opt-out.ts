@@ -2,7 +2,13 @@ import { phoneVariants } from "@/lib/chat/phone";
 
 export type OptOutCommand = "opt_out" | "opt_in";
 
-const OPT_OUT_WORDS = new Set(["SAIR", "PARAR", "CANCELAR RECEBIMENTO", "NAO QUERO MAIS", "DESCADASTRAR"]);
+// Inclui os textos do botão de descadastro de marketing da Meta ("Parar promoções" / "Stop promotions").
+const OPT_OUT_WORDS = new Set([
+  // "CANCELAR" e "REMOVER" sozinhos ficam de fora: o cliente pode estar falando de um pedido.
+  "SAIR", "PARE", "PARAR", "STOP", "CANCELAR RECEBIMENTO", "NAO QUERO MAIS", "NAO QUERO MAIS RECEBER",
+  "NAO QUERO RECEBER", "PARAR DE RECEBER", "DESCADASTRAR", "DESCADASTRE", "DESCADASTRAR ME", "ME DESCADASTRE",
+  "ME TIRA DA LISTA", "PARAR PROMOCOES", "STOP PROMOTIONS", "NAO TENHO INTERESSE EM RECEBER",
+]);
 const OPT_IN_WORDS = new Set(["REATIVAR", "VOLTAR"]);
 
 export const OPT_OUT_REPLY =

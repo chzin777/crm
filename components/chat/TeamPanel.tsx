@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CircleDot, MessagesSquare, PauseCircle, Search, Users } from "lucide-react";
+import { AlertTriangle, CircleDot, MessagesSquare, PauseCircle, Search, Store, Users } from "lucide-react";
 import { Switch } from "@/components/chat/MenuFormParts";
-import { Metric, type QueueAgent, type QueueRecord } from "@/components/chat/QueueBoard";
+import { Metric, type QueueAgent, type QueueRecord, type StoreOption } from "@/components/chat/QueueBoard";
 import { initials } from "@/lib/chat/format";
 
 type Filter = "all" | "online" | "paused" | "noAccess";
@@ -75,7 +75,7 @@ function LimitSlider({ agent, onCommit }: { agent: QueueAgent; onCommit: (capaci
   );
 }
 
-function AgentCard({ agent, queues, act }: { agent: QueueAgent; queues: QueueRecord[]; act: Props["act"] }) {
+function AgentCard({ agent, queues, act, stores }: { agent: QueueAgent; queues: QueueRecord[]; act: Props["act"]; stores: StoreOption[] }) {
   const status = statusOf(agent);
   const usage = agent.capacity > 0 ? Math.min(agent.open / agent.capacity, 1) : 0;
   const agentQueues = queues.filter((queue) => agent.queueIds.includes(queue.id));
@@ -101,6 +101,19 @@ function AgentCard({ agent, queues, act }: { agent: QueueAgent; queues: QueueRec
       )}
 
       <LimitSlider agent={agent} onCommit={(capacity) => void act("/api/chat/team", "PATCH", { userId: agent.id, capacity }, "Limite salvo.")} />
+
+      <label className="block space-y-1 text-xs text-slate-500 dark:text-slate-400">
+        <span className="flex items-center gap-1.5"><Store className="h-3.5 w-3.5" />Loja do atendente (rodízio por loja)</span>
+        <select
+          value={agent.store ?? ""}
+          onChange={(event) => void act("/api/chat/team", "PATCH", { userId: agent.id, store: event.target.value || null }, "Loja salva.")}
+          className="h-9 w-full cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-[#C4D600]"
+        >
+          <option value="">Sem loja (atende qualquer cliente)</option>
+          {agent.store && !stores.some((store) => store.code === agent.store) && <option value={agent.store}>Loja {agent.store}</option>}
+          {stores.map((store) => <option key={store.code} value={store.code}>{store.name}</option>)}
+        </select>
+      </label>
 
       <div>
         <div className="mb-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">
@@ -137,9 +150,11 @@ type Props = {
   agents: QueueAgent[];
   queues: QueueRecord[];
   act: (url: string, method: string, body?: unknown, success?: string) => Promise<boolean>;
+  /** Lojas para o vínculo do atendente (rodízio por loja). */
+  stores?: StoreOption[];
 };
 
-export function TeamPanel({ agents, queues, act }: Props) {
+export function TeamPanel({ agents, queues, act, stores = [] }: Props) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -185,7 +200,7 @@ export function TeamPanel({ agents, queues, act }: Props) {
         <p className="rounded-xl border border-dashed border-slate-300 py-14 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">Ninguém encontrado com esse filtro.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {visible.map((agent) => <AgentCard key={agent.id} agent={agent} queues={queues} act={act} />)}
+          {visible.map((agent) => <AgentCard key={agent.id} agent={agent} queues={queues} act={act} stores={stores} />)}
         </div>
       )}
     </div>

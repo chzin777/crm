@@ -26,6 +26,18 @@ export function handoffPatch(queueId: string | null, now: Date) {
   return { status: "waiting" as const, waitingSince: now, queueId };
 }
 
+/** Modo de distribuição da fila: atendentes pegam da fila (manual) ou rodízio 1 a 1 automático. */
+export type QueueDistribution = "manual" | "round_robin";
+export const QUEUE_DISTRIBUTIONS: QueueDistribution[] = ["manual", "round_robin"];
+
+/** Rodízio 1 a 1; com prioridade por loja, primeiro os atendentes da loja do cliente e, sem nenhum livre, todos. */
+export function pickRoundRobin<T extends { store: string | null }>(pool: T[], cursor: number, customerStore: string | null, storePriority: boolean) {
+  const local = storePriority && customerStore ? pool.filter((item) => item.store === customerStore) : [];
+  const candidates = local.length > 0 ? local : pool;
+  if (candidates.length === 0) return null;
+  return { pick: candidates[cursor % candidates.length], byStore: local.length > 0 };
+}
+
 export type QueueRow = {
   id: string;
   status: string;

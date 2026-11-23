@@ -6,6 +6,7 @@ import { phoneVariants } from "@/lib/chat/phone";
 import { brDay, formatBr } from "@/lib/br-time";
 import { firstDispatch } from "@/lib/chat/conversation";
 import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
+import { coldContactIds, INVALID_NUMBER_CODES, markInvalidWhatsApp } from "@/lib/engagement";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 import { withoutOptedOut } from "@/lib/marketing-opt-out";
 import { dedupeRecipients } from "@/lib/campaign-audience";
@@ -49,6 +50,8 @@ export type DispatchJob = {
   ignoreCooldown?: boolean;
   /** Repetidos (mesmo contato ou mesmo celular em mais de um segmento) retirados da fila antes do envio. */
   duplicatesRemoved?: number;
+  /** Leads frios (sem leitura nas últimas X campanhas) retirados antes do envio. */
+  coldRemoved?: number;
   errors: string[];
   pause?: PauseReason;
   startedAt: string;
@@ -400,6 +403,7 @@ async function runJob(campaignId: string) {
             consecutiveApiFailures += 1;
             addError(job, `${recipient.nome}: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}`);
             await recordMessage(campaignId, recipient, { failure: error.message });
+            if (error.code && INVALID_NUMBER_CODES.has(error.code)) await markInvalidWhatsApp(recipient.telefone, `${error.code}: ${error.message}`).catch(() => undefined);
             if (consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES) {
               pause = { kind: "consecutive", code: error.code, message: `${MAX_CONSECUTIVE_API_FAILURES} envios seguidos falharam. Último erro: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}` };
             }
@@ -474,7 +478,7 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
   // Quem pediu para sair (marketingOptOut) nunca entra na fila de uma campanha.
   // Cada pessoa recebe no máximo uma vez, mesmo estando em vários segmentos (por contato e por celular).
   const { unique, removed: duplicatesRemoved } = dedupeRecipients(requested);
-  const recipients = withoutOptedOut(unique, await loadOptOutKeys());
+  const reachable = withoutOptedOut(unique, await loadOptOutKeys());
   const existing = await readJob(campaignId);
   if (existing && (existing.status === "running" || existing.status === "paused")) {
     throw new DispatchError("Esta campanha já tem um disparo em andamento ou pausado.", 409);
@@ -484,6 +488,10 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
   if (["Enviando", "Enviada", "Envio parcial", "Envio pausado"].includes(campaign.status)) {
     throw new DispatchError(`"${campaign.nome}" está em envio ou já teve mensagens enviadas. Não é possível dispará-la novamente para evitar duplicidades.`, 409);
   }
+  // "Excluir leads frios": quem não leu nem respondeu nenhuma das últimas X campanhas fica fora (economia na Meta).
+  const coldLimit = Number(campaign.excludeColdLeads);
+  const cold = Number.isInteger(coldLimit) && coldLimit >= 1 ? await coldContactIds(reachable.map((recipient) => recipient.id), Math.min(coldLimit, 20)) : new Set<string>();
+  const recipients = cold.size > 0 ? reachable.filter((recipient) => !cold.has(recipient.id)) : reachable;
   await assertCampaignTemplateReady(campaign);
   if (recipients.length === 0) throw new DispatchError(`O público de "${campaign.nome}" não contém contatos para envio.`, 400);
 
@@ -508,6 +516,7 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
     baseDisparos: campaign.disparos ?? 0,
     ignoreCooldown: options.ignoreCooldown === true,
     duplicatesRemoved,
+    coldRemoved: cold.size,
     errors: [],
     startedAt: new Date().toISOString(),
   };

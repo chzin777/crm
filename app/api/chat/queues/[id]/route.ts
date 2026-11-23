@@ -13,6 +13,8 @@ const patch = z.object({
   hours: z.string().trim().max(120).optional(),
   firstResponseSlaMin: z.number().int().min(1).max(1440).optional(),
   order: z.number().int().min(0).max(999).optional(),
+  distribution: z.enum(["manual", "round_robin"]).optional(),
+  storePriority: z.boolean().optional(),
   archived: z.boolean().optional(),
 });
 

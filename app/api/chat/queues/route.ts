@@ -12,6 +12,8 @@ const queueBody = z.object({
   hours: z.string().trim().max(120).default(""),
   firstResponseSlaMin: z.number().int().min(1).max(1440).default(15),
   order: z.number().int().min(0).max(999).default(0),
+  distribution: z.enum(["manual", "round_robin"]).default("manual"),
+  storePriority: z.boolean().default(false),
 });
 
 export async function GET() {

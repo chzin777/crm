@@ -26,8 +26,8 @@ async function cancelAutomationsForPhone(phone: string) {
   }
 }
 
-/** Ids e telefones de quem pediu para não receber campanhas. */
+/** Ids e telefones que não recebem campanha: quem pediu para sair e números sem WhatsApp (erro 131026 da Meta). */
 export async function loadOptOutKeys() {
-  const rows = await prisma.contact.findMany({ where: { marketingOptOut: true }, select: { id: true, phone: true } });
+  const rows = await prisma.contact.findMany({ where: { OR: [{ marketingOptOut: true }, { invalidWhatsApp: true }] }, select: { id: true, phone: true } });
   return optOutKeys(rows);
 }
