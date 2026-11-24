@@ -91,6 +91,67 @@ export function rankByCategory(urls: string[], category: PhotoCategory) {
 
 const BLOCKED_HOSTS = /(^|\.)(facebook\.com|fbsbx\.com|fbcdn\.net|instagram\.com|cdninstagram\.com|tiktok\.com|x\.com|twitter\.com|pinimg\.com|gstatic\.com|googleusercontent\.com|lookaside\.)/i;
 
+/**
+ * Origens proibidas (imagem ou página de origem): marketplaces, concorrentes, comparadores de preço, agregadores de
+ * cupom/promoção e redes sociais, inclusive as CDNs deles. Um rótulo do domínio igual ao nome basta
+ * ("media.pelando.com.br", "m.media-amazon.com", "http2.mlstatic.com").
+ */
+const BLOCKED_SOURCE_NAMES = [
+  "amazon", "media-amazon", "ssl-images-amazon", "mercadolivre", "mercadolibre", "mlstatic", "shopee", "susercontent", "aliexpress", "alicdn",
+  "shein", "ltwebstatic", "magazineluiza", "magalu", "mlcdn", "americanas", "casasbahia", "pontofrio", "extra", "submarino", "shoptime", "b2wdigital",
+  "netshoes", "dafiti", "zattini", "kanui", "pelando", "promobit", "gatry", "zoom", "buscape", "bondfaro", "jacotei", "cuponomia", "meliuz", "mercadolivrecdn",
+  "oticascarol", "chillibeans", "oticasdiniz", "oticagolden", "oticasgolden", "grandvision", "oticaswanny", "lojasrenner", "renner", "riachuelo", "cea",
+  "pinterest", "pinimg", "instagram", "facebook", "fbcdn", "tiktok", "youtube", "ytimg", "olx", "enjoei", "ebay", "ebayimg", "walmart", "carrefour", "kabum",
+];
+const BLOCKED_SOURCE = new RegExp(`(^|[.-])(${BLOCKED_SOURCE_NAMES.join("|")})([.-]|$)`, "i");
+
+/** Texto da página/resultado com cara de anúncio: preço, desconto, cupom, frete grátis ou nome de varejista. */
+const PROMO_TEXT = /R\$|US\$|\$\s?\d|\d+\s?%\s?(off|de desconto)|\bpromo(c|ç)(a|ã)o\b|\bpromo\b|\bofertas?\b|\bcupo(m|ns|n)\b|frete\s+gr(a|á)tis|\bdesconto\b|\bliquida(c|ç)(a|ã)o\b|black\s*friday|\bpelando\b|\bamazon\b|mercado\s*livre|\bshopee\b|\baliexpress\b|\bmagalu\b|magazine\s*luiza|\bamericanas\b/i;
+
+/** Domínios próprios (site/CDN da empresa): sempre na frente. */
+const OWN_HOSTS = /(^|\.)oticasbrasil\.com\.br$/i;
+/** Sites oficiais de fabricantes e distribuidores autorizados: logo depois dos próprios. */
+const OFFICIAL_HOSTS = /(^|\.)(ray-ban\.com|rayban\.com|luxottica\.com|essilorluxottica\.com|oakley\.com|vogue-eyewear\.com|prada\.com|dolcegabbana\.com|armani\.com|safilo\.com|carreraworld\.com|polaroideyewear\.com|michaelkors\.com|tommy\.com|gucci\.com|versace\.com|burberry\.com|miumiu\.com|persol\.com|arnette\.com|costadelmar\.com|marchon\.com|kering\.com|keringeyewear\.com|marcolin\.com|tomford\.com|guess\.com|calvinklein\.com|hugoboss\.com|boss\.com|lacoste\.com|swarovski\.com|chanel\.com|dior\.com|celine\.com|fendi\.com|bulgari\.com|tiffany\.com|coach\.com|jimmychoo\.com|ralphlauren\.com|scene7\.com)$/i;
+
+const hostOf = (raw: string | undefined) => {
+  if (!raw) return "";
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+/** Origem proibida (marketplace, concorrente, agregador ou rede social) pelo host da imagem ou da página. */
+export function isBlockedImageSource(url: string | undefined) {
+  const host = hostOf(url);
+  return !!host && BLOCKED_SOURCE.test(host);
+}
+
+/** Resultado de busca aceitável: origem permitida e sem texto de anúncio (preço, oferta, cupom, varejista). */
+export function isCleanImageResult(item: { url: string; pageUrl?: string; title?: string; source?: string }) {
+  if (isBlockedImageSource(item.url) || isBlockedImageSource(item.pageUrl)) return false;
+  let path = item.url;
+  try {
+    path = decodeURIComponent(item.url);
+  } catch {
+    /* URL com % solto: confere como veio */
+  }
+  const text = [item.title, item.source, item.pageUrl, path].filter(Boolean).join(" ").replace(/[-_]+/g, " ");
+  return !PROMO_TEXT.test(text);
+}
+
+/** 0 = site próprio, 1 = fabricante oficial, 2 = demais lojas permitidas. */
+export function imageSourceRank(item: { url: string; pageUrl?: string }) {
+  const hosts = [hostOf(item.url), hostOf(item.pageUrl)];
+  if (hosts.some((host) => OWN_HOSTS.test(host))) return 0;
+  if (hosts.some((host) => OFFICIAL_HOSTS.test(host))) return 1;
+  return 2;
+}
+
+/** Termos negativos na busca: tira marketplace, agregador e anúncio já na origem. */
+export const NEGATIVE_QUERY_TERMS = "-amazon -pelando -mercadolivre -shopee -aliexpress -magalu -promocao -oferta -desconto -cupom";
+
 /** URL direta de foto aceita pela Meta: https, .jpg/.jpeg/.png no caminho; sem WebP, SVG, base64, miniatura do Google nem rede social. */
 export function isDirectImageUrl(raw: unknown): raw is string {
   if (typeof raw !== "string" || raw.length > 2000 || !raw.startsWith("https://")) return false;
@@ -105,14 +166,24 @@ export function isDirectImageUrl(raw: unknown): raw is string {
   return /\.(jpe?g|png)$/i.test(url.pathname);
 }
 
-export type ImageCandidate = { url: string; width?: number; height?: number };
+export type ImageCandidate = { url: string; width?: number; height?: number; pageUrl?: string; title?: string; source?: string };
 
-/** Candidatas válidas em ordem (URL direta JPG/PNG, de bom tamanho, sem repetir). */
+/**
+ * Candidatas válidas (URL direta JPG/PNG, de bom tamanho, sem repetir), sem marketplace/concorrente/agregador e sem
+ * anúncio com preço; site próprio e fabricantes oficiais na frente.
+ */
 export function pickImages(candidates: ImageCandidate[], limit = 6) {
   const seen = new Set<string>();
   return candidates
     .filter((item) => isDirectImageUrl(item.url) && (!item.width || item.width >= 250) && (!item.height || item.height >= 200))
-    .map((item) => item.url)
+    .filter((item) => {
+      if (isCleanImageResult(item)) return true;
+      console.warn(`[ai][foto] resultado descartado (marketplace, concorrente ou anúncio com preço): ${hostOf(item.pageUrl) || hostOf(item.url)}`);
+      return false;
+    })
+    .map((item, index) => ({ item, index, rank: imageSourceRank(item) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ item }) => item.url)
     .filter((url) => (seen.has(url) ? false : (seen.add(url), true)))
     .slice(0, limit);
 }
@@ -134,8 +205,8 @@ async function duckDuckGoImages(query: string, doFetch: FetchLike, timeoutMs: nu
   if (!vqd) throw new Error("DuckDuckGo sem token vqd");
   const response = await doFetch(`https://duckduckgo.com/i.js?l=br-pt&o=json&q=${q}&vqd=${vqd}&f=,,,,,&p=1`, { headers: { ...BROWSER_HEADERS, Referer: "https://duckduckgo.com/", Accept: "application/json" }, signal });
   if (!response.ok) throw new Error(`DuckDuckGo i.js ${response.status}`);
-  const body = (await response.json()) as { results?: { image?: string; width?: number; height?: number }[] };
-  return pickImages((body.results ?? []).map((item) => ({ url: item.image ?? "", width: item.width, height: item.height })));
+  const body = (await response.json()) as { results?: { image?: string; width?: number; height?: number; url?: string; title?: string; source?: string }[] };
+  return pickImages((body.results ?? []).map((item) => ({ url: item.image ?? "", width: item.width, height: item.height, pageUrl: item.url, title: item.title, source: item.source })));
 }
 
 /** Bing Imagens (reserva): URLs originais ("murl") no HTML de /images/async, em até 3 s. */
@@ -143,7 +214,11 @@ async function bingImages(query: string, doFetch: FetchLike, timeoutMs: number) 
   const response = await doFetch(`https://www.bing.com/images/async?q=${encodeURIComponent(query)}&first=0&count=35&mmasync=1`, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(`Bing ${response.status}`);
   const html = (await response.text()).replace(/&quot;/g, '"').replace(/&amp;/g, "&");
-  return pickImages([...html.matchAll(/"murl":"(.*?)"/g)].map((match) => ({ url: match[1].replace(/\\\//g, "/") })));
+  // Cada resultado traz a foto (murl), a página de origem (purl) e o título (t) no mesmo bloco.
+  return pickImages([...html.matchAll(/\{[^{}]*?"murl":"(.*?)"[^{}]*?\}/g)].map((match) => {
+    const field = (name: string) => new RegExp(`"${name}":"(.*?)"`).exec(match[0])?.[1]?.replace(/\\\//g, "/");
+    return { url: match[1].replace(/\\\//g, "/"), pageUrl: field("purl"), title: field("t") };
+  }));
 }
 
 /** Busca gratuita sem chave: DuckDuckGo e, se falhar ou vier vazio, Bing. Nunca lança erro. */
@@ -167,11 +242,12 @@ export async function searchFreeImages(query: string, deps: { fetch?: FetchLike;
  */
 export async function searchWebImages(query: string, config: ImageSearchConfig, deps: { fetch?: FetchLike; timeoutMs?: number } = {}): Promise<string[]> {
   if (!query.trim()) return [];
+  const filtered = `${query.trim()} ${NEGATIVE_QUERY_TERMS}`;
   if (config.provider !== "free") {
-    const paid = await searchPaidImage(query, config, deps);
+    const paid = await searchPaidImage(filtered, config, deps);
     if (paid.length) return paid;
   }
-  return searchFreeImages(query, deps);
+  return searchFreeImages(filtered, deps);
 }
 
 /** Primeira candidata (compatibilidade). */
@@ -191,14 +267,14 @@ async function searchPaidImage(query: string, config: ImageSearchConfig, deps: {
         signal,
       });
       if (!response.ok) throw new Error(`Serper ${response.status}`);
-      const body = (await response.json()) as { images?: { imageUrl?: string; imageWidth?: number; imageHeight?: number }[] };
-      return pickImages((body.images ?? []).map((item) => ({ url: item.imageUrl ?? "", width: item.imageWidth, height: item.imageHeight })));
+      const body = (await response.json()) as { images?: { imageUrl?: string; imageWidth?: number; imageHeight?: number; link?: string; title?: string; source?: string; domain?: string }[] };
+      return pickImages((body.images ?? []).map((item) => ({ url: item.imageUrl ?? "", width: item.imageWidth, height: item.imageHeight, pageUrl: item.link, title: item.title, source: [item.source, item.domain].filter(Boolean).join(" ") })));
     }
     const params = new URLSearchParams({ key: config.key ?? "", cx: config.cx ?? "", q: query, searchType: "image", num: "10", safe: "active", gl: "br" });
     const response = await doFetch(`https://www.googleapis.com/customsearch/v1?${params}`, { signal });
     if (!response.ok) throw new Error(`Google CSE ${response.status}`);
-    const body = (await response.json()) as { items?: { link?: string; image?: { width?: number; height?: number } }[] };
-    return pickImages((body.items ?? []).map((item) => ({ url: item.link ?? "", width: item.image?.width, height: item.image?.height })));
+    const body = (await response.json()) as { items?: { link?: string; title?: string; snippet?: string; displayLink?: string; image?: { width?: number; height?: number; contextLink?: string } }[] };
+    return pickImages((body.items ?? []).map((item) => ({ url: item.link ?? "", width: item.image?.width, height: item.image?.height, pageUrl: item.image?.contextLink, title: [item.title, item.snippet].filter(Boolean).join(" "), source: item.displayLink })));
   } catch (error) {
     console.warn(`[ai][foto] busca "${query}" (${config.provider}) falhou: ${error instanceof Error ? error.message : error}`);
     return [];
@@ -228,13 +304,16 @@ export function createProductImageService(deps: { cache: ImageCache; search: (qu
       const cached = await deps.cache.get(sku);
       // Foto gravada por uma busca sem o tipo (ou do tipo oposto) não vale para quem agora sabe o tipo: busca de novo.
       const staleKind = !!category && !!cached && !cached.query.includes(CATEGORY_QUERY[category]);
-      if (cached && !staleKind) {
+      // Foto antiga de marketplace/agregador/anúncio (ex.: arte do Pelando com preço): descartada e buscada de novo.
+      const blocked = !!cached?.imageUrl && !isCleanImageResult({ url: cached.imageUrl });
+      if (blocked) console.warn(`[ai][foto] ${sku}: foto em cache de origem proibida descartada (${hostOf(cached!.imageUrl!)})`);
+      if (cached && !staleKind && !blocked) {
         const age = now() - cached.updatedAt.getTime();
         if (cached.imageUrl && age < IMAGE_CACHE_TTL_MS) return { sku, url: cached.imageUrl, source: "cache", query: cached.query };
         if (!cached.imageUrl && age < IMAGE_MISS_TTL_MS) return null;
       }
       const found = await deps.search(query);
-      const candidates = rankByCategory(Array.isArray(found) ? found : found ? [found] : [], category).slice(0, 3);
+      const candidates = rankByCategory((Array.isArray(found) ? found : found ? [found] : []).filter((candidate) => isCleanImageResult({ url: candidate })), category).slice(0, 3);
       // Só grava foto que baixa de verdade como JPG/PNG de até 5 MB (site sem bloqueio).
       let url: string | null = null;
       for (const candidate of candidates) {

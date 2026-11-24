@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { createProductImageService, imageQuery, imageSearchConfig, isUsableImage, photoCategory, rankByCategory, searchWebImages, type ImageCache } from "@/lib/ai/product-image";
+import { createProductImageService, imageQuery, imageSearchConfig, isCleanImageResult, isUsableImage, photoCategory, rankByCategory, searchWebImages, type ImageCache } from "@/lib/ai/product-image";
 
 /** Cache da foto por código do produto no banco do CRM (reaproveitado por todas as conversas). */
 const cache: ImageCache = {
@@ -39,7 +39,8 @@ export async function catalogImages(models: CatalogImageModel[], options: { want
     const category = photoCategory(model.categoriaModelo);
     for (const code of model.codigos) {
       const row = bySku.get(code);
-      if (!row?.imageUrl) continue;
+      // Foto de marketplace/concorrente/agregador já salva não vai ao cliente (a busca de abaixo traz uma limpa).
+      if (!row?.imageUrl || !isCleanImageResult({ url: row.imageUrl })) continue;
       if (category && (!row.query.includes(imageQuery({ produto: "", categoria: model.categoriaModelo })) || !rankByCategory([row.imageUrl], category).length)) continue;
       images[code] = row.imageUrl;
     }
