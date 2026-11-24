@@ -23,11 +23,17 @@ GET /orders/pending?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id",
 GET /orders/credit?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "orderId", "number", "issuedAt", "sentAt", "analysisAt", "analyst", "note", "total", "customer", "customerCode", "store", "storeCode", "seller"}]}
   - fila de autorização de crédito (SOLICITACAO_AUTZ_VENDA): pedidos A Liberar enviados pela loja ao financeiro e ainda sem resposta;
   - "id" é a solicitação (um pedido reenviado gera nova solicitação), "analysisAt" = financeiro abriu a solicitação;
+  - também "uf"/"city" da loja e "attempt" (1 = primeiro envio, 2+ = reenvio);
+GET /orders/credit/history?date=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "sentAt", "analysisAt", "answeredAt", "analyst", "store", "storeCode", "uf", "status", "denied", "total"}]}
+  - solicitações de crédito enviadas no dia (resumo do painel: tempo de resposta, por analista, por loja);
+GET /orders/credit/customer?order=PEDIDO_SAIDA_ID  (cabeçalho x-api-key)  ->  {"customer", "order", "receivables", "purchases", "requests"}
+  - ficha do cliente para decidir o crédito: situação/SPC, plano do pedido, parcelas em aberto/atrasadas, pontualidade, compras;
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
 ORACLE_LIB_DIR (de /etc/crm-vmset-sync.env) e STOCK_API_TOKEN, STOCK_API_PORT (de /etc/crm-vmset-stock.env).
 """
+import datetime
 import hmac
 import json
 import os
@@ -322,7 +328,9 @@ MAX_ORDERS = 2000
 CREDIT_QUEUE_SQL = """
 SELECT SAV.SOLICITACAO_AUTZ_VENDA_ID, PS.PEDIDO_SAIDA_ID, PS.PDSD_NR_PEDIDO, PS.PDSD_DT_EMISSAO,
        SAV.SOAV_DT_SAIDA_LOJA, SAV.SOAV_DT_ENTR_CRED, F.PRCR_NOME, SAV.SOAV_OBSERVACAO, PS.PDSD_VLR_TOTAL,
-       P.PRCR_NOME, P.PRCR_CODIGO_CLIENTE, UEP.PRCR_NOME, UE.UNEM_CODIGO, V.PRCR_NOME
+       P.PRCR_NOME, P.PRCR_CODIGO_CLIENTE, UEP.PRCR_NOME, UE.UNEM_CODIGO, V.PRCR_NOME, PS.UNIDADE_EMPRESARIAL_ID,
+       (SELECT COUNT(*) FROM SOLICITACAO_AUTZ_VENDA S2 WHERE S2.PEDIDO_SAIDA_ID = SAV.PEDIDO_SAIDA_ID
+          AND S2.SOAV_DT_SAIDA_LOJA <= SAV.SOAV_DT_SAIDA_LOJA)
 FROM SOLICITACAO_AUTZ_VENDA SAV
 JOIN PEDIDO_SAIDA PS ON PS.PEDIDO_SAIDA_ID = SAV.PEDIDO_SAIDA_ID
 JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PS.UNIDADE_EMPRESARIAL_ID
@@ -337,6 +345,86 @@ WHERE (SAV.FUNCIONARIO_ID IS NULL OR SAV.SOAV_DT_SAIDA_CRED IS NULL)
   AND PS.PDSD_DT_EMISSAO >= TRUNC(SYSDATE) - :days
 ORDER BY SAV.SOAV_DT_SAIDA_LOJA
 """
+
+# Solicitações de crédito enviadas pelas lojas num dia (resumo do painel do financeiro).
+CREDIT_HISTORY_SQL = """
+SELECT SAV.SOLICITACAO_AUTZ_VENDA_ID, PS.PDSD_NR_PEDIDO, SAV.SOAV_DT_SAIDA_LOJA, SAV.SOAV_DT_ENTR_CRED,
+       SAV.SOAV_DT_SAIDA_CRED, F.PRCR_NOME, UEP.PRCR_NOME, UE.UNEM_CODIGO, PS.UNIDADE_EMPRESARIAL_ID, PS.PDSD_STATUS,
+       PS.PDSD_NEGADO_CREDITO, PS.PDSD_VLR_TOTAL
+FROM SOLICITACAO_AUTZ_VENDA SAV
+JOIN PEDIDO_SAIDA PS ON PS.PEDIDO_SAIDA_ID = SAV.PEDIDO_SAIDA_ID
+JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PS.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN PARCEIRO UEP ON UEP.PARCEIRO_ID = PS.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN PARCEIRO F ON F.PARCEIRO_ID = SAV.FUNCIONARIO_ID
+WHERE SAV.SOAV_DT_SAIDA_LOJA >= :d AND SAV.SOAV_DT_SAIDA_LOJA < :d + 1
+ORDER BY SAV.SOAV_DT_SAIDA_LOJA
+"""
+
+# UF/cidade de cada loja pelo endereço cadastrado (bairro ou CEP -> cidade -> estado).
+STORE_PLACE_SQL = """
+SELECT UE.UNIDADE_EMPRESARIAL_ID, MAX(P.PRCR_NOME), MAX(ES.ESTD_SIGLA), MAX(CI.CDDE_NOME)
+FROM UNIDADE_EMPRESARIAL UE
+JOIN PARCEIRO P ON P.PARCEIRO_ID = UE.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN ENDERECO EN ON EN.PARCEIRO_ID = UE.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN BAIRRO B ON B.BAIRRO_ID = EN.BAIRRO_ID
+LEFT JOIN CEP C ON C.CEP_ID = EN.CEP_ID
+LEFT JOIN CIDADE CI ON CI.CIDADE_ID = NVL(B.CIDADE_ID, C.CIDADE_ID)
+LEFT JOIN ESTADO ES ON ES.ESTADO_ID = CI.ESTADO_ID
+GROUP BY UE.UNIDADE_EMPRESARIAL_ID
+"""
+STORE_PLACE_TTL = 3600
+store_place_cache = {"at": 0, "map": {}}
+
+# Ficha do cliente para a decisão de crédito (pedido -> cliente).
+CUSTOMER_SQL = """
+SELECT PS.PARCEIRO_ID, P.PRCR_NOME, P.PRCR_CODIGO_CLIENTE, P.PRCR_CGC_CPF, P.DATA_INCLUSAO, PC.PRCL_SITUACAO,
+       PC.PRCL_QTDE_RESTRICOES_SPC, PC.PRCL_DT_ULT_CONS_SPC, PS.PDSD_NR_PEDIDO, PS.PDSD_VLR_TOTAL, D.TPDC_DESCRICAO,
+       CP.CDPG_DESCRICAO
+FROM PEDIDO_SAIDA PS
+JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
+LEFT JOIN PARAM_CLIENTE PC ON PC.PARAM_CLIENTE_ID = PS.PARCEIRO_ID
+LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
+LEFT JOIN CONDICAO_PAGTO CP ON CP.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
+WHERE PS.PEDIDO_SAIDA_ID = :id
+"""
+ORDER_PLAN_SQL = """
+SELECT PCPS_NR_PARCELA, PCPS_DT_VENCTO, PCPS_VALOR FROM PARCELA_PEDIDO_SAIDA
+WHERE PEDIDO_SAIDA_ID = :id AND NVL(TRIM(STATUS), 'Ativo') LIKE 'Ativo%'
+ORDER BY PCPS_NR_PARCELA
+"""
+# Títulos a receber do cliente (carnê/boleto/crédito interno), últimos 5 anos, sem cancelados.
+CUSTOMER_TITLES_SQL = """
+SELECT T.TITL_NUMERO, T.TITL_PARCELA, T.TITL_DT_VENCTO, T.TITL_VALOR, T.TITL_POSICAO, T.TITL_DT_PAGTO,
+       T.TITL_VLR_PAGTO, MAX(LJ.PRCR_NOME)
+FROM TITULO T
+JOIN FATURA F ON F.FATURA_ID = T.FATURA_ID AND F.FTRA_TIPO = 'Recebimento'
+JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = T.TIPO_DOCUMENTO_ID AND D.TPDC_DESCRICAO IN ('CARNE', 'BOLETO BANCARIO', 'CREDITO INTERNO')
+LEFT JOIN PARCEIRO LJ ON LJ.PARCEIRO_ID = T.UNIDADE_MANTENEDORA_ID
+WHERE T.PARCEIRO_ID = :p AND T.STATUS LIKE 'Ativo%' AND T.TITL_POSICAO <> 'Cancelado'
+  AND T.TITL_DT_VENCTO >= ADD_MONTHS(TRUNC(SYSDATE), -60)
+GROUP BY T.TITULO_ID, T.TITL_NUMERO, T.TITL_PARCELA, T.TITL_DT_VENCTO, T.TITL_VALOR, T.TITL_POSICAO, T.TITL_DT_PAGTO, T.TITL_VLR_PAGTO
+ORDER BY T.TITL_DT_VENCTO
+"""
+CUSTOMER_PURCHASES_SQL = """
+SELECT * FROM (
+  SELECT PS.PDSD_NR_PEDIDO, PS.PDSD_DT_EMISSAO, PS.PDSD_VLR_TOTAL, UEP.PRCR_NOME, D.TPDC_DESCRICAO
+  FROM PEDIDO_SAIDA PS
+  LEFT JOIN PARCEIRO UEP ON UEP.PARCEIRO_ID = PS.UNIDADE_EMPRESARIAL_ID
+  LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
+  WHERE PS.PARCEIRO_ID = :p AND PS.PDSD_STATUS = 'Faturado' AND TRIM(PS.STATUS) = 'Ativo'
+  ORDER BY PS.PDSD_DT_EMISSAO DESC
+) WHERE ROWNUM <= 6
+"""
+CUSTOMER_PURCHASE_TOTALS_SQL = """
+SELECT COUNT(*), SUM(PDSD_VLR_TOTAL), MIN(PDSD_DT_EMISSAO) FROM PEDIDO_SAIDA
+WHERE PARCEIRO_ID = :p AND PDSD_STATUS = 'Faturado' AND TRIM(STATUS) = 'Ativo'
+"""
+CUSTOMER_REQUESTS_SQL = """
+SELECT COUNT(*), SUM(CASE WHEN PS.PDSD_NEGADO_CREDITO = 'Sim' THEN 1 ELSE 0 END)
+FROM SOLICITACAO_AUTZ_VENDA SAV JOIN PEDIDO_SAIDA PS ON PS.PEDIDO_SAIDA_ID = SAV.PEDIDO_SAIDA_ID
+WHERE PS.PARCEIRO_ID = :p AND PS.PEDIDO_SAIDA_ID <> :id
+"""
+ORDER_ID = re.compile(r"^[A-Za-z0-9]{1,40}$")
 
 
 def moment(value):
@@ -354,8 +442,25 @@ def pending_orders(days):
         } for order_id, number, status, release, issued, updated, total, customer, store, seller, mode in cur.fetchmany(MAX_ORDERS)]
 
 
+def store_places(conn):
+    """{UNIDADE_EMPRESARIAL_ID: (uf, cidade)}; loja sem endereço no VMSet cai na UF pelo nome (OTICAS BRASIL TO, -ZVC = GO)."""
+    if time.time() - store_place_cache["at"] < STORE_PLACE_TTL:
+        return store_place_cache["map"]
+    cur = conn.cursor()
+    cur.execute(STORE_PLACE_SQL)
+    places = {}
+    for store_id, name, uf, city in cur.fetchall():
+        name = text(name) or ""
+        if not uf:
+            uf = "TO" if " TO " in f" {name} " else "GO" if "-ZVC" in name else None
+        places[str(store_id)] = (text(uf), text(city))
+    store_place_cache.update(at=time.time(), map=places)
+    return places
+
+
 def credit_queue(days):
     with pool.acquire() as conn:
+        places = store_places(conn)
         cur = conn.cursor()
         cur.execute(CREDIT_QUEUE_SQL, days=days)
         return [{
@@ -363,8 +468,82 @@ def credit_queue(days):
             "sentAt": moment(sent), "analysisAt": moment(analysis), "analyst": text(analyst), "note": text(note),
             "total": round(float(total or 0), 2), "customer": text(customer), "customerCode": text(customer_code),
             "store": text(store), "storeCode": text(store_code), "seller": text(seller),
+            "uf": places.get(str(store_id), (None, None))[0], "city": places.get(str(store_id), (None, None))[1],
+            "attempt": int(attempt or 1),
         } for request_id, order_id, number, issued, sent, analysis, analyst, note, total, customer, customer_code,
-            store, store_code, seller in cur.fetchmany(MAX_ORDERS)]
+            store, store_code, seller, store_id, attempt in cur.fetchmany(MAX_ORDERS)]
+
+
+def credit_history(date):
+    with pool.acquire() as conn:
+        conn.call_timeout = 15_000
+        places = store_places(conn)
+        cur = conn.cursor()
+        cur.execute(CREDIT_HISTORY_SQL, d=date)
+        return [{
+            "id": str(request_id), "number": str(number or ""), "sentAt": moment(sent), "analysisAt": moment(analysis),
+            "answeredAt": moment(answered), "analyst": text(analyst), "store": text(store), "storeCode": text(store_code),
+            "uf": places.get(str(store_id), (None, None))[0], "status": text(status), "denied": text(denied) == "Sim",
+            "total": round(float(total or 0), 2),
+        } for request_id, number, sent, analysis, answered, analyst, store, store_code, store_id, status, denied, total
+            in cur.fetchmany(MAX_ORDERS)]
+
+
+def credit_customer(order_id):
+    with pool.acquire() as conn:
+        conn.call_timeout = 15_000
+        cur = conn.cursor()
+        cur.execute(CUSTOMER_SQL, id=order_id)
+        row = cur.fetchone()
+        if not row:
+            return None
+        (partner, name, code, cpf, since, rating, spc_count, spc_at, number, total, doc_type, condition) = row
+        cur.execute(ORDER_PLAN_SQL, id=order_id)
+        plan = [{"n": int(n or 0), "due": day(due), "value": money(value)} for n, due, value in cur.fetchall()]
+
+        cur.execute(CUSTOMER_TITLES_SQL, p=partner)
+        today = datetime.date.today()
+        open_items, paid, on_time, delays, last_payment = [], 0, 0, [], None
+        for numero, parcela, due, value, position, paid_at, paid_value, store in cur.fetchmany(2000):
+            position = text(position) or ""
+            if position in ("Aberto", "Recebendo"):
+                remaining = float(value or 0) - (float(paid_value or 0) if position == "Recebendo" else 0)
+                late = (today - due.date()).days if due and due.date() < today else 0
+                open_items.append({"numero": str(numero or ""), "parcela": str(parcela or ""), "due": day(due),
+                                   "value": round(max(remaining, 0), 2), "lateDays": late, "store": text(store)})
+            elif position == "Quitado" and paid_at and due and due.date() < today:
+                paid += 1
+                delay = max((paid_at.date() - due.date()).days, 0)
+                delays.append(delay)
+                on_time += delay == 0
+            if paid_at and (not last_payment or paid_at > last_payment):
+                last_payment = paid_at
+        overdue = [t for t in open_items if t["lateDays"] > 0]
+
+        cur.execute(CUSTOMER_PURCHASE_TOTALS_SQL, p=partner)
+        bought, spent, first = cur.fetchone()
+        cur.execute(CUSTOMER_PURCHASES_SQL, p=partner)
+        purchases = [{"number": str(n or ""), "date": day(d), "total": money(v), "store": text(s), "payment": text(t)}
+                     for n, d, v, s, t in cur.fetchall()]
+        cur.execute(CUSTOMER_REQUESTS_SQL, p=partner, id=order_id)
+        requests, denied = cur.fetchone()
+        return {
+            "customer": {"name": text(name), "code": text(code), "cpf": text(cpf), "since": day(since), "rating": text(rating),
+                         "spcRestrictions": int(spc_count) if spc_count is not None else None, "spcCheckedAt": day(spc_at)},
+            "order": {"number": str(number or ""), "total": money(total), "payment": text(doc_type), "condition": text(condition),
+                      "plan": plan},
+            "receivables": {
+                "openCount": len(open_items), "openValue": round(sum(t["value"] for t in open_items), 2),
+                "overdueCount": len(overdue), "overdueValue": round(sum(t["value"] for t in overdue), 2),
+                "maxLateDays": max((t["lateDays"] for t in overdue), default=0),
+                "paidCount": paid, "paidOnTime": on_time,
+                "avgDelayDays": round(sum(delays) / len(delays), 1) if delays else None,
+                "lastPaymentAt": day(last_payment),
+                "open": sorted(open_items, key=lambda t: t["due"] or "")[:30],
+            },
+            "purchases": {"count": int(bought or 0), "total": money(spent), "firstAt": day(first), "last": purchases},
+            "requests": {"previous": int(requests or 0), "denied": int(denied or 0)},
+        }
 
 
 def catalog_products():
@@ -452,7 +631,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", "/orders/credit", *catalog_cache):
+        if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", "/orders/credit",
+                            "/orders/credit/history", "/orders/credit/customer", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
@@ -474,6 +654,27 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"ERRO pedidos {url.path}: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
             return self._send(200, {"at": int(time.time() * 1000), "items": items})
+        if url.path == "/orders/credit/history":
+            try:
+                date = datetime.datetime.strptime(parse_qs(url.query).get("date", [""])[0], "%Y-%m-%d")
+            except ValueError:
+                return self._send(400, {"error": "date precisa ser YYYY-MM-DD"})
+            try:
+                items = credit_history(date)
+            except Exception as error:
+                log(f"ERRO histórico de crédito: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+            return self._send(200, {"at": int(time.time() * 1000), "items": items})
+        if url.path == "/orders/credit/customer":
+            order_id = parse_qs(url.query).get("order", [""])[0]
+            if not ORDER_ID.match(order_id):
+                return self._send(400, {"error": "order inválido"})
+            try:
+                data = credit_customer(order_id)
+            except Exception as error:
+                log(f"ERRO ficha do cliente: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+            return self._send(200, data) if data else self._send(404, {"error": "pedido não encontrado"})
         if url.path == "/punctuality":
             query = parse_qs(url.query)
             try:
