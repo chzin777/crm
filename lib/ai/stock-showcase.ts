@@ -18,6 +18,8 @@ export type SearchKind = "marca_ampla" | "modelo_especifico";
 
 /** Modelos na vitrine da busca ampla: no máximo 3 opções distintas (curadoria de consultora, não catálogo inteiro). */
 export const SHOWCASE_MAX_MODELS = 3;
+/** Modelos de reserva (com estoque) para trocar opção sem foto válida no catálogo visual. */
+export const SHOWCASE_RESERVES = 4;
 /** Modelos candidatos consultados no saldo (até 2 códigos cada) para sobrarem até 8 com estoque. */
 export const SHOWCASE_CANDIDATES = 12;
 export const SHOWCASE_CODES_PER_MODEL = 2;
@@ -122,6 +124,10 @@ export type ShowcaseResult = {
   marcaResolvida?: string;
   /** A marca foi reconhecida, mas não há modelo dela com estoque/cadastro agora. */
   semEstoqueDaMarca?: boolean;
+  /** Próximos modelos com estoque (fora da vitrine): substituem no catálogo com foto quem não tiver foto válida. Nunca vão ao modelo de linguagem. */
+  reservas?: ShowcaseModel[];
+  /** Vitrine da rede quando a cidade não tem saldo (a loja confirma). */
+  foraDaCidade?: boolean;
 };
 
 /**
@@ -339,6 +345,7 @@ export function buildShowcaseResult(input: {
     if (!fresh.length) return { ...base, cenario: "todos_ja_mostrados", todosJaMostrados: true, modelos: [], vitrineFormatada: null, orientacao: "Todos os modelos com estoque desta busca já foram mostrados nesta conversa: NÃO repita nenhum. Diga com naturalidade que esses são os que a loja tem dessa linha agora e ofereça outro caminho (outra marca, outro estilo ou faixa de preço, ou conhecer de perto na loja mais próxima)." };
     models.splice(0, models.length, ...fresh);
   }
+  const reserves = models.slice(SHOWCASE_MAX_MODELS, SHOWCASE_MAX_MODELS + SHOWCASE_RESERVES);
   models.splice(SHOWCASE_MAX_MODELS);
   const range = priceRangeLabel(input.price);
   if (!models.length && range) return { ...base, cenario: input.city ? "sem_estoque_na_cidade" : "sem_estoque_na_rede", modelos: [], vitrineFormatada: null, orientacao: `Não há modelos com estoque ${range}${input.city ? ` em ${input.city}` : ""} agora. Diga isso com naturalidade e ofereça as opções mais próximas do orçamento (nova busca sem o limite de valor) ou ajuda de um atendente.` };
@@ -347,6 +354,7 @@ export function buildShowcaseResult(input: {
     ...base,
     cenario: "disponivel_em_lojas",
     modelos: models,
+    ...(reserves.length ? { reservas: reserves } : {}),
     vitrineFormatada: formatShowcase(models, { header: false }),
     orientacao: input.price?.minPrice || input.price?.maxPrice || input.price?.sortBy ? BUDGET_SHOWCASE_GUIDANCE : SHOWCASE_GUIDANCE.disponivel_em_lojas,
   };

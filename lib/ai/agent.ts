@@ -656,6 +656,8 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     : input.listedProducts ?? [];
   // Modelos das vitrines desta resposta (estoque, lojas e códigos): base do catálogo com fotos.
   const shownModels: ShowcaseModel[] = [];
+  /** Modelos com estoque além dos 3 da vitrine: substituem opção sem foto válida no catálogo visual. */
+  const reserveModels: ShowcaseModel[] = [];
   // Toque na lista interativa: escolha determinística (busca específica com foto + ficha + lojas).
   const choice: ListedChoice = photoQuery || forceCatalog ? null : input.selectedProductRef
     ? { type: "item", item: selectedListedItem(input.selectedProductRef, listed) }
@@ -824,9 +826,12 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
         // Modelos já mostrados na conversa saem na própria busca (query._excluir), antes do corte da vitrine.
         const fresh = models;
         shownModels.push(...fresh);
+        // Reservas (com estoque, fora da vitrine): trocam no catálogo com foto quem não tiver foto válida. Não vão ao modelo.
+        const { reservas, ...visible } = result;
+        reserveModels.push(...(reservas ?? []));
         interactiveList = buildShowcaseList(fresh, null);
         toolShowcase = result.vitrineFormatada ?? null;
-        return { ...result, fotosNoCatalogo: await catalogPhotosFor(fresh), quantidadeDeModelos: fresh.length, orientacaoDaVitrine: showcaseGuidance(fresh) };
+        return { ...visible, fotosNoCatalogo: await catalogPhotosFor([...fresh, ...(reservas ?? [])]), quantidadeDeModelos: fresh.length, orientacaoDaVitrine: showcaseGuidance(fresh) };
       }
       if (!allowsProductPhoto(result)) return result;
       // Referência pedida (ou o produto fixado) primeiro: a ficha e a foto nunca saem de outro modelo da lista.
@@ -1125,8 +1130,9 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     const ordered: ShowcaseModel[] = items.map((item) => shownModels.find((model) => !!item.referencia && key(model.referencia) === key(item.referencia))
       ?? shownModels.find((model) => normalizeTerm(model.nomeComercial) === normalizeTerm(item.nomeComercial) && (item.preco === null || parseBrl(model.precoVenda ?? "") === item.preco))
       ?? { nomeComercial: item.nomeComercial, referencia: item.referencia, categoriaModelo: null, precoVenda: item.preco ? formatBrl(item.preco) : null, totalDisponivelRede: 0, codigos: item.sku ? [item.sku] : [] });
-    if (!ordered.some((model) => model.codigos.some((code) => !!catalogPhotos[code]))) await catalogPhotosFor(ordered);
-    visualCatalog = buildVisualCatalog({ models: ordered, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after });
+    const reserves = reserveModels.filter((model) => !ordered.some((item) => item.codigos.some((code) => model.codigos.includes(code))));
+    if (!ordered.some((model) => model.codigos.some((code) => !!catalogPhotos[code]))) await catalogPhotosFor([...ordered, ...reserves]);
+    visualCatalog = buildVisualCatalog({ models: ordered, reserves, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after });
     if (visualCatalog) {
       outcome = { ...outcome, reply: [before, ...visualCatalog.items.map((item) => item.caption), after].filter(Boolean).join("\n---SPLIT---\n") };
       catalogState.lastShownProducts = shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })));

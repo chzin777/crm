@@ -43,8 +43,10 @@ const BRAND_NAMES: Record<string, string> = { RAYBAN: "Ray-Ban", "RAY-BAN": "Ray
  * Busca limpa a partir do ERP: marca + modelo/referência, sem cor/tamanho (601/8G, 54-17, 140) nem siglas internas.
  * Ex.: "RAYBAN RB4165 JUSTIN 601/8G 54" → "Ray-Ban RB4165 Justin óculos".
  */
-export function imageQuery(product: { produto: string; marca?: string | null }) {
-  const brandRaw = product.marca?.trim().toUpperCase() ?? "";
+export function imageQuery(product: { produto: string; marca?: string | null; categoria?: string | null }) {
+  // Sem marca separada (catálogo: "Ray-Ban RB4340"), a marca vem do próprio nome em vez de ser descartada.
+  const named = product.produto.split(/\s+/).map((word) => word.toUpperCase()).find((word) => BRAND_NAMES[word] !== undefined) ?? "";
+  const brandRaw = product.marca?.trim().toUpperCase() || named;
   const brand = BRAND_NAMES[brandRaw] ?? (brandRaw ? brandRaw.charAt(0) + brandRaw.slice(1).toLowerCase() : "");
   const words = product.produto
     .replace(/[()[\]{}"',;]/g, " ")
@@ -56,7 +58,35 @@ export function imageQuery(product: { produto: string; marca?: string | null }) 
       return upper !== brandRaw && upper !== brandRaw.replace(/[\s-]/g, "") && BRAND_NAMES[upper] === undefined;
     })
     .map((word) => (/\d/.test(word) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()));
-  return [brand, ...words.slice(0, 5), "óculos"].filter(Boolean).join(" ").trim();
+  // Tipo do produto na busca: a mesma referência existe em sol e grau (RB4340 x RX4340); sem ele vinha foto da armação.
+  return [brand, ...words.slice(0, 5), CATEGORY_QUERY[photoCategory(product.categoria)]].filter(Boolean).join(" ").trim();
+}
+
+export type PhotoCategory = "sol" | "grau" | "";
+/** Categoria do modelo ("Óculos de sol", "SOLAR", "Armação", "ARMACAO") → tipo da foto. */
+export function photoCategory(categoria: string | null | undefined): PhotoCategory {
+  const text = (categoria ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  if (!text || /lente/.test(text)) return "";
+  if (/\bsol\b|solar|sunglass/.test(text)) return "sol";
+  if (/arma|grau|receitu|optical|eyeglass/.test(text)) return "grau";
+  return "";
+}
+const CATEGORY_QUERY: Record<PhotoCategory, string> = { sol: "óculos de sol", grau: "armação óculos de grau", "": "óculos" };
+
+const SUN_HINT = /sunglass|sun-glass|oculos-de-sol|oculos_de_sol|de-sol|solar|polarized|polarizad|\bsol\b/i;
+const OPTICAL_HINT = /eyeglass|optical|opticals|oftalm|receituario|armacao|armacoes|\brx\d|[/_-]rx[/_-]|grau|clear-lens|demo-lens|prescription/i;
+
+/**
+ * Coerência foto x tipo: para óculos de sol descarta URLs que indicam armação de grau (eyeglasses, optical, RX) e
+ * vice-versa; as que confirmam o tipo vêm primeiro. Sem tipo conhecido, mantém a ordem.
+ */
+export function rankByCategory(urls: string[], category: PhotoCategory) {
+  if (!category) return urls;
+  const decode = (url: string) => { try { return decodeURIComponent(url); } catch { return url; } };
+  const fold = (url: string) => decode(url).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const [same, opposite] = category === "sol" ? [SUN_HINT, OPTICAL_HINT] : [OPTICAL_HINT, SUN_HINT];
+  const allowed = urls.filter((url) => !(opposite.test(fold(url)) && !same.test(fold(url))));
+  return [...allowed.filter((url) => same.test(fold(url))), ...allowed.filter((url) => !same.test(fold(url)))];
 }
 
 const BLOCKED_HOSTS = /(^|\.)(facebook\.com|fbsbx\.com|fbcdn\.net|instagram\.com|cdninstagram\.com|tiktok\.com|x\.com|twitter\.com|pinimg\.com|gstatic\.com|googleusercontent\.com|lookaside\.)/i;
@@ -189,19 +219,22 @@ export type ProductImage = { sku: string; url: string; source: "cache" | "web"; 
  */
 export function createProductImageService(deps: { cache: ImageCache; search: (query: string) => Promise<string[] | string | null>; validate?: (url: string) => Promise<boolean>; now?: () => number }) {
   const now = deps.now ?? Date.now;
-  return async function searchAndCacheProductImage(product: { codigo: string; produto: string; marca?: string | null }): Promise<ProductImage | null> {
+  return async function searchAndCacheProductImage(product: { codigo: string; produto: string; marca?: string | null; categoria?: string | null }): Promise<ProductImage | null> {
     const sku = product.codigo?.trim();
     if (!sku) return null;
     try {
+      const query = imageQuery(product);
+      const category = photoCategory(product.categoria);
       const cached = await deps.cache.get(sku);
-      if (cached) {
+      // Foto gravada por uma busca sem o tipo (ou do tipo oposto) não vale para quem agora sabe o tipo: busca de novo.
+      const staleKind = !!category && !!cached && !cached.query.includes(CATEGORY_QUERY[category]);
+      if (cached && !staleKind) {
         const age = now() - cached.updatedAt.getTime();
         if (cached.imageUrl && age < IMAGE_CACHE_TTL_MS) return { sku, url: cached.imageUrl, source: "cache", query: cached.query };
         if (!cached.imageUrl && age < IMAGE_MISS_TTL_MS) return null;
       }
-      const query = imageQuery(product);
       const found = await deps.search(query);
-      const candidates = (Array.isArray(found) ? found : found ? [found] : []).slice(0, 3);
+      const candidates = rankByCategory(Array.isArray(found) ? found : found ? [found] : [], category).slice(0, 3);
       // Só grava foto que baixa de verdade como JPG/PNG de até 5 MB (site sem bloqueio).
       let url: string | null = null;
       for (const candidate of candidates) {

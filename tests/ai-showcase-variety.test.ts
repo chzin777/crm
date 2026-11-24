@@ -45,15 +45,23 @@ describe("vitrine com modelos reais e distintos, sem repetir na conversa", () =>
     expect(sanitizeCatalogContext(JSON.parse(JSON.stringify(context))).shownIds).toEqual(["ref:4340", "2", "1"]);
   });
 
-  it("catálogo com fotos: modelo sem foto entra como legenda em texto (não some); legendas sem traço nem bloco de lojas", () => {
+  it("catálogo com fotos: todos os cards com foto (sem foto sai e a reserva com foto entra); legendas sem traço nem bloco de lojas", () => {
     const models: ShowcaseModel[] = [
       { nomeComercial: "Ray-Ban", referencia: "RB4340", categoriaModelo: "Óculos de sol", precoVenda: "R$ 990,00", precoVaria: true, totalDisponivelRede: 2, codigos: ["1"], lojas: ["Setor Central", "Setor Sul"] },
       { nomeComercial: "Ray-Ban", referencia: "RB7047", categoriaModelo: "Armação de grau", precoVenda: "R$ 750,00", totalDisponivelRede: 1, codigos: ["2"], lojas: ["Setor Marista"] },
       { nomeComercial: "Ray-Ban Justin", referencia: "RB4165", categoriaModelo: "Óculos de sol", precoVenda: "R$ 1.210,00", totalDisponivelRede: 1, codigos: ["3"] },
     ];
-    const catalog = buildVisualCatalog({ models, images: { "1": "https://img.test/1.jpg" }, city: "Goiânia", opening: "Olha essas", closing: "Qual te agradou?" })!;
+    const vogue: ShowcaseModel = { nomeComercial: "Vogue", referencia: "VO5625S", categoriaModelo: "Óculos de sol", precoVenda: "R$ 450,00", totalDisponivelRede: 1, codigos: ["4"] };
+    // Sem reserva: só os que têm foto (nunca card em texto no meio dos com foto).
+    const only = buildVisualCatalog({ models, images: { "1": "https://img.test/1.jpg", "3": "https://img.test/3.jpg" }, city: "Goiânia", opening: "", closing: "" })!;
+    expect(only.items.map((item) => item.sku)).toEqual(["1", "3"]);
+    expect(only.items.map((item) => item.index)).toEqual([1, 2]);
+    // Mesma foto em dois modelos conta como sem foto para o segundo.
+    const duplicated = buildVisualCatalog({ models, reserves: [vogue], images: { "1": "https://img.test/1.jpg", "2": "https://img.test/1.jpg", "3": "https://img.test/3.jpg", "4": "https://img.test/4.jpg" }, city: "Goiânia", opening: "", closing: "" })!;
+    expect(duplicated.items.map((item) => item.sku)).toEqual(["1", "3", "4"]);
+    const catalog = buildVisualCatalog({ models, images: { "1": "https://img.test/1.jpg", "2": "https://img.test/2.jpg", "3": "https://img.test/3.jpg" }, city: "Goiânia", opening: "Olha essas", closing: "Qual te agradou?" })!;
     expect(catalog.items).toHaveLength(3);
-    expect(catalog.items.map((item) => item.imageUrl)).toEqual(["https://img.test/1.jpg", "", ""]);
+    expect(catalog.items.every((item) => item.imageUrl)).toBe(true);
     expect(catalog.items.map((item) => item.caption)).toEqual([
       "1. Ray-Ban RB4340, óculos de sol, a partir de R$ 990,00",
       "2. Ray-Ban RB7047, armação de grau, R$ 750,00",

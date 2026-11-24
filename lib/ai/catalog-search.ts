@@ -523,24 +523,27 @@ export function catalogOpening(input: { count: number; category?: string; city?:
 export const CATALOG_CLOSINGS = ["Qual dessas fotos chamou mais sua atenção?", "Qual delas você mais gostou?", "Alguma dessas te agradou? Me fala o número da foto."];
 
 /**
- * Curadoria do catálogo visual: na ordem da vitrine, até VISUAL_CATALOG_MAX modelos distintos. Modelo com foto
- * válida (qualquer código da variante) vai como foto + legenda; sem foto (ou com a mesma foto de outro), vai só
- * a legenda em texto, em vez de sumir da vitrine. null quando nenhum tem foto (aí a vitrine sai em texto limpo).
+ * Curadoria do catálogo visual: na ordem da vitrine, até VISUAL_CATALOG_MAX modelos distintos, TODOS com foto válida
+ * e única (qualquer código da variante). Opção sem foto (ou com a mesma foto de outra) sai e dá lugar à próxima
+ * reserva com foto (mesma busca, com estoque). null quando nenhum modelo tem foto (aí a vitrine sai em texto limpo).
  */
-export function buildVisualCatalog(input: { models: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number }): VisualCatalog | null {
+export function buildVisualCatalog(input: { models: ShowcaseModel[]; reserves?: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number }): VisualCatalog | null {
   const items: CatalogPhoto[] = [];
   // Nunca o mesmo modelo (referência/nome) nem a mesma foto duas vezes na mesma resposta.
   const seenModels = new Set<string>();
   const seenImages = new Set<string>();
   const key = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const imageKey = (url: string) => url.trim().replace(/#.*$/, "");
-  for (const model of input.models) {
-    if (items.length >= (input.max ?? VISUAL_CATALOG_MAX)) break;
+  const max = Math.min(input.max ?? VISUAL_CATALOG_MAX, Math.max(1, input.models.length));
+  for (const model of [...input.models, ...(input.reserves ?? [])]) {
+    if (items.length >= max) break;
     const modelKeys = [model.referencia && !model.referencia.startsWith("#") ? `ref:${key(referenceKey(model.referencia) || model.referencia)}` : "", ...model.codigos.map((code) => `cod:${code}`)].filter(Boolean);
     if (modelKeys.some((value) => seenModels.has(value))) continue;
-    modelKeys.forEach((value) => seenModels.add(value));
     const sku = model.codigos.find((code) => !!input.images[code] && !seenImages.has(imageKey(input.images[code])));
-    if (sku) seenImages.add(imageKey(input.images[sku]));
+    // Sem foto válida e única: fica fora (uniformidade visual: todos os cards com foto).
+    if (!sku) continue;
+    modelKeys.forEach((value) => seenModels.add(value));
+    seenImages.add(imageKey(input.images[sku]));
     const index = items.length + 1;
     const stores = model.lojas ?? [];
     const name = modelDisplayName(model);

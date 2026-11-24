@@ -183,7 +183,7 @@ export async function consultarEstoqueProduto(
         const network = await showcase(GENERIC_CANDIDATES_WIDE, "");
         if (network.result.modelos.length) {
           ({ result, lookup } = network);
-          result = { ...result, orientacao: `Não achei saldo desses modelos nas lojas de ${city} agora, mas a rede tem estas opções. Apresente com naturalidade e diga que a loja de ${city} confirma a disponibilidade ou providencia a transferência.`, foraDaCidade: true } as ShowcaseResult;
+          result = { ...result, orientacao: `Não achei saldo desses modelos nas lojas de ${city} agora, mas a rede tem estas opções. Apresente com naturalidade e diga que a loja de ${city} confirma a disponibilidade ou providencia a transferência.`, foraDaCidade: true };
         }
       }
     }
