@@ -18,8 +18,9 @@ GET /catalog/products[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [
   - retrato em memória por 60 min (a consulta de preços varre a PRECO_VENDA e leva ~30 s), renovado em segundo plano;
 GET /catalog/stock[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [[codigo, unidade, nomeUnidade, disponivel, reservado]]}
   - saldo de todas as unidades que vendem, retrato de 2 min (mesma regra do /stock);
-GET /orders/pending?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "status", "release", "issuedAt", "updatedAt", "total", "customer", "store", "seller", "mode"}]}
+GET /orders/pending?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "status", "release", "issuedAt", "updatedAt", "total", "customer", "store", "seller", "mode", "credit"}]}
   - pedidos de venda ativos ainda não faturados (A Liberar / Reservado) para o painel de pedidos;
+  - "credit": verificações de crédito ainda pendentes (aguardando o financeiro liberar); vazio = não depende do financeiro;
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -303,7 +304,8 @@ def price_value(value):
 # (estoque reservado, aguardando NF). Só pedidos ativos, emitidos nos últimos :days dias.
 PENDING_ORDERS_SQL = """
 SELECT PS.PEDIDO_SAIDA_ID, PS.PDSD_NR_PEDIDO, PS.PDSD_STATUS, PS.PDSD_SIT_LIBERACAO, PS.PDSD_DT_EMISSAO, PS.DATA_ALTERACAO,
-       PS.PDSD_VLR_TOTAL, P.PRCR_NOME, UE.PRCR_NOME, V.PRCR_NOME, PS.PDSD_MODO_VD
+       PS.PDSD_VLR_TOTAL, P.PRCR_NOME, UE.PRCR_NOME, V.PRCR_NOME, PS.PDSD_MODO_VD, PS.PDSD_NEGADO_CREDITO,
+       PS.PDSD_LIB_LIMITE_CREDITO, PS.PDSD_LIB_SPC, PS.PDSD_LIB_TIPO_DCTO, PS.PDSD_LIB_CONDICAO_PAGTO
 FROM PEDIDO_SAIDA PS
 LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
 LEFT JOIN PARCEIRO UE ON UE.PARCEIRO_ID = PS.UNIDADE_EMPRESARIAL_ID
@@ -313,10 +315,18 @@ WHERE PS.PDSD_STATUS IN ('A Liberar', 'Reservado') AND TRIM(PS.STATUS) = 'Ativo'
 ORDER BY PS.PDSD_DT_EMISSAO DESC
 """
 MAX_ORDERS = 2000
+# Bloqueios de crédito do pedido: "Nao" = aguardando o financeiro liberar, "Sim" = já liberado, vazio = não se aplica.
+CREDIT_CHECKS = ("Limite de crédito", "SPC", "Tipo de documento", "Condição de pagamento")
 
 
 def moment(value):
     return value.strftime("%Y-%m-%dT%H:%M:%S") if value else None
+
+
+def credit_pending(status, denied, flags):
+    if text(status) != "A Liberar" or text(denied) == "Sim":
+        return []
+    return [name for name, flag in zip(CREDIT_CHECKS, flags) if text(flag) == "Nao"]
 
 
 def pending_orders(days):
@@ -327,7 +337,9 @@ def pending_orders(days):
             "id": str(order_id), "number": str(number or ""), "status": text(status), "release": text(release),
             "issuedAt": moment(issued), "updatedAt": moment(updated), "total": round(float(total or 0), 2),
             "customer": text(customer), "store": text(store), "seller": text(seller), "mode": text(mode),
-        } for order_id, number, status, release, issued, updated, total, customer, store, seller, mode in cur.fetchmany(MAX_ORDERS)]
+            "credit": credit_pending(status, denied, flags),
+        } for order_id, number, status, release, issued, updated, total, customer, store, seller, mode, denied, *flags
+            in cur.fetchmany(MAX_ORDERS)]
 
 
 def catalog_products():
