@@ -18,9 +18,11 @@ GET /catalog/products[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [
   - retrato em memória por 60 min (a consulta de preços varre a PRECO_VENDA e leva ~30 s), renovado em segundo plano;
 GET /catalog/stock[?refresh=1]  (cabeçalho x-api-key)  ->  {"at", "items": [[codigo, unidade, nomeUnidade, disponivel, reservado]]}
   - saldo de todas as unidades que vendem, retrato de 2 min (mesma regra do /stock);
-GET /orders/pending?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "status", "release", "issuedAt", "updatedAt", "total", "customer", "store", "seller", "mode", "credit"}]}
+GET /orders/pending?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "status", "release", "issuedAt", "updatedAt", "total", "customer", "store", "seller", "mode"}]}
   - pedidos de venda ativos ainda não faturados (A Liberar / Reservado) para o painel de pedidos;
-  - "credit": verificações de crédito ainda pendentes (aguardando o financeiro liberar); vazio = não depende do financeiro;
+GET /orders/credit?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "orderId", "number", "issuedAt", "sentAt", "analysisAt", "analyst", "note", "total", "customer", "customerCode", "store", "storeCode", "seller"}]}
+  - fila de autorização de crédito (SOLICITACAO_AUTZ_VENDA): pedidos A Liberar enviados pela loja ao financeiro e ainda sem resposta;
+  - "id" é a solicitação (um pedido reenviado gera nova solicitação), "analysisAt" = financeiro abriu a solicitação;
 GET /health
 
 Roda no host como serviço (crm-vmset-stock.service). Ambiente: ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
@@ -304,8 +306,7 @@ def price_value(value):
 # (estoque reservado, aguardando NF). Só pedidos ativos, emitidos nos últimos :days dias.
 PENDING_ORDERS_SQL = """
 SELECT PS.PEDIDO_SAIDA_ID, PS.PDSD_NR_PEDIDO, PS.PDSD_STATUS, PS.PDSD_SIT_LIBERACAO, PS.PDSD_DT_EMISSAO, PS.DATA_ALTERACAO,
-       PS.PDSD_VLR_TOTAL, P.PRCR_NOME, UE.PRCR_NOME, V.PRCR_NOME, PS.PDSD_MODO_VD, PS.PDSD_NEGADO_CREDITO,
-       PS.PDSD_LIB_LIMITE_CREDITO, PS.PDSD_LIB_SPC, PS.PDSD_LIB_TIPO_DCTO, PS.PDSD_LIB_CONDICAO_PAGTO
+       PS.PDSD_VLR_TOTAL, P.PRCR_NOME, UE.PRCR_NOME, V.PRCR_NOME, PS.PDSD_MODO_VD
 FROM PEDIDO_SAIDA PS
 LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
 LEFT JOIN PARCEIRO UE ON UE.PARCEIRO_ID = PS.UNIDADE_EMPRESARIAL_ID
@@ -315,18 +316,31 @@ WHERE PS.PDSD_STATUS IN ('A Liberar', 'Reservado') AND TRIM(PS.STATUS) = 'Ativo'
 ORDER BY PS.PDSD_DT_EMISSAO DESC
 """
 MAX_ORDERS = 2000
-# Bloqueios de crédito do pedido: "Nao" = aguardando o financeiro liberar, "Sim" = já liberado, vazio = não se aplica.
-CREDIT_CHECKS = ("Limite de crédito", "SPC", "Tipo de documento", "Condição de pagamento")
+
+# Fila de autorização de crédito do VMSet (mesma regra da tela do financeiro): solicitação enviada pela loja
+# (SOAV_DT_SAIDA_LOJA) e ainda não devolvida pelo crédito, pedido A Liberar ativo e sem crédito negado.
+CREDIT_QUEUE_SQL = """
+SELECT SAV.SOLICITACAO_AUTZ_VENDA_ID, PS.PEDIDO_SAIDA_ID, PS.PDSD_NR_PEDIDO, PS.PDSD_DT_EMISSAO,
+       SAV.SOAV_DT_SAIDA_LOJA, SAV.SOAV_DT_ENTR_CRED, F.PRCR_NOME, SAV.SOAV_OBSERVACAO, PS.PDSD_VLR_TOTAL,
+       P.PRCR_NOME, P.PRCR_CODIGO_CLIENTE, UEP.PRCR_NOME, UE.UNEM_CODIGO, V.PRCR_NOME
+FROM SOLICITACAO_AUTZ_VENDA SAV
+JOIN PEDIDO_SAIDA PS ON PS.PEDIDO_SAIDA_ID = SAV.PEDIDO_SAIDA_ID
+JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PS.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN PARCEIRO UEP ON UEP.PARCEIRO_ID = PS.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
+LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
+LEFT JOIN PARCEIRO F ON F.PARCEIRO_ID = SAV.FUNCIONARIO_ID
+WHERE (SAV.FUNCIONARIO_ID IS NULL OR SAV.SOAV_DT_SAIDA_CRED IS NULL)
+  AND SAV.SOAV_DT_SAIDA_LOJA IS NOT NULL
+  AND PS.PDSD_STATUS = 'A Liberar' AND TRIM(PS.STATUS) = 'Ativo'
+  AND NVL(PS.PDSD_NEGADO_CREDITO, 'Nao') = 'Nao'
+  AND PS.PDSD_DT_EMISSAO >= TRUNC(SYSDATE) - :days
+ORDER BY SAV.SOAV_DT_SAIDA_LOJA
+"""
 
 
 def moment(value):
     return value.strftime("%Y-%m-%dT%H:%M:%S") if value else None
-
-
-def credit_pending(status, denied, flags):
-    if text(status) != "A Liberar" or text(denied) == "Sim":
-        return []
-    return [name for name, flag in zip(CREDIT_CHECKS, flags) if text(flag) == "Nao"]
 
 
 def pending_orders(days):
@@ -337,9 +351,20 @@ def pending_orders(days):
             "id": str(order_id), "number": str(number or ""), "status": text(status), "release": text(release),
             "issuedAt": moment(issued), "updatedAt": moment(updated), "total": round(float(total or 0), 2),
             "customer": text(customer), "store": text(store), "seller": text(seller), "mode": text(mode),
-            "credit": credit_pending(status, denied, flags),
-        } for order_id, number, status, release, issued, updated, total, customer, store, seller, mode, denied, *flags
-            in cur.fetchmany(MAX_ORDERS)]
+        } for order_id, number, status, release, issued, updated, total, customer, store, seller, mode in cur.fetchmany(MAX_ORDERS)]
+
+
+def credit_queue(days):
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        cur.execute(CREDIT_QUEUE_SQL, days=days)
+        return [{
+            "id": str(request_id), "orderId": str(order_id), "number": str(number or ""), "issuedAt": moment(issued),
+            "sentAt": moment(sent), "analysisAt": moment(analysis), "analyst": text(analyst), "note": text(note),
+            "total": round(float(total or 0), 2), "customer": text(customer), "customerCode": text(customer_code),
+            "store": text(store), "storeCode": text(store_code), "seller": text(seller),
+        } for request_id, order_id, number, issued, sent, analysis, analyst, note, total, customer, customer_code,
+            store, store_code, seller in cur.fetchmany(MAX_ORDERS)]
 
 
 def catalog_products():
@@ -427,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
-        if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", *catalog_cache):
+        if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", "/orders/credit", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
@@ -438,15 +463,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as error:
                 log(f"ERRO catálogo {url.path}: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
-        if url.path == "/orders/pending":
+        if url.path in ("/orders/pending", "/orders/credit"):
             try:
                 days = min(max(int(parse_qs(url.query).get("days", ["30"])[0]), 1), 365)
             except ValueError:
                 return self._send(400, {"error": "days precisa ser número"})
             try:
-                items = pending_orders(days)
+                items = pending_orders(days) if url.path == "/orders/pending" else credit_queue(days)
             except Exception as error:
-                log(f"ERRO pedidos a faturar: {str(error)[:200]}")
+                log(f"ERRO pedidos {url.path}: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
             return self._send(200, {"at": int(time.time() * 1000), "items": items})
         if url.path == "/punctuality":
