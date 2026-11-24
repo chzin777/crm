@@ -58,6 +58,8 @@ import {
   X,
 } from "lucide-react";
 import Stepper, { Step } from "@/components/Stepper";
+import { PipelineKpis } from "@/components/PipelineKpis";
+import { pipelineKpis } from "@/lib/pipeline-kpis";
 
 type ColumnId = StageId;
 const CARD_PAGE_SIZES = [10, 20, 30, 50] as const;
@@ -699,6 +701,7 @@ export default function Home() {
     });
   }, [cards, searchActive, normalizedSearchQuery, stageConfigs]);
 
+  const kpis = useMemo(() => pipelineKpis(activeCards, { isOverdue: (card) => isStageOverdue(card, stageConfigs[card.coluna]) }), [activeCards, stageConfigs]);
   const novosCount = useMemo(() => cards.filter((card) => card.pipelineId === "novos").length, [cards]);
   const relacionamentoCount = useMemo(() => cards.filter((card) => card.pipelineId === "relacionamento").length, [cards]);
 
@@ -717,6 +720,8 @@ export default function Home() {
                 : `${activePipeline.descricao} · ${activeCards.length} deals`}
             </p>
           </div>
+
+          {!searchActive && !cardsLoading && <PipelineKpis kpis={kpis} pipelineId={activePipelineId} />}
 
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
