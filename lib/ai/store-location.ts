@@ -108,6 +108,7 @@ export const LOCATION_TOOL = {
 export const LOCATION_RULES = [
   "LOCALIZAÇÃO (regra fixa): quando o cliente pedir a localização, o mapa, como chegar ou onde fica a loja, chame enviarLocalizacaoLoja com a loja da conversa. A localização (pin no mapa ou link do Google Maps) é enviada automaticamente logo depois da sua resposta.",
   "Nesse caso responda curto, com suas palavras, sem repetir o endereço inteiro. Se a ferramenta devolver mais de uma loja possível, pergunte qual delas listando cada opção com o endereço completo exatamente como veio em lojasPossiveis (• *Nome da loja* — endereço). Nunca diga que não consegue mandar a localização.",
+  "LOJA MAIS PRÓXIMA: nunca afirme qual loja é a mais perto do cliente sem ele ter dito o bairro/setor ou enviado a localização nesta conversa; sem isso, peça o bairro ou a localização do WhatsApp. Com o bloco LOJA MAIS PRÓXIMA do sistema, use exatamente as lojas dele.",
   "NUNCA pergunte \"Qual dessas unidades você quer?\" listando nomes iguais sem endereço. Se o cliente disser \"essa loja\" (ou \"dessa loja do setor X\") referindo-se à unidade que você acabou de informar, chame enviarLocalizacaoLoja com o nome e o endereço dessa unidade (ex.: \"Setor Sul Rua 95\") e envie direto, sem pedir confirmação.",
 ].join("\n");
 

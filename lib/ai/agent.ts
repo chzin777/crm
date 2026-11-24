@@ -50,6 +50,7 @@ import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai
 import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
 import { geocodeStoreAddress } from "@/lib/ai/store-geolocation";
+import { nearbyStorePrompt } from "@/lib/ai/store-nearby";
 import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, LOCATION_TOOL, locationText, storeLocation, type SessionStore, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
@@ -665,6 +666,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   let cardShown: string | null = null;
   let productInterest: { name: string; price: number | null } | null = null;
   let interactiveList: InteractiveShowcase | null = null;
+  const nearbyBlock = nearbyStorePrompt({ customerText, earlierCustomerTexts: input.earlierCustomerTexts ?? [], cityHint: catalogState.preferredCity || input.knownCity, knownPlace: input.knownCity, directory });
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
   const system = buildSystemPrompt({
@@ -677,7 +679,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     // Módulos de lib/ai/prompts escolhidos pelo assunto desta mensagem e pelo estado da sessão.
     // Estúdio de IA: regras da empresa ligadas ao assunto, skills e trechos do RAG entram no composeSystemPrompt.
     prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length, studio: { ...studioContext, skills }, conversationText },
-    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))],
+    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", nearbyBlock, budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))],
   });
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
