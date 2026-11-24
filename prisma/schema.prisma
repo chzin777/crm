@@ -1106,3 +1106,46 @@ model ConversationObjection {
   @@index([closedAt])
   @@index([weekKey])
 }
+
+/// Catálogo do VMSET persistido (página /produtos lê daqui; sincronização incremental em segundo plano).
+/// Ver prisma/catalog-cache.sql e lib/catalog/catalog-store.ts.
+model CatalogProduct {
+  code           String   @id
+  description    String
+  reference      String?
+  ean            String?
+  brand          String?
+  category       String?
+  subcategory    String?
+  ncm            String?
+  color          String?
+  material       String?
+  eyeSize        String?
+  bridge         String?
+  warrantyMonths Int?
+  price          Float?
+  priceMin       Float?
+  priceMax       Float?
+  imageUrl       String?
+  /// Produto sumiu do retrato do ERP: fica inativo (nunca apagado).
+  active         Boolean  @default(true)
+  /// Hash dos campos do ERP: só grava quando algo mudou.
+  hash           String
+  updatedAt      DateTime @default(now())
+  lastSyncedAt   DateTime @default(now())
+
+  @@index([category])
+  @@index([active])
+}
+
+/// Saldo por loja do catálogo persistido (só linhas com saldo ou reserva).
+model CatalogStock {
+  code      String
+  unit      String
+  erpName   String
+  available Float
+  reserved  Float
+  syncedAt  DateTime @default(now())
+
+  @@id([code, unit])
+}

@@ -184,3 +184,13 @@ export function whatsappSummary(product: { description: string; brand: string | 
   ];
   return lines.filter(Boolean).join("\n");
 }
+
+/** "Última sincronização há 12 min" (ou "agora", "há 2 h"). */
+export function syncAgeLabel(syncedAt: number | null, now = Date.now()) {
+  if (!syncedAt) return "Ainda não sincronizado";
+  const minutes = Math.max(0, Math.round((now - syncedAt) / 60_000));
+  if (minutes < 1) return "Sincronizado agora";
+  if (minutes < 60) return `Última sincronização há ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `Última sincronização há ${hours} h` : `Última sincronização há ${Math.round(hours / 24)} dias`;
+}

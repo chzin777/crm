@@ -10,7 +10,8 @@ const number = (value: string | null) => {
 
 /**
  * Catálogo do VMSET com busca (código, referência, descrição, marca, EAN), filtros (categoria, marca, loja, preço,
- * só com estoque), ordenação e paginação no servidor. `refresh=1` pede um retrato novo ao ERP.
+ * só com estoque), ordenação e paginação no servidor. Lê do catálogo persistido no banco local (nunca espera o ERP);
+ * a sincronização com o VMSET roda em segundo plano (relógio ou POST /api/produtos/sync).
  */
 export async function GET(request: Request) {
   const guard = await requireModule("produtos", "chat", "pipelines", "contatos");
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
   const sort = params.get("ordem") as CatalogSort | null;
   const category = params.get("categoria")?.trim() || undefined;
   try {
-    const catalog = await getCatalog(params.get("refresh") === "1");
+    const catalog = await getCatalog();
     const result = queryCatalog(catalog.products, catalog.stockOf, {
       q: params.get("q")?.slice(0, 120) ?? "",
       category,

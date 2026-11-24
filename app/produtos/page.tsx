@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Copy, LayoutGrid, List, Loader2, PackageSearch, RefreshCw, Search, Store, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CloudCheck, Copy, LayoutGrid, List, Loader2, PackageSearch, RefreshCw, Search, Store, X } from "lucide-react";
 import { FormSelect } from "@/components/FormSelect";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { useToast } from "@/components/ToastProvider";
 import { ProductDetailDialog } from "@/components/produtos/ProductDetailDialog";
 import { StockBadge, brl, copyText } from "@/components/produtos/catalog-ui";
-import { CATALOG_PAGE_SIZES, CATALOG_SORTS, type CatalogListItem, type CatalogSort } from "@/lib/catalog/catalog-query";
+import { CATALOG_PAGE_SIZES, CATALOG_SORTS, syncAgeLabel, type CatalogListItem, type CatalogSort } from "@/lib/catalog/catalog-query";
+
+type SyncStatus = { productsSyncedAt: number | null; stockSyncedAt: number | null; running: boolean; last?: { created: number; updated: number; deactivated: number; stockChanged: number; at: number } };
 
 type Facets = { categories: { value: string; label: string; count: number }[]; brands: string[]; stores: { value: string; label: string }[] };
 type Result = { items: CatalogListItem[]; total: number; page: number; pageSize: number; pages: number; facets: Facets; productsAt: number; stockAt: number };
@@ -53,7 +55,8 @@ export default function ProdutosPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(24);
   const [reloadKey, setReloadKey] = useState(0);
-  const [forceRefresh, setForceRefresh] = useState(false);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const [state, setState] = useState<{ signature: string; result?: Result; error?: string } | null>(null);
   const [lastResult, setLastResult] = useState<Result | null>(null);
   const [openCode, setOpenCode] = useState<string | null>(null);
@@ -84,8 +87,7 @@ export default function ProdutosPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const url = `/api/produtos?${params}${forceRefresh ? "&refresh=1" : ""}`;
-    fetch(url, { signal: controller.signal, cache: "no-store" })
+    fetch(`/api/produtos?${params}`, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const body = (await response.json().catch(() => ({}))) as Result & { error?: string };
         if (!response.ok) {
@@ -94,10 +96,6 @@ export default function ProdutosPage() {
         }
         setState({ signature, result: body });
         setLastResult(body);
-        if (forceRefresh) {
-          setForceRefresh(false);
-          toast.success("Catálogo atualizado", "Produtos, preços e saldos recarregados do VMSET.");
-        }
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setState({ signature, error: error instanceof Error ? error.message : "Falha de conexão." });
@@ -105,6 +103,32 @@ export default function ProdutosPage() {
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a assinatura cobre filtros e recarga
   }, [signature]);
+
+  // Situação da sincronização em segundo plano: confere a cada minuto (a cada 5 s enquanto sincroniza) e, ao terminar,
+  // recarrega a página atual da listagem sem bloquear a tela.
+  const running = !!sync?.running;
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch("/api/produtos/sync", { cache: "no-store" })
+      .then((response) => (response.ok ? (response.json() as Promise<SyncStatus>) : null))
+      .then((next) => {
+        if (!alive || !next) return;
+        setClock(Date.now());
+        setSync((previous) => {
+          if (previous?.running && !next.running) {
+            setReloadKey((key) => key + 1);
+            const last = next.last;
+            if (last && (last.created || last.updated)) toast.success("Catálogo sincronizado", `${last.created} novo${last.created === 1 ? "" : "s"} e ${last.updated} alterado${last.updated === 1 ? "" : "s"}.`);
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    void load();
+    const timer = window.setInterval(load, running ? 5000 : 60000);
+    return () => { alive = false; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- o intervalo muda só com "sincronizando"
+  }, [running]);
 
   const current = state?.signature === signature ? state : null;
   const loading = !current;
@@ -129,7 +153,20 @@ export default function ProdutosPage() {
   const clearFilters = () => {
     setSearch(""); setDebounced(""); setCategory(""); setBrand(""); setStore(""); setMinPrice(""); setMaxPrice(""); setInStock(true); setSort("relevancia"); setPage(1);
   };
-  const refresh = () => { setForceRefresh(true); setReloadKey((key) => key + 1); };
+  const syncNow = () => {
+    setSync((previous) => (previous ? { ...previous, running: true } : previous));
+    fetch("/api/produtos/sync", { method: "POST", cache: "no-store" })
+      .then(async (response) => {
+        const body = (await response.json().catch(() => null)) as (SyncStatus & { error?: string }) | null;
+        if (!response.ok || !body) throw new Error(body?.error || "Não foi possível iniciar a sincronização.");
+        setSync(body);
+      })
+      .catch((error: unknown) => {
+        setSync((previous) => (previous ? { ...previous, running: false } : previous));
+        toast.error("Sincronização não iniciada", error instanceof Error ? error.message : "Falha de conexão.");
+      });
+  };
+  const syncedAt = sync ? Math.max(sync.productsSyncedAt ?? 0, sync.stockSyncedAt ?? 0) || null : null;
 
   const total = data?.total ?? 0;
   const from = total === 0 ? 0 : (data!.page - 1) * data!.pageSize + 1;
@@ -163,6 +200,11 @@ export default function ProdutosPage() {
             {data ? `${total.toLocaleString("pt-BR")} produto${total === 1 ? "" : "s"} encontrado${total === 1 ? "" : "s"}` : "Produtos, preços e estoque do VMSET"}
             {data && <span className="text-slate-400"> · saldo das {new Date(data.stockAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>}
           </p>
+          {sync && (
+            <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500" aria-live="polite">
+              {running ? <><Loader2 className="h-3 w-3 animate-spin" /> Sincronizando novos itens do VMSET...</> : <><CloudCheck className="h-3 w-3" /> {syncAgeLabel(syncedAt, clock)}</>}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div role="radiogroup" aria-label="Visualização" className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800">
@@ -172,8 +214,8 @@ export default function ProdutosPage() {
               </button>
             ))}
           </div>
-          <button type="button" onClick={refresh} disabled={loading && forceRefresh} className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
-            <RefreshCw className={`h-4 w-4 ${loading && forceRefresh ? "animate-spin" : ""}`} /> <span className="hidden sm:inline">Atualizar do VMSET</span>
+          <button type="button" onClick={syncNow} disabled={running} title="Busca no VMSET só o que é novo ou mudou, sem travar a listagem" className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+            <RefreshCw className={`h-4 w-4 ${running ? "animate-spin" : ""}`} /> <span className="hidden sm:inline">Sincronizar agora</span>
           </button>
         </div>
       </header>
@@ -211,7 +253,7 @@ export default function ProdutosPage() {
       )}
       {loading && !data && (
         <p className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white py-16 text-sm text-slate-500 dark:border-slate-800 dark:bg-[#07194f] dark:text-slate-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Carregando o catálogo do VMSET (a primeira carga pode levar até 1 minuto)...
+          <Loader2 className="h-4 w-4 animate-spin" /> Carregando o catálogo...
         </p>
       )}
 

@@ -1,13 +1,15 @@
 import "server-only";
+import { Prisma } from "@/generated/prisma/client";
+import { prisma } from "@/lib/prisma";
+import { firstDispatch } from "@/lib/chat/conversation";
 import { isRetailUnit, storeLabel, type StoreInfo } from "@/lib/ai/stock";
 import { getStockByProductCodes, storeDirectory } from "@/lib/ai/stock-db";
 import { categoryLabel, indexCatalog, type CatalogProduct, type CatalogStoreStock, type IndexedCatalogProduct } from "@/lib/catalog/catalog-query";
+import { diffProducts, diffStock } from "@/lib/catalog/catalog-sync";
 
 /** API do VMSet no host (scripts/vmset-stock-api.py): retrato do catálogo e do saldo por loja. */
 const API_URL = (process.env.VMSET_STOCK_URL?.trim() || "http://host.docker.internal:9005").replace(/\/$/, "");
 const API_TOKEN = process.env.VMSET_STOCK_TOKEN?.trim() ?? "";
-const PRODUCTS_MS = 10 * 60 * 1000;
-const STOCK_MS = 60 * 1000;
 
 type ProductRow = [string, string, string | null, string | null, string | null, string | null, string | null, string | null, string | null, string | null, string | null, string | null, number | null, number | null, number | null, number | null];
 type StockRow = [string, string, string, number, number];
@@ -21,13 +23,160 @@ async function fetchSnapshot<T>(path: string, refresh: boolean, timeoutMs: numbe
   return { at: Number(body.at) || Date.now(), items: body.items };
 }
 
-type ProductsState = { loadedAt: number; erpAt: number; products: IndexedCatalogProduct[]; byCode: Map<string, IndexedCatalogProduct> };
-type StockState = { loadedAt: number; erpAt: number; byCode: Map<string, CatalogStoreStock[]> };
+/** Índice em memória montado a partir do banco local (nunca direto do ERP na requisição da tela). */
+type CatalogState = {
+  version: string;
+  checkedAt: number;
+  products: IndexedCatalogProduct[];
+  byCode: Map<string, IndexedCatalogProduct>;
+  stock: Map<string, CatalogStoreStock[]>;
+  productsAt: number;
+  stockAt: number;
+};
 
-let products: ProductsState | null = null;
-let productsLoading: Promise<ProductsState> | null = null;
-let stock: StockState | null = null;
-let stockLoading: Promise<StockState> | null = null;
+let state: CatalogState | null = null;
+let stateLoading: Promise<CatalogState> | null = null;
+let syncRunning: Promise<CatalogSyncResult> | null = null;
+
+const SYNC_KEY = "catalog-sync";
+/** Produtos (cadastro/preço) a cada 15 min; saldo por loja a cada 5 min. Tudo em segundo plano. */
+export const PRODUCTS_SYNC_MS = 15 * 60 * 1000;
+export const STOCK_SYNC_MS = 5 * 60 * 1000;
+/** De quanto em quanto tempo a réplica confere se o banco tem versão nova do catálogo. */
+const VERSION_CHECK_MS = 30 * 1000;
+const CHUNK = 2000;
+
+export type CatalogSyncState = { productsAt: number | null; stockAt: number | null; productsSyncedAt: number | null; stockSyncedAt: number | null; version: string; running: boolean; last?: { created: number; updated: number; deactivated: number; stockChanged: number; at: number } };
+export type CatalogSyncResult = { products: ProductDiffSummary | null; stockChanged: number | null };
+type ProductDiffSummary = { created: number; updated: number; deactivated: number };
+
+async function readSyncState(): Promise<CatalogSyncState> {
+  const row = await prisma.crmWorkspaceData.findUnique({ where: { key: SYNC_KEY } });
+  const value = (row?.value ?? {}) as Partial<CatalogSyncState>;
+  return { productsAt: value.productsAt ?? null, stockAt: value.stockAt ?? null, productsSyncedAt: value.productsSyncedAt ?? null, stockSyncedAt: value.stockSyncedAt ?? null, version: value.version ?? "", running: false, last: value.last };
+}
+
+async function writeSyncState(patch: Partial<CatalogSyncState>) {
+  const current = await readSyncState();
+  const next = { ...current, ...patch, running: undefined };
+  await prisma.crmWorkspaceData.upsert({ where: { key: SYNC_KEY }, create: { key: SYNC_KEY, value: next as unknown as Prisma.InputJsonValue }, update: { value: next as unknown as Prisma.InputJsonValue } });
+}
+
+/** Situação da sincronização para o indicador da tela ("Última sincronização há X min" / "Sincronizando..."). */
+export async function catalogSyncStatus(): Promise<CatalogSyncState> {
+  return { ...(await readSyncState()), running: !!syncRunning };
+}
+
+type DbProductRow = CatalogProduct & { imageUrl: string | null };
+
+/** Catálogo ativo + saldo do banco local → índice de busca em memória. */
+async function loadFromDb(): Promise<CatalogState | null> {
+  const sync = await readSyncState();
+  const [rows, stockRows, stores] = await Promise.all([
+    prisma.$queryRaw<DbProductRow[]>`SELECT code, description, reference, ean, brand, category, subcategory, ncm, color, material, "eyeSize", bridge, "warrantyMonths", price, "priceMin", "priceMax", "imageUrl" FROM "CatalogProduct" WHERE active`,
+    prisma.$queryRaw<{ code: string; unit: string; erpName: string; available: number; reserved: number }[]>`SELECT code, unit, "erpName", available, reserved FROM "CatalogStock"`,
+    storeDirectory(),
+  ]);
+  if (!rows.length) return null;
+  const list = indexCatalog(rows.map(({ imageUrl: _image, ...product }) => product));
+  const stock = new Map<string, CatalogStoreStock[]>();
+  for (const row of stockRows) {
+    if (!isRetailUnit(row.erpName)) continue;
+    const entries = stock.get(row.code) ?? [];
+    entries.push({ unit: row.unit, label: unitLabel(row.unit, stores.get(row.unit), row.erpName), available: row.available, reserved: row.reserved });
+    stock.set(row.code, entries);
+  }
+  return { version: sync.version, checkedAt: Date.now(), products: list, byCode: new Map(list.map((product) => [product.code, product])), stock, productsAt: sync.productsAt ?? Date.now(), stockAt: sync.stockAt ?? sync.productsAt ?? Date.now() };
+}
+
+async function writeProducts(diff: ReturnType<typeof diffProducts>, now: Date) {
+  for (let start = 0; start < diff.upserts.length; start += CHUNK) {
+    const part = diff.upserts.slice(start, start + CHUNK);
+    const col = <K extends keyof (typeof part)[number]>(key: K) => part.map((item) => item[key] ?? null);
+    await prisma.$executeRaw`
+      INSERT INTO "CatalogProduct" (code, description, reference, ean, brand, category, subcategory, ncm, color, material, "eyeSize", bridge, "warrantyMonths", price, "priceMin", "priceMax", hash, active, "updatedAt", "lastSyncedAt")
+      SELECT u.*, true, ${now}, ${now} FROM unnest(
+        ${col("code")}::text[], ${col("description")}::text[], ${col("reference")}::text[], ${col("ean")}::text[], ${col("brand")}::text[], ${col("category")}::text[],
+        ${col("subcategory")}::text[], ${col("ncm")}::text[], ${col("color")}::text[], ${col("material")}::text[], ${col("eyeSize")}::text[], ${col("bridge")}::text[],
+        ${col("warrantyMonths")}::int[], ${col("price")}::float8[], ${col("priceMin")}::float8[], ${col("priceMax")}::float8[], ${col("hash")}::text[]
+      ) AS u(code, description, reference, ean, brand, category, subcategory, ncm, color, material, "eyeSize", bridge, "warrantyMonths", price, "priceMin", "priceMax", hash)
+      ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description, reference = EXCLUDED.reference, ean = EXCLUDED.ean, brand = EXCLUDED.brand,
+        category = EXCLUDED.category, subcategory = EXCLUDED.subcategory, ncm = EXCLUDED.ncm, color = EXCLUDED.color, material = EXCLUDED.material,
+        "eyeSize" = EXCLUDED."eyeSize", bridge = EXCLUDED.bridge, "warrantyMonths" = EXCLUDED."warrantyMonths", price = EXCLUDED.price,
+        "priceMin" = EXCLUDED."priceMin", "priceMax" = EXCLUDED."priceMax", hash = EXCLUDED.hash, active = true, "updatedAt" = EXCLUDED."updatedAt", "lastSyncedAt" = EXCLUDED."lastSyncedAt"`;
+  }
+  for (let start = 0; start < diff.deactivate.length; start += CHUNK) {
+    await prisma.$executeRaw`UPDATE "CatalogProduct" SET active = false, "updatedAt" = ${now} WHERE code = ANY(${diff.deactivate.slice(start, start + CHUNK)}::text[])`;
+  }
+}
+
+async function writeStock(diff: ReturnType<typeof diffStock>, now: Date) {
+  for (let start = 0; start < diff.upserts.length; start += CHUNK) {
+    const part = diff.upserts.slice(start, start + CHUNK);
+    await prisma.$executeRaw`
+      INSERT INTO "CatalogStock" (code, unit, "erpName", available, reserved, "syncedAt")
+      SELECT u.*, ${now} FROM unnest(${part.map((row) => row.code)}::text[], ${part.map((row) => row.unit)}::text[], ${part.map((row) => row.erpName)}::text[], ${part.map((row) => row.available)}::float8[], ${part.map((row) => row.reserved)}::float8[])
+        AS u(code, unit, "erpName", available, reserved)
+      ON CONFLICT (code, unit) DO UPDATE SET "erpName" = EXCLUDED."erpName", available = EXCLUDED.available, reserved = EXCLUDED.reserved, "syncedAt" = EXCLUDED."syncedAt"`;
+  }
+  for (let start = 0; start < diff.removals.length; start += CHUNK) {
+    const part = diff.removals.slice(start, start + CHUNK);
+    await prisma.$executeRaw`DELETE FROM "CatalogStock" s USING unnest(${part.map((row) => row.code)}::text[], ${part.map((row) => row.unit)}::text[]) AS r(code, unit) WHERE s.code = r.code AND s.unit = r.unit`;
+  }
+}
+
+/**
+ * Sincronização incremental com o VMSET (sempre fora da requisição da tela): retrato do ERP → diferença por hash →
+ * grava só novos/alterados, desativa os que sumiram e atualiza o saldo alterado. Uma por vez por réplica e,
+ * entre réplicas (blue/green), uma por janela de 2 min.
+ */
+export function syncCatalog(options: { products: boolean; stock: boolean; refresh?: boolean }): Promise<CatalogSyncResult> {
+  if (syncRunning) return syncRunning;
+  syncRunning = (async () => {
+    const now = new Date();
+    const scope = `${options.products ? "p" : ""}${options.stock ? "s" : ""}`;
+    if (!(await firstDispatch(`catalog-sync:${scope}:${Math.floor(now.getTime() / 120_000)}`))) return { products: null, stockChanged: null };
+    let products: ProductDiffSummary | null = null;
+    let stockChanged: number | null = null;
+    const patch: Partial<CatalogSyncState> = {};
+    if (options.products) {
+      const snapshot = await fetchSnapshot<ProductRow>("/catalog/products", !!options.refresh, 200_000);
+      const stored = new Map((await prisma.$queryRaw<{ code: string; hash: string; active: boolean }[]>`SELECT code, hash, active FROM "CatalogProduct"`).map((row) => [row.code, { hash: row.hash, active: row.active }]));
+      const diff = diffProducts(stored, snapshot.items.map(toProduct));
+      await writeProducts(diff, now);
+      products = { created: diff.created, updated: diff.updated, deactivated: diff.deactivate.length };
+      Object.assign(patch, { productsAt: snapshot.at, productsSyncedAt: now.getTime() });
+    }
+    if (options.stock) {
+      const snapshot = await fetchSnapshot<StockRow>("/catalog/stock", !!options.refresh, 90_000);
+      const stored = new Map((await prisma.$queryRaw<{ code: string; unit: string; erpName: string; available: number; reserved: number }[]>`SELECT code, unit, "erpName", available, reserved FROM "CatalogStock"`).map((row) => [`${row.code}|${row.unit}`, row]));
+      const diff = diffStock(stored, snapshot.items.map(([code, unit, erpName, available, reserved]) => ({ code, unit, erpName, available: Number(available) || 0, reserved: Number(reserved) || 0 })));
+      await writeStock(diff, now);
+      stockChanged = diff.upserts.length + diff.removals.length;
+      Object.assign(patch, { stockAt: snapshot.at, stockSyncedAt: now.getTime() });
+    }
+    const changed = (products ? products.created + products.updated + products.deactivated : 0) + (stockChanged ?? 0);
+    const previous = await readSyncState();
+    await writeSyncState({ ...patch, version: changed || !previous.version ? `${now.getTime()}` : previous.version, last: { created: products?.created ?? 0, updated: products?.updated ?? 0, deactivated: products?.deactivated ?? 0, stockChanged: stockChanged ?? 0, at: now.getTime() } });
+    if (changed) {
+      console.log(`[catalogo] sincronizado: ${products?.created ?? 0} novos, ${products?.updated ?? 0} alterados, ${products?.deactivated ?? 0} inativos, ${stockChanged ?? 0} saldos`);
+      // Esta réplica já passa a servir a versão nova (a outra cor percebe pela versão em até 30 s).
+      if (state) await loadFromDb().then((loaded) => { if (loaded) state = loaded; }).catch(() => undefined);
+    }
+    return { products, stockChanged };
+  })().finally(() => { syncRunning = null; });
+  return syncRunning;
+}
+
+/** Relógio por minuto: produtos a cada 15 min e saldo a cada 5 min (em segundo plano, sem esperar). */
+export async function scheduleCatalogSync(now = Date.now()) {
+  const sync = await readSyncState();
+  const products = !sync.productsSyncedAt || now - sync.productsSyncedAt >= PRODUCTS_SYNC_MS;
+  const stock = !sync.stockSyncedAt || now - sync.stockSyncedAt >= STOCK_SYNC_MS;
+  if (!products && !stock) return false;
+  void syncCatalog({ products, stock }).catch((error: unknown) => console.warn(`[catalogo] sincronização falhou: ${error instanceof Error ? error.message : error}`));
+  return true;
+}
 
 function toProduct(row: ProductRow): CatalogProduct {
   const [code, description, reference, ean, brand, category, subcategory, ncm, color, material, eyeSize, bridge, warrantyMonths, price, priceMin, priceMax] = row;
@@ -42,45 +191,38 @@ export function unitLabel(code: string, store: StoreInfo | undefined, erpName?: 
   return place ? `LJ ${number} · ${place}` : `LJ ${number}`;
 }
 
-async function loadProducts(refresh: boolean) {
-  const snapshot = await fetchSnapshot<ProductRow>("/catalog/products", refresh, 200_000);
-  const list = indexCatalog(snapshot.items.map(toProduct));
-  return { loadedAt: Date.now(), erpAt: snapshot.at, products: list, byCode: new Map(list.map((product) => [product.code, product])) };
+function reloadState() {
+  stateLoading ??= loadFromDb()
+    .then(async (loaded) => {
+      if (loaded) return loaded;
+      // Banco ainda vazio (primeira instalação): uma única carga completa do VMSET, depois sempre do banco.
+      await syncCatalog({ products: true, stock: true });
+      const filled = await loadFromDb();
+      if (!filled) throw new Error("Catálogo do VMSET ainda não sincronizado. Tente novamente em instantes.");
+      return filled;
+    })
+    .then((loaded) => (state = loaded))
+    .finally(() => { stateLoading = null; });
+  return stateLoading;
 }
 
-async function loadStock(refresh: boolean) {
-  const [snapshot, stores] = await Promise.all([fetchSnapshot<StockRow>("/catalog/stock", refresh, 90_000), storeDirectory()]);
-  const byCode = new Map<string, CatalogStoreStock[]>();
-  for (const [code, unit, name, available, reserved] of snapshot.items) {
-    if (!isRetailUnit(name)) continue;
-    const rows = byCode.get(code) ?? [];
-    rows.push({ unit, label: unitLabel(unit, stores.get(unit), name), available, reserved });
-    byCode.set(code, rows);
+/**
+ * Catálogo para a tela: sempre do banco local (índice em memória). Com versão nova no banco (sincronização feita),
+ * recarrega em segundo plano e segue servindo a anterior. Nunca espera o VMSET (salvo o banco ainda vazio).
+ */
+export async function getCatalog() {
+  if (!state) await reloadState();
+  else if (Date.now() - state.checkedAt > VERSION_CHECK_MS) {
+    state.checkedAt = Date.now();
+    void readSyncState().then((sync) => { if (sync.version && sync.version !== state?.version) void reloadState().catch(() => undefined); }).catch(() => undefined);
   }
-  return { loadedAt: Date.now(), erpAt: snapshot.at, byCode };
-}
-
-/** Catálogo + saldo em memória (produtos 10 min, saldo 1 min); `refresh` pede um retrato novo ao VMSET. */
-export async function getCatalog(refresh = false) {
-  const now = Date.now();
-  if (refresh || !products || now - products.loadedAt > PRODUCTS_MS) {
-    productsLoading ??= loadProducts(refresh).finally(() => { productsLoading = null; });
-    // Sem retrato ainda (ou atualização pedida): espera; senão segue com o anterior enquanto renova.
-    if (refresh || !products) products = await productsLoading;
-    else productsLoading.then((next) => { products = next; }).catch(() => undefined);
-  }
-  if (refresh || !stock || now - stock.loadedAt > STOCK_MS) {
-    stockLoading ??= loadStock(refresh).finally(() => { stockLoading = null; });
-    if (refresh || !stock) stock = await stockLoading;
-    else stockLoading.then((next) => { stock = next; }).catch(() => undefined);
-  }
-  const current = { products: products!, stock: stock! };
+  const current = state!;
   return {
-    products: current.products.products,
-    byCode: current.products.byCode,
-    stockOf: (code: string) => current.stock.byCode.get(code) ?? [],
-    productsAt: current.products.erpAt,
-    stockAt: current.stock.erpAt,
+    products: current.products,
+    byCode: current.byCode,
+    stockOf: (code: string) => current.stock.get(code) ?? [],
+    productsAt: current.productsAt,
+    stockAt: current.stockAt,
   };
 }
 

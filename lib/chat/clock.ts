@@ -27,6 +27,7 @@ import { ensureScoringFlows } from "@/lib/automations/scoring-seed";
 import { attributeSales } from "@/lib/automations/attribution";
 import { scheduleDailyRfvp } from "@/lib/rfvp-db";
 import { runBudgetRecovery, runRecurrenceReminders, runWeeklyObjections } from "@/lib/commercial/jobs-db";
+import { scheduleCatalogSync } from "@/lib/catalog/vmset-catalog";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -343,6 +344,9 @@ export async function runClock() {
   await block("recuperação de orçamento", async () => {
     await runBudgetRecovery(new Date(now));
   });
+
+  // Catálogo do VMSET (/produtos): sincronização incremental em segundo plano (produtos 15 min, saldo 5 min).
+  void scheduleCatalogSync(now).catch((error: unknown) => void reportError("cron.catálogo", error));
 
   return summary;
 }
