@@ -90,5 +90,7 @@ export function aiConversationMode(
   if (conversation.closedAt || conversation.assigneeId || conversation.status === "in_progress") return "paused";
   if (flags.humanReplied || (stateOf(conversation.menuState) as { aiPaused?: boolean }).aiPaused === true) return "paused";
   if (!flags.handedOff) return "exclusive";
-  return conversation.status === "waiting" ? "queued" : "paused";
+  // Transbordo feito (pedido do cliente, assunto ou limite de respostas): a partir daqui o atendimento é só do humano.
+  // A espera assistida ("queued") foi desligada: a IA não responde mais nenhuma mensagem depois do transbordo.
+  return "paused";
 }

@@ -269,3 +269,21 @@ export function cardGuidance() {
     "Se a ficha deste modelo já foi enviada antes nesta conversa, não repita: responda só o que o cliente perguntou agora.",
   ].join("\n");
 }
+
+/** Pergunta de loja/disponibilidade sobre o modelo da conversa ("Tem no Buriti shopping?", "tem em Aparecida?"). */
+export function asksStoreAvailability(text: string) {
+  const value = text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return /\btem\s+(no|na|nos|nas|em|ai|la|por)\b|\b(shopping|loja|lojas|unidade|filial|disponivel|disponibilidade|estoque|onde\s+(tem|encontro|acho)|qual\s+loja)\b/.test(value);
+}
+
+/**
+ * Modelo já mostrado nesta conversa: foto dele já enviada (qualquer pergunta que não peça foto/variações) ou modelo
+ * já listado com pergunta de loja/disponibilidade. Nesses casos a resposta é só texto: nada de foto, ficha ou lista.
+ */
+export function repeatsShownModel(input: { text: string; chosen: boolean; productCodes: string[]; sentImageSkus: Iterable<string>; shownIds: string[] }) {
+  if (!input.productCodes.length || asksForPhoto(input.text) || /\b(cores|outras cores|outra cor|variac|modelos?\s+parecid)/i.test(input.text)) return false;
+  const sent = new Set(input.sentImageSkus);
+  const photoSent = input.productCodes.some((code) => sent.has(code));
+  const listedBefore = input.productCodes.some((code) => input.shownIds.includes(code));
+  return asksStoreAvailability(input.text) ? photoSent || listedBefore : photoSent && !input.chosen;
+}

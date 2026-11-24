@@ -566,3 +566,19 @@ export function withoutShowcaseRefs(text: string) {
 }
 
 export const NO_PHOTOS_NOTE = "(As fotos desses modelos não estão disponíveis no sistema no momento.)";
+
+/**
+ * Só produto de vitrine vai ao cliente: óculos completos (armação de grau, óculos de sol) e caixas de lentes de
+ * contato. Peça de reposição, lente avulsa (ex.: "LENTE, LUXOTTICA-POLARIZADA, RB4165L 622/2V"), haste, plaqueta,
+ * estojo, flanela, acessórios e lentes oftálmicas ficam fora da busca.
+ */
+const PART_CATEGORY = /^(ACESSORIOS?|LENTES|LENTE PRONTA|INSUMOS?|PECAS?|REPOSICAO|SERVICOS?)$/;
+const PART_WORDS = /^(LENTE\b|LENTES\b(?!\s+DE\s+CONTATO)|HASTE|PLAQUETA|PARAFUSO|ESTOJO|FLANELA|MICROFIBRA|CORDAO|CORRENTE|LIMPA|REPOSICAO|ACESSORIO|EXPOSITOR|DISPLAY|BRINDE)|\b(REPOSICAO|PECA DE REPOSICAO|LENTE AVULSA)\b/;
+export function isCustomerProduct(product: { description: string; category?: string | null; subcategory?: string | null }) {
+  const up = (value: string | null | undefined) => (value ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().trim();
+  const category = up(product.category);
+  if (PART_CATEGORY.test(category)) return false;
+  const description = up(product.description);
+  if (category !== "LENTES DE CONTATO" && PART_WORDS.test(description)) return false;
+  return !PART_WORDS.test(up(product.subcategory)) || category === "LENTES DE CONTATO";
+}

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { storeErpCode } from "@/lib/stores";
-import { CATEGORY_FILTER, explicitBrand, isKidsProduct, mentionsKids, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
+import { CATEGORY_FILTER, explicitBrand, isCustomerProduct, isKidsProduct, mentionsKids, normalizeBrandQuery, matchIconicProducts, matchProducts, type IndexedProduct } from "@/lib/ai/catalog-search";
 import { broadCatalogMatches, catalogBrands, isBrandFamily, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
 import { expandModelNicknames } from "@/lib/ai/product-names";
 import { buildStockResult, createStockClient, STOCK_MAX_CODES, stockSearchTerms, type StockLog, type StockLookup, type StockToolResult, type StoreInfo } from "@/lib/ai/stock";
@@ -124,7 +124,9 @@ export async function consultarEstoqueProduto(
   const started = Date.now();
   const field = (value: unknown) => typeof value === "string" ? value.trim() : "";
   const rawTerm = normalizeBrandQuery((field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80));
-  const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
+  const [loaded, stores] = await Promise.all([deps.products(), storeDirectory()]);
+  // Peça de reposição, lente avulsa e acessório nunca entram na busca (só óculos completos e lentes de contato).
+  const all = loaded.filter((product) => isCustomerProduct({ description: product.description, category: product.category }));
   // Cidade e ocasião no termo ("Goiânia" respondendo à pergunta da cidade, "sol pra presentear") não são produto:
   // saem do termo. Termo com referência (números, barras) fica intacto, a não ser que só sobre ruído.
   const noise = stripSearchNoise(rawTerm, [...stores.values()].map((store) => store.city ?? ""));

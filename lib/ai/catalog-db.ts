@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { indexProduct, matchProducts, type CatalogSearch, type IndexedProduct, type SearchStep } from "@/lib/ai/catalog-search";
+import { indexProduct, isCustomerProduct, matchProducts, type CatalogSearch, type IndexedProduct, type SearchStep } from "@/lib/ai/catalog-search";
 import { isRetailUnit, mainPrice, retailStock, storeLabel } from "@/lib/ai/stock";
 import { getStockByProductCodes, storeDirectory } from "@/lib/ai/stock-db";
 
@@ -27,7 +27,7 @@ export function catalogProducts() {
       AND COALESCE("category", '') NOT ILIKE '%SERVI%' AND COALESCE("category", '') <> 'LENTES'
       AND "orderDate" >= (now() AT TIME ZONE 'America/Sao_Paulo')::date - ${DAYS}::int
     GROUP BY 2
-  `.then((rows) => rows.map(indexProduct));
+  `.then((rows) => rows.filter(isCustomerProduct).map(indexProduct));
   cache = { at: Date.now(), products: load };
   load.catch(() => { cache = null; });
   return load;

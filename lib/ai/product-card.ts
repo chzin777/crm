@@ -117,3 +117,19 @@ export const PRODUCT_CARD_TEMPLATE = [
   "- Se couber, uma pergunta leve de próximo passo (reservar, provar na loja, receber a localização) após ---SPLIT---, escrita do zero e concordando com o número de lojas da ficha; não force pergunta.",
   "- Nunca escreva atributos sem dado (nada de não informado) nem invente lojas, quantidades ou preços.",
 ].join("\n");
+
+/** Nome bruto do ERP no texto ("OCS RAY BAN REF 0RB4165L 622/7157"): tipo + marca + REF + referência/cor/tamanho. */
+const ERP_NAME = /\b(?:OCS|ARM|OCULOS(?:\s+SOLAR)?|ARMACAO)\s+[A-Z][A-Z0-9&'.\- ]*?\s+REF[-.:]?\s*[0-9A-Z][0-9A-Z/.\- ]*[0-9A-Z]/g;
+
+/** Nome comercial limpo para o cliente: "OCS RAY BAN REF 0RB4165L 622/7157" → "Ray-Ban Justin RB4165L". */
+export function customerProductName(description: string, brand?: string | null) {
+  const name = commercialName(description, brand);
+  if (name.nomeComercial === description.trim()) return description.trim();
+  const ref = name.referencia && !name.nomeComercial.toUpperCase().replace(/[^A-Z0-9]/g, "").includes(name.referencia.toUpperCase().replace(/[^A-Z0-9]/g, "")) ? ` ${name.referencia}` : "";
+  return `${name.nomeComercial}${ref}`;
+}
+
+/** Troca qualquer nome bruto do VMSET que escapou na resposta pelo nome comercial (nunca código interno ao cliente). */
+export function humanizeErpMentions(text: string) {
+  return text.replace(ERP_NAME, (raw) => customerProductName(raw));
+}

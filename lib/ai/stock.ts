@@ -108,8 +108,13 @@ export function storeLabel(code: string, store: StoreInfo | undefined) {
   // "Avenida AV. PERIMETRAL" no cadastro vira "Av. Perimetral" (sem o tipo repetido).
   const street = store.address ? titleCase(store.address.replace(/,\s*$/, "")).replace(/^(Av\.|R\.|Rua)\s+(Av\.|R\.|Rua)\s+/i, "$2 ") : "";
   const number = store.addressNumber && !/^s\/?n$/i.test(store.addressNumber.trim()) && !street.includes(store.addressNumber.trim()) ? store.addressNumber.trim() : "";
-  const city = store.city && !/^GOIANIA$/i.test(store.city.trim()) ? ` (${titleCase(store.city)})` : "";
   const address = [street, number].filter(Boolean).join(", ");
+  // "Setor Central"/"Centro" existe em Goiânia e em Aparecida: o município entra no próprio nome (sem parênteses, que
+  // somem na ficha), para nunca confundir as duas unidades.
+  if (store.city && /^(SETOR\s+)?(CENTRAL|CENTRO)$/i.test((store.neighborhood ?? "").trim())) {
+    return `Loja ${place} de ${titleCase(store.city)}${address ? ` — ${address}` : ""}`;
+  }
+  const city = store.city && !/^GOIANIA$/i.test(store.city.trim()) ? ` (${titleCase(store.city)})` : "";
   return `Loja ${place}${city}${address ? ` — ${address}` : ""}`;
 }
 

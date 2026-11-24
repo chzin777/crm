@@ -8,8 +8,12 @@ const waiting = { status: "waiting", queueId: "q-comercial", assigneeId: null as
 const handedOff = { handedOff: true, humanReplied: false };
 
 describe("espera assistida: IA ajuda enquanto o cliente aguarda na fila", () => {
-  it("transferida para Comercial sem atendente → IA responde a nova dúvida e não transfere de novo", () => {
-    expect(aiConversationMode(waiting, handedOff)).toBe("queued");
+  it("transferida para a fila (pedido ou limite de 30 respostas) → IA em silêncio absoluto na mensagem seguinte", () => {
+    expect(aiConversationMode(waiting, handedOff)).toBe("paused");
+    expect(aiConversationMode({ ...waiting, status: "bot" }, handedOff)).toBe("paused");
+  });
+
+  it("modo queued (legado, sem uso): o pré-agente não transfere de novo", () => {
     // A fila de destino não precisa estar entre as filas da IA: ela ajuda na espera de qualquer fila.
     expect(aiShouldAttend(settings, waiting, new Date(), true)).toBe(true);
     // Pedido de atendente na espera não gera transbordo duplicado: a IA tranquiliza o cliente.

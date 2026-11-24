@@ -44,8 +44,8 @@ import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { formatBrl, STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, formatShowcase, showcaseReference, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 import { asksListAgain, extractListedProducts, genericYesToDetails, nextShowcaseIndex, whichOfShownQuestion, listedPromptBlock, listedSearchTerm, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
-import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
-import { buildProductCard, cardStore, cleanReference, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
+import { asksForPhoto, asksStoreAvailability, cardGuidance, DETAILS_TOOL, repeatsShownModel, shouldSendProductPhoto } from "@/lib/ai/product-details";
+import { buildProductCard, cardStore, cleanReference, commercialName, humanizeErpMentions, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
 import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/stock-db";
 import { ensureStorePin } from "@/lib/store-pin";
@@ -135,7 +135,9 @@ const CREDIT_RETRY_MS = 10 * 60 * 1000;
 
 /** Transbordo já feito e se algum atendente escreveu ao cliente depois dele (assumiu o controle). */
 async function handoffFlags(conversationId: string) {
-  const mark = await prisma.chatMessage.findFirst({ where: { conversationId, author: "system", text: { startsWith: AI_HANDOFF_MARK } }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  // Só o transbordo do atendimento atual: conversa reaberta depois volta para a IA.
+  const sessionStart = await sessionStartedAt(conversationId);
+  const mark = await prisma.chatMessage.findFirst({ where: { conversationId, author: "system", text: { startsWith: AI_HANDOFF_MARK }, ...(sessionStart ? { createdAt: { gt: sessionStart } } : {}) }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
   if (!mark) return { handedOff: false, humanReplied: false, since: null };
   const human = await prisma.chatMessage.findFirst({ where: { conversationId, author: "agent", internal: false, createdAt: { gt: mark.createdAt } }, select: { id: true } });
   return { handedOff: true, humanReplied: !!human, since: mark.createdAt };
@@ -848,6 +850,14 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
         const candidate = iconicModel(product.produto, product.marca);
         return !!candidate && candidate.references.some((reference) => iconic.references.includes(reference));
       });
+      // Modelo cuja foto/ficha já saiu nesta conversa e pergunta de loja/disponibilidade ("Tem no Buriti shopping?"):
+      // resposta só em texto consultivo, sem reenviar foto, ficha nem lista de variações.
+      if (repeatsShownModel({ text: input.pendingText, chosen: !!chosen, productCodes: available.map((product) => product.codigo), sentImageSkus: input.sentImageSkus ?? [], shownIds: catalogState.shownIds ?? [] })) {
+        interactiveList = null;
+        toolShowcase = null;
+        return { ...result, produtos: available.slice(0, 1).map((product) => ({ ...product, produto: commercialName(product.produto, product.marca).nomeComercial })), modeloJaMostrado: true, orientacao: `${result.orientacao}
+Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto, curto e consultivo, sobre a pergunta do cliente (loja, disponibilidade, preço). NÃO repita a ficha, a foto nem a lista de variações, e não escreva códigos internos.` };
+      }
       if ((args._photo || (iconic && !chosen && !anchoredProduct)) && available.length > 1) {
         const colorWords = (photoQuery?.color ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().split(/[^A-Z0-9]+/).filter((word) => word.length >= 4 && !["LENTE", "LENTES", "ARMACAO", "COM"].includes(word));
         const colorMatches = colorWords.length ? available.filter((product) => colorWords.every((word) => normalizeTerm(product.produto).includes(word))) : [];
@@ -1115,6 +1125,8 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     outcome = { ...outcome, reply: withToolContent(outcome.reply, (cardShown ?? toolShowcase)!) };
   }
   if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: withoutRedundantStoreQuestion(outcome.reply) };
+  // Nome bruto do VMSET ("OCS RAY BAN REF 0RB4165L 622/7157") nunca chega ao cliente: vira o nome comercial.
+  if (outcome.reply) outcome = { ...outcome, reply: humanizeErpMentions(outcome.reply) };
   // Trava final do "Sim" genérico: só a pergunta de qual modelo (nenhuma vitrine, foto ou lista nova sai neste turno).
   if (yesToDetails && outcome.action === "reply" && !close.close) {
     outcome = { ...outcome, reply: whichOfShownQuestion(listed), reason: "Confirmou detalhes sem dizer o modelo" };
