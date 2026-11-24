@@ -44,6 +44,34 @@ export function modelWords(term: string) {
   return norm(term).split(" ").filter((word) => word && !GENERIC.has(word));
 }
 
+/** Ocasião e pedido ("pra presentear", "queria uns") não identificam produto: saem do termo de busca. */
+const OCCASION_WORDS = new Set([
+  "PRESENTE", "PRESENTES", "PRESENTEAR", "PRESENTEANDO", "PRESENTINHO", "ANIVERSARIO", "NATAL", "DIA", "MAES", "PAIS", "NAMORADOS",
+  "NAMORADA", "NAMORADO", "ESPOSA", "ESPOSO", "MARIDO", "MULHER", "MAE", "PAI", "FILHA", "FILHO", "AMIGA", "AMIGO", "ALGUEM",
+  "QUERIA", "QUERO", "GOSTARIA", "PROCURO", "PROCURANDO", "PRECISO", "VER", "MOSTRAR", "MOSTRA", "UNS", "UMAS", "ALGUMAS",
+  "MINHA", "MEU", "BONITO", "BONITOS", "BONITA", "BONITAS", "LINDO", "LINDOS", "LINDA", "LINDAS", "LEGAL", "LEGAIS",
+]);
+
+/**
+ * Termo da busca sem cidade e sem ocasião: "Goiânia" (resposta à pergunta da cidade) ou "óculos de sol pra presentear"
+ * viram "" e "OCULOS DE SOL", e a busca ampla segue só com categoria + cidade. A cidade encontrada no termo volta
+ * em `city` (quando a tool não recebeu cidade).
+ */
+export function stripSearchNoise(term: string, cities: string[]): { term: string; city: string | null; changed: boolean } {
+  const original = norm(term);
+  let text = ` ${original} `;
+  let city: string | null = null;
+  const names = [...new Set(cities.map((item) => norm(item.replace(/\s*[-/]\s*[A-Z]{2}$/i, ""))).filter((item) => item.length >= 4))].sort((a, b) => b.length - a.length);
+  for (const name of names) {
+    if (!text.includes(` ${name} `)) continue;
+    city ??= name;
+    text = text.split(` ${name} `).join(" ");
+  }
+  const words = text.split(" ").filter((word) => word && !OCCASION_WORDS.has(word));
+  const cleaned = words.join(" ");
+  return { term: cleaned, city, changed: cleaned !== original };
+}
+
 /** Categoria do catálogo pedida no termo (filtro da vitrine). */
 export function termCategory(term: string): "SOLAR" | "ARMACAO" | "LENTE_CONTATO" | "" {
   const words = new Set(norm(term).split(" "));

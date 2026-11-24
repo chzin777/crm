@@ -5,7 +5,7 @@ import { CATEGORY_FILTER, explicitBrand, isKidsProduct, mentionsKids, normalizeB
 import { broadCatalogMatches, catalogBrands, isBrandFamily, resolveBrandQuery, specificSearchScope, type BrandEntry } from "@/lib/ai/brand-resolve";
 import { expandModelNicknames } from "@/lib/ai/product-names";
 import { buildStockResult, createStockClient, STOCK_MAX_CODES, stockSearchTerms, type StockLog, type StockLookup, type StockToolResult, type StoreInfo } from "@/lib/ai/stock";
-import { buildShowcaseResult, classifySearch, modelWords, SHOWCASE_CODES_PER_MODEL, showcaseCandidates, termCategory, type PriceFilter, type ShowcaseResult } from "@/lib/ai/stock-showcase";
+import { buildShowcaseResult, classifySearch, modelWords, SHOWCASE_CODES_PER_MODEL, showcaseCandidates, stripSearchNoise, termCategory, type PriceFilter, type ShowcaseResult } from "@/lib/ai/stock-showcase";
 
 /** API de estoque do VMSet no host (scripts/vmset-stock-api.py), alcançada pelo container via host-gateway. */
 const client = createStockClient({
@@ -81,6 +81,10 @@ export function storeDirectory() {
 const TYPE_CATEGORY: Record<string, "ARMACAO" | "SOLAR" | "LENTE_CONTATO"> = { grau: "ARMACAO", sol: "SOLAR", lente_contato: "LENTE_CONTATO" };
 /** Modelos candidatos de uma busca sem marca (só tipo/orçamento) consultados no saldo do VMSet. */
 const GENERIC_CANDIDATES = 30;
+/** Segunda tentativa da busca geral de categoria quando os primeiros candidatos não têm saldo na cidade. */
+const GENERIC_CANDIDATES_WIDE = 120;
+/** Termo da vitrine de uma categoria inteira (cliente pediu só o tipo). */
+const CATEGORY_WORD: Record<"ARMACAO" | "SOLAR" | "LENTE_CONTATO", string> = { ARMACAO: "armação", SOLAR: "óculos de sol", LENTE_CONTATO: "lentes de contato" };
 
 function priceFilterOf(args: { minPrice?: unknown; maxPrice?: unknown; sortBy?: unknown; _pisoTicket?: unknown }): PriceFilter | undefined {
   const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined);
@@ -119,12 +123,17 @@ export async function consultarEstoqueProduto(
 ): Promise<{ result: StockToolResult | ShowcaseResult; log: StockLog }> {
   const started = Date.now();
   const field = (value: unknown) => typeof value === "string" ? value.trim() : "";
-  const term = normalizeBrandQuery((field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80));
-  const city = field(args.cidade).slice(0, 60);
+  const rawTerm = normalizeBrandQuery((field(args.termoBusca) || [field(args.marca), field(args.nomeModelo), field(args.referenciaOuSku)].filter(Boolean).join(" ")).slice(0, 80));
+  const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
+  // Cidade e ocasião no termo ("Goiânia" respondendo à pergunta da cidade, "sol pra presentear") não são produto:
+  // saem do termo. Termo com referência (números, barras) fica intacto, a não ser que só sobre ruído.
+  const noise = stripSearchNoise(rawTerm, [...stores.values()].map((store) => store.city ?? ""));
+  const onlyWords = /^[\p{L}\s'-]*$/u.test(rawTerm);
+  const term = noise.changed && (onlyWords || !modelWords(noise.term).length) ? noise.term : rawTerm;
+  const city = (field(args.cidade) || noise.city || "").slice(0, 60);
   const region = typeof args.regiaoOuLoja === "string" ? args.regiaoOuLoja.slice(0, 60) : city;
   const price = priceFilterOf(args);
-  const category = TYPE_CATEGORY[field(args.tipo)] ?? termCategory(term);
-  const [all, stores] = await Promise.all([deps.products(), storeDirectory()]);
+  const category = TYPE_CATEGORY[field(args.tipo)] ?? (termCategory(term) || termCategory(rawTerm));
   // Tipo pedido (grau/sol/lente de contato) restringe a vitrine também quando não há marca no termo.
   const inCategory = (product: IndexedProduct) => !category || product.categoryKey === CATEGORY_FILTER[category];
   // Público adulto por padrão: linhas infantis/juvenis só entram na vitrine quando o cliente falou de criança.
@@ -148,17 +157,36 @@ export async function consultarEstoqueProduto(
   const budgetOnly = !iconic && (clientPrice || !!field(args.tipo)) && !brandMatch?.rest.length && !modelWords(withoutValues).length;
   const kind = iconic ? "modelo_especifico" : budgetOnly || (brandMatch && !brandMatch.rest.length) ? "marca_ampla" : classifySearch(brandMatch ? [brandMatch.brand, ...brandMatch.rest].join(" ") : term, args.tipoBusca, brands.map((entry) => entry.brand));
   if (kind === "marca_ampla") {
-    const broad = requestedBrand && !brandMatch ? { products: [], brand: requestedBrand } : broadCatalogMatches(all, budgetOnly ? withoutValues : term, brands, city || price || category ? all.length : undefined);
+    let broad = requestedBrand && !brandMatch ? { products: [] as IndexedProduct[], brand: requestedBrand as string | null } : broadCatalogMatches(all, budgetOnly ? withoutValues : term, brands, city || price || category ? all.length : undefined);
+    // Sem marca e sem nenhum produto com as palavras do termo, mas com o tipo conhecido (sol/grau/lente): a vitrine
+    // é a da categoria inteira (nunca "não encontrei" quando há centenas de modelos daquele tipo).
+    const categoryOnly = !broad.brand && !requestedBrand && !!category && !broad.products.some(inCategory);
+    if (categoryOnly) broad = broadCatalogMatches(all, CATEGORY_WORD[category], brands, all.length);
     // Sem marca (só tipo/orçamento) o catálogo é grande: limita os candidatos consultados no saldo.
-    const generic = !broad.brand && (budgetOnly || !modelWords(term).length);
+    const generic = !broad.brand && (budgetOnly || categoryOnly || !modelWords(term).length);
     // A marca inteira pedida é infantil ("tem Sp Kids?"): aí o próprio pedido já é infantil.
     const audience = broad.brand && isKidsProduct({ brand: broad.brand }) ? broad.products : broad.products.filter(inAudience);
     const candidates = orderByBudget(audience.filter(inCategory), price);
-    const limits = generic ? { groups: GENERIC_CANDIDATES, codesPerModel: SHOWCASE_CODES_PER_MODEL } : city || price ? { groups: candidates.length, codesPerModel: candidates.length } : undefined;
-    const groups = showcaseCandidates(candidates.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), limits);
-    const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;
     const exclude = Array.isArray(args._excluir) ? args._excluir.filter((id): id is string => typeof id === "string") : [];
-    const result = buildShowcaseResult({ term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city, price, exclude });
+    const showcase = async (groupLimit: number, showcaseCity: string) => {
+      const limits = generic ? { groups: groupLimit, codesPerModel: SHOWCASE_CODES_PER_MODEL } : showcaseCity || price ? { groups: candidates.length, codesPerModel: candidates.length } : undefined;
+      const groups = showcaseCandidates(candidates.map((product) => ({ code: product.code!, description: product.description, brand: product.brand })), limits);
+      const lookup = groups.length ? await getStockInBatches(groups.flat().map((product) => product.code)) : null;
+      return { lookup, result: buildShowcaseResult({ term: categoryOnly ? CATEGORY_WORD[category] : term, groups, lookup, stores, withPrices: deps.withPrices, brand: broad.brand, city: showcaseCity, price, exclude }) };
+    };
+    let { result, lookup } = await showcase(GENERIC_CANDIDATES, city);
+    // Busca geral de categoria vazia na cidade (os primeiros candidatos não têm saldo lá): amplia os candidatos e,
+    // se ainda assim nada, mostra o que a rede tem daquele tipo (a IA avisa que a loja confirma a disponibilidade).
+    if (generic && city && result.cenario === "sem_estoque_na_cidade") {
+      ({ result, lookup } = await showcase(GENERIC_CANDIDATES_WIDE, city));
+      if (result.cenario === "sem_estoque_na_cidade") {
+        const network = await showcase(GENERIC_CANDIDATES_WIDE, "");
+        if (network.result.modelos.length) {
+          ({ result, lookup } = network);
+          result = { ...result, orientacao: `Não achei saldo desses modelos nas lojas de ${city} agora, mas a rede tem estas opções. Apresente com naturalidade e diga que a loja de ${city} confirma a disponibilidade ou providencia a transferência.`, foraDaCidade: true } as ShowcaseResult;
+        }
+      }
+    }
     const log: StockLog = { term, region, scenario: result.cenario, products: result.modelos.length, stores: 0, ms: Date.now() - started, cached: !!lookup && lookup.requested === 0, kind };
     console.log(`[ai][estoque] busca ampla: ${log.scenario}, ${log.products} modelos, ${log.ms} ms`);
     return { result, log };

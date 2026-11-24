@@ -98,6 +98,8 @@ export async function releaseFromAi(conversation: ChatConversation) {
 export const AI_AUTHOR = AI_AUTHOR_NAME;
 /** Marca da mensagem de sistema da transferência: depois dela a IA só ajuda na espera (fila sem atendente). */
 export const AI_HANDOFF_MARK = "IA transferiu o atendimento";
+/** Categoria da sessão (aiContext.category) → argumento "tipo" da tool de estoque. */
+const CATEGORY_TIPO: Record<string, string> = { SOLAR: "sol", ARMACAO: "grau", LENTE_CONTATO: "lente_contato" };
 /**
  * Mensagens picadas: cada mensagem entra no lote da conversa e reinicia a espera adaptativa (1,8 a 5,5 s, teto de
  * 12 s desde a primeira); ao vencer, a IA responde uma vez só ao lote inteiro.
@@ -629,8 +631,12 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const qualifyFirst = skillEnabled(skills, "consultoria_pos_campanha") && !cityFirst && !typeFirst && !(affirmative && input.aiReplies > 0)
     && needsQualificationFirst({ category: catalogState.category, brand: catalogState.brand, texts: [...(input.earlierCustomerTexts ?? []), customerText], photo: !!photoQueries.length, selectedProduct: !!input.selectedProductRef, queued: !!input.queued || !!staffRoute || !!documentRoute });
   const cityProduct = intent.city && !intent.brand && !intent.correction ? input.anchor?.activeProduct : null;
-  const forceCatalog = !cityFirst && !staffRoute && !documentRoute && !photoQueries.length && !input.selectedProductRef && !!catalogState.brand && !asksForHuman(settings, customerText)
-    && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand));
+  // Pedido só de tipo ("uns óculos de sol pra presentear") e a cidade chegando agora ("Goiânia"): a intenção do turno
+  // anterior + a cidade nova viram a busca da categoria na cidade, sem exigir marca nem faixa de preço.
+  const categoryBrowse = !catalogState.brand && !!catalogState.category && !!intent.city && !intent.brand && !intent.correction && !typeFirst && !qualifyFirst && !cityProduct;
+  const forceCatalog = !cityFirst && !staffRoute && !documentRoute && !photoQueries.length && !input.selectedProductRef && !asksForHuman(settings, customerText)
+    && (categoryBrowse || (!!catalogState.brand
+      && (intent.correction || !!intent.city || (!!intent.brand && isBroadBrandRequest(customerText, intent.brand)) || (!!catalogState.brand && !!previousCatalog.brand && intent.changed && !intent.brand))));
   // Pedido de pessoa com a IA roteando: sem assunto → 1 pergunta de triagem; com assunto → transfere já para a fila certa.
   // Âncora do atendimento atual: follow-up de detalhes usa o produto fixado; localização no singular usa a loja fixada.
   const anchor = input.anchor ?? EMPTY_ANCHOR;
@@ -753,6 +759,8 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       // Cidade digitada pelo modelo com erro ("Goiânai", "Brasila") vira a cidade real da rede.
       const cityArg = typeof args.cidade === "string" && args.cidade.trim() ? extractPreferredCity(args.cidade, cities) ?? args.cidade : args.cidade;
       const query: Record<string, unknown> = { ...withBudgetArgs(baseQuery, { budget, cheap, category: catalogState.category, ticketFloor: settings.minProactivePrice }), cidade: catalogState.preferredCity || cityArg };
+      // Tipo já dito na conversa (sol/grau/lente) segue como filtro mesmo que o modelo mande só a cidade no termo.
+      if (query.tipo === undefined && CATEGORY_TIPO[catalogState.category]) query.tipo = CATEGORY_TIPO[catalogState.category];
       // Público adulto por padrão; linha infantil só se o cliente falou de criança/filho(a)/idade juvenil.
       if (wantsKids) query.publicoInfantil = true;
       else delete query.publicoInfantil;
@@ -898,7 +906,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const stockSkill = skillEnabled(skills, "estoque_cidade");
   if (forceCatalog && stockSkill) {
     const term = cityProduct ? [cityProduct.marca, cityProduct.referencia ?? cityProduct.nomeComercial].filter(Boolean).join(" ") : [catalogState.brand, categoryWord].filter(Boolean).join(" ");
-    preResult = await stockTool.run({ termoBusca: term, marca: catalogState.brand, cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
+    preResult = await stockTool.run({ termoBusca: term, ...(catalogState.brand ? { marca: catalogState.brand } : {}), cidade: catalogState.preferredCity, tipoBusca: cityProduct ? "modelo_especifico" : "marca_ampla" });
   } else if (choice?.type === "item" && !photoQueries.length && stockSkill) {
     // Item escolhido na vitrine ("gostei da segunda", toque na lista): a ficha dele já sai, mesmo se o modelo não buscar.
     preResult = await stockTool.run({ termoBusca: listedSearchTerm(choice.item), tipoBusca: "modelo_especifico" });
