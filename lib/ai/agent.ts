@@ -8,6 +8,7 @@ import { activeStaff } from "@/lib/ai/staff-db";
 import { savePrescriptionFromAi } from "@/lib/prescriptions-db";
 import { detectSalesEvents, isSalesQueue, parseBrl, type SalesEvent } from "@/lib/sales-pipeline";
 import { recordSalesEvents } from "@/lib/sales-pipeline-db";
+import { pinHandoffBrief } from "@/lib/commercial/jobs-db";
 import { awaitingIdentity, extractCpf, extractFullName, financialStep, FINANCIAL_ASK_IDENTITY, FINANCIAL_CHECK_CPF, FINANCIAL_INVALID_CPF, FINANCIAL_STILL_WAITING, FINANCIAL_UNAVAILABLE, FINANCIAL_WAIT, isFullName, isInstallmentQuestion, maskCpf, type InstallmentLookup, type PlaygroundFinancial } from "@/lib/ai/installments";
 import { buildApprovalDraft, createFinancialApproval, linkedCpfForPhone, lookupInstallments, pendingApproval, type FinancialApprovalDraft } from "@/lib/ai/installments-db";
 import { readMenuState } from "@/lib/chat/menu";
@@ -268,6 +269,8 @@ async function handoff(conversation: ChatConversation, settings: AiSettings, rea
   // Nota para o atendente: fila, como foi escolhida e o resumo do que o cliente precisa.
   const how = target?.source === "ai" ? " (escolhida pela IA)" : target?.source === "fallback" ? " (fila padrão: assunto não identificado)" : target?.source === "staff" ? " (fila do atendente pedido)" : "";
   await addSystemMessage(conversation.id, `${AI_HANDOFF_MARK}${target ? ` para a fila ${target.name}${how}` : ""}: ${reason}`);
+  // Resumo executivo (nome, interesse, modelos, receita, loja/região) fixado no topo do atendimento no /chat.
+  await pinHandoffBrief(conversation.id).catch((error) => console.warn(`[ai] ${conversation.id}: resumo do transbordo não gerado`, error));
   // O que vem depois (aviso ao cliente, fila/atendente, tags, alertas) é o fluxo "IA transferiu o atendimento" em
   // /automacoes. Sem fluxo que rode, o aviso padrão: nunca transferência silenciosa.
   if (sendHandoffMessage) {

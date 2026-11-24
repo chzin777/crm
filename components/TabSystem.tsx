@@ -22,6 +22,7 @@ import {
   Gem,
   PackageSearch,
   MessageSquareText,
+  TrendingUp,
   X,
 } from "lucide-react";
 
@@ -49,6 +50,7 @@ const TABS: TabDef[] = [
   { id: "produtos", label: "Produtos", href: "/produtos", icon: PackageSearch },
   { id: "filas", label: "Filas", href: "/filas", icon: ListOrdered },
   { id: "respostas", label: "Respostas Rápidas", href: "/respostas-rapidas", icon: MessageSquareText },
+  { id: "conversao", label: "Conversão Real", href: "/metricas-atendimento/conversao", icon: TrendingUp },
   { id: "metricas", label: "Métricas", href: "/metricas-atendimento", icon: BarChart3 },
   { id: "ia", label: "Inteligência Artificial", href: "/ia", icon: Sparkles },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },

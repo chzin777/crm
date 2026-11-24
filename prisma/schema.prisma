@@ -1070,3 +1070,39 @@ model ManualVideo {
 
   @@index([order])
 }
+
+/// Lembretes de pós-venda enviados pelo job diário (revisão de grau 11 meses, reposição de lentes de contato).
+/// Um por tipo e pedido do VMSet: nunca duplica. Ver prisma/commercial-suite.sql.
+model CommercialReminder {
+  id        String   @id @default(cuid())
+  /// "rx_review" | "contact_lens"
+  kind      String
+  /// Loja + pedido do VMSet.
+  saleKey   String
+  contactId String?
+  phone     String?
+  dueDate   DateTime @db.Date
+  /// "sent" | "failed" | "skipped"
+  status    String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@unique([kind, saleKey])
+  @@index([contactId, kind, createdAt])
+  @@index([createdAt])
+}
+
+/// Motivo de perda de conversas encerradas sem venda (análise semanal), base do mapa de objeções.
+model ConversationObjection {
+  conversationId String   @id
+  contactId      String
+  assigneeId     String?
+  closedAt       DateTime
+  reason         String
+  evidence       String?
+  weekKey        String
+  createdAt      DateTime @default(now())
+
+  @@index([closedAt])
+  @@index([weekKey])
+}

@@ -386,7 +386,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                 )}
                 {message.author === "system" || message.text === LEGACY_PROTOCOL_TEXT ? (
                   <div className="flex justify-center">
-                    <span className="max-w-[85%] rounded-lg bg-slate-200/70 px-3 py-1.5 text-center text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="max-w-[85%] whitespace-pre-line break-words rounded-lg bg-slate-200/70 px-3 py-1.5 text-center text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                       {message.text === LEGACY_PROTOCOL_TEXT ? "Aviso de sistema do WhatsApp" : message.text} · {clockTime(message.createdAt)}
                     </span>
                   </div>

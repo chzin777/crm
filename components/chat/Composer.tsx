@@ -363,7 +363,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
       {blocked ? (
         <p className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300"><Lock className="h-4 w-4 shrink-0" />Este número está bloqueado e não recebe mensagens. Você ainda pode registrar notas internas.</p>
       ) : windowClosed ? (
-        <TemplatePicker onSend={onTemplate} customerName={conversation.name} agentName={agentName} />
+        <TemplatePicker onSend={onTemplate} customerName={conversation.name} agentName={agentName} conversationId={conversation.id} storeName={conversation.store} />
       ) : recorder.recording ? (
         <div className="flex items-end gap-2">
           <button type="button" onClick={recorder.discard} title="Descartar" aria-label="Descartar gravação" className={`${roundButton} text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/15`}><Trash2 className="h-5 w-5" /></button>

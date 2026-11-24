@@ -26,6 +26,7 @@ import { checkConversions, checkErpTriggers } from "@/lib/automations/erp-sync";
 import { ensureScoringFlows } from "@/lib/automations/scoring-seed";
 import { attributeSales } from "@/lib/automations/attribution";
 import { scheduleDailyRfvp } from "@/lib/rfvp-db";
+import { runBudgetRecovery, runRecurrenceReminders, runWeeklyObjections } from "@/lib/commercial/jobs-db";
 
 const MINUTE = 60_000;
 const PRIORITY_STEP = { low: "normal", normal: "high", high: "urgent", urgent: "urgent" } as const;
@@ -332,6 +333,15 @@ export async function runClock() {
   // "Cancelar automaticamente se o cliente converter": compra (espelho do VMSet) e título pago (API do VMSet).
   await block("automações conversão", async () => {
     summary.automationsConverted = await checkConversions(new Date(now));
+  });
+
+  // Suíte comercial: pós-venda (revisão de grau 11 meses e reposição de lentes de contato, 1x/dia), recuperação de
+  // orçamento aberto (4 a 6 h sem resposta, dentro da janela de 24 h) e mapa semanal de objeções.
+  // Lotes longos (envios espaçados, análise da semana) rodam em segundo plano: o relógio por minuto não espera.
+  void runRecurrenceReminders(new Date(now)).catch((error: unknown) => void reportError("cron.pós-venda", error));
+  void runWeeklyObjections(new Date(now)).catch((error: unknown) => void reportError("cron.objeções semanais", error));
+  await block("recuperação de orçamento", async () => {
+    await runBudgetRecovery(new Date(now));
   });
 
   return summary;

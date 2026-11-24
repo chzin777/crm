@@ -103,6 +103,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Respostas Rápidas", href: "/respostas-rapidas", icon: MessageSquareText },
     { title: "Métricas de Atendimento", href: "/metricas-atendimento", icon: BarChart3 },
+    { title: "Conversão Real", href: "/metricas-atendimento/conversao", icon: TrendingUp },
     { title: "Lojas", href: "/lojas", icon: Store },
     { title: "Campanhas e disparos", href: "/campanhas", icon: Megaphone },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
@@ -118,7 +119,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento")] },
+    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento"), byHref("/metricas-atendimento/conversao")] },
     { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes"), byHref("/clientes-vip")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/permissoes")] },
   ]

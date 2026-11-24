@@ -70,7 +70,7 @@ export function formatExtraction(kind: DocumentKind, extraction: DocumentExtract
 
 /** Confirmação ao cliente antes do transbordo (acolhedora, sem repetir os dados). */
 export function documentReply(kinds: DocumentKind[]) {
-  if (kinds.includes("receita")) return "Recebi sua receita! Já anotei os dados aqui e vou te encaminhar agora mesmo para um de nossos especialistas montar o orçamento das lentes ideal pra você 😊";
+  if (kinds.includes("receita")) return "Recebi sua receita! Já anotei os dados aqui e vou te encaminhar agora mesmo para um de nossos especialistas montar a sua cotação 😊";
   if (kinds.includes("comprovante")) return "Recebi seu comprovante! Já anotei os dados aqui e vou te encaminhar agora mesmo para a nossa equipe conferir, tá bom? 😊";
   return "Recebi seu documento! Já anotei as informações e vou te encaminhar agora mesmo para um especialista da nossa equipe conferir com cuidado 😊";
 }

@@ -15,6 +15,7 @@ import { ConversationList } from "@/components/chat/ConversationList";
 import type { Attendant } from "@/components/chat/AttendantFilter";
 import { Composer, type ComposerSend } from "@/components/chat/Composer";
 import { FinancialApprovalCard } from "@/components/chat/FinancialApprovalCard";
+import { HandoffBriefCard } from "@/components/chat/HandoffBriefCard";
 import { DeleteConversationDialog, deleteConversation, type DeleteReason } from "@/components/chat/DeleteConversationDialog";
 
 const UNDO_DELETE_MS = 7000;
@@ -650,6 +651,7 @@ function ChatWorkspace() {
                   />
                 </div>
               </div>
+              <HandoffBriefCard key={`${open.id}-brief`} conversationId={open.id} tick={tick} />
               <MessageList
                 key={open.id}
                 conversationId={open.id}

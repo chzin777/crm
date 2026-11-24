@@ -7,12 +7,26 @@ type Template = { name: string; language: string; status: string; body: string }
 
 export type TemplateChoice = { name: string; language: string; params: string[] };
 
-export function TemplatePicker({ onSend, requireNotice = true, customerName, agentName }: { onSend: (template: TemplateChoice) => Promise<void>; requireNotice?: boolean; customerName?: string | null; agentName?: string | null }) {
+type CommercialVariables = { model: string; store: string; city: string };
+
+export function TemplatePicker({ onSend, requireNotice = true, customerName, agentName, conversationId, storeName }: { onSend: (template: TemplateChoice) => Promise<void>; requireNotice?: boolean; customerName?: string | null; agentName?: string | null; conversationId?: string | null; storeName?: string | null }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selected, setSelected] = useState("");
   const [params, setParams] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [commercial, setCommercial] = useState<CommercialVariables | null>(null);
+
+  // Reengajamento de lead expirado: modelo consultado e loja/região vêm da conversa (catálogo, funil de vendas).
+  useEffect(() => {
+    if (!conversationId) return;
+    let active = true;
+    fetch(`/api/chat/conversations/${conversationId}/brief?variables=1`)
+      .then(async (response) => (response.ok ? ((await response.json()) as { variables?: CommercialVariables }) : {}))
+      .then((data) => { if (active && data.variables) setCommercial(data.variables); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [conversationId]);
 
   useEffect(() => {
     let active = true;
@@ -40,12 +54,24 @@ export function TemplatePicker({ onSend, requireNotice = true, customerName, age
     const customer = (customerName ?? "").trim();
     return fillAttendantTokens(value, attendant)
       .replace(/\{\{\s*primeiro_nome\s*\}\}/gi, customer.split(/\s+/)[0] ?? "")
-      .replace(/\{\{\s*nome\s*\}\}/gi, customer);
+      .replace(/\{\{\s*nome\s*\}\}/gi, customer)
+      .replace(/\{\{\s*modelo_consultado\s*\}\}/gi, commercial?.model ?? "")
+      .replace(/\{\{\s*unidade\s*\}\}/gi, unit);
   };
+  const unit = (commercial?.store || storeName || commercial?.city || "").trim();
   const sources = [
     ...(customerName?.trim() ? [{ label: "Nome do cliente", value: "{{nome}}" }, { label: "Primeiro nome do cliente", value: "{{primeiro_nome}}" }] : []),
+    ...(commercial?.model ? [{ label: "Modelo consultado", value: "{{modelo_consultado}}" }] : []),
+    ...(unit ? [{ label: "Unidade", value: "{{unidade}}" }] : []),
     ...ATTENDANT_FIELDS.map((item) => ({ label: item.label, value: `{{${item.value}}}` })),
   ];
+  // Preenchimento automático ao escolher o modelo: {{1}} nome, {{2}} modelo consultado, {{3}} unidade (o atendente ajusta).
+  const autoFill = (choice: Template | undefined) => {
+    if (!choice) return [];
+    const total = new Set(choice.body.match(/\{\{\d+\}\}/g) ?? []).size;
+    const defaults = [customerName?.trim() ? "{{primeiro_nome}}" : "", commercial?.model ? "{{modelo_consultado}}" : "", unit ? "{{unidade}}" : ""];
+    return Array.from({ length: total }, (_, index) => defaults[index] ?? "");
+  };
   const setParam = (index: number, value: string) => setParams((current) => { const next = [...current]; next[index] = value; return next; });
   const preview = template
     ? template.body.replace(/\{\{(\d+)\}\}/g, (mark, number: string) => resolve(params[Number(number) - 1] ?? "").trim() || mark)
@@ -68,7 +94,7 @@ export function TemplatePicker({ onSend, requireNotice = true, customerName, age
         </p>
       )}
       {error && <p className="text-xs text-red-600 dark:text-red-300">{error}</p>}
-      <select aria-label="Modelo" value={selected} onChange={(event) => { setSelected(event.target.value); setParams([]); }} className={`${field} cursor-pointer`}>
+      <select aria-label="Modelo" value={selected} onChange={(event) => { setSelected(event.target.value); setParams(autoFill(templates.find((item) => `${item.name}|${item.language}` === event.target.value))); }} className={`${field} cursor-pointer`}>
         <option value="">Selecione um modelo</option>
         {templates.map((item) => <option key={`${item.name}|${item.language}`} value={`${item.name}|${item.language}`}>{item.name} ({item.language})</option>)}
       </select>
