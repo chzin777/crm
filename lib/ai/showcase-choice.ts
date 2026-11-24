@@ -49,7 +49,7 @@ const ORDINALS: Record<string, number> = { primeir: 1, segund: 2, terceir: 3, qu
 export function choicePosition(text: string, count: number): number | null {
   const value = norm(text).trim();
   const alone = value.match(/^(?:o|a)?\s*(\d{1,2})\s*[.!?]*$/);
-  const numbered = value.match(/\b(?:o|a|n[º°o]?|numero|item|opcao|op)\s*\.?\s*(\d{1,2})(?!\s*(?:reais|,|\.\d|\d))\b/);
+  const numbered = value.match(/\b(?:o|a|do|da|no|na|pelo|pela|n[º°o]?|numero|item|opcao|op)\s*\.?\s*(\d{1,2})(?!\s*(?:reais|,|\.\d|\d))\b/);
   const ordinal = value.match(/\b(?:o|a|esse|essa|este|esta|do|da|no|na|pelo|pela|ver)\s+(?:ai\s+)?(primeir|segund|terceir|quart|quint|sext|setim|oitav)[oa]\b|\b(\d)\s*[º°ª]|\b(?:a|da|na)\s+(\d)\s*(?:a\s+)?foto\b/);
   const last = /\b(?:o|a|esse|essa|do|da)\s+ultim[oa]\b/.test(value);
   let position: number | null = null;
@@ -80,8 +80,10 @@ export function resolveListedChoice(text: string, listed: ListedProduct[]): List
     return ref.length >= 3 && hay.includes(ref);
   });
   if (byRef.length === 1) return { type: "item", item: byRef[0] };
-  const position = choicePosition(text, listed.length);
-  if (position) return { type: "item", item: listed[position - 1] };
+  // Numeração contínua na conversa (4, 5, 6 depois de 1, 2, 3): o número do card identifica o item.
+  const position = choicePosition(text, nextShowcaseIndex(listed) - 1);
+  const item = position ? listed.find((entry) => entry.index === position) : undefined;
+  if (item) return { type: "item", item };
   const price = choicePrice(text);
   if (price === null) return null;
   const same = listed.filter((item) => item.preco !== null && (Math.abs(item.preco - price) < 0.01 || Math.floor(item.preco) === Math.floor(price)));
@@ -137,4 +139,37 @@ export function listedPromptBlock(listed: ListedProduct[], choice: ListedChoice)
   else if (choice?.type === "ambiguous") lines.push(`O preço citado serve para os itens ${choice.items.map((item) => item.index).join(", ")}: pergunte qual número ou referência ele quer ver, sem repetir a vitrine.`);
   else lines.push("Não chame marca_ampla de novo para a mesma marca nem repita essa lista: se o cliente escolher pelo número, posição, referência ou preço, abra o item com modelo_especifico.");
   return lines.join("\n");
+}
+
+/** A última mensagem da IA ofereceu detalhes dos modelos já mostrados ("Quer que eu te mostre mais detalhes de algum deles?"). */
+export function offeredDetails(lastAiText: string | null | undefined) {
+  const value = norm(lastAiText ?? "");
+  return /\b(algum|alguma|qual|quais)\s+(deles|delas|desses|dessas|modelos?|opc(ao|oes)|fotos?)\b/.test(value)
+    || /\b(mais\s+)?detalhes\b|\bmais\s+informac(ao|oes)\b|\bver\s+melhor\b|\bchamou\s+(mais\s+)?(sua\s+)?atencao\b|\bte\s+agradou\b|\bmais\s+gostou\b/.test(value);
+}
+
+/** Confirmação genérica sem dizer qual item: "Sim", "Quero", "Pode mostrar", "Com certeza". */
+export function isGenericYes(text: string) {
+  const value = norm(text).replace(/[!.?,😊🙂👍❤️]+/gu, " ").replace(/\s+/g, " ").trim();
+  return /^(sim|s|ss|simm+|claro|quero|quero sim|sim quero|pode|pode sim|pode mostrar|pode ser|mostra|mostre|me mostra|sim pode|com certeza|certeza|isso|ok|okay|beleza|blz|bora|vamos|manda|pode mandar|sim por favor|por favor|gostaria|gostaria sim|aham|uhum|yes)( (sim|por favor|pfv|pf|obrigad[oa]))?$/.test(value);
+}
+
+/**
+ * "Sim" depois de "Quer ver mais detalhes de algum deles?": nada de nova busca nem nova vitrine; pergunta qual dos
+ * modelos já mostrados ele quer ver (número + nome).
+ */
+export function genericYesToDetails(input: { text: string; lastAiText: string | null | undefined; listed: ListedProduct[] }) {
+  return input.listed.length > 0 && isGenericYes(input.text) && offeredDetails(input.lastAiText);
+}
+
+export function whichOfShownQuestion(listed: ListedProduct[]) {
+  const items = listed.slice(-3);
+  const names = items.map((item) => `o ${item.index} (${item.nomeComercial})`);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} ou ${names[names.length - 1]}` : names[0];
+  return `Claro! Qual deles você curtiu mais? ${list.charAt(0).toUpperCase()}${list.slice(1)}? Me diz o número que eu te mando os detalhes.`;
+}
+
+/** Próximo número de card na conversa: continua a numeração das vitrines anteriores (1, 2, 3 → 4, 5, 6). */
+export function nextShowcaseIndex(listed: { index: number }[]) {
+  return listed.reduce((max, item) => Math.max(max, item.index), 0) + 1;
 }

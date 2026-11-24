@@ -771,3 +771,33 @@ describe("cliente pede um atendente pelo nome", () => {
     expect(turn.messages).toEqual(["Claro, Vivi! Vou te transferir agora mesmo para um dos nossos atendentes. Só um instante! 😊"]);
   });
 });
+
+describe("\"Sim\" depois de \"Quer que eu te mostre mais detalhes de algum deles?\"", () => {
+  it("não chama a busca nem manda nova vitrine: pergunta qual dos modelos já mostrados", async () => {
+    model.script = async (tools) => {
+      const result = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as { vitrineFormatada: string };
+      return { reply: `Separei as Radda que estão aqui:\n${result.vitrineFormatada}\n---SPLIT---\nQuer que eu te mostre mais detalhes de algum deles?`, action: "reply" };
+    };
+    const history: PlaygroundMessage[] = [{ from: "customer", text: "tem radda?" }];
+    const turn1 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-sim", knownCity: "Goiânia" });
+    expect(turn1.catalogContext?.lastShownProducts).toHaveLength(3);
+    history.push(...turn1.messages.map((text, index): PlaygroundMessage => ({ from: "ai", text, ...(index === 0 ? { catalogContext: turn1.catalogContext } : {}) })));
+
+    // O modelo tenta a busca ampla de novo e devolve outra vitrine: o backend bloqueia as duas coisas.
+    const searchesBefore = calls.stock.length;
+    let seen: { vitrineJaEnviada?: boolean; orientacao?: string } | null = null;
+    model.script = async (tools) => {
+      seen = (await tools.consultarEstoqueProduto({ termoBusca: "Radda", tipoBusca: "marca_ampla" })) as typeof seen;
+      return { reply: "Separei três opções da Radda pra você:\n1. 👓 *Radda*, R$ 120,00\n2. 👓 *Radda*, R$ 120,00\n3. 👓 *Radda*, R$ 120,00", action: "reply" };
+    };
+    history.push({ from: "customer", text: "Sim" });
+    const turn2 = await simulateAgent(settings, history, "user-1", undefined, { sessionId: "sessao-sim", knownCity: "Goiânia" });
+    expect(calls.stock.length).toBe(searchesBefore);
+    expect(seen).toMatchObject({ vitrineJaEnviada: true });
+    const reply = turn2.messages.join("\n");
+    expect(reply).toMatch(/Qual deles você curtiu mais\? O 1 \(Radda\), o 2 \(Radda\) ou o 3 \(Radda\)\?/);
+    expect(reply).not.toMatch(/^\s*\d[.)]\s/m);
+    expect(reply).not.toMatch(/Separei/);
+    expect(turn2.image).toBeFalsy();
+  });
+});

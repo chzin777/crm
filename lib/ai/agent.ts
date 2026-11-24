@@ -43,7 +43,7 @@ import { listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-op
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { formatBrl, STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, formatShowcase, showcaseReference, type ShowcaseModel } from "@/lib/ai/stock-showcase";
-import { asksListAgain, extractListedProducts, listedPromptBlock, listedSearchTerm, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
+import { asksListAgain, extractListedProducts, genericYesToDetails, nextShowcaseIndex, whichOfShownQuestion, listedPromptBlock, listedSearchTerm, repeatsShowcase, parseShowcase, resolveListedChoice, type ListedChoice, type ListedProduct } from "@/lib/ai/showcase-choice";
 import { asksForPhoto, cardGuidance, DETAILS_TOOL, shouldSendProductPhoto } from "@/lib/ai/product-details";
 import { buildProductCard, cardStore, cleanReference, commercialName, type ProductCardFields } from "@/lib/ai/product-card";
 import { buscarDetalhesProduto, productSummary, type DetailsLog } from "@/lib/ai/product-details-db";
@@ -666,6 +666,8 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   let cardShown: string | null = null;
   let productInterest: { name: string; price: number | null } | null = null;
   let interactiveList: InteractiveShowcase | null = null;
+  // "Sim" depois de "Quer ver mais detalhes de algum deles?": sem nova busca nem nova vitrine; pergunta qual dos já mostrados.
+  const yesToDetails = !forceCatalog && !photoQueries.length && !input.selectedProductRef && !choice && genericYesToDetails({ text: input.pendingText, lastAiText: input.lastAiText, listed });
   const nearbyBlock = nearbyStorePrompt({ customerText, earlierCustomerTexts: input.earlierCustomerTexts ?? [], cityHint: catalogState.preferredCity || input.knownCity, knownPlace: input.knownCity, directory });
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
   // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
@@ -741,6 +743,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     definition: STOCK_TOOL,
     run: async (args: Record<string, unknown>) => {
       // Preço que serve para vários itens da vitrine: nada de nova busca (nem a mesma lista); pergunta número/referência.
+      if (yesToDetails) return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], orientacao: `O cliente só confirmou ("${input.pendingText.trim()}") que quer detalhes, sem dizer de qual modelo. NÃO faça nova busca nem nova vitrine: pergunte qual dos modelos já mostrados ele quer ver, citando número e nome: ${whichOfShownQuestion(listed)}` };
       if (choice?.type === "ambiguous") return { tipoBusca: "marca_ampla", vitrineJaEnviada: true, produtos: [], opcoesComEssePreco: choice.items.map((item) => item.index), orientacao: `Não repita a vitrine. O preço citado (${formatBrl(choice.price)}) vale para as opções ${choice.items.map((item) => item.index).join(", ")}: pergunte com suas palavras qual delas o cliente quer ver, pelo número da foto, sem citar códigos de referência.` };
       // Item escolhido na vitrine (número, posição, referência ou preço único): busca específica com a referência exata.
       const chosen = choice?.type === "item" ? choice.item : null;
@@ -1112,6 +1115,12 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     outcome = { ...outcome, reply: withToolContent(outcome.reply, (cardShown ?? toolShowcase)!) };
   }
   if (outcome.action === "reply" && !close.close) outcome = { ...outcome, reply: withoutRedundantStoreQuestion(outcome.reply) };
+  // Trava final do "Sim" genérico: só a pergunta de qual modelo (nenhuma vitrine, foto ou lista nova sai neste turno).
+  if (yesToDetails && outcome.action === "reply" && !close.close) {
+    outcome = { ...outcome, reply: whichOfShownQuestion(listed), reason: "Confirmou detalhes sem dizer o modelo" };
+    image = null;
+    interactiveList = null;
+  }
   // O cliente pediu uma pessoa e já houve triagem (ou o assunto é claro): a transferência acontece mesmo se o modelo só respondeu.
   if (humanMode === "route" && outcome.action !== "handoff") outcome = { ...outcome, action: "handoff", reason: outcome.reason === "Sem motivo informado" ? "Cliente pediu para falar com uma pessoa" : outcome.reason, trigger: "keyword" };
   // Vitrine de opções vira catálogo visual: comentário do modelo → 1 foto por modelo (até 4) com legenda limpa (nome,
@@ -1134,10 +1143,12 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       ?? { nomeComercial: item.nomeComercial, referencia: item.referencia, categoriaModelo: null, precoVenda: item.preco ? formatBrl(item.preco) : null, totalDisponivelRede: 0, codigos: item.sku ? [item.sku] : [] });
     const reserves = reserveModels.filter((model) => !ordered.some((item) => item.codigos.some((code) => model.codigos.includes(code))));
     if (!ordered.some((model) => model.codigos.some((code) => !!catalogPhotos[code]))) await catalogPhotosFor([...ordered, ...reserves]);
-    visualCatalog = buildVisualCatalog({ models: ordered, reserves, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after });
+    // Nova vitrine na mesma conversa continua a numeração dos cards (1, 2, 3 → 4, 5, 6): "gostei do 2" nunca fica ambíguo.
+    const startIndex = nextShowcaseIndex(shown);
+    visualCatalog = buildVisualCatalog({ models: ordered, reserves, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after, startIndex });
     if (visualCatalog) {
       outcome = { ...outcome, reply: [before, ...visualCatalog.items.map((item) => item.caption), after].filter(Boolean).join("\n---SPLIT---\n") };
-      catalogState.lastShownProducts = shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })));
+      catalogState.lastShownProducts = [...shown, ...shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })))].slice(-12);
       rememberShown(catalogState, visualCatalog.items.flatMap((item) => [...modelShownIds({ sku: item.sku, referencia: item.ref }), ...modelShownIds(ordered.find((model) => model.codigos.includes(item.sku)) ?? {})]));
       interactiveList = null;
     } else {

@@ -527,7 +527,7 @@ export const CATALOG_CLOSINGS = ["Qual dessas fotos chamou mais sua atenção?",
  * e única (qualquer código da variante). Opção sem foto (ou com a mesma foto de outra) sai e dá lugar à próxima
  * reserva com foto (mesma busca, com estoque). null quando nenhum modelo tem foto (aí a vitrine sai em texto limpo).
  */
-export function buildVisualCatalog(input: { models: ShowcaseModel[]; reserves?: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number }): VisualCatalog | null {
+export function buildVisualCatalog(input: { models: ShowcaseModel[]; reserves?: ShowcaseModel[]; images: Record<string, string>; city: string; opening: string; closing: string; max?: number; /** Número do 1º card: continua a numeração da conversa (4, 5, 6 depois de 1, 2, 3). */ startIndex?: number }): VisualCatalog | null {
   const items: CatalogPhoto[] = [];
   // Nunca o mesmo modelo (referência/nome) nem a mesma foto duas vezes na mesma resposta.
   const seenModels = new Set<string>();
@@ -544,7 +544,7 @@ export function buildVisualCatalog(input: { models: ShowcaseModel[]; reserves?: 
     if (!sku) continue;
     modelKeys.forEach((value) => seenModels.add(value));
     seenImages.add(imageKey(input.images[sku]));
-    const index = items.length + 1;
+    const index = items.length + Math.max(1, Math.floor(input.startIndex ?? 1));
     const stores = model.lojas ?? [];
     const name = modelDisplayName(model);
     items.push({

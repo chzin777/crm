@@ -17,7 +17,7 @@ export const EMPTY_CATALOG_CONTEXT: CatalogContext = { preferredCity: "", brand:
 function sanitizeShown(value: unknown): ShownProduct[] {
   if (!Array.isArray(value)) return [];
   const text = (raw: unknown, max: number) => (typeof raw === "string" ? raw.replace(/[\r\n]+/g, " ").trim().slice(0, max) : "");
-  return value.slice(0, 8).flatMap((raw, position): ShownProduct[] => {
+  return value.slice(-12).flatMap((raw, position): ShownProduct[] => {
     if (!raw || typeof raw !== "object") return [];
     const item = raw as Record<string, unknown>;
     const name = text(item.name, 100);
