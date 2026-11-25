@@ -150,7 +150,11 @@ export async function GET(request: Request) {
   ];
 
   // "Todas" e "Encerradas": 1 entrada por contato (o atendimento mais recente), calculada sobre os filtros/busca.
-  const contacts = loadByContact(filters);
+  // Nas demais abas ela só alimenta os contadores, então reaproveita o cálculo recente (é a consulta mais pesada da rota).
+  const listsByContact = tab === "all" || tab === "closed";
+  const byContact = listsByContact ? loadByContact(filters) : null;
+  if (byContact) rememberContactTotals(filters, byContact);
+  const contacts: Promise<ContactTotals> = byContact ?? cachedContactTotals(filters);
 
   // A aba de lembretes mostra o retorno mais próximo primeiro (1 por contato).
   if (tab === "followups") {
@@ -172,8 +176,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ items, nextCursor: unique.length > offset + PAGE_SIZE ? offset + PAGE_SIZE : null, counts });
   }
 
-  if (tab === "all" || tab === "closed") {
-    const [{ all, closed }, counts] = await Promise.all([contacts, tabCounts(actor, filters, contacts)]);
+  if (byContact) {
+    const [{ all, closed }, counts] = await Promise.all([byContact, tabCounts(actor, filters, contacts)]);
     const entries = tab === "all" ? all : closed;
     const page = entries.slice(offset, offset + PAGE_SIZE);
     const rows = await prisma.chatConversation.findMany({ where: { id: { in: page.map((entry) => entry.id) } }, include: conversationInclude });
@@ -231,7 +235,31 @@ async function withSessionTotals(rows: ConversationRow[]) {
   return rows.map((row) => ({ ...serializeConversation(row), totalSessions: Math.max(1, byContact.get(row.contactId) ?? (isSession(row) ? 1 : 0)) }));
 }
 
-async function tabCounts(actor: ChatActor, filters: Prisma.ChatConversationWhereInput[], contacts: ReturnType<typeof loadByContact>): Promise<ChatCounts> {
+type ContactTotals = { all: { length: number }; closed: { length: number } };
+
+/** Totais de "Todas"/"Encerradas" por filtro, guardados por alguns segundos para as abas que só exibem o número. */
+const CONTACT_TOTALS_TTL_MS = 20_000;
+const CONTACT_TOTALS_MAX = 100;
+const contactTotals = new Map<string, { at: number; value: Promise<ContactTotals> }>();
+
+function rememberContactTotals(filters: Prisma.ChatConversationWhereInput[], value: Promise<ContactTotals>) {
+  const key = JSON.stringify(filters);
+  const totals = value.then(({ all, closed }) => ({ all: { length: all.length }, closed: { length: closed.length } }));
+  totals.catch(() => contactTotals.delete(key));
+  contactTotals.delete(key);
+  contactTotals.set(key, { at: Date.now(), value: totals });
+  while (contactTotals.size > CONTACT_TOTALS_MAX) contactTotals.delete(contactTotals.keys().next().value!);
+}
+
+function cachedContactTotals(filters: Prisma.ChatConversationWhereInput[]): Promise<ContactTotals> {
+  const hit = contactTotals.get(JSON.stringify(filters));
+  if (hit && Date.now() - hit.at < CONTACT_TOTALS_TTL_MS) return hit.value;
+  const fresh = loadByContact(filters);
+  rememberContactTotals(filters, fresh);
+  return fresh;
+}
+
+async function tabCounts(actor: ChatActor, filters: Prisma.ChatConversationWhereInput[], contacts: Promise<ContactTotals>): Promise<ChatCounts> {
   const count = (where: Prisma.ChatConversationWhereInput) => prisma.chatConversation.count({ where: { AND: [where, ...filters] } });
   const [queue, mine, byContact, unread, campaigns, followups, followupsOverdue, slaBreached] = await Promise.all([
     count(tabWhere("queue", actor)),
