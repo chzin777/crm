@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { motion } from "motion/react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertTriangle, CalendarClock, Check, HeartPulse, Inbox, Moon, Receipt, RotateCcw, ShieldAlert, Smile, Sparkles, Store, TrendingUp, UserRound, UserRoundX, Users } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, HeartPulse, Inbox, Moon, Receipt, RotateCcw, ShieldAlert, Smile, Sparkles, Store, TrendingUp, UserRound, UserRoundX, Users, Zap } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { NewConversationDialog } from "@/components/chat/NewConversationDialog";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
@@ -222,6 +223,17 @@ export default function PainelPage() {
           <RefreshButton loading={loading} onClick={() => setReloadToken((token) => token + 1)} />
         </div>
       </header>
+
+      <Link href="/vendas/ao-vivo" className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl bg-[#051647] px-4 py-3 text-white shadow-sm transition hover:bg-[#002187]">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5 shrink-0"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#C4D600] opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#C4D600]" /></span>
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold">Vendas ao vivo · Black Friday</span>
+            <span className="block text-xs text-white/70">Faturamento, pedidos e ranking de lojas do dia, direto do VMSET, otimizado para o celular.</span>
+          </span>
+        </span>
+        <Zap className="h-5 w-5 shrink-0 text-[#C4D600]" />
+      </Link>
 
       {result?.error && <p role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">{result.error}</p>}
 

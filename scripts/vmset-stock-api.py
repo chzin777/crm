@@ -26,6 +26,8 @@ GET /orders/credit?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", 
   - também "uf"/"city" da loja e "attempt" (1 = primeiro envio, 2+ = reenvio);
 GET /orders/credit/history?date=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "sentAt", "analysisAt", "answeredAt", "analyst", "store", "storeCode", "uf", "status", "denied", "total"}]}
   - solicitações de crédito enviadas no dia (resumo do painel: tempo de resposta, por analista, por loja);
+GET /sales/today  (cabeçalho x-api-key)  ->  {"at", "day", "items": [{"id", "store", "order", "invoice", "time", "seller", "customer", "cpf", "phone", "brand", "description", "category", "quantity", "amount", "payment", "terms"}]}
+  - itens de venda do dia (painel ao vivo); Oracle no máximo a cada 10 s (novos itens) e 60 s (dia inteiro);
 GET /orders/credit/customer?order=PEDIDO_SAIDA_ID  (cabeçalho x-api-key)  ->  {"customer", "order", "receivables", "purchases", "requests"}
   - ficha do cliente para decidir o crédito: situação/SPC, plano do pedido, parcelas em aberto/atrasadas, pontualidade, compras;
 GET /health
@@ -612,6 +614,81 @@ class Snapshot:
         return {"at": int(self.at * 1000), "items": self.data}
 
 
+TODAY_SALES_COLS = (
+    "ITEM_MOVI_ESTOQUE_ID, LOJA, NUM_PEDIDO, NUM_NOTA, HORA_PEDIDO2, VENDEDOR, NOME_CLIENTE, PARCEIRO_CPF, CELULAR, "
+    "TELEFONE, MARCA, DESCRICAO, NOME_CATEGORIA, QTDE_ITEM_VENDA, VALOR_ITEM_VENDA, PAGTO, COND_PAGTO, DATA_PEDIDO"
+)
+
+
+def digits(value, pad=0):
+    """Só dígitos (CPF numérico no Oracle perde o zero à esquerda: volta com pad)."""
+    if value is None:
+        return None
+    raw = str(int(value)) if isinstance(value, (int, float)) else re.sub(r"\D", "", str(value))
+    if pad and 9 <= len(raw) < pad:
+        raw = raw.zfill(pad)
+    return raw or None
+
+
+def sale_item(row):
+    (item_id, store, order, invoice, hour, seller, customer, cpf, mobile, phone, brand, description, category,
+     quantity, amount, payment, terms, _day) = row
+    return {
+        "id": text(item_id), "store": text(store), "order": text(order), "invoice": text(invoice), "time": text(hour),
+        "seller": text(seller), "customer": text(customer), "cpf": digits(cpf, 11),
+        "phone": digits(mobile) or digits(phone), "brand": text(brand),
+        "description": text(description), "category": text(category), "quantity": float(quantity or 0),
+        "amount": round(float(amount or 0), 2), "payment": text(payment), "terms": text(terms),
+    }
+
+
+class TodaySales:
+    """Vendas do dia (tab_dados_dinamicos, TIPO = Venda) em memória para o painel ao vivo do CRM.
+
+    O Oracle é consultado no máximo uma vez por ciclo, não importa quantos navegadores estejam abertos:
+    novos itens a cada 10 s (ITEM_MOVI_ESTOQUE_ID maior que o último visto, consulta instantânea) e o dia inteiro
+    a cada 60 s (~2 s; pega itens fora de ordem, cancelamentos e a virada do dia).
+    """
+
+    INCREMENTAL_EVERY, FULL_EVERY = 10, 60
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.day, self.items, self.last_full, self.last_inc, self.at = None, {}, 0.0, 0.0, 0.0
+
+    def _full(self, cur):
+        cur.execute(f"SELECT {TODAY_SALES_COLS} FROM tab_dados_dinamicos WHERE DATA_PEDIDO >= TRUNC(SYSDATE) AND TIPO = 'Venda'")
+        self.items = {item["id"]: item for item in (sale_item(row) for row in cur.fetchall()) if item["id"]}
+        self.day, self.last_full = datetime.date.today(), time.monotonic()
+
+    def _incremental(self, cur):
+        after = max(self.items, default="")
+        cur.execute(f"SELECT {TODAY_SALES_COLS} FROM tab_dados_dinamicos WHERE ITEM_MOVI_ESTOQUE_ID > :a AND TIPO = 'Venda'", a=after)
+        today = datetime.date.today()
+        for row in cur.fetchall():
+            sold = row[-1]
+            if isinstance(sold, datetime.datetime) and sold.date() != today:
+                continue
+            item = sale_item(row)
+            if item["id"]:
+                self.items[item["id"]] = item
+
+    def get(self):
+        with self.lock:
+            now = time.monotonic()
+            if self.day != datetime.date.today() or now - self.last_full >= self.FULL_EVERY:
+                with pool.acquire() as conn:
+                    self._full(conn.cursor())
+                self.last_inc, self.at = now, time.time()
+            elif now - self.last_inc >= self.INCREMENTAL_EVERY:
+                with pool.acquire() as conn:
+                    self._incremental(conn.cursor())
+                self.last_inc, self.at = now, time.time()
+            return {"at": int(self.at * 1000), "day": self.day.isoformat(), "items": list(self.items.values())}
+
+
+today_sales = TodaySales()
+
 catalog_cache = {
     "/catalog/products": Snapshot("produtos", catalog_products, ttl=3600, min_refresh=300),
     "/catalog/stock": Snapshot("estoque", catalog_stock, ttl=120, min_refresh=30),
@@ -632,10 +709,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
         if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", "/orders/credit",
-                            "/orders/credit/history", "/orders/credit/customer", *catalog_cache):
+                            "/orders/credit/history", "/orders/credit/customer", "/sales/today", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
+        if url.path == "/sales/today":
+            try:
+                return self._send(200, today_sales.get())
+            except Exception as error:
+                log(f"ERRO vendas do dia: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
         if url.path in catalog_cache:
             refresh = parse_qs(url.query).get("refresh", [""])[0] == "1"
             try:

@@ -4,6 +4,7 @@ export const MODULES = [
   { key: "contatos", label: "Contatos & Clientes", href: "/contatos", group: "Vendas" },
   { key: "segmentos", label: "Segmentos", href: "/segmentos", group: "Vendas" },
   { key: "produtos", label: "Catálogo de Produtos", href: "/produtos", group: "Vendas" },
+  { key: "vendas", label: "Vendas ao vivo", href: "/vendas/ao-vivo", group: "Marketing" },
   { key: "campanhas", label: "Campanhas", href: "/campanhas", group: "Marketing" },
   { key: "disparos", label: "Disparos pelo pipeline", href: "/campanhas", group: "Marketing" },
   { key: "modelos", label: "Modelos WhatsApp", href: "/modelos", group: "Marketing" },
@@ -59,6 +60,8 @@ export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAc
   // Respostas rápidas acompanham o atendimento: quem atende ou gerencia filas já administra as suas.
   if (key === "respostas") return modules?.chat === true || modules?.filas === true || modules?.configuracoes === true;
   if (key === "produtos") return modules?.chat === true || modules?.pipelines === true || modules?.contatos === true;
+  // Vendas ao vivo (Black Friday): gestão e marketing acompanham pelo celular sem precisar de liberação nova.
+  if (key === "vendas") return modules?.painel === true || modules?.campanhas === true || modules?.metricas === true;
   return key === "campanhas" && modules?.disparos === true;
 }
 

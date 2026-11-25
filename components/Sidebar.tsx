@@ -36,6 +36,7 @@ import {
   Gem,
   PackageSearch,
   MessageSquareText,
+  Zap,
 } from "lucide-react";
 
 const ITEM_ACTIVE = "bg-[#051647]/[0.07] text-[#051647] dark:bg-white/10 dark:text-[#C4D600]";
@@ -103,6 +104,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Respostas Rápidas", href: "/respostas-rapidas", icon: MessageSquareText },
     { title: "Métricas de Atendimento", href: "/metricas-atendimento", icon: BarChart3 },
+    { title: "Vendas ao vivo", href: "/vendas/ao-vivo", icon: Zap },
     { title: "Lojas", href: "/lojas", icon: Store },
     { title: "Campanhas e disparos", href: "/campanhas", icon: Megaphone },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
@@ -118,7 +120,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento")] },
+    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento"), byHref("/vendas/ao-vivo")] },
     { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes"), byHref("/clientes-vip")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/usuarios"), byHref("/permissoes")] },
   ]
