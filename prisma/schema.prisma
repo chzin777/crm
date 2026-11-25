@@ -1149,3 +1149,58 @@ model CatalogStock {
 
   @@id([code, unit])
 }
+
+/// Vendedor do VMSet espelhado no CRM (ativo e com venda nos últimos 60 dias), base das metas. SQL: prisma/seller-goals.sql
+model Seller {
+  id          String       @id @default(cuid())
+  /// VENDEDOR_ID do VMSet (PARCEIRO_ID).
+  vmsetId     String       @unique
+  name        String
+  /// Loja principal (a que mais vendeu nos últimos 60 dias), código do VMSet.
+  storeNumber Int?
+  /// Todas as lojas onde vendeu no período.
+  stores      Int[]
+  active      Boolean      @default(true)
+  lastSaleAt  DateTime?    @db.Date
+  sales60d    Decimal?     @db.Decimal(14, 2)
+  syncedAt    DateTime?    @db.Timestamptz(6)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  goals       SellerGoal[]
+
+  @@index([storeNumber])
+}
+
+/// Meta mensal do vendedor (R$). A meta da loja é a soma das metas dos vendedores daquela loja no mês.
+model SellerGoal {
+  id          String   @id @default(cuid())
+  sellerId    String
+  seller      Seller   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  /// "2026-11"
+  month       String
+  /// Loja da meta (fica gravada: trocar o vendedor de loja não muda metas passadas).
+  storeNumber Int?
+  amount      Decimal  @db.Decimal(14, 2)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sellerId, month])
+  @@index([month, storeNumber])
+}
+
+/// Meta mensal da empresa (scope "company", key "global") ou de uma marca (scope "brand", key = marca do VMSet em caixa alta).
+model SalesGoal {
+  id          String   @id @default(cuid())
+  /// "2026-11"
+  month       String
+  scope       String
+  key         String
+  label       String
+  amount      Decimal  @db.Decimal(14, 2)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([month, scope, key])
+}

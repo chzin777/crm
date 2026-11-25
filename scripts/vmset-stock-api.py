@@ -28,6 +28,8 @@ GET /orders/credit/history?date=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"at", "
   - solicitações de crédito enviadas no dia (resumo do painel: tempo de resposta, por analista, por loja);
 GET /sales/today  (cabeçalho x-api-key)  ->  {"at", "day", "items": [{"id", "store", "order", "invoice", "time", "seller", "customer", "cpf", "phone", "brand", "description", "category", "quantity", "amount", "payment", "terms"}]}
   - itens de venda do dia (painel ao vivo); Oracle no máximo a cada 10 s (novos itens) e 60 s (dia inteiro);
+GET /sellers/active?days=60  (cabeçalho x-api-key)  ->  {"at", "days", "items": [{"id", "name", "store", "stores", "orders", "amount", "lastSale"}]}
+  - vendedores ativos com venda no período (cadastro de vendedores e metas do CRM); loja principal = a que mais vendeu;
 GET /orders/credit/customer?order=PEDIDO_SAIDA_ID  (cabeçalho x-api-key)  ->  {"customer", "order", "receivables", "purchases", "requests"}
   - ficha do cliente para decidir o crédito: situação/SPC, plano do pedido, parcelas em aberto/atrasadas, pontualidade, compras;
 GET /health
@@ -689,6 +691,46 @@ class TodaySales:
 
 today_sales = TodaySales()
 
+# Vendedores ativos com venda no período (cadastro de vendedores e metas do CRM). Exclui a própria loja lançada
+# como vendedor ("LJ 01 UNILENTES...": VENDEDOR_ID que é uma UNIDADE_EMPRESARIAL).
+ACTIVE_SELLERS_SQL = """
+SELECT T.VENDEDOR_ID, MAX(P.PRCR_NOME), T.LOJA, COUNT(DISTINCT T.NUM_PEDIDO), SUM(T.VALOR_ITEM_VENDA), MAX(T.DATA_PEDIDO)
+FROM tab_dados_dinamicos T
+JOIN PARCEIRO P ON P.PARCEIRO_ID = T.VENDEDOR_ID
+WHERE T.TIPO = 'Venda' AND T.DATA_PEDIDO >= TRUNC(SYSDATE) - :d AND P.STATUS = 'Ativo'
+  AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = T.VENDEDOR_ID)
+GROUP BY T.VENDEDOR_ID, T.LOJA
+"""
+
+
+def active_sellers(days):
+    """[{id, name, store, stores, orders, amount, lastSale}]: loja principal = a que mais vendeu no período."""
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        cur.execute(ACTIVE_SELLERS_SQL, d=days)
+        rows = cur.fetchall()
+    sellers = {}
+    for seller_id, name, store, orders, amount, last in rows:
+        if not seller_id:
+            continue
+        entry = sellers.setdefault(seller_id, {"id": text(seller_id), "name": text(name), "byStore": {}, "orders": 0, "amount": 0.0, "lastSale": None})
+        value = float(amount or 0)
+        if store:
+            entry["byStore"][text(store)] = entry["byStore"].get(text(store), 0.0) + value
+        entry["orders"] += int(orders or 0)
+        entry["amount"] += value
+        day_value = day(last)
+        if day_value and (entry["lastSale"] is None or day_value > entry["lastSale"]):
+            entry["lastSale"] = day_value
+    items = []
+    for entry in sellers.values():
+        ranked = sorted(entry.pop("byStore").items(), key=lambda pair: pair[1], reverse=True)
+        entry["store"] = ranked[0][0] if ranked else None
+        entry["stores"] = [store for store, _ in ranked]
+        entry["amount"] = round(entry["amount"], 2)
+        items.append(entry)
+    return sorted(items, key=lambda item: item["name"] or "")
+
 catalog_cache = {
     "/catalog/products": Snapshot("produtos", catalog_products, ttl=3600, min_refresh=300),
     "/catalog/stock": Snapshot("estoque", catalog_stock, ttl=120, min_refresh=30),
@@ -709,10 +751,20 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
         if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", "/orders/credit",
-                            "/orders/credit/history", "/orders/credit/customer", "/sales/today", *catalog_cache):
+                            "/orders/credit/history", "/orders/credit/customer", "/sales/today", "/sellers/active", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
+        if url.path == "/sellers/active":
+            try:
+                days = min(max(int(parse_qs(url.query).get("days", ["60"])[0]), 1), 365)
+            except ValueError:
+                return self._send(400, {"error": "days precisa ser número"})
+            try:
+                return self._send(200, {"at": int(time.time() * 1000), "days": days, "items": active_sellers(days)})
+            except Exception as error:
+                log(f"ERRO vendedores ativos: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
         if url.path == "/sales/today":
             try:
                 return self._send(200, today_sales.get())
