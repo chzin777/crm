@@ -16,7 +16,6 @@ import {
   reminderTemplateParams,
   rxReviewDue,
   RX_REVIEW_CATCHUP_DAYS,
-  RX_REVIEW_DAYS,
 } from "@/lib/commercial/recurrence";
 import {
   attributeSalesToConversations,
@@ -34,7 +33,7 @@ import {
   type AttendedConversation,
   type FactSale,
 } from "@/lib/commercial/insights";
-import { DEFAULT_COMMERCIAL_SETTINGS, sanitizeCommercialSettings, type CommercialSettings, type TemplateRef } from "@/lib/commercial/settings";
+import { customRecoveryMessage, DEFAULT_COMMERCIAL_SETTINGS, insideWindow, sanitizeCommercialSettings, type CommercialSettings, type TemplateRef } from "@/lib/commercial/settings";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SETTINGS_KEY = "commercial-suite";
@@ -222,9 +221,10 @@ function boughtAgain(orders: { sourceKey: string; saleDate: Date }[], order: { s
 export async function runRecurrenceReminders(now = new Date()) {
   const summary = { rxReview: 0, contactLens: 0, skipped: 0, failed: 0 };
   const clock = brClock(now);
-  if (clock.hour < 9 || clock.hour >= 19) return summary;
-  if (!(await firstDispatch(`commercial-reminders:${brDay(now)}`))) return summary;
   const settings = await readCommercialSettings();
+  // Cada automação roda uma vez por dia, na primeira volta do relógio dentro da sua janela de envio (uma réplica só).
+  const runs = async (kind: "rx_review" | "contact_lens", rule: { enabled: boolean; template: TemplateRef; window: { from: number; to: number } }) =>
+    rule.enabled && !!rule.template && insideWindow(clock.hour, rule.window) && (await firstDispatch(`commercial-reminders:${kind}:${brDay(now)}`));
   const counts = new Map<string, number>();
   const today = new Date(`${brDay(now)}T00:00:00Z`);
   let budget = MAX_REMINDERS_PER_RUN;
@@ -235,23 +235,25 @@ export async function runRecurrenceReminders(now = new Date()) {
     if (result === "sent") budget -= 1;
   };
 
-  if (settings.rxReviewTemplate) {
-    const paramCount = await templateParamCount(settings.rxReviewTemplate, counts);
+  const rxTemplate = settings.rxReview.template;
+  if (rxTemplate && (await runs("rx_review", settings.rxReview))) {
+    const paramCount = await templateParamCount(rxTemplate, counts);
     if (paramCount >= 0) {
-      const rows = await recentSaleItems(Prisma.sql`upper(v.category) = 'LENTES'`, RX_REVIEW_DAYS + RX_REVIEW_CATCHUP_DAYS, 0, now);
+      const rows = await recentSaleItems(Prisma.sql`upper(v.category) = 'LENTES'`, settings.rxReview.days + RX_REVIEW_CATCHUP_DAYS, 0, now);
       const orders = groupOrders(rows.filter(isRxLensItem));
       const done = new Set((await prisma.commercialReminder.findMany({ where: { kind: "rx_review", saleKey: { in: orders.map((order) => order.saleKey) } }, select: { saleKey: true } })).map((row) => row.saleKey));
       for (const order of orders) {
         if (budget <= 0) break;
-        if (done.has(order.saleKey) || !rxReviewDue(order.saleDate, today) || boughtAgain(orders, order)) continue;
-        tally(await deliverReminder({ kind: "rx_review", saleKey: order.saleKey, sourceKey: order.sourceKey, dueDate: today, item: "seus óculos de grau", store: order.store }, settings.rxReviewTemplate, paramCount), "rxReview");
+        if (done.has(order.saleKey) || !rxReviewDue(order.saleDate, today, settings.rxReview.days) || boughtAgain(orders, order)) continue;
+        tally(await deliverReminder({ kind: "rx_review", saleKey: order.saleKey, sourceKey: order.sourceKey, dueDate: today, item: "seus óculos de grau", store: order.store }, rxTemplate, paramCount), "rxReview");
         await sleep(SEND_GAP_MS);
       }
     }
   }
 
-  if (settings.contactLensTemplate) {
-    const paramCount = await templateParamCount(settings.contactLensTemplate, counts);
+  const lensTemplate = settings.contactLens.template;
+  if (lensTemplate && (await runs("contact_lens", settings.contactLens))) {
+    const paramCount = await templateParamCount(lensTemplate, counts);
     if (paramCount >= 0) {
       const rows = await recentSaleItems(Prisma.sql`(upper(v.category) LIKE '%CONTATO%' OR upper(v.description) LIKE 'LENTE%DE CONTATO%')`, 400, 0, now);
       const orders = groupOrders(rows.filter(isContactLensItem));
@@ -259,9 +261,9 @@ export async function runRecurrenceReminders(now = new Date()) {
       for (const order of orders) {
         if (budget <= 0) break;
         if (done.has(order.saleKey) || boughtAgain(orders, order)) continue;
-        const plan = planContactLensReminder(order.saleDate, order.items.map((item) => ({ description: item.description, quantity: item.quantity })));
+        const plan = planContactLensReminder(order.saleDate, order.items.map((item) => ({ description: item.description, quantity: item.quantity })), settings.contactLens.leadDays);
         if (!contactLensReminderDue(plan, today)) continue;
-        tally(await deliverReminder({ kind: "contact_lens", saleKey: order.saleKey, sourceKey: order.sourceKey, dueDate: plan.reminderDate, item: contactLensProductName(order.items[0]?.description), store: order.store }, settings.contactLensTemplate, paramCount), "contactLens");
+        tally(await deliverReminder({ kind: "contact_lens", saleKey: order.saleKey, sourceKey: order.sourceKey, dueDate: plan.reminderDate, item: contactLensProductName(order.items[0]?.description), store: order.store }, lensTemplate, paramCount), "contactLens");
         await sleep(SEND_GAP_MS);
       }
     }
@@ -275,14 +277,15 @@ export async function runRecurrenceReminders(now = new Date()) {
 
 export async function runBudgetRecovery(now = new Date()) {
   const settings = await readCommercialSettings();
-  if (!settings.budgetRecoveryEnabled) return 0;
+  const rule = settings.budgetRecovery;
+  if (!rule.enabled) return 0;
   const clock = brClock(now);
-  // Fora do horário comercial nada sai; o candidato ainda pode entrar mais tarde se a janela de 4 a 6 h permitir.
-  if (clock.hour < 8 || clock.hour >= 20) return 0;
+  // Fora da janela de envio nada sai; o candidato ainda pode entrar mais tarde se o intervalo de horas permitir.
+  if (!insideWindow(clock.hour, rule.window)) return 0;
   const rows = await prisma.chatConversation.findMany({
     where: {
       closedAt: null,
-      lastMessageAt: { gte: new Date(now.getTime() - 6 * 60 * 60 * 1000), lte: new Date(now.getTime() - 4 * 60 * 60 * 1000) },
+      lastMessageAt: { gte: new Date(now.getTime() - rule.maxHours * 60 * 60 * 1000), lte: new Date(now.getTime() - rule.minHours * 60 * 60 * 1000) },
       lastInboundAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
     },
     include: { contact: { select: { name: true, marketingOptOut: true } } },
@@ -298,15 +301,17 @@ export async function runBudgetRecovery(now = new Date()) {
     });
     const base = { lastAuthor: (last?.author as "customer" | "agent" | "bot" | undefined) ?? null, lastAt: last?.createdAt ?? null, lastInboundAt: row.lastInboundAt, brHour: clock.hour, now };
     // Filtros baratos primeiro (quem falou por último, tempo, janela) e só então o contexto comercial.
-    if (!shouldRecoverBudget({ ...base, hasIntent: true })) continue;
+    if (!shouldRecoverBudget({ ...base, hasIntent: true }, rule)) continue;
     if (await prisma.chatDispatch.findUnique({ where: { key: `budget-recovery:${row.id}` }, select: { key: true } })) continue;
     const context = await conversationCommercialContext(row.id);
     if (!context) continue;
     const sentPrescription = !!context.prescription && context.prescription.conversationId === row.id;
-    if (!shouldRecoverBudget({ ...base, hasIntent: !!context.mainItem || context.products.length > 0 || sentPrescription })) continue;
+    if (!shouldRecoverBudget({ ...base, hasIntent: !!context.mainItem || context.products.length > 0 || sentPrescription }, rule)) continue;
     // Uma vez por conversa (e trava entre as duas cores do blue/green).
     if (!(await firstDispatch(`budget-recovery:${row.id}`))) continue;
-    const text = budgetRecoveryMessage({ name: row.contact.name, item: context.mainItem, prescription: sentPrescription, variant: row.id.length });
+    const text = rule.message
+      ? customRecoveryMessage(rule.message, { name: row.contact.name, item: context.mainItem })
+      : budgetRecoveryMessage({ name: row.contact.name, item: context.mainItem, prescription: sentPrescription, variant: row.id.length });
     await sendAutomaticMessage(row, text, undefined, undefined, "Acompanhamento automático");
     sent += 1;
     await sleep(SEND_GAP_MS);
@@ -473,4 +478,50 @@ export async function runWeeklyObjections(now = new Date()) {
   if (!(await firstDispatch(`objections:${isoWeek(now)}`))) return 0;
   const end = new Date(`${clock.day}T03:00:00Z`);
   return analyzeObjections(new Date(end.getTime() - 7 * DAY_MS), end);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Histórico das automações comerciais (/automacoes)
+
+export type CommercialHistoryItem = { at: string; contact: string | null; status: string; detail: string | null };
+export type CommercialAutomationKind = "rx_review" | "contact_lens" | "budget_recovery";
+export type CommercialAutomationsOverview = {
+  settings: CommercialSettings;
+  history: Record<CommercialAutomationKind, { last30: Record<string, number>; recent: CommercialHistoryItem[] }>;
+};
+
+/** Configuração das três automações + disparos dos últimos 30 dias e os 20 mais recentes de cada uma. */
+export async function commercialAutomationsOverview(): Promise<CommercialAutomationsOverview> {
+  const since = new Date(Date.now() - 30 * DAY_MS);
+  const [settings, grouped, reminders, recoveries, recoveryCount] = await Promise.all([
+    readCommercialSettings(),
+    prisma.commercialReminder.groupBy({ by: ["kind", "status"], where: { createdAt: { gte: since } }, _count: { _all: true } }),
+    Promise.all((["rx_review", "contact_lens"] as const).map((kind) => prisma.commercialReminder.findMany({ where: { kind }, orderBy: { createdAt: "desc" }, take: 20, select: { createdAt: true, contactId: true, status: true, detail: true } }))),
+    prisma.chatDispatch.findMany({ where: { key: { startsWith: "budget-recovery:" } }, orderBy: { createdAt: "desc" }, take: 20 }),
+    prisma.chatDispatch.count({ where: { key: { startsWith: "budget-recovery:" }, createdAt: { gte: since } } }),
+  ]);
+  const contactIds = [...new Set(reminders.flat().map((row) => row.contactId).filter((id): id is string => !!id))];
+  const conversationIds = recoveries.map((row) => row.key.slice("budget-recovery:".length));
+  const [contacts, conversations] = await Promise.all([
+    contactIds.length ? prisma.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, name: true, phone: true } }) : [],
+    conversationIds.length ? prisma.chatConversation.findMany({ where: { id: { in: conversationIds } }, select: { id: true, contact: { select: { name: true, phone: true } } } }) : [],
+  ]);
+  const contactName = new Map(contacts.map((row) => [row.id, row.name || row.phone]));
+  const conversationName = new Map(conversations.map((row) => [row.id, row.contact.name || row.contact.phone]));
+  const last30 = (kind: string) => Object.fromEntries(grouped.filter((row) => row.kind === kind).map((row) => [row.status, row._count._all]));
+  const reminderHistory = (index: number, kind: string) => ({
+    last30: last30(kind),
+    recent: reminders[index].map((row) => ({ at: row.createdAt.toISOString(), contact: row.contactId ? contactName.get(row.contactId) ?? null : null, status: row.status, detail: row.detail })),
+  });
+  return {
+    settings,
+    history: {
+      rx_review: reminderHistory(0, "rx_review"),
+      contact_lens: reminderHistory(1, "contact_lens"),
+      budget_recovery: {
+        last30: recoveryCount ? { sent: recoveryCount } : {},
+        recent: recoveries.map((row) => ({ at: row.createdAt.toISOString(), contact: conversationName.get(row.key.slice("budget-recovery:".length)) ?? null, status: "sent", detail: null })),
+      },
+    },
+  };
 }

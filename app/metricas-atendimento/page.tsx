@@ -5,6 +5,7 @@ import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, 
 import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Clock, Headphones, Hourglass, Inbox, ListFilter, MapPin, MessageCircleReply, MessagesSquare, Star, Tags, UserRound, Users } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
+import { ConversionInsights } from "@/components/metrics/ConversionInsights";
 import type { PeriodPreset, ServiceMetrics } from "@/lib/service-metrics";
 import { brDay } from "@/lib/br-time";
 
@@ -347,6 +348,8 @@ export default function ServiceMetricsPage() {
           <p className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500"><Clock className="h-3 w-3" />Dados atualizados a cada minuto. Conversas que só guardam envios de campanha sem resposta não entram nas contas.</p>
         </div>
       )}
+
+      {data && <ConversionInsights start={data.period.startDay} end={data.period.endDay} isDark={isDark} reloadToken={reloadToken} />}
     </main>
   );
 }

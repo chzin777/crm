@@ -82,10 +82,10 @@ const daysBetween = (from: Date, to: Date) => Math.round((startOfDay(to).getTime
 export type ContactLensPlan = { runOutDate: Date; reminderDate: Date; durationDays: number; modality: LensModality };
 
 /** Término estimado e data do lembrete (5 dias antes) de uma compra de lentes de contato. */
-export function planContactLensReminder(saleDate: Date, items: { description: string | null; quantity: number }[]): ContactLensPlan {
+export function planContactLensReminder(saleDate: Date, items: { description: string | null; quantity: number }[], leadDays = CONTACT_LENS_LEAD_DAYS): ContactLensPlan {
   const durationDays = contactLensDurationDays(items);
   const runOutDate = addDaysUtc(saleDate, durationDays);
-  return { runOutDate, reminderDate: addDaysUtc(runOutDate, -CONTACT_LENS_LEAD_DAYS), durationDays, modality: contactLensModality(items[0]?.description) };
+  return { runOutDate, reminderDate: addDaysUtc(runOutDate, -leadDays), durationDays, modality: contactLensModality(items[0]?.description) };
 }
 
 /** Lembrete de reposição vence hoje (ou venceu há pouco e o término ainda não passou do limite). */
@@ -94,9 +94,9 @@ export function contactLensReminderDue(plan: ContactLensPlan, today: Date) {
 }
 
 /** Revisão de grau vence: venda há 335 dias (com tolerância de 7 dias para relógio parado). */
-export function rxReviewDue(saleDate: Date, today: Date) {
+export function rxReviewDue(saleDate: Date, today: Date, days = RX_REVIEW_DAYS) {
   const elapsed = daysBetween(saleDate, today);
-  return elapsed >= RX_REVIEW_DAYS && elapsed <= RX_REVIEW_DAYS + RX_REVIEW_CATCHUP_DAYS;
+  return elapsed >= days && elapsed <= days + RX_REVIEW_CATCHUP_DAYS;
 }
 
 /** Nome curto do produto para a variável do modelo: "LENTE DE CONTATO ACUVUE OASYS -1.50" → "Acuvue Oasys". */

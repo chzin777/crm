@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Clock, FilePlus2, Loader2, Pause, Play, Plus, Sparkles, Trash2, Workflow, Zap } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CommercialAutomations } from "@/components/automations/CommercialAutomations";
 import { useToast } from "@/components/ToastProvider";
 
 type FlowRow = { id: string; name: string; description: string; status: "draft" | "active" | "paused"; trigger: string; steps: number; running: number; completed: number; failed: number; cancelled: number; updatedAt: string };
@@ -170,6 +171,8 @@ export default function AutomationsPage() {
           </ul>
         </div>
       )}
+
+      <CommercialAutomations />
 
       {creating && (
         <EntityDialog titleId="nova-automacao" title="Nova automação" description="Comece do zero, por um modelo pronto ou descreva o fluxo para a IA montar (você ajusta tudo no editor)." onClose={() => { if (busy !== "ai") setCreating(false); }} size="md">

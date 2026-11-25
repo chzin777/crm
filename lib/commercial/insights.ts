@@ -121,14 +121,14 @@ export type RecoveryCandidate = {
 };
 
 /** Cliente com intenção de compra parou de responder há 4 a 6 h, ainda dentro da janela de 24 h. */
-export function shouldRecoverBudget(input: RecoveryCandidate) {
+export function shouldRecoverBudget(input: RecoveryCandidate, rule: { minHours: number; maxHours: number; window: { from: number; to: number } } = { minHours: RECOVERY_MIN_HOURS, maxHours: RECOVERY_MAX_HOURS, window: RECOVERY_HOURS_BR }) {
   if (!input.hasIntent || !input.lastAt || !input.lastInboundAt) return false;
   if (input.lastAuthor !== "agent" && input.lastAuthor !== "bot") return false;
   const silent = input.now.getTime() - input.lastAt.getTime();
-  if (silent < RECOVERY_MIN_HOURS * HOUR_MS || silent > RECOVERY_MAX_HOURS * HOUR_MS) return false;
+  if (silent < rule.minHours * HOUR_MS || silent > rule.maxHours * HOUR_MS) return false;
   // Janela de 24 h da Meta (com folga de 10 min): fora dela, só modelo aprovado.
   if (input.now.getTime() - input.lastInboundAt.getTime() > 24 * HOUR_MS - 10 * 60 * 1000) return false;
-  return input.brHour >= RECOVERY_HOURS_BR.from && input.brHour < RECOVERY_HOURS_BR.to;
+  return input.brHour >= rule.window.from && input.brHour < rule.window.to;
 }
 
 /** Mensagem natural de acompanhamento citando o item exato consultado (sem travessões nem hífens). */

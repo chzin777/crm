@@ -191,7 +191,7 @@ describe("mapa de objeções", () => {
 
 describe("configuração da suíte", () => {
   it("aceita só nomes de modelo válidos e mantém o padrão", () => {
-    expect(sanitizeCommercialSettings({ rxReviewTemplate: { name: "revisao_grau", language: "pt_BR" }, contactLensTemplate: { name: "x y", language: "pt_BR" } })).toEqual({
+    expect(sanitizeCommercialSettings({ rxReviewTemplate: { name: "revisao_grau", language: "pt_BR" }, contactLensTemplate: { name: "x y", language: "pt_BR" } })).toMatchObject({
       rxReviewTemplate: { name: "revisao_grau", language: "pt_BR" },
       contactLensTemplate: null,
       budgetRecoveryEnabled: true,
