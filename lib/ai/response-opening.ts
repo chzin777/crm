@@ -15,6 +15,26 @@ export function welcomeReply(text: string, input: { first: boolean; returning?: 
   return text.replace(/^(\s*)(bom dia|boa tarde|boa noite)(?=[\s,!.]|$)/i, (_match, space: string) => `${space}${greeting}`);
 }
 
+/** Resposta vaga/passiva que não conduz o cliente ("Tô por aqui 😊", "Estou à disposição", "Pode falar"). */
+const PASSIVE_REPLY = /(?:^|[^\p{L}])(?:t[ôo]|estou|fico|sigo)\s+(?:por\s+)?aqui(?!\p{L})|[àa]\s+disposi[çc][ãa]o|(?:^|[^\p{L}])pode\s+(?:falar|mandar|chamar)(?!\p{L})/iu;
+
+/**
+ * Saudação pura do cliente ("oooi", "bom dia"): a resposta precisa acolher e conduzir com pergunta consultiva.
+ * Se o modelo respondeu de forma passiva ("Oi, Christofer! Tô por aqui 😊") ou sem nenhuma pergunta, troca pela
+ * abertura consultiva padrão (saudação do período só na primeira resposta; sem travessões).
+ */
+export function consultativeGreeting(reply: string, input: { first: boolean; name?: string | null; pendingText: string; now?: Date }) {
+  if (!isPureGreeting(input.pendingText)) return reply;
+  // Passiva ("Tô por aqui") ou só cumprimento ("Oi, Christofer! 😊"): não conduz. Convite do modelo
+  // ("Me conta o que você está procurando") ou retomada de assunto anterior ficam como o modelo escreveu.
+  const onlyGreeting = !reply.replace(REPEATED_OPENING, "").replace(/[\s\p{Extended_Pictographic}!.,]+/gu, "");
+  if (!PASSIVE_REPLY.test(reply) && !onlyGreeting) return reply;
+  const question = "Como posso te ajudar hoje? Está procurando óculos de sol, armação de grau ou quer saber sobre alguma de nossas lojas?";
+  if (!input.first) return question;
+  const name = input.name?.trim();
+  return `${brasiliaGreeting(input.now).greeting}${name ? `, ${name}` : ""}! Tudo bem? ${question}`;
+}
+
 /**
  * Emojis de expressão (rostos, corações, mãos, brilhos): no máximo 1 por resposta inteira, mantendo o primeiro.
  * Ícones da vitrine/ficha (👓 🕶️ 📍) não contam e ficam intactos.

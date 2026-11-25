@@ -39,7 +39,7 @@ import { NOISE_AUTHOR } from "@/lib/chat/noise";
 import { withToolContent, withoutRedundantStoreQuestion, budgetBlock, cityFirstBlock, isBroadStockCall, needsTypeFirst, typeFirstBlock, typeGatedResult, conversationBudget, conversationWantsKids, gatedStockResult, isGatedStockCall, needsCityFirst, asksSpecificModel, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { photoVariants } from "@/lib/ai/photo-response";
 import { iconicModel } from "@/lib/ai/product-names";
-import { listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-opening";
+import { consultativeGreeting, listWithOpening, singleEmoji, welcomeReply } from "@/lib/ai/response-opening";
 import { consultarEstoqueProduto } from "@/lib/ai/stock-db";
 import { formatBrl, STOCK_TOOL, titleCase, type StockLog } from "@/lib/ai/stock";
 import { allowsProductPhoto, fallbackReference, formatShowcase, showcaseReference, type ShowcaseModel } from "@/lib/ai/stock-showcase";
@@ -70,7 +70,7 @@ import { catalog, conversationContext, sessionStartedAt } from "@/lib/ai/assist"
 import { anchorPromptBlock, asksStoreLocation, EMPTY_ANCHOR, extractSessionAnchor, isProductFollowUp, isStoreFollowUp, storesIn, modelNumbers, SESSION_ANCHOR_RULES, type AnchorMessage, type SessionAnchor } from "@/lib/ai/session-anchor";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, bubbleDelayFor, type AiSettings } from "@/lib/ai/settings";
-import { buildSystemPrompt, carriesProductExtras, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
+import { buildSystemPrompt, carriesProductExtras, greetingName, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { campaignAiReplyEnabled } from "@/lib/chat/campaign-origin";
@@ -1221,7 +1221,11 @@ export async function runAiAgent(input: AgentRunInput): Promise<AgentRun> {
   if (!run.outcome.reply || run.outcome.action === "no_reply") return run;
   // Saudação escrita pelo modelo: só corrige o período errado (ou a saudação repetida); no máximo 1 emoji de
   // expressão na resposta inteira (os repetidos saem, só o 1º fica).
-  const reply = singleEmoji(welcomeReply(run.outcome.reply, {
+  // Cliente só cumprimentou: resposta passiva ("Tô por aqui 😊") vira abertura consultiva com pergunta.
+  const opened = run.visualCatalog || run.interactiveList
+    ? run.outcome.reply
+    : consultativeGreeting(run.outcome.reply, { first: input.aiReplies === 0, name: greetingName(input.contactName), pendingText: input.pendingText });
+  const reply = singleEmoji(welcomeReply(opened, {
     first: input.aiReplies === 0,
     returning: input.isReturningContact,
     customer: input.contactName,
