@@ -37,6 +37,7 @@ import {
   PackageSearch,
   MessageSquareText,
   Zap,
+  Trophy,
 } from "lucide-react";
 
 const ITEM_ACTIVE = "bg-[#051647]/[0.07] text-[#051647] dark:bg-white/10 dark:text-[#C4D600]";
@@ -107,6 +108,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Vendas ao vivo", href: "/vendas/ao-vivo", icon: Zap },
     { title: "Lojas", href: "/lojas", icon: Store },
     { title: "Metas de vendedores", href: "/vendas/metas", icon: Target },
+    { title: "Campanhas e premiações", href: "/vendas/campanhas", icon: Trophy },
     { title: "Campanhas e disparos", href: "/campanhas", icon: Megaphone },
     { title: "Modelos WhatsApp", href: "/modelos", icon: FileText },
     { title: "Pesquisas NPS", href: "/nps", icon: Award },
@@ -123,7 +125,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const navGroups = [
     { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento"), byHref("/vendas/ao-vivo")] },
     { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes"), byHref("/clientes-vip")] },
-    { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/vendas/metas"), byHref("/usuarios"), byHref("/permissoes")] },
+    { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/vendas/metas"), byHref("/vendas/campanhas"), byHref("/usuarios"), byHref("/permissoes")] },
   ]
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccess(item.href)) }))
     .filter((group) => group.items.length > 0);

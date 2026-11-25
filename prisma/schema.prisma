@@ -1164,11 +1164,14 @@ model Seller {
   lastSaleAt  DateTime?    @db.Date
   sales60d    Decimal?     @db.Decimal(14, 2)
   syncedAt    DateTime?    @db.Timestamptz(6)
+  /// Usuário do CRM deste vendedor (recebe a comemoração das conquistas). Vinculado pelo nome ou manualmente.
+  userId      String?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   goals       SellerGoal[]
 
   @@index([storeNumber])
+  @@index([userId])
 }
 
 /// Meta mensal do vendedor (R$). A meta da loja é a soma das metas dos vendedores daquela loja no mês.
@@ -1203,4 +1206,72 @@ model SalesGoal {
   updatedAt   DateTime @updatedAt
 
   @@unique([month, scope, key])
+}
+
+/// Campanha comercial com premiação (ex.: "Foco Stepper"). SQL: prisma/sales-campaigns.sql
+model SalesCampaign {
+  id           String            @id @default(cuid())
+  name         String
+  description  String?
+  /// "VALOR" (R$ vendido) ou "QUANTIDADE" (unidades vendidas).
+  metric       String            @default("VALOR")
+  /// Marca do VMSet em caixa alta (ex.: "STEPPER"); vazio = todas.
+  brand        String?
+  /// Categoria do VMSet (ex.: "ARMACAO", "OCULOS SOLAR", "LENTES"); vazio = todas.
+  category     String?
+  /// Lojas que entram na campanha; vazio = todas.
+  stores       Int[]
+  startDate    DateTime          @db.Date
+  endDate      DateTime          @db.Date
+  /// "INDIVIDUAL" (vendedor), "LOJA" ou "GRUPO" (lojas agrupadas em `groups`).
+  audience     String            @default("INDIVIDUAL")
+  /// [{ "name": "Grupo 1", "stores": [1, 2, 3] }]
+  groups       Json              @default("[]")
+  /// Meta (R$ ou unidades). Em "RECORRENTE" é o tamanho do bloco (ex.: a cada 3 unidades).
+  target       Decimal           @db.Decimal(14, 2)
+  /// "UNICO" (ao bater a meta), "RECORRENTE" (a cada bloco) ou "RANKING" (1º lugar de cada grupo ao fim do período).
+  rewardMode   String            @default("UNICO")
+  rewardLabel  String            @default("")
+  rewardAmount Decimal           @default(0) @db.Decimal(14, 2)
+  active       Boolean           @default(true)
+  evaluatedAt  DateTime?         @db.Timestamptz(6)
+  createdById  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  achievements GoalAchievement[]
+
+  @@index([active, endDate])
+}
+
+/// Prêmio conquistado (um por bloco/tier); a chave única impede registro duplicado.
+model GoalAchievement {
+  id              String            @id @default(cuid())
+  campaignId      String
+  campaign        SalesCampaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  /// "seller" ou "store".
+  participantType String
+  participantKey  String
+  participantName String
+  tier            Int
+  progress        Decimal           @db.Decimal(14, 2)
+  headline        String
+  rewardLabel     String
+  rewardAmount    Decimal           @db.Decimal(14, 2)
+  achievedAt      DateTime          @default(now()) @db.Timestamptz(6)
+  celebrations    GoalCelebration[]
+
+  @@unique([campaignId, participantKey, tier])
+}
+
+/// Comemoração (confete + parabéns) de uma conquista para um usuário; seenAt marca que já foi vista.
+model GoalCelebration {
+  id            String          @id @default(cuid())
+  achievementId String
+  achievement   GoalAchievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  userId        String
+  createdAt     DateTime        @default(now()) @db.Timestamptz(6)
+  seenAt        DateTime?       @db.Timestamptz(6)
+
+  @@unique([achievementId, userId])
+  @@index([userId, seenAt])
 }
