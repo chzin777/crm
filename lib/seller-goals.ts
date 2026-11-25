@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { goalMonthKey, sellerDisplayName, storeGoals, type GoalSeller } from "@/lib/seller-goals-shared";
 import { brandLabel } from "@/lib/sales-live/feed";
+import { linkSellersByContact } from "@/lib/seller-link";
 
 /**
  * Metas de vendedores do CRM. Vendedores vêm do VMSet (ativos e com venda nos últimos 60 dias); a meta é mensal por
@@ -14,7 +15,7 @@ export const SELLER_WINDOW_DAYS = 60;
 /** Recarrega a lista do VMSet sozinho quando a última sincronização tem mais de 12 h. */
 const STALE_MS = 12 * 60 * 60_000;
 
-type VmsetSeller = { id: string; name: string | null; store: string | null; stores: string[]; orders: number; amount: number; lastSale: string | null };
+type VmsetSeller = { id: string; name: string | null; cpf?: string | null; emails?: string[]; store: string | null; stores: string[]; orders: number; amount: number; lastSale: string | null };
 
 const storeNumber = (value: string | null | undefined) => {
   const number = Number.parseInt((value ?? "").trim(), 10);
@@ -36,6 +37,9 @@ export async function syncSellers() {
   for (const item of items) {
     const data = {
       name: sellerDisplayName(item.name ?? ""),
+      // CPF e e-mails do cadastro do VMSet: base do vínculo automático com o usuário do CRM.
+      ...(item.cpf !== undefined ? { cpf: item.cpf || null } : {}),
+      ...(Array.isArray(item.emails) ? { emails: item.emails.map((email) => email.trim().toLowerCase()).filter(Boolean) } : {}),
       storeNumber: storeNumber(item.store),
       stores: item.stores.map(storeNumber).filter((value): value is number => value !== null),
       active: true,
@@ -51,7 +55,11 @@ export async function syncSellers() {
   }
   const seen = items.map((item) => item.id);
   const deactivated = await prisma.seller.updateMany({ where: { active: true, vmsetId: { notIn: seen.length ? seen : [""] } }, data: { active: false, syncedAt: now } });
-  return { total: items.length, created, updated: items.length - created, deactivated: deactivated.count, syncedAt: now.toISOString() };
+  const linked = await linkSellersByContact().catch((error) => {
+    console.error("[metas] vínculo vendedor ↔ usuário:", error);
+    return 0;
+  });
+  return { total: items.length, created, updated: items.length - created, deactivated: deactivated.count, linked, syncedAt: now.toISOString() };
 }
 
 /** Sincroniza se nunca rodou ou se a última vez tem mais de 12 h (falha não impede abrir a tela). */

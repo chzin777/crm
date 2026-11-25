@@ -12,6 +12,8 @@ model User {
   name              String
   email             String             @unique
   jobTitle          String?
+  /// CPF (só dígitos): liga o usuário ao vendedor do VMSet (visão de vendedor no app). SQL: prisma/seller-link.sql
+  cpf               String?
   teamLevel         String             @default("Operador")
   roleId            String?
   roleRef           Role?              @relation(fields: [roleId], references: [id], onDelete: SetNull)
@@ -1156,6 +1158,9 @@ model Seller {
   /// VENDEDOR_ID do VMSet (PARCEIRO_ID).
   vmsetId     String       @unique
   name        String
+  /// CPF (só dígitos) e e-mails do cadastro do parceiro no VMSet: vínculo automático com o usuário do CRM. SQL: prisma/seller-link.sql
+  cpf         String?
+  emails      String[]     @default([])
   /// Loja principal (a que mais vendeu nos últimos 60 dias), código do VMSet.
   storeNumber Int?
   /// Todas as lojas onde vendeu no período.

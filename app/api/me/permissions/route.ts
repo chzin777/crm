@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthSession, getUserAccess, MUST_CHANGE_PASSWORD } from "@/lib/api-auth";
+import { loadViewer } from "@/lib/app-sales";
 
 export async function GET() {
   const session = await getAuthSession();
@@ -9,5 +10,7 @@ export async function GET() {
   if (user.mustChangePassword) return NextResponse.json({ error: "Crie sua nova senha para continuar.", code: MUST_CHANGE_PASSWORD }, { status: 403 });
   const access = await getUserAccess(user.id);
   if (!access) return NextResponse.json({ error: "Usuário sem acesso." }, { status: 403 });
-  return NextResponse.json({ data: access });
+  // Visão do app de celular (vendedor, gerente ou geral), definida nas Permissões do cargo.
+  const viewer = await loadViewer(user.id);
+  return NextResponse.json({ data: { ...access, appView: viewer?.view ?? "vendedor" } });
 }

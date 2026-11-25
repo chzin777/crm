@@ -694,7 +694,8 @@ today_sales = TodaySales()
 # Vendedores ativos com venda no período (cadastro de vendedores e metas do CRM). Exclui a própria loja lançada
 # como vendedor ("LJ 01 UNILENTES...": VENDEDOR_ID que é uma UNIDADE_EMPRESARIAL).
 ACTIVE_SELLERS_SQL = """
-SELECT T.VENDEDOR_ID, MAX(P.PRCR_NOME), T.LOJA, COUNT(DISTINCT T.NUM_PEDIDO), SUM(T.VALOR_ITEM_VENDA), MAX(T.DATA_PEDIDO)
+SELECT T.VENDEDOR_ID, MAX(P.PRCR_NOME), T.LOJA, COUNT(DISTINCT T.NUM_PEDIDO), SUM(T.VALOR_ITEM_VENDA), MAX(T.DATA_PEDIDO),
+       MAX(P.PRCR_CGC_CPF), MAX(LOWER(TRIM(P.PRCR_E_MAIL))), MAX(LOWER(TRIM(P.PRCR_E_MAIL2)))
 FROM tab_dados_dinamicos T
 JOIN PARCEIRO P ON P.PARCEIRO_ID = T.VENDEDOR_ID
 WHERE T.TIPO = 'Venda' AND T.DATA_PEDIDO >= TRUNC(SYSDATE) - :d AND P.STATUS = 'Ativo'
@@ -704,16 +705,19 @@ GROUP BY T.VENDEDOR_ID, T.LOJA
 
 
 def active_sellers(days):
-    """[{id, name, store, stores, orders, amount, lastSale}]: loja principal = a que mais vendeu no período."""
+    """[{id, name, cpf, emails, store, stores, orders, amount, lastSale}]: loja principal = a que mais vendeu no período.
+    cpf e emails (cadastro do parceiro) ligam o vendedor ao usuário do CRM."""
     with pool.acquire() as conn:
         cur = conn.cursor()
         cur.execute(ACTIVE_SELLERS_SQL, d=days)
         rows = cur.fetchall()
     sellers = {}
-    for seller_id, name, store, orders, amount, last in rows:
+    for seller_id, name, store, orders, amount, last, cpf, email, email2 in rows:
         if not seller_id:
             continue
-        entry = sellers.setdefault(seller_id, {"id": text(seller_id), "name": text(name), "byStore": {}, "orders": 0, "amount": 0.0, "lastSale": None})
+        digits = re.sub(r"\D", "", text(cpf) or "")
+        emails = sorted({value for value in (text(email), text(email2)) if value and "@" in value})
+        entry = sellers.setdefault(seller_id, {"id": text(seller_id), "name": text(name), "cpf": digits or None, "emails": emails, "byStore": {}, "orders": 0, "amount": 0.0, "lastSale": None})
         value = float(amount or 0)
         if store:
             entry["byStore"][text(store)] = entry["byStore"].get(text(store), 0.0) + value

@@ -24,6 +24,8 @@ interface UserRecord {
   image: string | null;
   presence?: PresenceStatus;
   stores?: string[];
+  cpf?: string | null;
+  seller?: string | null;
 }
 
 type StoreOption = { code: string; name: string };
@@ -35,6 +37,7 @@ const emptyForm = {
   banned: false,
   password: "",
   stores: [] as string[],
+  cpf: "",
 };
 
 const inputClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-[#051647] dark:text-white";
@@ -120,6 +123,7 @@ export default function UsuariosPage() {
       banned: user.banned,
       password: "",
       stores: user.stores ?? [],
+      cpf: user.cpf ?? "",
     });
     setFormError("");
   };
@@ -131,6 +135,8 @@ export default function UsuariosPage() {
     if (!form.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
       return setFormError("Informe um e-mail válido.");
     }
+    const cpfDigits = form.cpf.replace(/\D/g, "");
+    if (cpfDigits && cpfDigits.length !== 11) return setFormError("CPF deve ter 11 dígitos.");
     if ((editing === "new" || form.password) && form.password.length < 12) {
       return setFormError("A senha deve ter pelo menos 12 caracteres.");
     }
@@ -147,6 +153,7 @@ export default function UsuariosPage() {
           roleId: form.roleId || null,
           banned: form.banned,
           stores: form.stores,
+          cpf: form.cpf.replace(/\D/g, ""),
           ...(form.password ? { password: form.password } : {}),
         }),
       });
@@ -262,6 +269,9 @@ export default function UsuariosPage() {
                         {(user.stores ?? []).length > 0 && (
                           <span className="mt-0.5 block pl-[18px] text-[11px] font-normal text-slate-500 dark:text-slate-400">Loja {(user.stores ?? []).join(", ")}</span>
                         )}
+                        {user.seller && (
+                          <span className="mt-0.5 block pl-[18px] text-[11px] font-normal text-slate-500 dark:text-slate-400">Vendedor VMSet: {user.seller}</span>
+                        )}
                       </td>
                       <td className="px-4 py-2 xl:px-6 xl:py-4 text-slate-500 dark:text-slate-400">{user.email}</td>
                       <td className="px-4 py-2 xl:px-6 xl:py-4">
@@ -305,6 +315,13 @@ export default function UsuariosPage() {
             <label className="block space-y-1.5">
               <span className={labelClass}>E-mail *</span>
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputClass} placeholder="email@exemplo.com" />
+            </label>
+            <label className="block space-y-1.5">
+              <span className={labelClass}>CPF (liga ao vendedor do VMSet)</span>
+              <input type="text" inputMode="numeric" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} className={inputClass} placeholder="000.000.000-00" />
+              <span className="block text-[11px] text-slate-400">
+                {editing !== "new" && editing?.seller ? `Vendedor ligado: ${editing.seller}` : "O vínculo é automático pelo e-mail ou CPF do cadastro do vendedor no VMSet."}
+              </span>
             </label>
             <label className="block space-y-1.5">
               <span className={labelClass}>{editing === "new" ? "Senha inicial *" : "Nova senha (opcional)"}</span>

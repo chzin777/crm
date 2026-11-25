@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
 import { storeErpCode } from "@/lib/stores";
 import { effectivePresence } from "@/lib/chat/presence-status";
+import { linkSellersByContact, parseCpf } from "@/lib/seller-link";
 
 /** Lojas do ERP VMSet vinculadas ao usuário (códigos "13", "5"); undefined = não mexe. */
 function parseStores(value: unknown): string[] | undefined {
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
         banned: true,
         createdAt: true,
         image: true,
+        cpf: true,
         chatAgent: { select: { presenceStatus: true, paused: true, lastSeenAt: true, lastActivityAt: true, stores: true } },
       },
     });
@@ -49,9 +51,14 @@ export async function GET(request: NextRequest) {
       return code ? [{ code, name: store.name }] : [];
     });
 
+    // Vendedor do VMSet ligado a cada usuário (e-mail/CPF, nome ou manual): base da visão de vendedor no app.
+    const linkedSellers = await prisma.seller.findMany({ where: { userId: { in: users.map((user) => user.id) } }, select: { userId: true, name: true }, orderBy: { active: "desc" } });
+    const sellerByUser = new Map<string, string>();
+    for (const seller of linkedSellers) if (seller.userId && !sellerByUser.has(seller.userId)) sellerByUser.set(seller.userId, seller.name);
+
     return NextResponse.json({
       stores,
-      data: users.map(({ chatAgent, ...user }) => ({ ...user, presence: effectivePresence(chatAgent), stores: chatAgent?.stores ?? [] })),
+      data: users.map(({ chatAgent, ...user }) => ({ ...user, presence: effectivePresence(chatAgent), stores: chatAgent?.stores ?? [], seller: sellerByUser.get(user.id) ?? null })),
     });
   } catch (error) {
     console.error("Erro ao listar usuários:", error);
@@ -86,6 +93,7 @@ export async function POST(request: NextRequest) {
         email: email.trim().toLowerCase(),
         emailVerified: true,
         roleId: roleId || null,
+        cpf: parseCpf(body.cpf) ?? null,
         // Senha inicial é provisória: no primeiro acesso o usuário cria a dele.
         mustChangePassword: true,
         accounts: {
@@ -100,10 +108,12 @@ export async function POST(request: NextRequest) {
         banned: true,
         createdAt: true,
         image: true,
+        cpf: true,
       },
     });
 
     const stores = await saveStores(user.id, parseStores(body.stores));
+    await linkSellersByContact([user.id]).catch(() => 0);
     return NextResponse.json({ data: { ...user, presence: "OFFLINE", stores } }, { status: 201 });
   } catch (error) {
     console.error("Erro ao criar usuário:", error);
@@ -127,6 +137,9 @@ export async function PATCH(request: NextRequest) {
     if (email !== undefined) updateData.email = email.trim().toLowerCase();
     if (roleId !== undefined) updateData.roleId = roleId || null;
     if (banned !== undefined) updateData.banned = banned;
+    const cpf = parseCpf(body.cpf);
+    if (body.cpf !== undefined && cpf === undefined) return NextResponse.json({ error: "CPF inválido (11 dígitos)." }, { status: 400 });
+    if (cpf !== undefined) updateData.cpf = cpf;
     // Bloqueado sai na hora: derruba as sessões abertas (antes seguia logado até a sessão expirar).
     if (banned === true) await prisma.session.deleteMany({ where: { userId: id } });
 
@@ -155,11 +168,13 @@ export async function PATCH(request: NextRequest) {
         banned: true,
         createdAt: true,
         image: true,
+        cpf: true,
       },
     });
 
     const requested = parseStores(body.stores);
     await saveStores(id, requested);
+    await linkSellersByContact([id]).catch(() => 0);
     return NextResponse.json({ data: { ...user, stores: requested ?? [] } });
   } catch (error) {
     console.error("Erro ao atualizar usuário:", error);
