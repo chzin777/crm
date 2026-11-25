@@ -1,5 +1,8 @@
 import { requireApiSession } from "@/lib/api-auth";
 import { loadViewer, saveGoalForViewer, salesForViewer } from "@/lib/app-sales";
+import { syncSellersIfStale } from "@/lib/seller-goals";
+
+let syncing: Promise<unknown> | null = null;
 
 /** Vendas e metas do mês no app: o recorte (vendedor, gerente ou geral) vem das Permissões do cargo. */
 export async function GET(request: Request) {
@@ -8,6 +11,8 @@ export async function GET(request: Request) {
   const viewer = await loadViewer(user.id);
   if (!viewer) return Response.json({ error: "Usuário sem acesso." }, { status: 403 });
   const params = new URL(request.url).searchParams;
+  // Vendedores (e o vínculo por e-mail/CPF) se renovam em segundo plano quando a lista tem mais de 12 h.
+  if (!syncing) syncing = syncSellersIfStale().finally(() => (syncing = null));
   try {
     return Response.json({ data: await salesForViewer(viewer, params.get("month"), params.get("store")) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
