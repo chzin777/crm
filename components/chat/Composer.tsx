@@ -270,9 +270,25 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   const windowClosed = !conversation.windowOpen && !internal;
   const typing = !blocked && !windowClosed && !recorder.recording;
 
+  const modeButton = (active: boolean, note: boolean) => `inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors ${
+    active
+      ? note ? "bg-[#F7915E]/20 text-[#b4531f] dark:text-[#F7915E]" : "bg-white text-[#051647] shadow-xs dark:bg-white/10 dark:text-white"
+      : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+  }`;
+
   return (
     <div className={footer}>
       {error && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
+      {!recorder.recording && (
+        <div role="tablist" aria-label="Tipo de envio" className="mb-2 inline-flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-white/[0.04]">
+          <button type="button" role="tab" aria-selected={!internal} onClick={() => setInternal(false)} className={modeButton(!internal, false)}>
+            <Send className="h-3.5 w-3.5" />Mensagem
+          </button>
+          <button type="button" role="tab" aria-selected={internal} onClick={() => setInternal(true)} className={modeButton(internal, true)}>
+            <StickyNote className="h-3.5 w-3.5" />Nota interna
+          </button>
+        </div>
+      )}
       {replyTo && !internal && (
         <div className="mb-2 flex items-start gap-2 rounded-lg border-l-4 border-[#002187] bg-slate-100 px-3 py-2 dark:border-[#C4D600] dark:bg-slate-800">
           <p className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300">{replyTo.text || "Anexo"}</p>
@@ -412,7 +428,6 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
                 {suggesting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
               </button>
             )}
-            <button type="button" title="Nota interna" aria-label="Nota interna" aria-pressed={internal} onClick={() => setInternal((value) => !value)} className={internal ? `${toolButton} bg-[#F7915E]/20 text-[#b4531f] hover:bg-[#F7915E]/30 dark:text-[#F7915E] dark:hover:bg-[#F7915E]/30` : toolButton}><StickyNote className="h-5 w-5" /></button>
           </div>
           <textarea
             ref={field}
@@ -476,13 +491,6 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
             onScheduled();
           }}
         />
-      )}
-      {(blocked || windowClosed) && (
-        <div className="mt-2 flex items-center gap-2">
-          <button type="button" onClick={() => setInternal(true)} className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
-            <StickyNote className="h-3.5 w-3.5" />Nota interna
-          </button>
-        </div>
       )}
     </div>
   );

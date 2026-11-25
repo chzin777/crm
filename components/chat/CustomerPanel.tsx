@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, CalendarClock, Check, Glasses, Megaphone, Plus, ShoppingBag, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, Database, Glasses, Megaphone, Plus, ShoppingBag, Sparkles, UserRound, X } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 import type { CustomerHistory, FollowUpItem } from "@/lib/chat/types";
@@ -34,10 +34,21 @@ type Props = {
   onNewFollowUp: () => void;
   onChanged: () => void;
   onClose: () => void;
+  /** Aba ativa do painel: dados do cliente (ERP/VMSet, retornos, campanhas) ou sugestões da IA. */
+  tab?: CustomerPanelTab;
+  onTab?: (tab: CustomerPanelTab) => void;
+  /** Campanha que originou a conversa (sai do cabeçalho e da lista e fica aqui). */
+  campaign?: string | null;
+  /** Conteúdo da aba "Sugestões IA" (montado só quando a aba está ativa). */
+  aiSlot?: ReactNode;
+  /** Abre o Copiloto VMSet (gaveta flutuante) a partir do painel. */
+  onOpenVmset?: () => void;
 };
 
+export type CustomerPanelTab = "cliente" | "ia";
+
 /** Painel direito do /chat: lembretes de retorno e visão do cliente no ERP. */
-export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollowUp, onChanged, onClose }: Props) {
+export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollowUp, onChanged, onClose, tab = "cliente", onTab, campaign, aiSlot, onOpenVmset }: Props) {
   const toast = useToast();
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [historyError, setHistoryError] = useState(false);
@@ -88,14 +99,52 @@ export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollo
   const done = followUps?.filter((item) => item.status !== "PENDING") ?? [];
 
   return (
-    <aside aria-label="Dados do cliente" className="absolute inset-y-0 right-0 z-30 flex w-80 max-w-full flex-col border-l border-slate-200 bg-white shadow-xl lg:static lg:shrink-0 lg:shadow-none dark:border-slate-800 dark:bg-[#07194f]">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 px-4 dark:border-slate-800">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Cliente</h3>
-        <button type="button" onClick={onClose} title="Fechar painel" aria-label="Fechar painel" className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10">
+    <aside aria-label="Contexto do cliente" className="absolute inset-y-0 right-0 z-30 flex w-full max-w-full flex-col border-l border-slate-200/80 bg-white shadow-xl sm:w-[340px] lg:static lg:shrink-0 lg:shadow-none dark:border-slate-800 dark:bg-[#07194f]">
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-200/80 px-3 dark:border-slate-800">
+        <div role="tablist" aria-label="Painel do cliente" className="flex min-w-0 flex-1 items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-white/[0.04]">
+          {([
+            { id: "cliente", label: "Dados & VMSet", icon: <UserRound className="h-3.5 w-3.5" /> },
+            { id: "ia", label: "Sugestões IA", icon: <Sparkles className="h-3.5 w-3.5" /> },
+          ] as const).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              onClick={() => onTab?.(item.id)}
+              className={`flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2 text-xs font-semibold transition-colors ${tab === item.id ? "bg-white text-[#051647] shadow-xs dark:bg-white/10 dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"}`}
+            >
+              {item.icon}
+              <span className="truncate">{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={onClose} title="Fechar painel" aria-label="Fechar painel" className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10">
           <X className="h-4 w-4" />
         </button>
       </div>
+      {tab === "ia" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">Oportunidades pelo histórico de compras, receita e conversa. A oferta vai para o campo de mensagem para você revisar.</p>
+          {aiSlot}
+        </div>
+      ) : (
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {(campaign || onOpenVmset) && (
+          <section className="space-y-2 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+            {campaign && (
+              <p className="flex min-w-0 items-start gap-2 rounded-lg bg-violet-50 px-2.5 py-2 text-xs text-violet-800 dark:bg-violet-500/10 dark:text-violet-200">
+                <Megaphone className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 break-words"><span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70">Origem: campanha</span>{campaign}</span>
+              </p>
+            )}
+            {onOpenVmset && (
+              <button type="button" onClick={onOpenVmset} className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-[#002187] transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/5">
+                <Database className="h-3.5 w-3.5" />Consultar VMSet: faturas, estoque e receitas
+              </button>
+            )}
+          </section>
+        )}
         <Section
           icon={<CalendarClock className="h-4 w-4" />}
           title="Retornos"
@@ -221,6 +270,7 @@ export function CustomerPanel({ conversationId, canWrite, refreshKey, onNewFollo
           </>
         )}
       </div>
+      )}
     </aside>
   );
 }

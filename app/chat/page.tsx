@@ -5,11 +5,11 @@ import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRightLeft, Award, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Database, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
-import { CampaignBadge } from "@/components/chat/CampaignBadge";
+
 import { ContactDetailsDialog } from "@/components/chat/ContactDetailsDialog";
-import { CustomerPanel } from "@/components/chat/CustomerPanel";
+import { CustomerPanel, type CustomerPanelTab } from "@/components/chat/CustomerPanel";
 import { VmsetCopilotPanel } from "@/components/chat/VmsetCopilotPanel";
-import { AiSalesDialog, AiSummaryDialog } from "@/components/chat/AiPanels";
+import { AiProductSuggestions, AiSummaryDialog } from "@/components/chat/AiPanels";
 import { FollowUpDialog } from "@/components/chat/ScheduleDialogs";
 import { ConversationList } from "@/components/chat/ConversationList";
 import type { Attendant } from "@/components/chat/AttendantFilter";
@@ -26,7 +26,7 @@ import { PriorityPill } from "@/components/chat/PriorityPill";
 import type { TemplateChoice } from "@/components/chat/TemplatePicker";
 import { TransferDialog } from "@/components/chat/TransferDialog";
 import { alertsEnabled, disableAlerts, enableAlerts } from "@/lib/chat/alerts";
-import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
+import { displayName, initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { formatPhone } from "@/lib/chat/phone";
 import { STATUS_LABELS, type ChatCounts, type ChatMessageItem, type ChatTab, type ConversationDetail, type ConversationItem, type ScheduledMessageItem } from "@/lib/chat/types";
 import { usePulse } from "@/lib/chat/use-pulse";
@@ -73,7 +73,7 @@ function ChatWorkspace() {
   const [showPanel, setShowPanel] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpKey, setFollowUpKey] = useState(0);
-  const [showSales, setShowSales] = useState(false);
+  const [panelTab, setPanelTab] = useState<CustomerPanelTab>("cliente");
   const [summaryTarget, setSummaryTarget] = useState<{ id: string; name: string } | null>(null);
   const [composerDraft, setComposerDraft] = useState<{ text: string; nonce: number; append?: boolean } | null>(null);
   const [showCopilot, setShowCopilot] = useState(false);
@@ -101,6 +101,17 @@ function ChatWorkspace() {
       return !current;
     });
     setShowCopilot(false);
+  };
+
+  /** Abre o painel direito já na aba pedida (ex.: "Sugestões IA" pelo menu da conversa). */
+  const openPanelTab = (next: CustomerPanelTab) => {
+    setPanelTab(next);
+    setShowPanel(true);
+    try {
+      window.localStorage.setItem(PANEL_KEY, "1");
+    } catch {
+      // Preferência não salva; o painel abre do mesmo jeito.
+    }
   };
 
   const toggleCopilot = () => {
@@ -496,6 +507,7 @@ function ChatWorkspace() {
     return [
       { label: "Assumir atendimento", icon: <Hand className="h-4 w-4" />, onSelect: () => run("/assume", "Atendimento assumido"), hidden: !canWrite || !!conversation.closedAt || !!conversation.assignee },
       { label: "Ver dados do cliente", icon: <UserRound className="h-4 w-4" />, onSelect: () => setShowDetails(true) },
+      { label: "Sugestões de venda (IA)", icon: <ShoppingBag className="h-4 w-4" />, onSelect: () => openPanelTab("ia") },
       { label: "Resumir atendimento (IA)", icon: <Sparkles className="h-4 w-4" />, onSelect: () => setSummaryTarget({ id: conversation.id, name: conversation.name }) },
       // eslint-disable-next-line react-hooks/refs
       { label: "Salvar como atendimento padrão ouro", icon: <Award className="h-4 w-4" />, onSelect: () => void saveGoldConversation(conversation.id), hidden: !capabilities["chat.queues"] },
@@ -522,9 +534,9 @@ function ChatWorkspace() {
   const contextMenuItems = contextItem ? conversationMenu(detail?.id === contextItem.id ? detail : contextItem, true) : [];
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden px-3 py-3 md:px-4 md:py-4 xl:px-10 xl:py-8 compact:py-3">
-      <div className="relative flex flex-1 min-h-0 w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-[#07194f]">
-        <div className={`flex min-h-0 flex-col border-r border-slate-200 dark:border-slate-800 ${selectedId ? "hidden md:flex" : "flex"} w-full md:w-72 md:shrink-0 xl:w-80 2xl:w-96`}>
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <div className="relative flex min-h-0 w-full flex-1 overflow-hidden border-t border-slate-200/80 bg-white dark:border-slate-800 dark:bg-[#07194f]">
+        <div className={`flex min-h-0 flex-col border-r border-slate-200/80 dark:border-slate-800 ${selectedId ? "hidden md:flex" : "flex"} w-full md:w-[320px] md:shrink-0 lg:w-[340px] 2xl:w-[360px]`}>
           <ConversationList
             items={hiddenIds.size ? items.filter((item) => !hiddenIds.has(item.id)) : items}
             counts={counts}
@@ -556,9 +568,9 @@ function ChatWorkspace() {
             actions={(
               <>
                 {canWrite && (
-                  <button type="button" onClick={() => { setNewSearch(""); setShowNew(true); }} className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 text-xs font-medium text-[#051647] shadow-xs transition-opacity hover:opacity-90">
+                  <button type="button" onClick={() => { setNewSearch(""); setShowNew(true); }} title="Nova conversa" className="flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-[#C4D600] px-2.5 text-xs font-semibold text-[#051647] shadow-xs transition-opacity hover:opacity-90">
                     <MessageSquarePlus className="h-4 w-4" />
-                    Nova conversa
+                    Nova
                   </button>
                 )}
                 <button
@@ -566,7 +578,7 @@ function ChatWorkspace() {
                   onClick={() => void toggleAlerts()}
                   title={alertsOn ? "Desligar som" : "Ligar som"}
                   aria-label={alertsOn ? "Desligar som" : "Ligar som"}
-                  className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   {alertsOn ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
                 </button>
@@ -578,7 +590,7 @@ function ChatWorkspace() {
         <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${selectedId ? "flex" : "hidden md:flex"}`}>
           {open ? (
             <>
-              <div className="flex min-h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-2 xl:px-4 xl:py-3 compact:py-1.5 dark:border-slate-800 dark:bg-[#07194f]">
+              <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white px-3 py-2 xl:px-4 compact:py-1.5 dark:border-slate-800 dark:bg-[#07194f]">
                 <button type="button" onClick={() => select(null)} aria-label="Voltar" className="md:hidden cursor-pointer rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                   <ArrowLeft className="h-5 w-5" />
                 </button>
@@ -591,61 +603,61 @@ function ChatWorkspace() {
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="truncate text-sm font-semibold text-slate-900 dark:text-white">{open.name}</h3>
                   <div className="flex min-w-0 items-center gap-2">
-                    <p title={headerInfo} className="min-w-0 truncate text-xs text-slate-500 dark:text-slate-400">{headerInfo}</p>
-                    {open.campaign && <CampaignBadge name={open.campaign.name} className="max-w-[45%] shrink-0" />}
+                    <h3 title={open.name} className="truncate text-sm font-semibold text-slate-900 dark:text-white">{displayName(open.name)}</h3>
+                    <PriorityPill key={`${open.id}-priority`} priority={open.priority} onChange={canWrite && !open.closedAt ? (value) => void updateConversation({ priority: value }) : undefined} />
                   </div>
+                  <p title={headerInfo} className="min-w-0 truncate text-xs text-slate-500 dark:text-slate-400">{headerInfo}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {canWrite && (
-                    <button
-                      type="button"
-                      onClick={() => setShowFollowUp(true)}
-                      title="Agendar retorno"
-                      aria-label="Agendar retorno"
-                      className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 xl:h-9 xl:w-9 dark:text-slate-400 dark:hover:bg-white/10"
-                    >
-                      <CalendarClock className="h-5 w-5" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowSales(true)}
-                    title="Sugestões de venda com IA para este cliente"
-                    aria-label="Sugestões de venda"
-                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-2.5 text-xs font-semibold text-[#051647] transition hover:bg-[#b3c400] xl:h-9"
-                  >
-                    <ShoppingBag className="h-4 w-4" />
-                    <span className="hidden sm:inline">Sugestões de venda</span>
-                  </button>
+                <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
                     onClick={toggleCopilot}
                     title={showCopilot ? "Fechar Copiloto VMSet" : "Consultar VMSet: faturas, estoque, compras e receitas"}
                     aria-label="Consultar VMSet"
                     aria-pressed={showCopilot}
-                    className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors xl:h-9 ${showCopilot ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-200 text-[#002187] hover:bg-slate-100 dark:border-slate-700 dark:text-[#C4D600] dark:hover:bg-white/10"}`}
+                    className={`inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${showCopilot ? "bg-[#002187] text-white dark:bg-[#C4D600] dark:text-[#051647]" : "bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]"}`}
                   >
                     <Database className="h-4 w-4" />
                     <span className="hidden lg:inline">Consultar VMSet</span>
                   </button>
+                  {capabilities["chat.transfer"] && !open.closedAt && (
+                    <button
+                      type="button"
+                      onClick={() => setShowTransfer(true)}
+                      title="Transferir conversa"
+                      aria-label="Transferir conversa"
+                      className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+                    >
+                      <ArrowRightLeft className="h-[18px] w-[18px]" />
+                    </button>
+                  )}
+                  {capabilities["chat.close"] && !open.closedAt && (
+                    <button
+                      type="button"
+                      onClick={() => void conversationAction("/close", undefined, open.id, "Atendimento finalizado")}
+                      title="Finalizar atendimento"
+                      aria-label="Finalizar atendimento"
+                      className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
+                    >
+                      <CheckCircle2 className="h-[18px] w-[18px]" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={togglePanel}
-                    title={showPanel ? "Fechar painel do cliente" : "Painel do cliente: compras, receita, campanhas e retornos"}
+                    title={showPanel ? "Fechar painel do cliente" : "Painel do cliente: dados, VMSet, campanha, retornos e sugestões da IA"}
                     aria-label="Painel do cliente"
                     aria-pressed={showPanel}
-                    className={`grid h-8 w-8 cursor-pointer place-items-center rounded-lg transition-colors xl:h-9 xl:w-9 ${showPanel ? "bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"}`}
+                    className={`grid h-9 w-9 cursor-pointer place-items-center rounded-lg transition-colors ${showPanel ? "bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]" : "text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"}`}
                   >
                     <PanelRight className="h-5 w-5" />
                   </button>
-                  <PriorityPill key={`${open.id}-priority`} priority={open.priority} onChange={canWrite && !open.closedAt ? (value) => void updateConversation({ priority: value }) : undefined} />
                   <FloatingMenu
                     key={open.id}
                     label="Ações da conversa"
                     widthClassName="w-60"
-                    triggerClassName="grid h-8 w-8 xl:h-9 xl:w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
+                    triggerClassName="grid h-9 w-9 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
                     trigger={<MoreVertical className="h-5 w-5" />}
                     items={menuItems}
                   />
@@ -706,6 +718,18 @@ function ChatWorkspace() {
             onNewFollowUp={() => setShowFollowUp(true)}
             onChanged={() => void loadList()}
             onClose={togglePanel}
+            tab={panelTab}
+            onTab={setPanelTab}
+            campaign={open.campaign?.name ?? null}
+            onOpenVmset={() => setShowCopilot(true)}
+            aiSlot={(
+              <AiProductSuggestions
+                key={`${open.id}-ia`}
+                conversationId={open.id}
+                autoLoad
+                onUsePitch={canWrite && !open.closedAt ? (text) => setComposerDraft({ text, nonce: Date.now() }) : undefined}
+              />
+            )}
           />
         )}
 
@@ -718,15 +742,6 @@ function ChatWorkspace() {
             canInsert={canWrite && !open.closedAt}
             onInsert={(text) => setComposerDraft({ text, nonce: Date.now(), append: true })}
             onClose={closeCopilot}
-          />
-        )}
-
-        {showSales && open && (
-          <AiSalesDialog
-            conversationId={open.id}
-            customerName={open.name}
-            onUsePitch={canWrite && !open.closedAt ? (text) => setComposerDraft({ text, nonce: Date.now() }) : undefined}
-            onClose={() => setShowSales(false)}
           />
         )}
 

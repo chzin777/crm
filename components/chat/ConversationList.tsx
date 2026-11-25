@@ -1,18 +1,21 @@
 "use client";
-import type { ReactNode } from "react";
-import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, History, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShieldCheck, ShoppingBag, Smile, Trash2, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, Hourglass, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShieldCheck, ShoppingBag, SlidersHorizontal, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { AttendantFilter, type Attendant } from "@/components/chat/AttendantFilter";
-import { initials, relativeTime, waitingLabel } from "@/lib/chat/format";
+import { displayName, initials, relativeTime, waitingLabel } from "@/lib/chat/format";
 import { PRIORITY_LABELS, SLA_BREACH_MINUTES, SLA_WARN_MINUTES, type ChatCounts, type ChatDelivery, type ChatPriority, type ChatTab, type ConversationItem } from "@/lib/chat/types";
 
-const TABS: { id: ChatTab; label: string }[] = [
+/** Abas principais sempre visíveis numa linha; as demais ficam no "Mais". */
+const MAIN_TABS: { id: ChatTab; label: string }[] = [
   { id: "all", label: "Todas" },
   { id: "unread", label: "Não lidas" },
   { id: "mine", label: "Minhas" },
-  { id: "campaigns", label: "Campanhas" },
+];
+const MORE_TABS: { id: ChatTab; label: string }[] = [
   // Conversas na fila esperando atendente; a fila/setor fica no filtro de filas.
   { id: "queue", label: "Aguardando" },
+  { id: "campaigns", label: "Campanhas" },
   { id: "followups", label: "Lembretes" },
   { id: "closed", label: "Encerradas" },
 ];
@@ -49,13 +52,14 @@ function DeliveryIcon({ delivery }: { delivery: ChatDelivery }) {
 /** Tag de origem com cor própria: campanha violeta, e-commerce verde, demais etiquetas neutras. */
 type OriginTone = "campaign" | "ecommerce" | "neutral" | "followup" | "overdue" | "financial";
 
+/** Linha 3 do card: só texto suave, com cor apenas nos alertas (aprovação financeira e retorno). */
 const ORIGIN_TONES: Record<OriginTone, string> = {
-  financial: "border-[#F7915E]/50 bg-[#F7915E]/15 font-semibold text-[#9a3d12] dark:border-[#F7915E]/40 dark:bg-[#F7915E]/15 dark:text-[#F7915E]",
-  followup: "border-[#002187]/20 bg-[#002187]/5 text-[#002187] dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600]",
-  overdue: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300",
-  neutral: "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
-  campaign: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-950/40 dark:text-violet-300",
-  ecommerce: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300",
+  financial: "font-semibold text-[#c25a26] dark:text-[#F7915E]",
+  followup: "font-medium text-[#002187] dark:text-[#C4D600]",
+  overdue: "font-semibold text-rose-600 dark:text-rose-300",
+  neutral: "text-slate-400 dark:text-slate-500",
+  campaign: "text-violet-600 dark:text-violet-300",
+  ecommerce: "text-emerald-600 dark:text-emerald-400",
 };
 
 const ECOMMERCE_TAG = /e-?commerce|site|pedido|loja online/i;
@@ -86,7 +90,7 @@ const dueLabel = (value: string) => new Date(value).toLocaleString("pt-BR", { da
 
 /** Parcelas consultadas pela IA esperando o operador conferir: selo mais urgente da linha 3. */
 function financialOf(item: ConversationItem): Origin | null {
-  return item.financialApprovalPending ? { title: "A IA consultou as parcelas no VMSet e aguarda você conferir antes de enviar", text: "⏳ Aprovação Financeira", tone: "financial" } : null;
+  return item.financialApprovalPending ? { title: "A IA consultou as parcelas no VMSet e aguarda você conferir antes de enviar", text: "Aprovação financeira", tone: "financial", icon: <Hourglass className="h-3 w-3 shrink-0" /> } : null;
 }
 
 /** Lembrete de retorno pendente vira o selo da linha 3 (mais urgente que a origem). */
@@ -115,8 +119,8 @@ function ListSkeleton() {
   return (
     <div role="status" aria-label="Carregando conversas" className="animate-pulse">
       {SKELETON_ROWS.map((row) => (
-        <div key={row} className="mx-2 my-1 flex h-[84px] items-center gap-3 border-l-4 border-transparent px-3 py-2.5">
-          <div className="h-11 w-11 shrink-0 rounded-full bg-slate-200 dark:bg-slate-800" />
+        <div key={row} className="mx-2 my-0.5 flex h-[72px] items-center gap-3 px-3 py-2.5">
+          <div className="h-10 w-10 shrink-0 rounded-full bg-slate-200 dark:bg-slate-800" />
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex items-center justify-between gap-6">
               <div className="h-3 w-2/5 rounded bg-slate-200 dark:bg-slate-800" />
@@ -196,13 +200,35 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
     const list = event.currentTarget;
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
   };
-  const hasFilters = !!queueId || !!priority;
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilters = (queueId ? 1 : 0) + (priority ? 1 : 0) + (assigneeId && tab !== "mine" ? 1 : 0);
+  const moreActive = MORE_TABS.find((item) => item.id === tab);
+  const clearFilters = () => {
+    onQueue("");
+    onPriority("");
+    onAssignee("");
+  };
+  const tabButton = (active: boolean) => `relative flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-xs font-semibold transition-colors ${
+    active ? "bg-white text-[#051647] shadow-xs dark:bg-white/10 dark:text-white" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+  }`;
+  const tabCount = (id: ChatTab) => {
+    const late = id === "followups" && counts.followupsOverdue > 0;
+    const urgent = id === "unread" && counts.unread > 0;
+    return (
+      <span
+        title={late ? `${counts.followupsOverdue} ${counts.followupsOverdue === 1 ? "retorno atrasado" : "retornos atrasados"}` : undefined}
+        className={`text-[10px] tabular-nums ${late ? "font-bold text-rose-600 dark:text-rose-300" : urgent ? "font-bold text-[#002187] dark:text-[#C4D600]" : "font-medium opacity-60"}`}
+      >
+        {counts[id]}
+      </span>
+    );
+  };
 
   return (
     <>
-      <div className="shrink-0 space-y-2 border-b border-slate-200 px-4 pb-2 pt-3 dark:border-slate-800">
+      <div className="shrink-0 space-y-2.5 border-b border-slate-200/80 px-3 pb-2.5 pt-3 dark:border-slate-800">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Conversas</h2>
+          <h2 className="text-base font-bold text-slate-900 dark:text-white">Conversas</h2>
           {silentTriage && (
             <span
               title="Modo Triagem Silenciosa: a IA filtra robôs e ruídos pós-campanha, mas não responde clientes. Conversas válidas vão para a fila."
@@ -213,7 +239,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             </span>
           )}
           {counts.unread > 0 && (
-            <span title="Conversas não lidas" className="rounded-full bg-[#C4D600] px-2 py-0.5 text-[11px] font-semibold text-[#051647]">{counts.unread}</span>
+            <span title="Conversas não lidas" className="rounded-full bg-slate-100 px-1.5 py-px text-[11px] font-semibold tabular-nums text-slate-600 dark:bg-white/10 dark:text-slate-300">{counts.unread}</span>
           )}
           {counts.slaBreached > 0 && (
             <button
@@ -228,74 +254,94 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
           )}
           <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => onSearch(event.target.value)}
-            placeholder="Buscar conversa..."
-            aria-label="Buscar conversa"
-            className="h-9 w-full rounded-lg border border-slate-200/60 bg-slate-100/60 px-3 pl-9 text-sm outline-none transition-all focus:border-[#002187] focus:ring-1 focus:ring-[#002187]/30 dark:border-slate-700/60 dark:bg-slate-800/80! dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/30"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(event) => onSearch(event.target.value)}
+              placeholder="Buscar conversa..."
+              aria-label="Buscar conversa"
+              className="h-9 w-full rounded-lg border border-slate-200/60 bg-slate-100/60 px-3 pl-9 text-sm outline-none transition-all focus:border-[#002187] focus:ring-1 focus:ring-[#002187]/30 dark:border-slate-700/60 dark:bg-slate-800/80! dark:text-white dark:focus:border-[#C4D600] dark:focus:ring-[#C4D600]/30"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowFilters((value) => !value)}
+            aria-expanded={showFilters}
+            aria-controls="chat-filtros"
+            title="Filtros: fila, prioridade e atendente"
+            className={`relative inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+              showFilters || activeFilters
+                ? "border-[#002187]/30 bg-[#002187]/5 text-[#002187] dark:border-[#C4D600]/40 dark:bg-[#C4D600]/10 dark:text-[#C4D600]"
+                : "border-slate-200/80 text-slate-600 hover:bg-slate-100 dark:border-slate-700/80 dark:text-slate-300 dark:hover:bg-white/5"
+            }`}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Filtros
+            {activeFilters > 0 && <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#C4D600] px-1 text-[10px] font-bold text-[#051647]">{activeFilters}</span>}
+          </button>
         </div>
-        {/* Quebra em linhas em vez de rolar: no desktop a roda do mouse não rola de lado e as abas ficavam escondidas. */}
-        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          {TABS.map(({ id, label }) => {
-            const active = tab === id;
-            const urgent = id === "unread" && counts.unread > 0;
-            const late = id === "followups" && counts.followupsOverdue > 0;
-            return (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onTab(id)}
-                className={`flex shrink-0 cursor-pointer items-center whitespace-nowrap rounded-full border px-2 py-0.5 font-medium transition-colors ${
-                  active
-                    ? "border-[#002187]/30 bg-[#002187]/10 text-[#002187] dark:border-[#C4D600]/40 dark:bg-[#C4D600]/15 dark:text-[#C4D600]"
-                    : "border-slate-200/80 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700/80 dark:bg-transparent dark:text-slate-300 dark:hover:bg-white/5"
-                }`}
-              >
-                {label}
-                <span
-                  title={late ? `${counts.followupsOverdue} ${counts.followupsOverdue === 1 ? "retorno atrasado" : "retornos atrasados"}` : undefined}
-                  className={`ml-1 font-mono text-[10px] tabular-nums ${late ? "font-semibold text-rose-600 dark:text-rose-300" : urgent ? "font-semibold text-[#002187] dark:text-[#C4D600]" : "opacity-70"}`}
-                >
-                  {counts[id]}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <div className={`grid gap-2 ${hasFilters ? "grid-cols-[1fr_1fr_auto]" : "grid-cols-2"}`}>
-          <FilterSelect
-            label="Filtrar por fila"
-            value={queueId}
-            placeholder="Todas as filas"
-            options={[{ value: "", label: "Todas as filas" }, ...queues.map((queue) => ({ value: queue.id, label: queue.name }))]}
-            onChange={onQueue}
-          />
-          <FilterSelect
-            label="Filtrar por prioridade"
-            value={priority}
-            placeholder="Prioridade"
-            options={[{ value: "", label: "Todas as prioridades" }, ...(Object.keys(PRIORITY_LABELS) as ChatPriority[]).map((key) => ({ value: key, label: PRIORITY_LABELS[key] }))]}
-            onChange={onPriority}
-          />
-          {hasFilters && (
-            <button
-              type="button"
-              title="Limpar filtros"
-              aria-label="Limpar filtros"
-              onClick={() => { onQueue(""); onPriority(""); }}
-              className="grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-            >
-              <X className="h-4 w-4" />
+        {showFilters && (
+          <div id="chat-filtros" className="soft-pop-in space-y-2 rounded-xl border border-slate-200/80 bg-slate-50/80 p-2.5 dark:border-slate-700/80 dark:bg-white/[0.03]">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Filtros</p>
+              <div className="flex items-center gap-1">
+                {activeFilters > 0 && (
+                  <button type="button" onClick={clearFilters} className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-[#002187] hover:bg-white dark:text-[#C4D600] dark:hover:bg-white/10">Limpar</button>
+                )}
+                <button type="button" onClick={() => setShowFilters(false)} title="Fechar filtros" aria-label="Fechar filtros" className="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-slate-400 hover:bg-white hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <FilterSelect
+                label="Filtrar por fila"
+                value={queueId}
+                placeholder="Todas as filas"
+                options={[{ value: "", label: "Todas as filas" }, ...queues.map((queue) => ({ value: queue.id, label: queue.name }))]}
+                onChange={onQueue}
+              />
+              <FilterSelect
+                label="Filtrar por prioridade"
+                value={priority}
+                placeholder="Prioridade"
+                options={[{ value: "", label: "Todas as prioridades" }, ...(Object.keys(PRIORITY_LABELS) as ChatPriority[]).map((key) => ({ value: key, label: PRIORITY_LABELS[key] }))]}
+                onChange={onPriority}
+              />
+            </div>
+            <AttendantFilter value={tab === "mine" ? "" : assigneeId} onChange={onAssignee} attendants={attendants} lockedLabel={tab === "mine" ? "Meus atendimentos" : undefined} />
+          </div>
+        )}
+        {/* Uma linha só: 3 abas principais + "Mais" com as demais (com contador e alerta de atrasos). */}
+        <div role="tablist" aria-label="Situação das conversas" className="flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-white/[0.04]">
+          {MAIN_TABS.map(({ id, label }) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => onTab(id)} className={tabButton(tab === id)}>
+              {label}
+              {tabCount(id)}
             </button>
-          )}
+          ))}
+          <FloatingMenu
+            label="Mais situações"
+            compact
+            widthClassName="w-52"
+            triggerClassName={tabButton(!!moreActive)}
+            trigger={(
+              <>
+                <span className="truncate">{moreActive?.label ?? "Mais"}</span>
+                {moreActive ? tabCount(moreActive.id) : counts.followupsOverdue > 0 || counts.slaBreached > 0 ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" aria-hidden /> : null}
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+              </>
+            )}
+            items={MORE_TABS.map(({ id, label }) => ({
+              label: `${label} · ${counts[id]}${id === "followups" && counts.followupsOverdue > 0 ? ` (${counts.followupsOverdue} atrasados)` : ""}`,
+              checked: tab === id,
+              onSelect: () => onTab(id),
+            }))}
+          />
         </div>
-        <AttendantFilter value={tab === "mine" ? "" : assigneeId} onChange={onAssignee} attendants={attendants} lockedLabel={tab === "mine" ? "Meus atendimentos" : undefined} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-1" onScroll={handleScroll}>
@@ -319,15 +365,19 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const selected = selectedId === item.id;
             const delivery = item.lastMessage && item.lastMessage.author !== "customer" ? item.lastMessage.delivery : null;
             const waiting = item.status === "waiting" && !!item.waitingSince;
-            const origin = financialOf(item) ?? followUpOf(item) ?? originOf(item);
+            // Linha 3: um único metadado. Alerta (aprovação financeira / retorno) tem preferência; senão fila · loja; senão a etiqueta.
+            const alert = financialOf(item) ?? followUpOf(item);
+            const tag = item.campaign ? null : originOf(item);
             const corner = cornerTime(item, waiting);
             const priorityDot = PRIORITY_DOTS[item.priority];
             const operational = [item.queue?.name, item.store ? storeLabel(item.store) : null].filter((value): value is string => !!value);
             const podium = item.queuePosition ? PODIUM[item.queuePosition] ?? null : null;
+            const name = displayName(item.name);
+            const recurring = (item.totalSessions ?? 1) > 1 ? `Cliente recorrente: ${item.totalSessions} atendimentos no histórico` : "";
             return (
               <div
                 key={item.id}
-                className="group relative mx-2 my-1"
+                className="group relative mx-1.5 my-0.5"
                 onContextMenu={onContextMenu ? (event) => {
                   event.preventDefault();
                   onContextMenu(item, { x: event.clientX, y: event.clientY });
@@ -337,15 +387,15 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                   type="button"
                   onClick={() => onSelect(item.id)}
                   aria-current={selected ? "true" : undefined}
-                  className={`flex h-[84px] w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border-l-4 p-2.5 text-left transition-all duration-150 ${
+                  className={`flex w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border-l-[3px] px-2.5 py-2 text-left transition-colors duration-150 ${
                     selected
-                      ? "border-[#051647] bg-blue-50/70 shadow-xs dark:border-[#C4D600] dark:bg-white/10"
+                      ? "border-[#051647] bg-[#002187]/[0.06] dark:border-[#C4D600] dark:bg-white/10"
                       : podium?.card ?? "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5"
                   }`}
                 >
                   <div className="relative shrink-0">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-[#051647]/10 bg-gradient-to-br from-[#051647] to-[#002187] text-sm font-bold text-white dark:border-white/10 dark:from-slate-700 dark:to-slate-800 dark:text-[#C4D600]">
-                      {initials(item.name)}
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#051647] to-[#002187] text-xs font-bold text-white dark:from-slate-700 dark:to-slate-800 dark:text-[#C4D600]">
+                      {initials(name)}
                     </div>
                     {item.windowOpen && !item.closedAt && (
                       <span title="Janela de 24h aberta" className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#C4D600] ring-2 ring-white dark:ring-[#07194f]" />
@@ -367,16 +417,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         ) : item.queuePosition ? (
                           <span title={`${item.queuePosition}º na fila`} className="shrink-0 rounded-md bg-slate-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-slate-500 dark:bg-white/10 dark:text-slate-400">#{item.queuePosition}</span>
                         ) : null}
-                        <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{item.name}</span>
-                        {(item.totalSessions ?? 1) > 1 && (
-                          <span
-                            title={`Cliente recorrente: ${item.totalSessions} atendimentos no histórico`}
-                            className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300"
-                          >
-                            <History className="h-2.5 w-2.5" />
-                            {item.totalSessions} atendimentos
-                          </span>
-                        )}
+                        <span title={[item.name, recurring].filter(Boolean).join("\n")} className={`truncate text-sm text-slate-900 dark:text-white ${item.unreadCount > 0 ? "font-semibold" : "font-medium"}`}>{name}</span>
                       </span>
                       <span title={corner.title} className={`shrink-0 text-xs tabular-nums ${corner.tone}`}>{corner.text}</span>
                     </div>
@@ -394,24 +435,36 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#C4D600] px-1 text-[10px] font-bold text-[#051647]">{item.unreadCount}</span>
                       )}
                     </div>
-                    {/* Linha 3 (altura fixa): origem colorida à esquerda, fila • loja em texto à direita, sempre visíveis. */}
-                    <div className="mt-1.5 flex h-6 min-w-0 items-center justify-between gap-2 overflow-hidden">
-                      {origin ? (
-                        <span title={origin.title} className={`inline-flex h-6 min-w-[72px] max-w-[150px] shrink items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-medium ${ORIGIN_TONES[origin.tone]}`}>
-                          {origin.icon}
-                          <span className="truncate">{origin.text}</span>
-                        </span>
-                      ) : <span />}
-                      {operational.length > 0 && (
-                        <span
-                          title={[item.queue && `Fila: ${item.queue.name}`, item.store && storeLabel(item.store), item.assignee && `Atendente: ${item.assignee.name}`].filter(Boolean).join("\n")}
-                          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11px] font-normal text-slate-400 dark:text-slate-500"
-                        >
-                          {item.queue && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.queue.color }} />}
-                          <span className="truncate">{operational.join(" • ")}</span>
-                        </span>
-                      )}
-                    </div>
+                    {/* Linha 3: um metadado discreto em texto suave (campanha vira só um ícone; o nome dela fica no painel do cliente). */}
+                    {(alert || operational.length > 0 || tag || item.campaign) && (
+                      <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 overflow-hidden text-[11px]">
+                        {alert ? (
+                          <span title={alert.title} className={`flex min-w-0 items-center gap-1 ${ORIGIN_TONES[alert.tone]}`}>
+                            {alert.icon}
+                            <span className="truncate">{alert.text}</span>
+                          </span>
+                        ) : operational.length > 0 ? (
+                          <span
+                            title={[item.queue && `Fila: ${item.queue.name}`, item.store && storeLabel(item.store), item.assignee && `Atendente: ${item.assignee.name}`].filter(Boolean).join("\n")}
+                            className="flex min-w-0 items-center gap-1.5 text-slate-400 dark:text-slate-500"
+                          >
+                            {item.queue && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.queue.color }} />}
+                            <span className="truncate">{operational.join(" · ")}</span>
+                          </span>
+                        ) : tag ? (
+                          <span title={tag.title} className={`flex min-w-0 items-center gap-1 ${ORIGIN_TONES[tag.tone]}`}>
+                            {tag.icon}
+                            <span className="truncate">{tag.text}</span>
+                          </span>
+                        ) : null}
+                        {item.campaign && (
+                          <span title={`Respondeu à campanha: ${item.campaign.name}`} className="ml-auto shrink-0 text-violet-500 dark:text-violet-300">
+                            <Megaphone className="h-3 w-3" />
+                            <span className="sr-only">Campanha {item.campaign.name}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </button>
                 {onDelete && (

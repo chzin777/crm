@@ -48,6 +48,19 @@ export function elapsedLabel(minutes: number) {
   return hours % 24 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${Math.floor(hours / 24)}d`;
 }
 
+const NAME_PARTICLES = new Set(["da", "das", "de", "do", "dos", "e"]);
+
+/** "RUIMAR ANAPOLINO MACHADO" → "Ruimar Anapolino Machado" (só converte nome todo em caixa alta; o resto fica como veio). */
+export function displayName(name: string) {
+  const value = (name ?? "").trim();
+  if (!/\p{Lu}/u.test(value) || value !== value.toLocaleUpperCase("pt-BR")) return value;
+  return value
+    .toLocaleLowerCase("pt-BR")
+    .split(/\s+/)
+    .map((word, index) => (index > 0 && NAME_PARTICLES.has(word) ? word : word.replace(/^\p{L}/u, (letter) => letter.toLocaleUpperCase("pt-BR"))))
+    .join(" ");
+}
+
 export const initials = (name: string) => name.split(" ").map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
 export function fileSize(bytes: number) {

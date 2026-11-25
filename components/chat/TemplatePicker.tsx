@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Clock } from "lucide-react";
+import { Clock, Send } from "lucide-react";
 import { ATTENDANT_FIELDS, attendantValues, fillAttendantTokens } from "@/lib/attendant-variables";
 
 type Template = { name: string; language: string; status: string; body: string };
@@ -87,18 +87,22 @@ export function TemplatePicker({ onSend, requireNotice = true, customerName, age
   const field = "h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]";
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 rounded-xl border border-slate-200/80 bg-slate-50/70 p-2.5 dark:border-slate-700/80 dark:bg-white/[0.03]">
       {requireNotice && (
-        <p className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-          <Clock className="h-4 w-4 shrink-0" />Faz mais de 24h desde a última mensagem do cliente. Só é possível enviar um modelo aprovado.
+        <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-[#F7915E]" />Janela de 24h encerrada: envie um modelo aprovado para retomar a conversa.
         </p>
       )}
       {error && <p className="text-xs text-red-600 dark:text-red-300">{error}</p>}
-      <select aria-label="Modelo" value={selected} onChange={(event) => { setSelected(event.target.value); setParams(autoFill(templates.find((item) => `${item.name}|${item.language}` === event.target.value))); }} className={`${field} cursor-pointer`}>
+      <select aria-label="Modelo" value={selected} onChange={(event) => { setSelected(event.target.value); setParams(autoFill(templates.find((item) => `${item.name}|${item.language}` === event.target.value))); }} className={`${field} cursor-pointer bg-white! dark:bg-slate-800!`}>
         <option value="">Selecione um modelo</option>
         {templates.map((item) => <option key={`${item.name}|${item.language}`} value={`${item.name}|${item.language}`}>{item.name} ({item.language})</option>)}
       </select>
-      {template && <p aria-label="Pré-visualização do modelo" className="whitespace-pre-wrap break-words rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{preview}</p>}
+      {template && (
+        <div className="flex justify-end">
+          <p aria-label="Pré-visualização do modelo" className="max-h-40 max-w-[85%] overflow-y-auto whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-[#C4D600]/25 px-3 py-2 text-xs leading-relaxed text-slate-800 dark:bg-[#C4D600]/15 dark:text-slate-100">{preview}</p>
+        </div>
+      )}
       {Array.from({ length: count }, (_, index) => (
         <div key={index} className="space-y-1">
           <input aria-label={`Variável ${index + 1}`} placeholder={`Variável {{${index + 1}}}`} value={params[index] ?? ""} onChange={(event) => setParam(index, event.target.value)} className={field} />
@@ -113,9 +117,12 @@ export function TemplatePicker({ onSend, requireNotice = true, customerName, age
           )}
         </div>
       ))}
-      <button type="button" onClick={() => void send()} disabled={!template || sending || Array.from({ length: count }).some((_, index) => !resolve(params[index] ?? "").trim())} className="h-9 cursor-pointer rounded-lg bg-[#051647] px-4 text-sm font-medium text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647]">
-        {sending ? "Enviando..." : "Enviar modelo"}
-      </button>
+      <div className="flex justify-end">
+        <button type="button" onClick={() => void send()} disabled={!template || sending || Array.from({ length: count }).some((_, index) => !resolve(params[index] ?? "").trim())} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-sm font-semibold text-[#051647] hover:bg-[#b3c400] disabled:cursor-not-allowed disabled:opacity-50">
+          <Send className="h-4 w-4" />
+          {sending ? "Enviando..." : "Enviar modelo"}
+        </button>
+      </div>
     </div>
   );
 }
