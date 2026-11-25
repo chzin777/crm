@@ -225,6 +225,40 @@ body {
 .soft-pop-in {
   animation: soft-pop-in 220ms ease-out both;
 }
+
+/* Gaveta inferior (EntityDialog size="sheet") e entrada de venda nova no War Room. */
+@keyframes sheet-up {
+  from {
+    opacity: 0.6;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes sale-flash {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+    box-shadow: 0 0 0 0 rgb(196 214 0 / 0.55);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgb(196 214 0 / 0);
+  }
+}
+.sale-flash {
+  animation: sale-flash 900ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sale-flash {
+    animation: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .soft-pop-in {
     animation: none;

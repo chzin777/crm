@@ -22,6 +22,10 @@ export type SaleItem = {
   terms?: string | null;
 };
 
+/** Sol, grau (armação + lentes oftálmicas), lentes de contato ou outros (serviço, acessório). */
+export type CategoryKind = "sol" | "grau" | "lentes" | "outros";
+export type OrderLine = { label: string; description: string | null; kind: CategoryKind; quantity: number; amount: number };
+
 export type LiveOrder = {
   /** Loja + número do pedido: identidade estável (o mesmo pedido nunca entra duas vezes no feed). */
   key: string;
@@ -41,6 +45,14 @@ export type LiveOrder = {
   fromCrm: boolean;
   /** Assinatura do conteúdo: muda quando entra item novo no mesmo pedido (atualiza o card, não duplica). */
   version: string;
+  /** Itens do pedido (gaveta de detalhes). Opcional: retratos antigos não trazem. */
+  lines?: OrderLine[];
+  /** Categorias presentes no pedido (tags do card). */
+  kinds?: CategoryKind[];
+  /** Cliente (primeiro e último nome). */
+  customer?: string | null;
+  /** Conversa do cliente no /chat quando houve match no CRM. */
+  conversationId?: string | null;
 };
 
 export type StoreRank = { store: string; storeLabel: string; amount: number; orders: number };
@@ -88,7 +100,7 @@ export function saleInstant(day: string, time: string | null) {
  * Itens do dia → pedidos (loja + número), ordenados do mais recente para o mais antigo. Itens repetidos (mesmo id,
  * ao reconectar ou reprocessar) contam uma vez só.
  */
-export function buildOrders(items: SaleItem[], day: string, input: { storeLabel: (store: string) => string; fromCrm?: (key: string) => boolean } = { storeLabel: (store) => `Loja ${store}` }): LiveOrder[] {
+export function buildOrders(items: SaleItem[], day: string, input: { storeLabel: (store: string) => string; fromCrm?: (key: string) => boolean; conversationOf?: (key: string) => string | null } = { storeLabel: (store) => `Loja ${store}` }): LiveOrder[] {
   const unique = new Map<string, SaleItem>();
   for (const item of items) if (item.id && !unique.has(item.id)) unique.set(item.id, item);
   const groups = new Map<string, SaleItem[]>();
@@ -117,6 +129,10 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
       payment: first.payment ? titleCase(first.payment.trim()) : null,
       fromCrm: input.fromCrm?.(key) ?? false,
       version: `${sorted.map((item) => item.id).join(",")}:${amount}`,
+      lines: sorted.map((item) => ({ label: brandLabel(item), description: item.description ? titleCase(item.description.trim()) : null, kind: categoryKind(item.category, item.description), quantity: Math.max(1, Math.round(item.quantity || 1)), amount: money2(Number.isFinite(item.amount) ? item.amount : 0) })),
+      kinds: [...new Set(sorted.map((item) => categoryKind(item.category, item.description)))],
+      customer: shortName(first.customer),
+      conversationId: input.conversationOf?.(key) ?? null,
     });
   }
   return orders.sort((a, b) => b.at.localeCompare(a.at) || b.key.localeCompare(a.key));
@@ -169,6 +185,127 @@ export function relativeTime(at: string, now: Date, time: string) {
 }
 
 export const formatMoney = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const plain = (value: string | null | undefined) => (value ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+
+/** Categoria do VMSet → Sol / Grau / Lentes de contato / Outros ("LENTES" oftálmicas contam como grau). */
+export function categoryKind(category: string | null | undefined, description?: string | null): CategoryKind {
+  const text = `${plain(category)} ${plain(description)}`;
+  if (/CONTATO/.test(text)) return "lentes";
+  if (/SOLAR|\bSOL\b|OCULOS DE SOL/.test(plain(category)) || (!category && /\bSOLAR|\bSOL\b/.test(text))) return "sol";
+  if (/ARMAC|GRAU|LENTE|MULTIFOCAL|VISAO SIMPLES|OFTALM|BIFOCAL|PROGRESSIV/.test(text)) return "grau";
+  return "outros";
+}
+
+export const KIND_LABEL: Record<CategoryKind, string> = { sol: "Sol", grau: "Grau", lentes: "Lentes de contato", outros: "Outros" };
+
+/** "VISA PARCELADO" → "Cartão de crédito"; PIX, débito, dinheiro, crediário. */
+export function paymentGroup(payment: string | null | undefined) {
+  const text = plain(payment);
+  if (!text.trim()) return "Não informado";
+  if (/PIX/.test(text)) return "Pix";
+  if (/DEBITO/.test(text)) return "Débito";
+  if (/DINHEIRO|ESPECIE/.test(text)) return "Dinheiro";
+  if (/CREDIARIO|CARNE|BOLETO|PROMISSORIA/.test(text)) return "Crediário";
+  if (/CREDITO|VISA|MASTER|ELO|HIPER|AMEX|DINERS|CARTAO|PARCELADO/.test(text)) return "Cartão de crédito";
+  return "Outros";
+}
+
+const orderHour = (order: Pick<LiveOrder, "time">) => {
+  const hour = Number.parseInt(order.time.slice(0, 2), 10);
+  return Number.isFinite(hour) && hour >= 0 && hour < 24 ? hour : null;
+};
+
+export type HourPoint = { hour: number; label: string; revenue: number; orders: number; cumulative: number };
+
+/** Faturamento e pedidos por hora (mínimo 08h–21h, estende se houver venda fora da faixa ou a hora atual passar). */
+export function hourlySeries(orders: Pick<LiveOrder, "time" | "amount">[], currentHour?: number): HourPoint[] {
+  const hours = orders.map(orderHour).filter((hour): hour is number => hour !== null);
+  const start = Math.min(8, ...hours);
+  const end = Math.max(21, currentHour ?? 0, ...hours);
+  const points: HourPoint[] = [];
+  for (let hour = start; hour <= end; hour += 1) points.push({ hour, label: `${String(hour).padStart(2, "0")}h`, revenue: 0, orders: 0, cumulative: 0 });
+  for (const order of orders) {
+    const hour = orderHour(order);
+    const point = hour === null ? undefined : points[hour - start];
+    if (!point) continue;
+    point.revenue = money2(point.revenue + order.amount);
+    point.orders += 1;
+  }
+  let total = 0;
+  for (const point of points) point.cumulative = total = money2(total + point.revenue);
+  return points;
+}
+
+export type SellerRank = { key: string; seller: string; storeLabel: string; amount: number; orders: number };
+
+/** Vendedores do dia por faturamento (mesmo nome em lojas diferentes conta separado). */
+export function topSellers(orders: LiveOrder[], limit = 5): SellerRank[] {
+  const bySeller = new Map<string, SellerRank>();
+  for (const order of orders) {
+    if (!order.seller) continue;
+    const key = `${order.store}|${order.seller}`;
+    const rank = bySeller.get(key) ?? { key, seller: order.seller, storeLabel: order.storeLabel, amount: 0, orders: 0 };
+    rank.amount = money2(rank.amount + order.amount);
+    rank.orders += 1;
+    bySeller.set(key, rank);
+  }
+  return [...bySeller.values()].sort((a, b) => b.amount - a.amount || b.orders - a.orders).slice(0, limit);
+}
+
+export type MixSlice = { key: string; label: string; amount: number; orders: number };
+
+/** Faturamento por categoria (Sol / Grau / Lentes de contato / Outros), pelos itens de cada pedido. */
+export function mixByKind(orders: LiveOrder[]): MixSlice[] {
+  const slices = new Map<CategoryKind, MixSlice>();
+  for (const order of orders) {
+    const lines = order.lines?.length ? order.lines : [{ kind: "outros" as CategoryKind, amount: order.amount }];
+    const seen = new Set<CategoryKind>();
+    for (const line of lines) {
+      const slice = slices.get(line.kind) ?? { key: line.kind, label: KIND_LABEL[line.kind], amount: 0, orders: 0 };
+      slice.amount = money2(slice.amount + line.amount);
+      if (!seen.has(line.kind)) slice.orders += 1;
+      seen.add(line.kind);
+      slices.set(line.kind, slice);
+    }
+  }
+  return [...slices.values()].sort((a, b) => b.amount - a.amount);
+}
+
+/** Faturamento por meio de pagamento agrupado. */
+export function mixByPayment(orders: LiveOrder[]): MixSlice[] {
+  const slices = new Map<string, MixSlice>();
+  for (const order of orders) {
+    const label = paymentGroup(order.payment);
+    const slice = slices.get(label) ?? { key: label, label, amount: 0, orders: 0 };
+    slice.amount = money2(slice.amount + order.amount);
+    slice.orders += 1;
+    slices.set(label, slice);
+  }
+  return [...slices.values()].sort((a, b) => b.amount - a.amount);
+}
+
+/** Pedidos e faturamento de clientes atendidos pelo CRM / WhatsApp. */
+export function crmShare(orders: LiveOrder[]) {
+  const crm = orders.filter((order) => order.fromCrm);
+  const revenue = money2(crm.reduce((sum, order) => sum + order.amount, 0));
+  const total = orders.reduce((sum, order) => sum + order.amount, 0);
+  return { orders: crm.length, revenue, ordersPct: orders.length ? (crm.length / orders.length) * 100 : 0, revenuePct: total ? (revenue / total) * 100 : 0 };
+}
+
+export const NEW_SALE_MS = 3 * 60_000;
+
+/**
+ * Selo "NOVA VENDA": só para venda dos últimos 3 minutos, ou que acabou de chegar pelo canal ao vivo (até 3 min
+ * depois da chegada) e ainda é recente (até 10 min). Venda antiga que chega atrasada nunca ganha o selo.
+ */
+export function isNewSale(order: Pick<LiveOrder, "at">, now: Date | number, arrivedAt?: number | null) {
+  const clock = typeof now === "number" ? now : now.getTime();
+  const age = clock - new Date(order.at).getTime();
+  if (!Number.isFinite(age)) return false;
+  if (age < NEW_SALE_MS) return true;
+  return arrivedAt != null && clock - arrivedAt < NEW_SALE_MS && age < 10 * 60_000;
+}
 
 /** Chave de telefone para cruzar VMSet x CRM: DDD + 8 últimos dígitos (com ou sem 55 e nono dígito). */
 export function phoneKey(value: string | null | undefined) {

@@ -13,7 +13,8 @@ interface EntityDialogProps {
   description: string;
   onClose: () => void;
   children: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "wizard" | "campaign-wizard" | "tabs" | "panel" | "xl" | "2xl";
+  /** "sheet": gaveta que sobe de baixo no celular e vira diálogo centralizado no desktop. */
+  size?: "sm" | "md" | "lg" | "wizard" | "campaign-wizard" | "tabs" | "panel" | "xl" | "2xl" | "sheet";
   fixedHeight?: boolean;
   /** Cabeçalho próprio no lugar de título + descrição (o título continua para leitores de tela). */
   header?: React.ReactNode;
@@ -24,7 +25,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
 
   const dialog = (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-[#051647]/55 p-4 backdrop-blur-sm"
+      className={`fixed inset-0 z-[100] flex justify-center bg-[#051647]/55 backdrop-blur-sm ${size === "sheet" ? "items-end p-0 sm:items-center sm:p-4" : "items-center p-4"}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -33,7 +34,7 @@ export function EntityDialog({ titleId, title, description, onClose, children, s
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] 2xl:p-6 ${size === "sm" ? `${fixedHeight ? "h-[min(640px,90vh)]" : ""} max-w-md` : size === "wizard" ? "h-[560px] max-w-4xl" : size === "campaign-wizard" ? "h-[88vh] max-h-[90dvh] w-[96vw] max-w-6xl" : size === "tabs" ? "h-[740px] max-w-2xl" : size === "panel" ? "h-[85vh] max-h-[85vh] max-w-3xl" : size === "xl" ? "h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl" : size === "2xl" ? "h-[88vh] max-h-[88vh] w-[95vw] max-w-[1400px]" : `h-[min(640px,90vh)] ${size === "lg" ? "max-w-5xl" : "max-w-xl"}`}`}
+        className={`flex max-h-[90dvh] w-full flex-col overflow-hidden border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-[#07194f] 2xl:p-6 ${size === "sheet" ? "max-w-lg animate-[sheet-up_220ms_ease-out] rounded-t-3xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-2xl" : "rounded-2xl"} ${size === "sheet" ? "" : size === "sm" ? `${fixedHeight ? "h-[min(640px,90vh)]" : ""} max-w-md` : size === "wizard" ? "h-[560px] max-w-4xl" : size === "campaign-wizard" ? "h-[88vh] max-h-[90dvh] w-[96vw] max-w-6xl" : size === "tabs" ? "h-[740px] max-w-2xl" : size === "panel" ? "h-[85vh] max-h-[85vh] max-w-3xl" : size === "xl" ? "h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl" : size === "2xl" ? "h-[88vh] max-h-[88vh] w-[95vw] max-w-[1400px]" : `h-[min(640px,90vh)] ${size === "lg" ? "max-w-5xl" : "max-w-xl"}`}`}
       >
         <header className="mb-4 shrink-0 2xl:mb-5">
           <div className="flex items-start justify-between gap-4">

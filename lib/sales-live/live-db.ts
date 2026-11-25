@@ -21,6 +21,7 @@ type State = {
   snapshot: LiveSnapshot | null;
   items: SaleItem[];
   crmKeys: Set<string>;
+  crmConversations: Map<string, string>;
   resolved: Set<string>;
   listeners: Set<(event: LiveEvent) => void>;
   timer: ReturnType<typeof setInterval> | null;
@@ -31,7 +32,8 @@ type State = {
 };
 
 const globalState = globalThis as unknown as { __salesLive?: State };
-const state: State = (globalState.__salesLive ??= { snapshot: null, items: [], crmKeys: new Set(), resolved: new Set(), listeners: new Set(), timer: null, lastDemand: 0, running: null, error: null, labels: { at: 0, map: new Map() } });
+const state: State = (globalState.__salesLive ??= { snapshot: null, items: [], crmKeys: new Set(), crmConversations: new Map(), resolved: new Set(), listeners: new Set(), timer: null, lastDemand: 0, running: null, error: null, labels: { at: 0, map: new Map() } });
+state.crmConversations ??= new Map();
 
 const titleCase = (value: string) => value.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, space: string, letter: string) => `${space}${letter.toUpperCase()}`);
 
@@ -67,21 +69,27 @@ async function resolveCrmOrders(items: SaleItem[], keys: string[]) {
   const phones = [...new Set([...byOrder.values()].flatMap((entry) => [...entry.phones]))];
   const cpfs = [...new Set([...byOrder.values()].flatMap((entry) => [...entry.cpfs]))];
   if (phones.length || cpfs.length) {
-    const rows = await prisma.$queryRaw<{ pkey: string | null; cpf: string | null }[]>`
+    const rows = await prisma.$queryRaw<{ pkey: string | null; cpf: string | null; conv: string | null }[]>`
       WITH c AS (
-        SELECT regexp_replace(COALESCE(ct.phone, ''), '\D', '', 'g') AS d, regexp_replace(COALESCE(ct.cpf, ''), '\D', '', 'g') AS cpf
+        SELECT regexp_replace(COALESCE(ct.phone, ''), '\D', '', 'g') AS d, regexp_replace(COALESCE(ct.cpf, ''), '\D', '', 'g') AS cpf,
+          (SELECT cv.id FROM "ChatConversation" cv WHERE cv."contactId" = ct.id ORDER BY cv."lastInboundAt" DESC NULLS LAST LIMIT 1) AS conv
         FROM "Contact" ct
         WHERE EXISTS (SELECT 1 FROM "ChatConversation" cv WHERE cv."contactId" = ct.id AND cv."lastInboundAt" >= now() - make_interval(days => ${CRM_WINDOW_DAYS}))
       ), n AS (
-        SELECT CASE WHEN length(d) >= 12 AND d LIKE '55%' THEN substr(d, 3) ELSE d END AS d, cpf FROM c
+        SELECT CASE WHEN length(d) >= 12 AND d LIKE '55%' THEN substr(d, 3) ELSE d END AS d, cpf, conv FROM c
       )
-      SELECT CASE WHEN length(d) >= 10 THEN substr(d, 1, 2) || right(d, 8) END AS pkey, cpf FROM n
+      SELECT CASE WHEN length(d) >= 10 THEN substr(d, 1, 2) || right(d, 8) END AS pkey, cpf, conv FROM n
       WHERE (length(d) >= 10 AND substr(d, 1, 2) || right(d, 8) = ANY(${phones.length ? phones : [""]}::text[]))
          OR (cpf <> '' AND cpf = ANY(${cpfs.length ? cpfs : [""]}::text[]))`;
-    const matchedPhones = new Set(rows.map((row) => row.pkey).filter(Boolean));
-    const matchedCpfs = new Set(rows.map((row) => row.cpf).filter(Boolean));
+    const matchedPhones = new Map(rows.filter((row) => row.pkey).map((row) => [row.pkey as string, row.conv]));
+    const matchedCpfs = new Map(rows.filter((row) => row.cpf).map((row) => [row.cpf as string, row.conv]));
     for (const [key, entry] of byOrder) {
-      if ([...entry.phones].some((phone) => matchedPhones.has(phone)) || [...entry.cpfs].some((cpf) => matchedCpfs.has(cpf))) state.crmKeys.add(key);
+      const phone = [...entry.phones].find((item) => matchedPhones.has(item));
+      const cpf = [...entry.cpfs].find((item) => matchedCpfs.has(item));
+      if (!phone && !cpf) continue;
+      state.crmKeys.add(key);
+      const conversation = (phone ? matchedPhones.get(phone) : null) ?? (cpf ? matchedCpfs.get(cpf) : null);
+      if (conversation) state.crmConversations.set(key, conversation);
     }
   }
   for (const key of pending) state.resolved.add(key);
@@ -107,13 +115,14 @@ async function tick() {
   const dayChanged = !previous || previous.day !== day;
   if (dayChanged) {
     state.crmKeys = new Set();
+    state.crmConversations = new Map();
     state.resolved = new Set();
   }
   const labels = await storeLabels();
   const label = (store: string) => labels.get(store) ?? `Loja ${store}`;
   const draft = buildOrders(items, day, { storeLabel: label });
   await resolveCrmOrders(items, draft.map((order) => order.key)).catch((error) => console.error("[vendas-ao-vivo] cruzamento CRM:", error));
-  const orders = buildOrders(items, day, { storeLabel: label, fromCrm: (key) => state.crmKeys.has(key) });
+  const orders = buildOrders(items, day, { storeLabel: label, fromCrm: (key) => state.crmKeys.has(key), conversationOf: (key) => state.crmConversations.get(key) ?? null });
   const changed = dayChanged ? orders : changedOrders(previous.orders, orders);
   const removed = !dayChanged && previous.orders.length > 0 && orders.length < previous.orders.length;
   const stores = [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel));

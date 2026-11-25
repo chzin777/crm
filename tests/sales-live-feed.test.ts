@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrders, changedOrders, dayKpis, itemsSummary, mergeOrders, phoneKey, relativeTime, saleInstant, type SaleItem } from "@/lib/sales-live/feed";
+import { buildOrders, categoryKind, changedOrders, crmShare, dayKpis, hourlySeries, isNewSale, itemsSummary, mergeOrders, mixByKind, mixByPayment, paymentGroup, phoneKey, relativeTime, saleInstant, topSellers, type SaleItem } from "@/lib/sales-live/feed";
 import { canAccessModule, moduleForPath } from "@/lib/permissions";
 
 const DAY = "2026-11-27";
@@ -72,5 +72,48 @@ describe("agregados do dia", () => {
     expect(canAccessModule("vendas", { campanhas: true })).toBe(true);
     expect(canAccessModule("vendas", { painel: true })).toBe(true);
     expect(canAccessModule("vendas", { chat: true })).toBe(false);
+  });
+});
+
+describe("vendas ao vivo: war room (selo, hora a hora, rankings e mix)", () => {
+  it("NOVA VENDA só nos últimos 3 min, ou recém-chegada e ainda recente; nunca em venda de 25 min", () => {
+    const now = new Date("2026-11-27T17:35:00.000Z");
+    expect(isNewSale({ at: "2026-11-27T17:33:00.000Z" }, now)).toBe(true);
+    expect(isNewSale({ at: "2026-11-27T17:30:00.000Z" }, now)).toBe(false);
+    expect(isNewSale({ at: "2026-11-27T17:30:00.000Z" }, now, now.getTime() - 30_000)).toBe(true);
+    expect(isNewSale({ at: "2026-11-27T17:10:00.000Z" }, now, now.getTime() - 5_000)).toBe(false);
+    expect(isNewSale({ at: "2026-11-27T17:30:00.000Z" }, now, now.getTime() - 4 * 60_000)).toBe(false);
+  });
+
+  it("categoria e pagamento agrupados; itens do pedido vão para a gaveta", () => {
+    expect(categoryKind("SOLAR")).toBe("sol");
+    expect(categoryKind("ARMACAO")).toBe("grau");
+    expect(categoryKind("LENTES")).toBe("grau");
+    expect(categoryKind("LENTES DE CONTATO")).toBe("lentes");
+    expect(categoryKind("ACESSORIOS")).toBe("outros");
+    expect(paymentGroup("VISA PARCELADO")).toBe("Cartão de crédito");
+    expect(paymentGroup("PIX")).toBe("Pix");
+    expect(paymentGroup("CARTAO DEBITO")).toBe("Débito");
+    expect(paymentGroup(null)).toBe("Não informado");
+    const [order] = buildOrders([item("l1", "3", "9", 500, { customer: "MARIA DA SILVA" }), item("l2", "3", "9", 300, { brand: "ZEISS", category: "LENTES" })], DAY, { ...labels, conversationOf: () => "conv1" });
+    expect(order.lines).toHaveLength(2);
+    expect(order.kinds).toEqual(["grau"]);
+    expect(order).toMatchObject({ customer: "Maria Silva", conversationId: "conv1" });
+  });
+
+  it("série hora a hora, top vendedores, mix e participação do CRM", () => {
+    const orders = buildOrders([
+      item("h1", "1", "1", 100, { time: "09:10:00" }),
+      item("h2", "1", "2", 200, { time: "09:50:00", category: "SOLAR", payment: "PIX" }),
+      item("h3", "2", "3", 300, { time: "15:00:00", seller: "ANA PAULA" }),
+    ], DAY, { ...labels, fromCrm: (key) => key === "2-3" });
+    const series = hourlySeries(orders, 16);
+    expect(series[0].label).toBe("08h");
+    expect(series.find((point) => point.hour === 9)).toMatchObject({ revenue: 300, orders: 2 });
+    expect(series.at(-1)?.cumulative).toBe(600);
+    expect(topSellers(orders).map((seller) => [seller.seller, seller.orders])).toEqual([["Jessica Melo", 2], ["Ana Paula", 1]]);
+    expect(mixByKind(orders).map((slice) => [slice.key, slice.amount])).toEqual([["grau", 400], ["sol", 200]]);
+    expect(mixByPayment(orders)[0]).toMatchObject({ label: "Cartão de crédito", amount: 400 });
+    expect(crmShare(orders)).toMatchObject({ orders: 1, revenue: 300, revenuePct: 50 });
   });
 });
