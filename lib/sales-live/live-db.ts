@@ -35,21 +35,8 @@ const globalState = globalThis as unknown as { __salesLive?: State };
 const state: State = (globalState.__salesLive ??= { snapshot: null, items: [], crmKeys: new Set(), crmConversations: new Map(), resolved: new Set(), listeners: new Set(), timer: null, lastDemand: 0, running: null, error: null, labels: { at: 0, map: new Map() } });
 state.crmConversations ??= new Map();
 
-const titleCase = (value: string) => value.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, space: string, letter: string) => `${space}${letter.toUpperCase()}`);
-
-/** Nome curto da loja para o celular: "Loja Jardim Nova Era (Aparecida)", sem endereço. */
-async function storeLabels() {
-  if (Date.now() - state.labels.at < 10 * 60_000 && state.labels.map.size) return state.labels.map;
-  const stores = await prisma.store.findMany({ select: { number: true, name: true, city: true, neighborhoods: true } });
-  const map = new Map<string, string>();
-  for (const store of stores) {
-    const place = store.neighborhoods[0]?.trim();
-    const city = store.city && !/^GOI[AÂ]NIA$/i.test(store.city.trim()) ? ` (${titleCase(store.city.trim()).replace("Aparecida De Goiânia", "Aparecida").replace("Aparecida De Goiania", "Aparecida")})` : "";
-    map.set(String(store.number), place ? `Loja ${titleCase(place)}${city}` : store.name);
-  }
-  state.labels = { at: Date.now(), map };
-  return map;
-}
+/** Nome da loja como vem do VMSet: o código da loja ("Loja 1", "Loja 18", "Loja 306"). */
+const storeLabel = (store: string) => `Loja ${store.replace(/^0+(?=\d)/, "")}`;
 
 /** Pedidos de clientes atendidos pelo CRM / WhatsApp nos últimos 30 dias (telefone DDD+8 dígitos ou CPF). */
 async function resolveCrmOrders(items: SaleItem[], keys: string[]) {
@@ -118,14 +105,13 @@ async function tick() {
     state.crmConversations = new Map();
     state.resolved = new Set();
   }
-  const labels = await storeLabels();
-  const label = (store: string) => labels.get(store) ?? `Loja ${store}`;
+  const label = storeLabel;
   const draft = buildOrders(items, day, { storeLabel: label });
   await resolveCrmOrders(items, draft.map((order) => order.key)).catch((error) => console.error("[vendas-ao-vivo] cruzamento CRM:", error));
   const orders = buildOrders(items, day, { storeLabel: label, fromCrm: (key) => state.crmKeys.has(key), conversationOf: (key) => state.crmConversations.get(key) ?? null });
   const changed = dayChanged ? orders : changedOrders(previous.orders, orders);
   const removed = !dayChanged && previous.orders.length > 0 && orders.length < previous.orders.length;
-  const stores = [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel));
+  const stores = [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel, "pt-BR", { numeric: true }));
   const seq = (previous?.seq ?? 0) + (changed.length || removed ? 1 : 0);
   const snapshot: LiveSnapshot = { day, updatedAt: new Date().toISOString(), seq, orders, kpis: dayKpis(orders), stores };
   state.snapshot = snapshot;

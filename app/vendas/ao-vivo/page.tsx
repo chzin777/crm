@@ -539,7 +539,7 @@ export default function LiveSalesPage() {
           <button type="button" onClick={() => setStore("")} className={pill(!store)}><Store className="h-3.5 w-3.5" />Todas</button>
           {allStores.map((item) => (
             <button key={item.store} type="button" onClick={() => setStore(store === item.store ? "" : item.store)} className={pill(store === item.store)}>
-              {item.storeLabel.replace(/^Loja /, "")}
+              {item.storeLabel}
               {item.orders > 0 && <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${store === item.store ? "bg-white/20" : "bg-slate-100 dark:bg-white/10"}`}>{item.orders}</span>}
             </button>
           ))}
