@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { SegmentedControl } from "@/components/dashboard/DashboardKit";
-import { parseGoalAmount } from "@/lib/seller-goals-shared";
+import { MoneyInput, QuantityInput } from "@/components/NumericInputs";
 import { parseStoreList, ruleSummary, type CampaignAudience, type CampaignMetric, type CampaignRule, type RewardMode } from "@/lib/sales-campaigns-shared";
 
 export type CampaignFormValue = CampaignRule & { id?: string; description: string | null; active: boolean };
@@ -22,7 +22,6 @@ const monthBounds = () => {
 
 const field = "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-white";
 const labelClass = "mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300";
-const numberText = (value: number) => (value > 0 ? value.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "");
 
 /** Criar/editar campanha comercial com premiação. */
 export function CampaignForm({ initial, options, onClose, onSaved }: { initial?: CampaignFormValue; options: CampaignFormOptions; onClose: () => void; onSaved: (id: string) => void }) {
@@ -38,9 +37,9 @@ export function CampaignForm({ initial, options, onClose, onSaved }: { initial?:
   const [stores, setStores] = useState(initial?.stores.join(", ") ?? "");
   const [groups, setGroups] = useState<{ name: string; stores: string }[]>(initial?.groups.length ? initial.groups.map((group) => ({ name: group.name, stores: group.stores.join(", ") })) : [{ name: "Grupo 1", stores: "" }]);
   const [rewardMode, setRewardMode] = useState<RewardMode>(initial?.rewardMode ?? "RECORRENTE");
-  const [target, setTarget] = useState(numberText(initial?.target ?? 0));
+  const [target, setTarget] = useState(initial?.target ?? 0);
   const [rewardLabel, setRewardLabel] = useState(initial?.rewardLabel ?? "Voucher iFood");
-  const [rewardAmount, setRewardAmount] = useState(numberText(initial?.rewardAmount ?? 0));
+  const [rewardAmount, setRewardAmount] = useState(initial?.rewardAmount ?? 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -57,9 +56,9 @@ export function CampaignForm({ initial, options, onClose, onSaved }: { initial?:
       stores: parseStoreList(stores),
       groups: groups.map((group) => ({ name: group.name, stores: parseStoreList(group.stores) })),
       rewardMode,
-      target: metric === "QUANTIDADE" ? Number(target.replace(",", ".")) || 0 : parseGoalAmount(target),
+      target: metric === "QUANTIDADE" ? Math.round(target) : target,
       rewardLabel,
-      rewardAmount: parseGoalAmount(rewardAmount),
+      rewardAmount,
       active: initial?.active ?? true,
     }),
     [name, description, metric, brand, category, startDate, endDate, audience, stores, groups, rewardMode, target, rewardLabel, rewardAmount, initial?.active],
@@ -169,7 +168,11 @@ export function CampaignForm({ initial, options, onClose, onSaved }: { initial?:
             {rewardMode !== "RANKING" && (
               <label>
                 <span className={labelClass}>{targetLabel}</span>
-                <input value={target} onChange={(event) => setTarget(event.target.value)} inputMode="decimal" placeholder={metric === "QUANTIDADE" ? "3" : "10.000"} className={field} required />
+                {metric === "QUANTIDADE" ? (
+                  <QuantityInput value={target} onValueChange={setTarget} placeholder="3" className={field} required />
+                ) : (
+                  <MoneyInput value={target} onValueChange={setTarget} placeholder="R$ 10.000,00" className={field} required />
+                )}
               </label>
             )}
             <label>
@@ -178,7 +181,7 @@ export function CampaignForm({ initial, options, onClose, onSaved }: { initial?:
             </label>
             <label>
               <span className={labelClass}>Valor do prêmio (R$)</span>
-              <input value={rewardAmount} onChange={(event) => setRewardAmount(event.target.value)} inputMode="decimal" placeholder="100" className={field} />
+              <MoneyInput value={rewardAmount} onValueChange={setRewardAmount} placeholder="R$ 100,00" className={field} />
             </label>
           </div>
           {rewardMode === "RANKING" && <p className="text-[11px] text-slate-500 dark:text-slate-400">O líder de cada {audience === "GRUPO" ? "grupo" : audience === "LOJA" ? "ranking de lojas" : "ranking de vendedores"} ganha o prêmio quando o período termina.</p>}

@@ -8,10 +8,31 @@ export type GoalSeller = {
   active: boolean;
   lastSaleAt: string | null;
   sales60d: number;
+  /** Meta em R$. */
   goal: number;
+  /** Meta em quantidade de vendas (pedidos). */
+  goalQty: number;
+  /** Realizado no mês (VMSet): R$ vendidos e quantidade de vendas. */
+  soldAmount: number;
+  soldQty: number;
 };
 
-export type StoreGoal = { storeNumber: number | null; label: string; goal: number; sellers: number; withGoal: number };
+/** Tipo de meta: valor (R$) ou quantidade de vendas/itens. */
+export type GoalMetric = "VALOR" | "QUANTIDADE";
+
+export type StoreGoal = {
+  storeNumber: number | null;
+  label: string;
+  goal: number;
+  goalQty: number;
+  soldAmount: number;
+  soldQty: number;
+  sellers: number;
+  /** Vendedores com meta (em valor ou em quantidade). */
+  withGoal: number;
+};
+
+type StoreGoalInput = Pick<GoalSeller, "storeNumber" | "goal"> & Partial<Pick<GoalSeller, "goalQty" | "soldAmount" | "soldQty">>;
 
 /** "2026-11" válido; qualquer outra coisa vira o mês atual em Brasília. */
 export function goalMonthKey(value: string | null | undefined, now: Date = new Date()) {
@@ -50,13 +71,17 @@ export function sellerDisplayName(value: string) {
 export const storeLabel = (storeNumber: number | null) => (storeNumber === null ? "Sem loja" : `Loja ${storeNumber}`);
 
 /** Meta da loja = soma das metas dos vendedores da loja no mês; lojas em ordem numérica ("Sem loja" no fim). */
-export function storeGoals(sellers: Pick<GoalSeller, "storeNumber" | "goal">[]): StoreGoal[] {
+export function storeGoals(sellers: StoreGoalInput[]): StoreGoal[] {
   const byStore = new Map<number | null, StoreGoal>();
+  const add = (a: number, b: number | undefined) => Math.round((a + (b ?? 0)) * 100) / 100;
   for (const seller of sellers) {
-    const entry = byStore.get(seller.storeNumber) ?? { storeNumber: seller.storeNumber, label: storeLabel(seller.storeNumber), goal: 0, sellers: 0, withGoal: 0 };
-    entry.goal = Math.round((entry.goal + seller.goal) * 100) / 100;
+    const entry = byStore.get(seller.storeNumber) ?? { storeNumber: seller.storeNumber, label: storeLabel(seller.storeNumber), goal: 0, goalQty: 0, soldAmount: 0, soldQty: 0, sellers: 0, withGoal: 0 };
+    entry.goal = add(entry.goal, seller.goal);
+    entry.goalQty = add(entry.goalQty, seller.goalQty);
+    entry.soldAmount = add(entry.soldAmount, seller.soldAmount);
+    entry.soldQty = add(entry.soldQty, seller.soldQty);
     entry.sellers += 1;
-    if (seller.goal > 0) entry.withGoal += 1;
+    if (seller.goal > 0 || (seller.goalQty ?? 0) > 0) entry.withGoal += 1;
     byStore.set(seller.storeNumber, entry);
   }
   return [...byStore.values()].sort((a, b) => (a.storeNumber ?? Number.MAX_SAFE_INTEGER) - (b.storeNumber ?? Number.MAX_SAFE_INTEGER));
@@ -69,4 +94,28 @@ export function parseGoalAmount(value: string) {
   const normalized = clean.includes(",") ? clean.replace(/\./g, "").replace(",", ".") : /^\d{1,3}(\.\d{3})+$/.test(clean) ? clean.replace(/\./g, "") : clean;
   const number = Number(normalized);
   return Number.isFinite(number) && number > 0 ? Math.round(number * 100) / 100 : 0;
+}
+
+/** Progresso de uma meta no tipo escolhido: alvo, realizado e % (0 sem meta). */
+export function goalProgress(metric: GoalMetric, item: { goal: number; goalQty: number; soldAmount: number; soldQty: number }) {
+  const target = metric === "QUANTIDADE" ? item.goalQty : item.goal;
+  const done = metric === "QUANTIDADE" ? item.soldQty : item.soldAmount;
+  return { target, done, percent: target > 0 ? Math.round((done / target) * 100) : 0 };
+}
+
+/** "R$ 1.234" (valor) ou "12 vendas" / "1 venda" (quantidade); `unit` troca a palavra (ex.: "un."). */
+export function formatGoal(metric: GoalMetric, value: number, unit?: string) {
+  if (metric === "VALOR") return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).replace(/ /g, " ");
+  const count = value.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+  return `${count} ${unit ?? (Math.round(value) === 1 ? "venda" : "vendas")}`;
+}
+
+/** Página (1-based) de uma lista: itens da página e contador "Mostrando X–Y de Z" (página fora do limite é ajustada). */
+export function paginate<T>(items: T[], page: number, perPage: number) {
+  const size = Math.max(1, Math.floor(perPage) || 1);
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
+  const start = (current - 1) * size;
+  const slice = items.slice(start, start + size);
+  return { items: slice, page: current, pages, perPage: size, total: items.length, from: items.length ? start + 1 : 0, to: start + slice.length };
 }

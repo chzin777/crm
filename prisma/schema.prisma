@@ -1188,7 +1188,10 @@ model SellerGoal {
   month       String
   /// Loja da meta (fica gravada: trocar o vendedor de loja não muda metas passadas).
   storeNumber Int?
-  amount      Decimal  @db.Decimal(14, 2)
+  /// Meta em R$ (0 = sem meta em valor).
+  amount      Decimal  @default(0) @db.Decimal(14, 2)
+  /// Meta em quantidade de vendas (pedidos); nulo/0 = sem meta em quantidade. SQL: prisma/goal-quantity.sql
+  quantity    Decimal? @db.Decimal(14, 2)
   updatedById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1205,7 +1208,10 @@ model SalesGoal {
   scope       String
   key         String
   label       String
-  amount      Decimal  @db.Decimal(14, 2)
+  /// Meta em R$ (0 = sem meta em valor).
+  amount      Decimal  @default(0) @db.Decimal(14, 2)
+  /// Meta em unidades vendidas (peças); nulo/0 = sem meta em quantidade.
+  quantity    Decimal? @db.Decimal(14, 2)
   updatedById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
