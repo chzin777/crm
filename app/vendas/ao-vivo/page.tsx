@@ -8,6 +8,7 @@ import {
   Receipt, Search, ShoppingBag, Store, Sun, Target, TrendingUp, Trophy, UserRound, Users, WifiOff, X, Zap,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
+import { useToast } from "@/components/ToastProvider";
 import { Avatar, ChartTooltip, FadeGradient, SegmentedControl, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import {
@@ -32,6 +33,8 @@ const SELLER_TONES: Tone[] = ["indigo", "emerald", "amber", "sky", "violet"];
 const MEDALS = ["bg-gradient-to-br from-amber-300 to-amber-500 text-amber-950", "bg-gradient-to-br from-slate-200 to-slate-400 text-slate-800", "bg-gradient-to-br from-orange-300 to-orange-600 text-orange-950"];
 
 const compactMoney = (value: number) => (value >= 1000 ? `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : formatMoney(value));
+/** Valor curto sem centavos: "R$ 988", "R$ 1,2 mil". */
+const shortMoney = (value: number) => (value >= 1000 ? `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : `R$ ${Math.round(value).toLocaleString("pt-BR")}`);
 const percent = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: value < 10 ? 1 : 0 })}%`;
 const brHour = (now: Date) => Number(new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", hour12: false, timeZone: "America/Sao_Paulo" }).format(now)) % 24;
 
@@ -336,6 +339,11 @@ export default function LiveSalesPage() {
   const soundRef = useRef(false);
   const loadedRef = useRef(false);
   const ordersRef = useRef<LiveOrder[]>([]);
+  const toast = useToast();
+  const toastRef = useRef(toast);
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(SOUND_KEY) === "1";
@@ -373,9 +381,18 @@ export default function LiveSalesPage() {
       if (loadedRef.current && added.length) {
         const stamp = Date.now();
         setArrived((current) => ({ ...Object.fromEntries(Object.entries(current).filter(([, at]) => stamp - at < 15 * 60_000)), ...Object.fromEntries(added.map((key) => [key, stamp])) }));
-        // Venda antiga que chega atrasada no VMSet não toca o alerta.
-        const recent = merged.some((order) => added.includes(order.key) && isNewSale(order, stamp, stamp));
-        if (soundRef.current && recent) notifySale();
+        // Venda antiga que chega atrasada no VMSet não toca o alerta nem mostra aviso.
+        const recentOrders = merged.filter((order) => added.includes(order.key) && isNewSale(order, stamp, stamp));
+        if (soundRef.current && recentOrders.length) notifySale();
+        // Aviso no topo da tela: até 3 vendas por rodada; acima disso, um aviso só com o total.
+        if (recentOrders.length > 3) {
+          const total = recentOrders.reduce((sum, order) => sum + order.amount, 0);
+          toastRef.current.success(`${recentOrders.length} novas vendas`, `${formatMoney(total)} no total`, { position: "top", duration: 6000 });
+        } else {
+          for (const order of recentOrders) {
+            toastRef.current.success(`Nova venda · ${formatMoney(order.amount)}`, [order.storeLabel, order.seller, order.summary].filter(Boolean).join(" · "), { position: "top", duration: 6000 });
+          }
+        }
       }
       loadedRef.current = true;
     };
@@ -547,15 +564,17 @@ export default function LiveSalesPage() {
             <div className="mt-3 grid grid-cols-3 gap-2">
               <div className="min-w-0 rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 sm:p-3">
                 <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-white/60"><ShoppingBag className="h-3.5 w-3.5 shrink-0" />Pedidos</p>
-                <p className="mt-0.5 text-xl font-bold tabular-nums sm:text-2xl">{kpis.orders}</p>
+                <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:text-2xl">{kpis.orders}</p>
               </div>
               <div className="min-w-0 rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 sm:p-3">
                 <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-white/60"><Receipt className="h-3.5 w-3.5 shrink-0" />Ticket</p>
-                <p className="mt-0.5 truncate text-xl font-bold tabular-nums sm:text-2xl">{kpis.orders ? compactMoney(kpis.ticket) : "—"}</p>
+                {/* Celular: sem centavos ("R$ 988") e fonte menor, para caber inteiro na coluna estreita. */}
+                <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:hidden">{kpis.orders ? shortMoney(kpis.ticket) : "—"}</p>
+                <p className="mt-0.5 hidden whitespace-nowrap text-2xl font-bold tabular-nums sm:block">{kpis.orders ? compactMoney(kpis.ticket) : "—"}</p>
               </div>
               <div className="min-w-0 rounded-2xl bg-[#C4D600]/15 p-2.5 ring-1 ring-[#C4D600]/30 sm:p-3">
                 <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#C4D600]"><MessageCircle className="h-3.5 w-3.5 shrink-0" />WhatsApp</p>
-                <p className="mt-0.5 text-xl font-bold tabular-nums sm:text-2xl">{percent(crm.revenuePct)}</p>
+                <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:text-2xl">{percent(crm.revenuePct)}</p>
                 <p className="truncate text-[10px] tabular-nums text-white/60">{compactMoney(crm.revenue)} · {crm.orders} ped.</p>
               </div>
             </div>
