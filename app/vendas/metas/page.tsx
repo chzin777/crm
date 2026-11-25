@@ -30,7 +30,6 @@ export default function SellerGoalsPage() {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [view, setView] = useState<View>("vendedores");
-  const [globalDraft, setGlobalDraft] = useState<string | null>(null);
   const [brandDrafts, setBrandDrafts] = useState<Record<string, string>>({});
   const [brandQuery, setBrandQuery] = useState("");
   const [allBrands, setAllBrands] = useState(false);
@@ -44,7 +43,6 @@ export default function SellerGoalsPage() {
       if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível carregar as metas.");
       setData(body.data);
       setDrafts({});
-      setGlobalDraft(null);
       setBrandDrafts({});
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível carregar as metas.");
@@ -62,10 +60,8 @@ export default function SellerGoalsPage() {
   const changedSellers = useMemo(() => (data?.sellers ?? []).filter((seller) => seller.id in drafts && parseGoalAmount(drafts[seller.id]) !== seller.goal), [data, drafts]);
   const brands = useMemo(() => (data?.company.brands ?? []).map((brand) => (brand.key in brandDrafts ? { ...brand, goal: parseGoalAmount(brandDrafts[brand.key]) } : brand)), [data, brandDrafts]);
   const changedBrands = useMemo(() => (data?.company.brands ?? []).filter((brand) => brand.key in brandDrafts && parseGoalAmount(brandDrafts[brand.key]) !== brand.goal), [data, brandDrafts]);
-  const globalGoal = globalDraft === null ? data?.company.global ?? 0 : parseGoalAmount(globalDraft);
-  const globalChanged = globalDraft !== null && globalGoal !== (data?.company.global ?? 0);
-  // Contador de alterações: vendedores + marcas + meta global (o nome "changed" segue para a barra de salvar).
-  const changed = useMemo(() => [...changedSellers.map((seller) => seller.id), ...changedBrands.map((brand) => `marca:${brand.key}`), ...(globalChanged ? ["global"] : [])], [changedSellers, changedBrands, globalChanged]);
+  // Contador de alterações: vendedores + marcas. A meta global é sempre a soma das lojas (não se digita).
+  const changed = useMemo(() => [...changedSellers.map((seller) => seller.id), ...changedBrands.map((brand) => `marca:${brand.key}`)], [changedSellers, changedBrands]);
   const brandTotal = brands.reduce((sum, brand) => sum + brand.goal, 0);
   const brandText = brandQuery.trim().toLowerCase();
   const brandList = brandText
@@ -93,7 +89,6 @@ export default function SellerGoalsPage() {
           month,
           goals: changedSellers.map((seller) => ({ sellerId: seller.id, amount: parseGoalAmount(drafts[seller.id]) })),
           company: {
-            ...(globalChanged ? { global: globalGoal } : {}),
             brands: changedBrands.map((brand) => ({ key: brand.key, label: brand.label, amount: parseGoalAmount(brandDrafts[brand.key]) })),
           },
         }),
@@ -102,7 +97,6 @@ export default function SellerGoalsPage() {
       if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível salvar.");
       setData(body.data);
       setDrafts({});
-      setGlobalDraft(null);
       setBrandDrafts({});
       toast.success("Metas salvas", `${body.saved ?? changed.length} ${changed.length === 1 ? "meta atualizada" : "metas atualizadas"} em ${monthLabel(month).toLowerCase()}.`);
     } catch (cause) {
@@ -145,7 +139,7 @@ export default function SellerGoalsPage() {
         }
       }
       setDrafts(next);
-      // Marcas e meta global sem valor também herdam do mês anterior.
+      // Marcas sem valor também herdam do mês anterior.
       const brandsBefore = new Map((body.data?.company.brands ?? []).filter((brand) => brand.goal > 0).map((brand) => [brand.key, brand.goal]));
       const nextBrands: Record<string, string> = { ...brandDrafts };
       for (const brand of brands) {
@@ -156,10 +150,6 @@ export default function SellerGoalsPage() {
         }
       }
       setBrandDrafts(nextBrands);
-      if ((body.data?.company.global ?? 0) > 0 && globalGoal <= 0) {
-        setGlobalDraft(inputValue(body.data?.company.global ?? 0));
-        filled += 1;
-      }
       if (filled) toast.success(`${filled} metas copiadas de ${monthLabel(previous).toLowerCase()}`, "Confira e clique em Salvar.");
       else toast.error("Nada para copiar", `Nada sem meta neste mês tinha meta em ${monthLabel(previous).toLowerCase()}.`);
     } finally {
@@ -195,21 +185,8 @@ export default function SellerGoalsPage() {
         </div>
         <div className="rounded-2xl bg-gradient-to-br from-[#07163B] to-[#0D255E] p-4 text-white shadow">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/70"><Target className="h-4 w-4 text-[#C4D600]" />Meta global da empresa</p>
-          <label className={`mt-1.5 flex h-11 items-center gap-1.5 rounded-xl border px-3 ${globalChanged ? "border-[#C4D600] bg-[#C4D600]/15" : "border-white/15 bg-white/[0.07]"} focus-within:border-[#C4D600]`}>
-            <span className="text-sm font-semibold text-white/60">R$</span>
-            <input
-              inputMode="decimal"
-              value={globalDraft ?? inputValue(data?.company.global ?? 0)}
-              onChange={(event) => setGlobalDraft(event.target.value)}
-              placeholder="Definir meta"
-              aria-label="Meta global da empresa"
-              className="min-w-0 flex-1 bg-transparent! text-xl font-extrabold tabular-nums text-white outline-none placeholder:text-base placeholder:font-semibold placeholder:text-white/40"
-            />
-          </label>
-          <p className="mt-1.5 text-[11px] text-white/70">
-            Soma das lojas: <span className="font-bold text-white">{money(total)}</span>
-            {globalGoal > 0 && total > 0 && Math.round(globalGoal) !== Math.round(total) && <span className={globalGoal > total ? "text-[#F7915E]" : "text-[#C4D600]"}> · {globalGoal > total ? `faltam ${money(globalGoal - total)} distribuídos` : `${money(total - globalGoal)} acima da global`}</span>}
-          </p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums">{money(total)}</p>
+          <p className="mt-0.5 text-[11px] text-white/70">Soma das metas de todas as lojas</p>
         </div>
         <div className={`${cardClass} p-4`}>
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"><Store className="h-4 w-4 text-[#F7915E]" />Lojas com meta</p>
@@ -346,7 +323,7 @@ export default function SellerGoalsPage() {
       {changed.length > 0 && (
         <div className="fixed inset-x-0 bottom-4 z-40 mx-auto flex w-fit max-w-[calc(100vw-24px)] items-center gap-3 rounded-2xl bg-[#051647] px-4 py-2.5 text-white shadow-2xl">
           <span className="text-sm">{changed.length} {changed.length === 1 ? "meta alterada" : "metas alteradas"}</span>
-          <button type="button" onClick={() => { setDrafts({}); setBrandDrafts({}); setGlobalDraft(null); }} className="cursor-pointer rounded-lg px-2 py-1 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white">Descartar</button>
+          <button type="button" onClick={() => { setDrafts({}); setBrandDrafts({}); }} className="cursor-pointer rounded-lg px-2 py-1 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white">Descartar</button>
           <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-3 py-1.5 text-xs font-bold text-[#051647] disabled:opacity-60"><Save className="h-3.5 w-3.5" />{saving ? "Salvando..." : "Salvar"}</button>
         </div>
       )}
