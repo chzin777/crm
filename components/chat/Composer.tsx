@@ -51,7 +51,6 @@ const MAX_FIELD_HEIGHT = 128;
 const MEDIA_ACCEPT = "image/jpeg,image/png,video/mp4";
 const WAVE_BARS = Array.from({ length: 18 }, (_, index) => index);
 
-const toolButton = "grid h-[42px] w-9 shrink-0 cursor-pointer place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/10";
 const roundButton = "grid h-[42px] w-[42px] shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
 export function Composer({ conversation, agentName, canWrite, replyTo, onCancelReply, onSend, onTemplate, onAttach, onError, uploadProgress, error, onScheduled, draft }: Props) {
@@ -261,7 +260,7 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
     setSending(false);
   };
 
-  const footer = "shrink-0 border-t border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-[#07194f]";
+  const footer = "shrink-0 border-t border-slate-200/80 bg-white p-3 dark:border-slate-800 dark:bg-[#07194f]";
 
   if (!canWrite) return <div className={`${footer} text-center text-xs text-slate-500 dark:text-slate-400`}>Seu perfil pode ver esta conversa, mas não responder.</div>;
   if (conversation.closedAt) return <div className={`${footer} text-center text-xs text-slate-500 dark:text-slate-400`}>Conversa encerrada. Reabra para responder.</div>;
@@ -270,25 +269,28 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
   const windowClosed = !conversation.windowOpen && !internal;
   const typing = !blocked && !windowClosed && !recorder.recording;
 
-  const modeButton = (active: boolean, note: boolean) => `inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors ${
+  const modeButton = (active: boolean, note: boolean) => `inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs font-semibold transition-colors ${
     active
-      ? note ? "bg-[#F7915E]/20 text-[#b4531f] dark:text-[#F7915E]" : "bg-white text-[#051647] shadow-xs dark:bg-white/10 dark:text-white"
+      ? note ? "bg-amber-400 text-amber-950 shadow-xs" : "bg-white text-[#051647] shadow-xs dark:bg-white/15 dark:text-white"
       : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
   }`;
+  /** Seletor Mensagem | Nota interna: fica dentro da caixa de digitação (ou acima do modelo/bloqueio, quando não há caixa). */
+  const modeSwitch = (
+    <div role="tablist" aria-label="Tipo de envio" className={`inline-flex shrink-0 items-center gap-0.5 rounded-lg p-0.5 ${internal ? "bg-amber-100 dark:bg-amber-500/15" : "bg-slate-100 dark:bg-white/[0.06]"}`}>
+      <button type="button" role="tab" aria-selected={!internal} title="Mensagem para o cliente" onClick={() => setInternal(false)} className={modeButton(!internal, false)}>
+        <Send className="h-3.5 w-3.5" /><span className="hidden sm:inline">Mensagem</span>
+      </button>
+      <button type="button" role="tab" aria-selected={internal} title="Nota interna (só a equipe vê)" onClick={() => setInternal(true)} className={modeButton(internal, true)}>
+        <StickyNote className="h-3.5 w-3.5" /><span className="hidden sm:inline">Nota interna</span>
+      </button>
+    </div>
+  );
+  const tool = "grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/10";
 
   return (
     <div className={footer}>
       {error && <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:bg-red-500/15 dark:text-red-300">{error}</p>}
-      {!recorder.recording && (
-        <div role="tablist" aria-label="Tipo de envio" className="mb-2 inline-flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-white/[0.04]">
-          <button type="button" role="tab" aria-selected={!internal} onClick={() => setInternal(false)} className={modeButton(!internal, false)}>
-            <Send className="h-3.5 w-3.5" />Mensagem
-          </button>
-          <button type="button" role="tab" aria-selected={internal} onClick={() => setInternal(true)} className={modeButton(internal, true)}>
-            <StickyNote className="h-3.5 w-3.5" />Nota interna
-          </button>
-        </div>
-      )}
+      {(blocked || windowClosed) && <div className="mb-2">{modeSwitch}</div>}
       {replyTo && !internal && (
         <div className="mb-2 flex items-start gap-2 rounded-lg border-l-4 border-[#002187] bg-slate-100 px-3 py-2 dark:border-[#C4D600] dark:bg-slate-800">
           <p className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300">{replyTo.text || "Anexo"}</p>
@@ -393,10 +395,35 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
           <button type="button" onClick={() => void sendRecording()} title="Parar e enviar" aria-label="Parar e enviar" className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}><Check className="h-5 w-5" /></button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
-          <div className="flex shrink-0 items-end">
-            <button ref={emojiButton} type="button" title="Emojis" aria-label="Emojis" aria-expanded={showEmojis} onClick={() => setShowEmojis((value) => !value)} className={toolButton}><Smile className="h-5 w-5" /></button>
-            <button ref={quickButton} type="button" title="Respostas prontas" aria-label="Respostas prontas" aria-expanded={quickVisible} onClick={() => (showQuick ? closeQuick() : setShowQuick(true))} className={toolButton}><Zap className="h-5 w-5" /></button>
+        <div className={`rounded-2xl border transition-colors ${internal ? "border-amber-300 bg-amber-50/80 dark:border-amber-500/40 dark:bg-amber-500/10" : "border-slate-200 bg-white focus-within:border-[#002187]/40 focus-within:ring-2 focus-within:ring-[#002187]/10 dark:border-slate-700 dark:bg-slate-800/60 dark:focus-within:border-[#C4D600]/40 dark:focus-within:ring-[#C4D600]/10"}`}>
+          {internal && (
+            <p className="flex items-center gap-1.5 px-3.5 pt-2 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+              <Lock className="h-3.5 w-3.5" />Nota interna · visível apenas para a equipe, o cliente não recebe
+            </p>
+          )}
+          <textarea
+            ref={field}
+            rows={1}
+            value={text}
+            onChange={(event) => {
+              setText(event.target.value);
+              signalTyping(event.target.value);
+            }}
+            onPaste={onPaste}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder={internal ? "Escreva uma nota interna visível apenas para a equipe..." : pasted ? "Legenda da imagem (opcional) e Enter..." : "Digite uma mensagem para o cliente..."}
+            className={`block max-h-32 min-h-[44px] w-full resize-none overflow-y-auto scroll-smooth bg-transparent! px-3.5 py-2.5 text-sm leading-5 outline-none placeholder:text-slate-400 ${internal ? "text-amber-950 placeholder:text-amber-700/60 dark:text-amber-50 dark:placeholder:text-amber-200/50" : "text-slate-900 dark:text-white"}`}
+          />
+          <div className="flex items-center gap-1 px-1.5 pb-1.5">
+            {modeSwitch}
+            <span aria-hidden className={`mx-1 h-5 w-px shrink-0 ${internal ? "bg-amber-200 dark:bg-amber-500/30" : "bg-slate-200 dark:bg-slate-700"}`} />
+            <button ref={emojiButton} type="button" title="Emojis" aria-label="Emojis" aria-expanded={showEmojis} onClick={() => setShowEmojis((value) => !value)} className={tool}><Smile className="h-[18px] w-[18px]" /></button>
+            <button ref={quickButton} type="button" title="Respostas prontas" aria-label="Respostas prontas" aria-expanded={quickVisible} onClick={() => (showQuick ? closeQuick() : setShowQuick(true))} className={tool}><Zap className="h-[18px] w-[18px]" /></button>
             {!internal && (
               <>
                 <input
@@ -414,8 +441,8 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
                   label="Anexar arquivo"
                   align="left"
                   widthClassName="w-52"
-                  triggerClassName={toolButton}
-                  trigger={<Paperclip className="h-5 w-5" />}
+                  triggerClassName={tool}
+                  trigger={<Paperclip className="h-[18px] w-[18px]" />}
                   items={[
                     { label: "Imagem ou vídeo", icon: <ImageIcon className="h-4 w-4" />, onSelect: () => pickFile(MEDIA_ACCEPT) },
                     { label: "Documento ou PDF", icon: <FileText className="h-4 w-4" />, onSelect: () => pickFile("") },
@@ -424,41 +451,29 @@ export function Composer({ conversation, agentName, canWrite, replyTo, onCancelR
               </>
             )}
             {!internal && (
-              <button type="button" title={suggesting ? "Gerando sugestão..." : "Sugerir resposta com IA"} aria-label={suggesting ? "Gerando sugestão..." : "Sugerir resposta com IA"} aria-busy={suggesting} disabled={suggesting} onClick={() => void suggestReply()} className={`${toolButton} text-[#002187] disabled:cursor-wait disabled:opacity-70 dark:text-[#C4D600]`}>
-                {suggesting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+              <button type="button" title={suggesting ? "Gerando sugestão..." : "Sugerir resposta com IA"} aria-label={suggesting ? "Gerando sugestão..." : "Sugerir resposta com IA"} aria-busy={suggesting} disabled={suggesting} onClick={() => void suggestReply()} className={`${tool} text-[#002187] disabled:cursor-wait disabled:opacity-70 dark:text-[#C4D600]`}>
+                {suggesting ? <Loader2 className="h-[18px] w-[18px] animate-spin" /> : <Sparkles className="h-[18px] w-[18px]" />}
               </button>
             )}
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              {text.trim() && !internal && onScheduled && (
+                <button type="button" title="Agendar envio" aria-label="Agendar envio" onClick={() => setScheduling(text.trim())} disabled={sending} className={tool}>
+                  <CalendarClock className="h-[18px] w-[18px]" />
+                </button>
+              )}
+              {internal ? (
+                <button type="button" title="Salvar nota interna" aria-label="Salvar nota" onClick={() => void submit()} disabled={!text.trim() || sending} className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-amber-500 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50">
+                  <StickyNote className="h-4 w-4" />Salvar nota
+                </button>
+              ) : text.trim() || pasted ? (
+                <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={(!text.trim() && !pasted) || sending} className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-full bg-[#C4D600] text-[#051647] transition-colors hover:bg-[#b3c400] disabled:cursor-not-allowed disabled:opacity-50">
+                  <Send className="h-[18px] w-[18px]" />
+                </button>
+              ) : (
+                <button type="button" title="Gravar áudio" aria-label="Gravar áudio" disabled={sending} onClick={() => void recorder.start()} className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/10"><Mic className="h-[18px] w-[18px]" /></button>
+              )}
+            </div>
           </div>
-          <textarea
-            ref={field}
-            rows={1}
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              signalTyping(event.target.value);
-            }}
-            onPaste={onPaste}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void submit();
-              }
-            }}
-            placeholder={internal ? "Nota interna, o cliente não vê..." : pasted ? "Legenda da imagem (opcional) e Enter..." : "Digite uma mensagem ou cole uma imagem (Ctrl+V)..."}
-            className={`max-h-32 min-h-[42px] min-w-0 flex-1 resize-none overflow-y-auto scroll-smooth rounded-2xl px-4 py-[11px] text-sm leading-5 text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-1 focus:ring-[#002187]/30 dark:text-white dark:focus:ring-[#C4D600]/40 ${internal ? "bg-[#F7915E]/15!" : "bg-slate-100 dark:bg-slate-800/80!"}`}
-          />
-          {text.trim() && !internal && onScheduled && (
-            <button type="button" title="Agendar envio" aria-label="Agendar envio" onClick={() => setScheduling(text.trim())} disabled={sending} className={`${roundButton} text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10`}>
-              <CalendarClock className="h-5 w-5" />
-            </button>
-          )}
-          {text.trim() || internal || pasted ? (
-            <button type="button" title="Enviar" aria-label="Enviar" onClick={() => void submit()} disabled={(!text.trim() && !(pasted && !internal)) || sending} className={`${roundButton} bg-[#C4D600] text-[#051647] hover:bg-[#b3c400]`}>
-              <Send className="h-5 w-5" />
-            </button>
-          ) : (
-            <button type="button" title="Gravar áudio" aria-label="Gravar áudio" disabled={sending} onClick={() => void recorder.start()} className={`${roundButton} text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10`}><Mic className="h-5 w-5" /></button>
-          )}
         </div>
       )}
       {uploadProgress !== null && (

@@ -106,6 +106,42 @@ function followUpOf(item: ConversationItem): Origin | null {
   };
 }
 
+/** Avatar com cor fixa por contato (mesmo cliente, mesma cor), em vez de todos azul-marinho. */
+const AVATAR_TONES = [
+  "from-indigo-400 to-indigo-600 text-white",
+  "from-emerald-400 to-emerald-600 text-white",
+  "from-amber-300 to-amber-500 text-amber-950",
+  "from-sky-400 to-sky-600 text-white",
+  "from-violet-400 to-violet-600 text-white",
+  "from-rose-400 to-rose-600 text-white",
+  "from-teal-400 to-teal-600 text-white",
+  "from-[#002187] to-[#051647] text-[#C4D600]",
+];
+
+function hashOf(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  return Math.abs(hash);
+}
+
+const avatarTone = (key: string) => AVATAR_TONES[hashOf(key) % AVATAR_TONES.length];
+
+/** Pílula da fila com cor pelo setor: Vendas verde, Financeiro índigo, Atendimento/Geral âmbar; demais por nome. */
+const QUEUE_TONES = [
+  "border-sky-200/70 bg-sky-50 text-sky-700 dark:border-sky-400/20 dark:bg-sky-400/10 dark:text-sky-300",
+  "border-violet-200/70 bg-violet-50 text-violet-700 dark:border-violet-400/20 dark:bg-violet-400/10 dark:text-violet-300",
+  "border-rose-200/70 bg-rose-50 text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-300",
+  "border-teal-200/70 bg-teal-50 text-teal-700 dark:border-teal-400/20 dark:bg-teal-400/10 dark:text-teal-300",
+];
+
+function queueTone(name: string) {
+  const value = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  if (/venda|comercial/.test(value)) return "border-emerald-200/70 bg-emerald-50 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300";
+  if (/financ|credi|cobranc/.test(value)) return "border-indigo-200/70 bg-indigo-50 text-indigo-700 dark:border-indigo-400/20 dark:bg-indigo-400/10 dark:text-indigo-300";
+  if (/geral|atendimento|recep/.test(value)) return "border-amber-200/70 bg-amber-50 text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-300";
+  return QUEUE_TONES[hashOf(value) % QUEUE_TONES.length];
+}
+
 const PRIORITY_DOTS: Partial<Record<ChatPriority, string>> = { low: "bg-slate-300 dark:bg-slate-600", high: "bg-amber-500", urgent: "bg-rose-500" };
 
 /** Pódio da fila (aba Aguardando): 1º destaque máximo (próximo a puxar), 2º intermediário, 3º discreto. */
@@ -373,6 +409,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
             const operational = [item.queue?.name, item.store ? storeLabel(item.store) : null].filter((value): value is string => !!value);
             const podium = item.queuePosition ? PODIUM[item.queuePosition] ?? null : null;
             const name = displayName(item.name);
+            const unread = item.unreadCount > 0;
             const recurring = (item.totalSessions ?? 1) > 1 ? `Cliente recorrente: ${item.totalSessions} atendimentos no histórico` : "";
             return (
               <div
@@ -387,14 +424,15 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                   type="button"
                   onClick={() => onSelect(item.id)}
                   aria-current={selected ? "true" : undefined}
-                  className={`flex w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border-l-[3px] px-2.5 py-2 text-left transition-colors duration-150 ${
+                  className={`relative flex w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border px-2.5 py-2 text-left transition-colors duration-150 ${
                     selected
-                      ? "border-[#051647] bg-[#002187]/[0.06] dark:border-[#C4D600] dark:bg-white/10"
-                      : podium?.card ?? "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5"
+                      ? "border-transparent bg-[#07163B]/[0.06] dark:bg-white/10"
+                      : podium?.card ?? (unread ? "border-transparent bg-sky-50/70 hover:bg-sky-50 dark:bg-white/[0.04] dark:hover:bg-white/[0.07]" : "border-transparent hover:bg-slate-100/70 dark:hover:bg-white/5")
                   }`}
                 >
+                  {selected && <span aria-hidden className="absolute inset-y-2 left-0 w-1 rounded-full bg-[#07163B] dark:bg-[#C4D600]" />}
                   <div className="relative shrink-0">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#051647] to-[#002187] text-xs font-bold text-white dark:from-slate-700 dark:to-slate-800 dark:text-[#C4D600]">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br text-xs font-bold ${avatarTone(item.contactId || item.id)}`}>
                       {initials(name)}
                     </div>
                     {item.windowOpen && !item.closedAt && (
@@ -417,14 +455,14 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                         ) : item.queuePosition ? (
                           <span title={`${item.queuePosition}º na fila`} className="shrink-0 rounded-md bg-slate-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-slate-500 dark:bg-white/10 dark:text-slate-400">#{item.queuePosition}</span>
                         ) : null}
-                        <span title={[item.name, recurring].filter(Boolean).join("\n")} className={`truncate text-sm text-slate-900 dark:text-white ${item.unreadCount > 0 ? "font-semibold" : "font-medium"}`}>{name}</span>
+                        <span title={[item.name, recurring].filter(Boolean).join("\n")} className={`truncate text-sm ${unread ? "font-bold text-[#051647] dark:text-white" : "font-medium text-slate-800 dark:text-slate-100"}`}>{name}</span>
                       </span>
                       <span title={corner.title} className={`shrink-0 text-xs tabular-nums ${corner.tone}`}>{corner.text}</span>
                     </div>
                     {/* Com lixeira, a linha da prévia reserva o canto dela ao passar o mouse. */}
                     <div className={`mt-0.5 flex items-center gap-1.5 ${onDelete ? "transition-[padding] group-hover:pr-7" : ""}`}>
                       {delivery && <DeliveryIcon delivery={delivery} />}
-                      <p className="min-w-0 flex-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                      <p className={`min-w-0 flex-1 truncate text-xs ${unread ? "font-semibold text-slate-800 dark:text-slate-100" : "text-slate-500 dark:text-slate-400"}`}>
                         {isSticker(item) ? (
                           <span className="inline-flex items-center gap-1"><Smile className="h-3.5 w-3.5" />Figurinha</span>
                         ) : isAudio(item) ? (
@@ -437,21 +475,23 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
                     </div>
                     {/* Linha 3: um metadado discreto em texto suave (campanha vira só um ícone; o nome dela fica no painel do cliente). */}
                     {(alert || operational.length > 0 || tag || item.campaign) && (
-                      <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 overflow-hidden text-[11px]">
+                      <div className="mt-1 flex h-5 min-w-0 items-center gap-1.5 overflow-hidden text-[11px]">
+                        {item.queue && (
+                          <span
+                            title={[`Fila: ${item.queue.name}`, item.assignee && `Atendente: ${item.assignee.name}`].filter(Boolean).join("\n")}
+                            className={`inline-flex h-5 max-w-[60%] shrink-0 items-center rounded-full border px-2 text-[10px] font-semibold ${queueTone(item.queue.name)}`}
+                          >
+                            <span className="truncate">{item.queue.name}</span>
+                          </span>
+                        )}
                         {alert ? (
                           <span title={alert.title} className={`flex min-w-0 items-center gap-1 ${ORIGIN_TONES[alert.tone]}`}>
                             {alert.icon}
                             <span className="truncate">{alert.text}</span>
                           </span>
-                        ) : operational.length > 0 ? (
-                          <span
-                            title={[item.queue && `Fila: ${item.queue.name}`, item.store && storeLabel(item.store), item.assignee && `Atendente: ${item.assignee.name}`].filter(Boolean).join("\n")}
-                            className="flex min-w-0 items-center gap-1.5 text-slate-400 dark:text-slate-500"
-                          >
-                            {item.queue && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.queue.color }} />}
-                            <span className="truncate">{operational.join(" · ")}</span>
-                          </span>
-                        ) : tag ? (
+                        ) : item.store ? (
+                          <span title={storeLabel(item.store)} className="min-w-0 truncate text-slate-400 dark:text-slate-500">{storeLabel(item.store)}</span>
+                        ) : !item.queue && tag ? (
                           <span title={tag.title} className={`flex min-w-0 items-center gap-1 ${ORIGIN_TONES[tag.tone]}`}>
                             {tag.icon}
                             <span className="truncate">{tag.text}</span>
