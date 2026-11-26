@@ -53,7 +53,7 @@ import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
 import { CampaignRecipientsLog } from "@/components/CampaignRecipientsLog";
 import { BULK_STARTED_EVENT, BulkJobDetailsDialog, type BulkJobView } from "@/components/BulkDispatchTracker";
 import { AudienceOverlapNotice } from "@/components/AudienceOverlapNotice";
-import { Calculator } from "lucide-react";
+import { Calculator, Pencil } from "lucide-react";
 import { DispatchCostCalculator } from "@/components/DispatchCostCalculator";
 import { useMetaPricing } from "@/hooks/useMetaPricing";
 import { dedupeRecipients, summarizeSegmentOverlap, type SegmentOverlapSummary } from "@/lib/campaign-audience";
@@ -61,7 +61,7 @@ import type { CampaignCadence, CampaignFollowUp, CampaignSendWindow } from "@/li
 import { sortCampaignRows, type CampaignSortField } from "@/lib/campaign-sort";
 import { MAX_SCHEDULE_DAYS, PARAM_FIELDS, fieldLabel, fixedText, isFixedParam, outsideSendWindow, parseSchedule, renderPreview, validateWizardStep, type AudienceSummary, type WizardState } from "@/lib/campaign-wizard";
 import { addDays, brDay } from "@/lib/br-time";
-import { AiPopover, AudienceSummaryCard, ChannelCard, ReviewBlock, WhatsAppPreview, WizardSection, type PreviewMedia } from "@/components/campaigns/CampaignWizardParts";
+import { AiPopover, AudienceSummaryCard, ChannelCard, ReviewItem, WhatsAppPreview, WizardSection, type PreviewMedia } from "@/components/campaigns/CampaignWizardParts";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
 // "Agendada": já tem disparo criado esperando a hora (cancelar devolve para "Pronta para envio").
@@ -2133,44 +2133,68 @@ export function CampaignsView() {
 
                 <section aria-label="Revisão da campanha" className="space-y-3">
                   <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"><ClipboardCheck className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" />Revisão antes de confirmar</h3>
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_260px]">
-                    <div className="grid min-w-0 gap-3 sm:grid-cols-2 md:col-span-2">
-                      <ReviewBlock title="Campanha" icon={Megaphone} onEdit={() => setCreateStep(1)}>
-                        <p className="font-semibold">{form.nome || "—"}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{[campaignObjective, campaignCategory === "UTILITY" ? "Utilidade" : "Marketing", campaignAiReply ? "IA atende as respostas" : "Respostas na fila humana"].filter(Boolean).join(" · ")}</p>
-                      </ReviewBlock>
-                      <ReviewBlock title="Público válido" icon={Users} onEdit={() => setCreateStep(1)}>
-                        <p className="font-semibold tabular-nums">{validSummary ? `${int(validSummary.valid)} contato${validSummary.valid === 1 ? "" : "s"}` : "Calculando..."}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{selectedAudienceSegments.join(", ") || "—"}{validSummary && validSummary.optedOut + validSummary.invalidPhone > 0 ? ` · ${int(validSummary.optedOut + validSummary.invalidPhone)} fora (descadastro ou sem celular)` : ""}</p>
-                      </ReviewBlock>
-                      <ReviewBlock title="Modelo" icon={FileText} onEdit={() => setCreateStep(2)}>
-                        <p className="font-semibold">{campaignTemplate ? campaignTemplate.name : aiTemplateDraft ? "Novo modelo (aguardando envio à Meta)" : "Mensagem livre"}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{campaignTemplate?.params.length ? campaignTemplate.params.map((field, index) => `{{${index + 1}}} ${isFixedParam(field) ? `"${fixedText(field)}"` : fieldLabel(field)}`).join(" · ") : selectedAttachments.length ? `${selectedAttachments.length} arquivo(s) anexado(s)` : campaignTemplate?.hasImage ? "Imagem do modelo" : "Sem variáveis"}</p>
-                      </ReviewBlock>
-                      <ReviewBlock title="Disparo" icon={Clock3}>
-                        <p className="font-semibold">{scheduleMode === "later" ? (scheduleError ? "Horário inválido" : scheduleLabel) : "Agora, ao confirmar"}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{safetySummary}</p>
-                      </ReviewBlock>
-                      <div className="rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 sm:col-span-2 dark:text-slate-200">
-                        {!dispatchEstimate || dispatchEstimate.loading ? (
-                          <span className="inline-flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Calculando custo estimado...</span>
-                        ) : dispatchEstimate.error ? (
-                          <span className="text-[#9a3d12] dark:text-[#F7915E]">{dispatchEstimate.error}</span>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-                            <span>Custo estimado na Meta: <b>{dispatchEstimate.cost === null ? "indisponível" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</b></span>
-                            {cooldownDays > 0 && !ignoreCooldown && <span className="w-full text-[10px] text-slate-500 dark:text-slate-400">Quem recebeu campanha nos últimos {cooldownDays} dias é pulado, então o valor real tende a ser menor.</span>}
-                          </div>
-                        )}
-                      </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ReviewItem
+                      label="Campanha"
+                      icon={Megaphone}
+                      value={form.nome || "—"}
+                      detail={[campaignObjective, campaignCategory === "UTILITY" ? "Utilidade" : "Marketing", campaignAiReply ? "IA atende as respostas" : "Respostas na fila humana"].filter(Boolean).join(" · ")}
+                      onEdit={() => setCreateStep(1)}
+                    />
+                    <ReviewItem
+                      label="Público válido"
+                      icon={Users}
+                      value={<span className="tabular-nums">{validSummary ? `${int(validSummary.valid)} contato${validSummary.valid === 1 ? "" : "s"}` : "Calculando..."}</span>}
+                      detail={selectedAudienceSegments.join(", ") || "—"}
+                      onEdit={() => setCreateStep(1)}
+                    />
+                    <ReviewItem
+                      label="Modelo"
+                      icon={FileText}
+                      value={campaignTemplate ? campaignTemplate.name : aiTemplateDraft ? "Novo modelo (aguardando envio à Meta)" : "Mensagem livre"}
+                      detail={campaignTemplate?.params.length ? campaignTemplate.params.map((field, index) => `{{${index + 1}}} ${isFixedParam(field) ? `"${fixedText(field)}"` : fieldLabel(field)}`).join(" · ") : selectedAttachments.length ? `${selectedAttachments.length} arquivo(s) anexado(s)` : campaignTemplate?.hasImage ? "Imagem do modelo" : "Sem variáveis"}
+                      onEdit={() => setCreateStep(2)}
+                    />
+                    <ReviewItem
+                      label="Disparo"
+                      icon={Clock3}
+                      value={scheduleMode === "later" ? (scheduleError ? "Horário inválido" : scheduleLabel) : "Agora, ao confirmar"}
+                      detail={safetySummary}
+                    />
+                  </div>
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700">
+                    <header className="flex items-center justify-between gap-2 px-3.5 pt-2.5">
+                      <h4 className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"><Smartphone className="h-3 w-3" />Mensagem</h4>
+                      <button type="button" onClick={() => setCreateStep(2)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-[#002187] hover:bg-[#002187]/5 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer"><Pencil className="h-3 w-3" />Editar</button>
+                    </header>
+                    <div className="custom-scrollbar h-auto max-h-48 space-y-1.5 overflow-y-auto px-3.5 pb-2.5 pt-1.5 text-[13px] leading-snug text-slate-800 dark:text-slate-100">
+                      {previewMedia.length > 0 && <p className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400"><Paperclip className="h-3 w-3" />{previewMedia.map((media) => media.name).join(", ")}</p>}
+                      {(aiTemplateDraft?.headerText || campaignTemplate?.headerText) && <p className="font-semibold">{aiTemplateDraft?.headerText || campaignTemplate?.headerText}</p>}
+                      <p className="whitespace-pre-wrap break-words">{previewBody.trim() || <span className="text-slate-400">Sem texto.</span>}</p>
+                      {(aiTemplateDraft?.footer || campaignTemplate?.footer) && <p className="text-[11px] text-slate-500 dark:text-slate-400">{aiTemplateDraft?.footer || campaignTemplate?.footer}</p>}
+                      {(aiTemplateDraft?.buttons ?? campaignTemplate?.buttons ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {(aiTemplateDraft?.buttons ?? campaignTemplate?.buttons ?? []).map((button, index) => <span key={`${button.text}-${index}`} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-[#002187] dark:border-slate-700 dark:text-[#C4D600]">{button.text}</span>)}
+                        </div>
+                      )}
                     </div>
-                    <ReviewBlock title="Mensagem" icon={Smartphone} onEdit={() => setCreateStep(2)}>
-                      <div className="origin-top scale-[0.86] -mb-12">{messagePreview}</div>
-                    </ReviewBlock>
                   </div>
                 </section>
                 {aiTemplateDraft && <p role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">O modelo gerado pela IA ainda precisa ir para análise. Volte à etapa Mensagem e clique em “Aprovar e enviar para análise da Meta”; o disparo fica bloqueado até a aprovação.</p>}
                 {formError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{formError}</p>}
+                <p
+                  role="status"
+                  title={cooldownDays > 0 && !ignoreCooldown ? `Quem recebeu campanha nos últimos ${cooldownDays} dias é pulado, então o custo real tende a ser menor.` : undefined}
+                  className="flex min-w-0 items-center gap-1.5 truncate rounded-lg border border-[#C4D600]/40 bg-[#C4D600]/10 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200"
+                >
+                  <Send className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" />
+                  <span className="truncate">
+                    <b className="tabular-nums">{validSummary ? `${int(validSummary.valid)} contato${validSummary.valid === 1 ? "" : "s"} válido${validSummary.valid === 1 ? "" : "s"}` : "Calculando público..."}</b>
+                    {validSummary && validSummary.optedOut + validSummary.invalidPhone > 0 ? ` · ${int(validSummary.optedOut + validSummary.invalidPhone)} fora (descadastro ou sem celular)` : ""}
+                    {" · "}
+                    {!dispatchEstimate || dispatchEstimate.loading ? "calculando custo..." : dispatchEstimate.error ? <span className="text-[#9a3d12] dark:text-[#F7915E]">{dispatchEstimate.error}</span> : <>custo estimado na Meta <b>{dispatchEstimate.cost === null ? "indisponível" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</b>{cooldownDays > 0 && !ignoreCooldown ? " (máx.)" : ""}</>}
+                  </span>
+                </p>
               </div>
             </Step>
           </Stepper>

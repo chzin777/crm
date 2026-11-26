@@ -204,6 +204,20 @@ export function WhatsAppPreview({ businessName, media, headerText, body, footer,
   );
 }
 
+/** Item compacto da revisão: rótulo discreto, valor em destaque, detalhe em 1 linha e "Editar" à direita. */
+export function ReviewItem({ label, icon: Icon, value, detail, onEdit }: { label: string; icon: React.ElementType; value: ReactNode; detail?: ReactNode; onEdit?: () => void }) {
+  return (
+    <section className="flex h-auto min-w-0 items-start gap-2 rounded-xl border border-slate-200 px-3.5 py-2.5 dark:border-slate-700">
+      <div className="min-w-0 flex-1">
+        <h4 className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"><Icon className="h-3 w-3 shrink-0" />{label}</h4>
+        <p className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-white">{value}</p>
+        {detail && <p className="truncate text-[11px] text-slate-500 dark:text-slate-400" title={typeof detail === "string" ? detail : undefined}>{detail}</p>}
+      </div>
+      {onEdit && <button type="button" onClick={onEdit} className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-[#002187] hover:bg-[#002187]/5 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer"><Pencil className="h-3 w-3" />Editar</button>}
+    </section>
+  );
+}
+
 /** Bloco da revisão final com atalho "Editar" para a etapa correspondente. */
 export function ReviewBlock({ title, icon: Icon, onEdit, children }: { title: string; icon: React.ElementType; onEdit?: () => void; children: ReactNode }) {
   return (
