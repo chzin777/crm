@@ -176,7 +176,9 @@ async function graph<T>(path: string, init?: RequestInit): Promise<T> {
     const errorMsg = body?.error?.message ?? body?.error?.error_user_msg ?? JSON.stringify(body?.error ?? body);
     const code = Number(body?.error?.code);
     console.error(`[meta] Graph API respondeu ${response.status} em ${path}: código ${body?.error?.code ?? "?"}, subcódigo ${body?.error?.error_subcode ?? "?"} - ${errorMsg}`);
-    throw new MetaApiError(`Meta WhatsApp API: ${errorMsg}`, Number.isFinite(code) ? code : undefined, response.status, body?.error);
+    // error_user_msg é a explicação em português da Meta (ex.: "Os modelos de amostra não podem ser editados ou excluídos.").
+    const userMsg = typeof body?.error?.error_user_msg === "string" && body.error.error_user_msg !== errorMsg ? body.error.error_user_msg : "";
+    throw new MetaApiError(`Meta WhatsApp API: ${errorMsg}${userMsg ? ` — ${userMsg}` : ""}`, Number.isFinite(code) ? code : undefined, response.status, body?.error);
   }
 
   return body as T;
