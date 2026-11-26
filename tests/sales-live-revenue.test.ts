@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildOrders, dayKpis, dayOfInstant, parseReturns, periodRange, returnsByStore, type SaleItem } from "@/lib/sales-live/feed";
+import { buildOrders, dayKpis, dayOfInstant, isClosedStore, parseReturns, periodRange, returnsByStore, type SaleItem } from "@/lib/sales-live/feed";
 
 const item = (over: Partial<SaleItem>): SaleItem => ({
   id: "1", store: "18", order: "100", time: "10:00:00", seller: "Thamyres Lima", brand: "RAY-BAN", description: "RB4165",
@@ -37,6 +37,33 @@ describe("faturamento do /vendas/ao-vivo igual ao relatório do VMSET", () => {
     const source = readFileSync(join(process.cwd(), "scripts", "vmset-stock-api.py"), "utf8");
     expect(source).toContain("T.TIPO = 'Devolucao Cliente' AND T.DATA_PEDIDO >= :a AND T.DATA_PEDIDO < :b");
     expect(source).toMatch(/"returns": entry\["returns"\]/);
+  });
+
+  it("loja 502 (encerrada) fica fora: consulta do VMSet, vendas, devoluções, seletor e ranking", () => {
+    const source = readFileSync(join(process.cwd(), "scripts", "vmset-stock-api.py"), "utf8");
+    expect(salesSql()).toContain("TO_NUMBER(UE.UNEM_CODIGO) NOT IN (502)");
+    expect(source).toContain("T.LOJA NOT IN (502)");
+    expect(isClosedStore("502")).toBe(true);
+    expect(isClosedStore("0502")).toBe(true);
+    expect(isClosedStore("52")).toBe(false);
+    const orders = buildOrders([
+      item({ id: "a", store: "502", order: "1", orderTotal: 5000 }),
+      item({ id: "b", store: "4", order: "2", orderTotal: 1000 }),
+    ], "2026-11-26");
+    expect(orders.map((order) => order.store)).toEqual(["4"]);
+    const returns = parseReturns([{ store: "502", order: "9", date: "2026-11-20", amount: 300 }], "2026-11-01");
+    expect(returns).toEqual([]);
+    const kpis = dayKpis(orders, returns);
+    expect(kpis.revenue).toBe(1000);
+    expect(kpis.topStores.map((rank) => rank.store)).toEqual(["4"]);
+  });
+
+  it("recebimento de carnê, baixa de parcela e recebimento de título nunca contam como venda", () => {
+    const sql = salesSql();
+    // Fonte única: pedido de saída com movimento "Venda"; nenhuma tabela financeira (contas a receber, títulos, parcelas).
+    expect(sql).toContain("FROM PEDIDO_SAIDA PS");
+    expect(sql).toContain("TM.TPME_TIPO = 'Venda'");
+    expect(sql).not.toMatch(/TITULO|RECEB|PARCELA|CARNE|CONTAS?_RECEBER|BAIXA/i);
   });
 
   it("faturamento líquido: devoluções do período abatem o total e a loja que devolveu", () => {

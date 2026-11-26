@@ -70,13 +70,20 @@ export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders
 /** Mensagens do canal ao vivo: retrato inteiro (conexão, virada do dia, cancelamento) ou só os pedidos novos/alterados. */
 export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
 
-/** Devoluções da API do VMSet (valor positivo, dia AAAA-MM-DD); linhas inválidas ficam de fora. */
+/**
+ * Lojas encerradas: nunca entram no seletor, no ranking nem nos totais de /vendas/ao-vivo. A 502 fechou, mas ainda
+ * registra recebimento de carnê no VMSet (baixa financeira, não é venda).
+ */
+export const CLOSED_STORES: readonly string[] = ["502"];
+export const isClosedStore = (store: string) => CLOSED_STORES.includes(String(Number(store)) === "NaN" ? store.trim() : String(Number(store)));
+
+/** Devoluções da API do VMSet (valor positivo, dia AAAA-MM-DD); linhas inválidas e lojas encerradas ficam de fora. */
 export function parseReturns(raw: unknown, fallbackDay: string): StoreReturn[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry) => {
     const item = (entry ?? {}) as { store?: unknown; order?: unknown; date?: unknown; amount?: unknown };
     const amount = typeof item.amount === "number" && Number.isFinite(item.amount) ? money2(item.amount) : 0;
-    if (!item.store || amount <= 0) return [];
+    if (!item.store || amount <= 0 || isClosedStore(String(item.store))) return [];
     const day = typeof item.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : fallbackDay;
     return [{ store: String(item.store), order: item.order ? String(item.order) : null, day, amount }];
   });
@@ -133,7 +140,7 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
   for (const item of items) if (item.id && !unique.has(item.id)) unique.set(item.id, item);
   const groups = new Map<string, SaleItem[]>();
   for (const item of unique.values()) {
-    if (!item.store || !item.order) continue;
+    if (!item.store || !item.order || isClosedStore(item.store)) continue;
     const key = `${item.store}-${item.order}`;
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
