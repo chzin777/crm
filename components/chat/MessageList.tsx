@@ -9,6 +9,7 @@ import { InteractiveListBubble } from "@/components/chat/InteractiveListBubble";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
 import { mergeMessages, replaceMessage } from "@/lib/chat/reconcile";
 import type { ChatDelivery, ChatMessageItem, ScheduledMessageItem } from "@/lib/chat/types";
+import { describeFailure } from "@/lib/chat/meta-failure";
 
 export type MessageListHandle = {
   add: (message: ChatMessageItem) => void;
@@ -27,8 +28,32 @@ function Delivery({ delivery, reason, onLime, onLight }: { delivery: ChatDeliver
   // Na cápsula de áudio o fundo é claro: o lima sumiria sobre o branco.
   if (delivery === "read" && onLight) return <CheckCheck className="h-3.5 w-3.5 text-[#002187] dark:text-[#C4D600]" aria-label="Lida" />;
   if (delivery === "read") return <CheckCheck className={`h-3.5 w-3.5 text-[#C4D600] ${onLime ? "dark:text-[#002187]" : ""}`} aria-label="Lida" />;
-  if (delivery === "failed") return <span title={reason ?? "Falha no envio"}><AlertCircle className="h-3.5 w-3.5 text-red-400" aria-label="Falhou" /></span>;
+  if (delivery === "failed") return <span title={describeFailure(reason).detail}><AlertCircle className="h-3.5 w-3.5 text-red-400" aria-label="Falhou" /></span>;
   return null;
+}
+
+/** Falha de envio na bolha: motivo em português (código técnico no tooltip) e "Tentar novamente". */
+export function FailureNotice({ reason, className, onRetry }: { reason: string | null; className: string; onRetry?: () => Promise<string | null> }) {
+  const [retrying, setRetrying] = useState(false);
+  const [error, setError] = useState("");
+  const failure = describeFailure(reason);
+  const retry = async () => {
+    setRetrying(true);
+    setError("");
+    setError((await onRetry?.()) ?? "");
+    setRetrying(false);
+  };
+  return (
+    <div className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-medium ${className}`}>
+      <span title={failure.detail} className="inline-flex min-w-0 items-center gap-1 break-words"><AlertCircle className="h-3 w-3 shrink-0" />{failure.text}</span>
+      {onRetry && (
+        <button type="button" onClick={() => void retry()} disabled={retrying} title="Reenviar esta mensagem" className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-current/30 px-1.5 py-0.5 font-semibold transition-colors hover:bg-black/10 disabled:cursor-wait disabled:opacity-60 dark:hover:bg-white/10">
+          <RotateCcw className={`h-3 w-3 ${retrying ? "animate-spin" : ""}`} />{retrying ? "Reenviando..." : "Tentar novamente"}
+        </button>
+      )}
+      {error && <span role="alert" className="w-full">{error}</span>}
+    </div>
+  );
 }
 
 const mediaUrl = (message: ChatMessageItem) => message.attachment?.localUrl ?? `/api/chat/media/${message.id}`;
@@ -267,6 +292,16 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     return true;
   };
 
+  // "Tentar novamente" na bolha com falha: devolve o erro em português ou null quando reenviou.
+  const retrySend = async (messageId: string) => {
+    const response = await fetch(`/api/chat/messages/${messageId}/retry`, { method: "POST" }).catch(() => null);
+    if (!response) return "Sem conexão com o servidor.";
+    const body = (await response.json().catch(() => ({}))) as ChatMessageItem & { error?: string };
+    if (!response.ok) return body.error ?? "Não foi possível reenviar.";
+    merge([body]);
+    return null;
+  };
+
   // Atendimentos do contato (a timeline junta todos; os divisores vêm daqui).
   const rememberSessions = useCallback((list: ChatSession[] | undefined) => {
     if (!list?.length) return;
@@ -485,7 +520,13 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
                       </div>}
-                      {message.delivery === "failed" && <p className={`mt-1 text-[10px] font-medium ${pill ? "px-3 text-red-500" : `text-red-300 ${inset}`}`}>{message.failureReason ?? "Falha no envio"}</p>}
+                      {message.delivery === "failed" && (
+                        <FailureNotice
+                          reason={message.failureReason}
+                          className={pill ? "px-3 text-red-500" : `text-red-300 ${inset}`}
+                          onRetry={onReply && fromUs && !message.internal && !message.attachment && message.text.trim() ? () => retrySend(message.id) : undefined}
+                        />
+                      )}
                     </div>
                     {!fromUs && onReply && (
                       <button type="button" title="Responder" aria-label="Responder" onClick={() => onReply(message)} className="cursor-pointer rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-slate-600 group-hover:opacity-100 dark:hover:text-slate-200">

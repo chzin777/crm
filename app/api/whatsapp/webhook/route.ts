@@ -14,6 +14,8 @@ import { emitInboundMessageById } from "@/lib/automations/engine-db";
 import { syncCampaignTemplateStatus } from "@/lib/campaigns";
 import { addEngagement, clearInvalidWhatsApp, ENGAGEMENT_POINTS, INVALID_NUMBER_CODES, markInvalidWhatsApp } from "@/lib/engagement";
 import { distributeWaiting } from "@/lib/chat/distribution";
+import { withMetaCode } from "@/lib/chat/meta-failure";
+import { confirmPhoneFallback, tryPhoneFallback } from "@/lib/chat/phone-fallback";
 
 /** Descadastro/reativação de campanhas pedido pelo próprio cliente. */
 async function handleOptOutCommand(conversationId: string, phone: string, command: OptOutCommand, text: string) {
@@ -69,15 +71,20 @@ async function updateChatDelivery(event: StatusEvent) {
   if (!event.id) return;
   if (event.status === "failed") {
     const error = event.errors?.[0];
+    // Código junto do motivo ("(#131026) Message Undeliverable."): a bolha traduz e o relógio reconhece o 131000.
     await prisma.chatMessage.updateMany({
       where: { externalId: event.id, delivery: { not: "read" } },
-      data: { delivery: "failed", failureReason: (error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta").slice(0, 500) },
+      data: { delivery: "failed", failureReason: withMetaCode(error?.code, error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta").slice(0, 500) },
     });
+    // 131026/131047: uma nova tentativa no mesmo celular com/sem o 9º dígito.
+    await tryPhoneFallback(event.id, error?.code).catch((failure) => console.error("[whatsapp/webhook] reenvio com/sem o 9:", failure));
   } else if (event.status === "sent" || event.status === "delivered" || event.status === "read") {
     await prisma.chatMessage.updateMany({
       where: { externalId: event.id, delivery: { in: [...chatDeliveryBefore[event.status]] } },
       data: { delivery: event.status },
     });
+    // Entregue pela variante do 9º dígito: conversa e cadastro passam a usar esse número.
+    if (event.status !== "sent") await confirmPhoneFallback(event.id).catch((failure) => console.error("[whatsapp/webhook] confirmar número:", failure));
     // Métrica "entregue" dos nós Enviar WhatsApp das automações.
     if (event.status !== "sent") await prisma.automationMessageTouch.updateMany({ where: { externalId: event.id, deliveredAt: null }, data: { deliveredAt: new Date() } });
   } else {

@@ -17,3 +17,22 @@ export function formatPhone(phone: string) {
   if (local.length === 10) return `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
   return phone;
 }
+
+/**
+ * Número brasileiro (55 + DDD) no formato da Meta e a variante com/sem o 9º dígito:
+ * 5562984341780 -> [5562984341780, 556284341780]; 556284341780 -> [556284341780, 5562984341780].
+ * Fixo (8 dígitos começando com 2 a 5) e números de outros países não têm variante.
+ */
+export function getBrazilianPhoneVariants(phone: string): string[] {
+  const digits = phone.replace(/\D/g, "");
+  if (!digits) return [];
+  if (!digits.startsWith("55") || (digits.length !== 12 && digits.length !== 13)) return [digits];
+  const ddd = digits.slice(2, 4);
+  const number = digits.slice(4);
+  if (number.length === 9 && number[0] === "9") return [digits, `55${ddd}${number.slice(1)}`];
+  if (number.length === 8 && /[6-9]/.test(number[0])) return [digits, `55${ddd}9${number}`];
+  return [digits];
+}
+
+/** A outra forma do mesmo celular brasileiro (com ou sem o 9), ou null quando não existe. */
+export const alternateBrazilianPhone = (phone: string) => getBrazilianPhoneVariants(phone)[1] ?? null;

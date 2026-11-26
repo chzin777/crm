@@ -11,6 +11,7 @@ import { estimateVoiceSeconds } from "@/lib/chat/presence";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import type { ChatInteractiveList } from "@/lib/chat/types";
 import { withoutDashes } from "@/lib/chat/text";
+import { sendWithRetry } from "@/lib/chat/meta-failure";
 import { AI_AUTHOR_NAME, sanitizeAiResponse } from "@/lib/ai/sanitize";
 
 /** Texto da IA: sem travessão/hífen como pontuação (trava em código, além da regra do prompt). */
@@ -40,7 +41,8 @@ const failureText = (error: unknown) => (error instanceof Error ? error.message 
 /** Grava a tentativa e o resultado; a linha nunca é apagada, nem em caso de falha. */
 async function deliver(messageId: string, send: () => Promise<{ messages?: { id: string }[] }>) {
   try {
-    const result = await send();
+    // Erro passageiro da Meta (131000, 130429, 5xx): mais 2 tentativas, após 2 s e 5 s.
+    const result = await sendWithRetry(send);
     return await prisma.chatMessage.update({ where: { id: messageId }, data: { delivery: "sent", failureReason: null, externalId: result.messages?.[0]?.id ?? null } });
   } catch (error) {
     console.error(`[chat] falha no envio da mensagem ${messageId}:`, error);
@@ -105,6 +107,21 @@ export async function resendAutomatic(messageId: string, send: () => Promise<{ m
   const claimed = await prisma.chatMessage.updateMany({ where: { id: messageId, delivery: "failed" }, data: { delivery: "sending" } });
   if (claimed.count === 0) return null;
   return deliver(messageId, send);
+}
+
+/**
+ * "Tentar novamente" na bolha que falhou: reenvia o mesmo texto ao número atual da conversa (que pode já ter
+ * mudado para a variante com/sem o 9). Só texto livre, dentro da janela de 24h; modelo e mídia saem pelo envio normal.
+ */
+export async function retryFailedMessage(message: ChatMessage, conversation: ChatConversation) {
+  if (message.delivery !== "failed" || message.internal || (message.author !== "agent" && message.author !== "bot")) throw new ChatRuleError("Esta mensagem não está com falha de envio.", 409, "not_failed");
+  const meta = (message.metaMedia ?? {}) as { template?: unknown };
+  if (message.attachment || meta.template || !message.text.trim()) throw new ChatRuleError("Reenvie modelos e arquivos pelo campo de mensagem.", 422, "not_text");
+  if (await isBlocked(conversation.phone)) throw new ChatRuleError("Este número está bloqueado e não recebe mensagens.", 422, "blocked");
+  if (!isWindowOpen(conversation.lastInboundAt)) throw new ChatRuleError("Faz mais de 24h desde a última mensagem do cliente. Envie um modelo aprovado.", 422, "window_closed");
+  const sent = await resendAutomatic(message.id, () => sendText(conversation.phone, message.text));
+  if (!sent) throw new ChatRuleError("A mensagem já está sendo reenviada.", 409, "busy");
+  return sent;
 }
 
 /** Assume para quem responde, só se ninguém assumiu antes. */
