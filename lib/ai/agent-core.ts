@@ -12,6 +12,7 @@ import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
 import { DETAILS_RULES, PRODUCT_CARD_RULES } from "@/lib/ai/product-details";
 import { NATURAL_RULES } from "@/lib/ai/product-names";
 import { LOCATION_RULES } from "@/lib/ai/store-location";
+import { BUSINESS_HARD_RULES } from "@/lib/ai/business-guard";
 import { humanRequestMode, queuedAssistBlock, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
 import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
@@ -59,7 +60,7 @@ export function historyText(history: CustomerHistory | null) {
   const lines = [
     `Compras no ERP: ${history.purchases} · total gasto R$ ${history.totalSpent.toFixed(2)} · última compra: ${history.lastPurchaseDate ?? "nunca"}`,
     `Loja do cadastro: ${history.store ?? "não informada"}`,
-    `Receita: última compra de lentes de grau ${history.prescription.lastLensPurchase ?? "sem registro"}${history.prescription.lensType ? ` (${history.prescription.lensType})` : ""}${history.prescription.renewalDue ? " · receita provavelmente vencida, oportunidade de novo exame/renovação" : ""}`,
+    `Receita: última compra de lentes de grau ${history.prescription.lastLensPurchase ?? "sem registro"}${history.prescription.lensType ? ` (${history.prescription.lensType})` : ""}${history.prescription.renewalDue ? " · receita provavelmente vencida, sugerir renovar com o oftalmologista (não fazemos exame)" : ""}`,
   ];
   for (const order of history.orders.slice(0, 6)) lines.push(`Pedido ${order.orderNumber} em ${order.date ?? "?"} (${order.status}, R$ ${order.total.toFixed(2)}): ${order.summary || `${order.items} itens`}`);
   return lines.join("\n");
@@ -178,7 +179,7 @@ export function simulatedHistory(profile: SimulatedProfileId, now = new Date()):
 }
 
 export const BRAND_RULES = [
-  "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato, armações e exames de vista).",
+  "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato e armações). A Óticas Brasil NÃO realiza exame de vista nem consulta oftalmológica ou optométrica.",
   "Escreva sempre em português do Brasil, tom cordial, próximo e profissional, frases curtas, adequadas ao WhatsApp.",
   "Nunca invente preços, prazos, estoque, promoções, endereços ou políticas que não estejam no contexto. Estoque só pela ferramenta consultarEstoqueProduto. Se faltar outra informação, oriente a pedir o dado ao cliente ou transfira.",
   "Nunca peça dados sensíveis como senha ou número de cartão.",
@@ -196,6 +197,7 @@ export function agentRules(settings: AiSettings, queues: RoutingQueue[] = [], mo
   return [
     // Fixas no código, antes e depois das instruções da tela: segurança, marca e imagens.
     SECURITY_RULES,
+    BUSINESS_HARD_RULES,
     // Módulos Markdown (lib/ai/prompts/*.md) escolhidos pelo estado da conversa: núcleo, saudação, vitrine...
     modules,
     IMAGE_RULE,

@@ -51,6 +51,8 @@ import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/
 import { ensureStorePin } from "@/lib/store-pin";
 import { geocodeStoreAddress } from "@/lib/ai/store-geolocation";
 import { nearbyStorePrompt } from "@/lib/ai/store-nearby";
+import { asksStorePlace, consultarLojas, CONSULTAR_LOJAS_TOOL, guardBusinessReply, mentionedCity, noStoreMessage, storeCities } from "@/lib/ai/business-guard";
+import { contactFirstName } from "@/lib/ai/staff-request";
 import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, LOCATION_TOOL, locationText, storeLocation, type SessionStore, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
@@ -1013,6 +1015,14 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
     }
     return storeLocation(code, store);
   };
+  // Cidade citada pelo cliente que não tem loja ativa (ex.: Trindade): resultado oficial encontrada=false.
+  const cityWithoutStore = async () => {
+    const stores = await storeDirectory();
+    const city = mentionedCity(input.pendingText, storeCities(stores));
+    if (!city) return null;
+    const result = consultarLojas(stores, { cidade: city });
+    return result.encontrada ? null : result;
+  };
   // Loja fixada na sessão (activeStore) no cadastro: pedido no singular manda direto o endereço já informado.
   const anchoredLocation = async (wanted: string) => {
     if (!storeFollowUp || !anchor.activeStore) return null;
@@ -1037,6 +1047,9 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
     definition: LOCATION_TOOL,
     run: async (args: Record<string, unknown>) => {
       const wanted = typeof args.nomeLoja === "string" ? args.nomeLoja.slice(0, 60) : "";
+      // Cidade pedida sem loja ativa: nunca resolve para unidade de outra cidade.
+      const noStore = await cityWithoutStore();
+      if (noStore) return noStore;
       const fixed = await anchoredLocation(wanted);
       if (fixed) {
         location = fixed;
@@ -1064,9 +1077,20 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
       return { enviado: false, orientacao: "Loja não encontrada no cadastro: pergunte o bairro ou o nome da loja." };
     },
   };
+  // consultar_lojas: cadastro oficial de lojas ativas; cidade sem loja devolve encontrada=false (nunca outro endereço).
+  const storesTool = {
+    definition: CONSULTAR_LOJAS_TOOL,
+    run: async (args: Record<string, unknown>) => {
+      const text = (key: string) => (typeof args[key] === "string" ? (args[key] as string) : undefined);
+      return consultarLojas(await storeDirectory(), { cidade: text("cidade"), bairro: text("bairro"), termo: text("termo") ?? (text("cidade") || text("bairro") ? undefined : input.pendingText) });
+    },
+  };
   // Localização pedida: resolvida antes do modelo (sessão → CRM → ERP); ele confirma com as próprias palavras e o
   // pin sai logo depois da resposta. Mais de uma unidade possível: o modelo pergunta qual, pela ferramenta.
-  if (storeFollowUp || asksStoreLocation(input.pendingText)) {
+  const missingCity = asksStorePlace(input.pendingText) ? await cityWithoutStore().catch(() => null) : null;
+  if (missingCity) {
+    turnFacts.push(`CIDADE SEM LOJA: o cliente pediu ${missingCity.cidade_consultada} e não há unidade da Óticas Brasil lá. Diga explicitamente "${noStoreMessage(missingCity.cidade_consultada)}" e não passe endereço de outra cidade como se fosse dela. Cidades com loja: ${missingCity.cidades_com_loja.join(", ")}.`);
+  } else if (storeFollowUp || asksStoreLocation(input.pendingText)) {
     const fixed = await anchoredLocation("").catch(() => null);
     const requested = fixed ?? (asksStoreLocation(input.pendingText) ? await locateStoreRequest([input.pendingText]).then((request) => (request.type === "found" ? request.location : null)).catch(() => null) : null);
     if (requested) {
@@ -1083,7 +1107,7 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
       { role: "system", content: [system, ...turnFacts].join("\n\n") },
       { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
     ],
-    { ...input.meta, maxTokens: 700, temperature: conversationTemperature(settings), tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), ...(await contactFieldTools(input.contactId))] },
+    { ...input.meta, maxTokens: 700, temperature: conversationTemperature(settings), tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), storesTool, ...(await contactFieldTools(input.contactId))] },
   );
   let outcome = interpretDecision(decision);
   // Transferência já decidida (pessoa pelo nome, documento lido): a confirmação é a que o modelo escreveu; a frase
@@ -1171,9 +1195,22 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
       rememberShown(catalogState, ordered.flatMap(modelShownIds));
     }
   }
+  // Guardrail de negócio antes do envio: exame de vista nunca afirmado; loja de outra cidade nunca vira a pedida.
+  let guardedPin = location as StoreLocation | null;
+  if (outcome.reply) {
+    const guarded = guardBusinessReply({ customerText, reply: outcome.reply, directory: await storeDirectory(), firstName: contactFirstName(input.contactName), locationText: guardedPin ? `${guardedPin.nome} ${guardedPin.endereco}` : null });
+    if (guarded.fixed) {
+      console.warn(`[ai][guard] resposta corrigida (${guarded.fixed}) conversation=${input.meta.conversationId ?? "-"}`);
+      outcome = { ...outcome, reply: guarded.reply };
+      visualCatalog = null;
+      interactiveList = null;
+      image = null;
+    }
+    if (guarded.dropLocation) guardedPin = null;
+  }
   // Foto só acompanha resposta ao cliente (não vai junto de transferência).
   const photo = image as ProductImage | null;
-  const pin = location as StoreLocation | null;
+  const pin = guardedPin;
   // Na fila, a resposta sai mesmo que o modelo marque transferência (não transfere de novo): foto e mapa vão junto.
   const answered = carriesProductExtras(outcome, !!input.queued);
   // Lista interativa só quando a resposta leva a vitrine numerada (2+ itens) ao cliente.

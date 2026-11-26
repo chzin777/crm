@@ -53,11 +53,12 @@ describe("contexto enviado ao modelo", () => {
     expect(formatContext({ contactName: null, queueName: null, subject: "", includeHistory: false, history: null, conversation: "" })).not.toContain("Cadastro:");
   });
 
-  it("temperatura equilibrada nas conversas quando /ia está no padrão; a escolha da equipe prevalece", () => {
-    expect(CONVERSATION_TEMPERATURE).toBeGreaterThanOrEqual(0.6);
-    expect(CONVERSATION_TEMPERATURE).toBeLessThanOrEqual(0.7);
+  it("temperatura baixa nas conversas (0,1 a 0,2); a escolha da equipe só vale para baixo", () => {
+    expect(CONVERSATION_TEMPERATURE).toBeGreaterThanOrEqual(0.1);
+    expect(CONVERSATION_TEMPERATURE).toBeLessThanOrEqual(0.2);
     expect(conversationTemperature({ temperature: null })).toBe(CONVERSATION_TEMPERATURE);
-    expect(conversationTemperature({ temperature: 0.3 })).toBe(0.3);
+    expect(conversationTemperature({ temperature: 0.7 })).toBe(CONVERSATION_TEMPERATURE);
+    expect(conversationTemperature({ temperature: 0.1 })).toBe(0.1);
   });
 
   it("copiloto do /chat recebe a regra do turno (mensagem vaga) junto do perfil", () => {

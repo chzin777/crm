@@ -87,7 +87,7 @@ export const AI_SETTINGS_KEY = "ai-settings";
 
 export const DEFAULT_AI_TOPICS: AiKnowledgeTopic[] = [
   { id: "pagamento", title: "Formas de pagamento", enabled: true, content: "Aceitamos cartão de crédito e de débito, PIX e dinheiro. Parcelamento e condições podem variar por loja; para valores e parcelas exatas, a loja confirma." },
-  { id: "exame", title: "Exame de vista", enabled: true, content: "Para fazer óculos de grau é preciso uma receita oftalmológica válida. Se o cliente não tiver receita ou ela tiver mais de 1 ano, oriente a renovar o exame e ofereça ajuda para encontrar a loja mais próxima." },
+  { id: "exame", title: "Exame de vista", enabled: true, content: "Para fazer óculos de grau é preciso uma receita oftalmológica válida. Se o cliente não tiver receita ou ela tiver mais de 1 ano, oriente a passar com um oftalmologista: a Óticas Brasil NÃO realiza exame de vista. Com a receita em mãos, nossa equipe faz o orçamento e confecciona os óculos ou lentes." },
   { id: "prazo", title: "Prazo de entrega dos óculos", enabled: true, content: "O prazo depende do tipo de lente: lentes prontas costumam ficar prontas em poucos dias; lentes surfaçadas e multifocais levam mais tempo. O prazo exato é informado pela loja no pedido." },
   { id: "garantia", title: "Garantia e trocas", enabled: true, content: "Armações e lentes têm garantia contra defeito de fabricação. Ajustes e consertos simples podem ser feitos em qualquer loja. Casos de troca ou defeito devem ser avaliados por um atendente." },
   { id: "produtos", title: "Produtos", enabled: true, content: "Trabalhamos com óculos de grau, óculos de sol, lentes oftálmicas (visão simples, multifocais/progressivas, filtro de luz azul, fotossensíveis), lentes de contato e acessórios de limpeza." },
