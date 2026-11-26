@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { Pagination } from "@/components/dashboard/DashboardKit";
 import {
@@ -9,7 +8,13 @@ import {
   Bot,
   CalendarClock,
   CheckCheck,
+  ChevronDown,
+  ClipboardCheck,
   Copy,
+  Megaphone,
+  MessageSquareText,
+  ShieldCheck,
+  Smartphone,
   Repeat,
   ChevronUp,
   ChevronsUpDown,
@@ -54,9 +59,13 @@ import { useMetaPricing } from "@/hooks/useMetaPricing";
 import { dedupeRecipients, summarizeSegmentOverlap, type SegmentOverlapSummary } from "@/lib/campaign-audience";
 import type { CampaignCadence, CampaignFollowUp, CampaignSendWindow } from "@/lib/campaign-schedule";
 import { sortCampaignRows, type CampaignSortField } from "@/lib/campaign-sort";
+import { MAX_SCHEDULE_DAYS, PARAM_FIELDS, fieldLabel, fixedText, isFixedParam, outsideSendWindow, parseSchedule, renderPreview, validateWizardStep, type AudienceSummary, type WizardState } from "@/lib/campaign-wizard";
+import { addDays, brDay } from "@/lib/br-time";
+import { AiPopover, AudienceSummaryCard, ChannelCard, ReviewBlock, WhatsAppPreview, WizardSection, type PreviewMedia } from "@/components/campaigns/CampaignWizardParts";
 
 type CampaignStatus = "Ativa" | "Pronta para envio" | "Agendada" | "Pausada" | "Rascunho" | "Enviando" | "Envio pausado" | "Enviada" | "Envio parcial" | "Falha no envio" | "Aguardando aprovação Meta" | "Rejeitada pela Meta" | "Falha na submissão" | "Modelo indisponível na Meta";
-const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial";
+// "Agendada": já tem disparo criado esperando a hora (cancelar devolve para "Pronta para envio").
+const isDispatchLocked = (status: CampaignStatus) => status === "Enviando" || status === "Envio pausado" || status === "Enviada" || status === "Envio parcial" || status === "Agendada";
 const isDispatchBlocked = (campaign: Campaign) => isDispatchLocked(campaign.status) || Boolean(campaign.metaApprovalStatus && campaign.metaApprovalStatus !== "APPROVED");
 
 /** Status exibido na listagem unificada (campanhas e lotes do pipeline). */
@@ -116,6 +125,7 @@ interface DispatchJobView {
   coldRemoved?: number;
   errors: string[];
   pause?: { kind: string; code?: number; message: string };
+  scheduledAt?: string;
   startedAt?: string;
 }
 
@@ -445,6 +455,16 @@ export function CampaignsView() {
   const [campaignCategory, setCampaignCategory] = useState<"MARKETING" | "UTILITY">("MARKETING");
   const [campaignAiReply, setCampaignAiReply] = useState(true);
   const [deliverySettings, setDeliverySettings] = useState<DeliverySettings>(EMPTY_DELIVERY);
+  // Assistente de nova campanha: etapa atual (controlada, para os atalhos "Editar" da revisão), agendamento e IA sob demanda.
+  const [createStep, setCreateStep] = useState(1);
+  const [scheduleMode, setScheduleMode] = useState<"now" | "later">("now");
+  const [scheduleDay, setScheduleDay] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [campaignAiOpen, setCampaignAiOpen] = useState(false);
+  const [templateAiOpen, setTemplateAiOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Público válido do assistente: únicos sem descadastrados e com celular (conferido no servidor).
+  const [audienceValid, setAudienceValid] = useState<{ signature: string; loading: boolean; summary?: AudienceSummary; error?: string } | null>(null);
   const [campaignPrompt, setCampaignPrompt] = useState("");
   const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
   const [campaignAiError, setCampaignAiError] = useState("");
@@ -732,6 +752,14 @@ export function CampaignsView() {
     setCampaignCategory("MARKETING");
     setCampaignAiReply(true);
     setDeliverySettings(EMPTY_DELIVERY);
+    setCreateStep(1);
+    setScheduleMode("now");
+    setScheduleDay("");
+    setScheduleTime("09:00");
+    setCampaignAiOpen(false);
+    setTemplateAiOpen(false);
+    setShowAdvanced(false);
+    setAudienceValid(null);
     setCampaignPrompt("");
     setIsGeneratingCampaign(false);
     setCampaignAiError("");
@@ -819,11 +847,13 @@ export function CampaignsView() {
       setCampaignAiError("");
       setFormError("");
       toast.success("Campanha gerada", "Revise o nome, o público, os filtros e a mensagem antes de salvar ou enviar.");
+      return true;
     } catch (error) {
       setCampaignAiError(error instanceof Error ? error.message : "Não foi possível gerar a campanha.");
     } finally {
       setIsGeneratingCampaign(false);
     }
+    return false;
   };
 
   const generateMessageTemplateWithAi = async () => {
@@ -856,11 +886,13 @@ export function CampaignsView() {
       setForm((current) => ({ ...current, mensagem: result.template?.body ?? "" }));
       setTemplateAiError("");
       setFormError("");
+      return true;
     } catch (error) {
       setTemplateAiError(error instanceof Error ? error.message : "Não foi possível gerar a mensagem.");
     } finally {
       setIsGeneratingTemplate(false);
     }
+    return false;
   };
 
   const updateGeneratedTemplateBody = (body: string) => {
@@ -1224,8 +1256,7 @@ export function CampaignsView() {
   };
 
   // Resumo de interseção do público em edição (2+ segmentos): soma bruta × únicos, unificados e segmentos sem novos.
-  const [audienceOverlap, setAudienceOverlap] = useState<{ signature: string; loading: boolean; summary?: SegmentOverlapSummary; finalUnique?: number; error?: string } | null>(null);
-  const overlapEditorOpen = isCreateOpen || Boolean(selectedCampaign);
+  const [audienceOverlap, setAudienceOverlap] = useState<{ signature: string; loading: boolean; summary?: SegmentOverlapSummary; finalUnique?: number; error?: string } | null>(null);  const overlapEditorOpen = isCreateOpen || Boolean(selectedCampaign);
   const overlapSignature = JSON.stringify([selectedAudienceSegments, campaignCriteriaFilters]);
   useEffect(() => {
     if (!overlapEditorOpen || selectedAudienceSegments.length < 1 || segmentsLoading || criteriaLoading) return;
@@ -1244,10 +1275,26 @@ export function CampaignsView() {
           if (!active) return;
           const keys = audience.groupKeysByCampaign.get(preview.id) ?? [];
           const summary = summarizeSegmentOverlap(keys.map(({ key, label }) => ({ label, recipients: audience.recipients[key] ?? [] })));
-          setAudienceOverlap({ signature: overlapSignature, loading: false, summary, finalUnique: uniqueCampaignRecipients(preview, audience).length });
+          const unique = uniqueCampaignRecipients(preview, audience);
+          setAudienceOverlap({ signature: overlapSignature, loading: false, summary, finalUnique: unique.length });
+          if (!isCreateOpen) return;
+          setAudienceValid({ signature: overlapSignature, loading: true });
+          // Os repetidos entre segmentos já saíram na união; o servidor desconta descadastrados e celulares inválidos.
+          fetch("/api/campaigns/dispatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "preview", recipients: unique }) })
+            .then(async (response) => {
+              const body = (await response.json().catch(() => ({}))) as { summary?: AudienceSummary; error?: string };
+              if (!response.ok || !body.summary) throw new Error(body.error ?? "Não foi possível conferir o público.");
+              if (active) setAudienceValid({ signature: overlapSignature, loading: false, summary: { ...body.summary, total: summary.rawTotal, duplicates: summary.removed + body.summary.duplicates } });
+            })
+            .catch((error: unknown) => {
+              if (active) setAudienceValid({ signature: overlapSignature, loading: false, error: error instanceof Error ? error.message : "Não foi possível conferir o público." });
+            });
         })
         .catch((error: unknown) => {
-          if (active) setAudienceOverlap({ signature: overlapSignature, loading: false, error: error instanceof Error ? error.message : "Não foi possível calcular o público." });
+          if (!active) return;
+          const message = error instanceof Error ? error.message : "Não foi possível calcular o público.";
+          setAudienceOverlap({ signature: overlapSignature, loading: false, error: message });
+          setAudienceValid({ signature: overlapSignature, loading: false, error: message });
         });
     }, 400);
     return () => { active = false; window.clearTimeout(timer); };
@@ -1318,11 +1365,11 @@ export function CampaignsView() {
     if (connection.state !== "open") throw new Error("WhatsApp desconectado. Conecte a conta em Configurações antes de disparar a campanha.");
   };
 
-  const startCampaignDispatch = async (campaign: Campaign, recipients: CampaignRecipient[]) => {
+  const startCampaignDispatch = async (campaign: Campaign, recipients: CampaignRecipient[], scheduledAt?: string) => {
     const startResponse = await fetch("/api/campaigns/dispatch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients, ignoreCooldown }),
+      body: JSON.stringify({ action: "start", campaignId: campaign.id, recipients, ignoreCooldown, ...(scheduledAt ? { scheduledAt } : {}) }),
     });
     const startResult = await startResponse.json().catch(() => ({})) as { error?: string };
     if (!startResponse.ok) throw new Error(startResult.error || `Não foi possível iniciar o disparo de "${campaign.nome}".`);
@@ -1337,6 +1384,16 @@ export function CampaignsView() {
     }
     const campaign = buildNewCampaign();
     if (!campaign) return;
+    // Agendado: horário de Brasília validado de novo na hora de confirmar (pode ter passado com a tela aberta).
+    let scheduledAt: string | undefined;
+    if (scheduleMode === "later") {
+      const parsed = parseSchedule(scheduleDay, scheduleTime);
+      if ("error" in parsed) {
+        setFormError(parsed.error);
+        return;
+      }
+      scheduledAt = parsed.at.toISOString();
+    }
     setIsLaunching(true);
     setFormError("");
     let saved = false;
@@ -1346,7 +1403,7 @@ export function CampaignsView() {
       // Persiste antes de iniciar: o servidor lê a campanha salva para montar o envio.
       await saveCampaigns([campaign, ...campaigns]);
       saved = true;
-      await startCampaignDispatch(campaign, recipients);
+      await startCampaignDispatch(campaign, recipients, scheduledAt);
       const refreshed = await reloadCampaigns().catch(() => null);
       resetCreateForm();
       setIsCreateOpen(false);
@@ -1354,7 +1411,8 @@ export function CampaignsView() {
       setSearchTerm("");
       startEditingCampaign(refreshed?.find((item) => item.id === campaign.id) ?? campaign);
       void refreshAll();
-      toast.success("Disparo iniciado", `"${campaign.nome}" está sendo enviada em segundo plano.`);
+      if (scheduledAt) toast.success("Campanha agendada", `"${campaign.nome}" será enviada em ${formatDateTime(scheduledAt)}.`);
+      else toast.success("Disparo iniciado", `"${campaign.nome}" está sendo enviada em segundo plano.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Não foi possível disparar a campanha.";
       if (saved) {
@@ -1497,6 +1555,56 @@ export function CampaignsView() {
       </span>
     </label>
   ) : null;
+
+  // Assistente de nova campanha: público válido, validação por etapa, agendamento e prévia do WhatsApp.
+  const validSummary = audienceValid?.signature === overlapSignature ? audienceValid.summary : undefined;
+  const wizardState: WizardState = {
+    name: form.nome,
+    segments: selectedAudienceSegments.length,
+    audienceValid: validSummary ? validSummary.valid : null,
+    message: form.mensagem,
+    hasTemplate: Boolean(campaignTemplate),
+    params: campaignTemplate?.params ?? [],
+    uploading: isUploading,
+    schedule: { mode: scheduleMode, day: scheduleDay, time: scheduleTime },
+  };
+  const parsedSchedule = scheduleMode === "later" ? parseSchedule(scheduleDay, scheduleTime) : null;
+  const scheduleError = parsedSchedule && "error" in parsedSchedule ? parsedSchedule.error : "";
+  const scheduleLabel = /^\d{4}-\d{2}-\d{2}$/.test(scheduleDay) ? `${scheduleDay.slice(8, 10)}/${scheduleDay.slice(5, 7)}/${scheduleDay.slice(0, 4)} às ${scheduleTime}` : "";
+  const safetySummary = [
+    deliverySettings.cadence ? `lotes de ${deliverySettings.cadence.batchSize}` : "",
+    deliverySettings.sendWindow ? `das ${deliverySettings.sendWindow.start} às ${deliverySettings.sendWindow.end}` : "",
+    deliverySettings.followUp?.enabled ? "com follow-up" : "",
+    deliverySettings.excludeColdLeads ? "sem leads frios" : "",
+  ].filter(Boolean).join(" · ") || "Sem regras extras";
+  const previewMedia: PreviewMedia[] = selectedAttachments.length
+    ? selectedAttachments.map((file) => ({ kind: file.type.startsWith("image/") ? "image" as const : file.type.startsWith("video/") ? "video" as const : "document" as const, url: attachmentPreviewUrls.get(file), name: file.name, size: formatFileSize(file.size) }))
+    : campaignTemplate?.hasImage && campaignTemplate.headerImageUrl ? [{ kind: "image", url: campaignTemplate.headerImageUrl, name: "Imagem do modelo" }] : [];
+  const previewBody = campaignTemplate
+    ? renderPreview(form.mensagem, campaignTemplate.params)
+    : aiTemplateDraft
+      ? form.mensagem.replace(/\{\{(\d+)\}\}/g, (match, number: string) => aiTemplateDraft.examples[Number(number) - 1] ?? match)
+      : form.mensagem.replace(/\{\{(\w+)\}\}/g, (match, key: string) => PARAM_FIELDS.find((field) => field.value === key)?.example ?? match);
+  const messagePreview = (
+    <WhatsAppPreview
+      businessName="Óticas Brasil"
+      media={previewMedia}
+      headerText={aiTemplateDraft?.headerText || campaignTemplate?.headerText}
+      body={previewBody}
+      footer={aiTemplateDraft?.footer || campaignTemplate?.footer}
+      buttons={(aiTemplateDraft?.buttons ?? campaignTemplate?.buttons ?? []).map((button) => button.text)}
+    />
+  );
+  const templateAiButton = (
+    <AiPopover label="Sugerir com IA" title="Sugerir mensagem com IA" hint="Cria um modelo novo (para análise da Meta) a partir do nome, do objetivo e do público." open={templateAiOpen} onOpenChange={setTemplateAiOpen}>
+      <input value={templatePrompt} onChange={(event) => { setTemplatePrompt(event.target.value); setTemplateAiError(""); }} placeholder="Opcional: tom, oferta ou chamada para ação" aria-label="Orientação para a IA" className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]" />
+      {(!form.nome.trim() || selectedAudienceSegments.length === 0) && <p className="text-[11px] text-slate-500 dark:text-slate-400">Informe o nome e o público na etapa 1 para liberar.</p>}
+      {templateAiError && <p role="alert" className="text-[11px] font-medium text-[#9a3d12] dark:text-[#F7915E]">{templateAiError}</p>}
+      <button type="button" disabled={isGeneratingTemplate || !form.nome.trim() || selectedAudienceSegments.length === 0} onClick={() => void generateMessageTemplateWithAi().then((ok) => { if (ok) setTemplateAiOpen(false); })} className={`${primaryButton} w-full justify-center`}>
+        {isGeneratingTemplate ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{isGeneratingTemplate ? "Gerando..." : "Gerar sugestão"}
+      </button>
+    </AiPopover>
+  );
 
   const selectedJob = selectedCampaign ? jobByCampaign.get(selectedCampaign.id) : undefined;
   const selectedStats = selectedCampaign ? stats[selectedCampaign.id] ?? EMPTY_STATS : EMPTY_STATS;
@@ -1727,44 +1835,32 @@ export function CampaignsView() {
         <EntityDialog
           titleId="campaign-create-title"
           title="Nova campanha"
-          description="Configure, revise e dispare. O envio roda em segundo plano no servidor."
+          description="Público, mensagem e horário em 3 etapas. O envio roda em segundo plano no servidor."
           size="campaign-wizard"
           onClose={() => { if (isLaunching || isSubmittingTemplate) return; setIsCreateOpen(false); resetCreateForm(); }}
         >
           <Stepper
-            initialStep={1}
+            step={createStep}
             onStepChange={(step) => {
               setFormError("");
-              if (step === 4) {
+              setCampaignAiOpen(false);
+              setTemplateAiOpen(false);
+              setCreateStep(step);
+              if (step === 3) {
                 const draft = buildNewCampaign();
                 if (draft) void estimateDispatchCost([draft]);
               }
             }}
             onFinalStepCompleted={() => void launchNewCampaign()}
             validateStep={(step) => {
-              if (step === 1 && !form.nome.trim()) {
-                setFormError("Informe o nome da campanha.");
-                return false;
-              }
-              if (step === 2 && selectedAudienceSegments.length === 0) {
-                setFormError("Selecione pelo menos um segmento para o público-alvo.");
-                return false;
-              }
-              if (step === 3 && !form.mensagem.trim()) {
-                setFormError("Escreva a mensagem da campanha.");
-                return false;
-              }
-              if (step === 3 && isUploading) {
-                setFormError("Aguarde o envio dos arquivos anexados terminar.");
-                return false;
-              }
-              setFormError("");
-              return true;
+              const error = validateWizardStep(step, wizardState);
+              setFormError(error);
+              return !error;
             }}
             backButtonText="Voltar"
             nextButtonText="Continuar"
-            completeButtonText={aiTemplateDraft ? "Envie o template à Meta" : isLaunching ? "Disparando..." : "Disparar agora"}
-            nextButtonProps={{ disabled: isLaunching || isSubmittingTemplate }}
+            completeButtonText={aiTemplateDraft ? "Envie o modelo à Meta" : isLaunching ? (scheduleMode === "later" ? "Agendando..." : "Disparando...") : scheduleMode === "later" ? "Agendar campanha" : "Criar e disparar agora"}
+            nextButtonProps={{ disabled: isLaunching || isSubmittingTemplate || (createStep === 3 && Boolean(aiTemplateDraft)) }}
             backButtonProps={{ disabled: isLaunching || isSubmittingTemplate }}
             lastStepSecondaryAction={(
               <button type="button" disabled={isLaunching || isSubmittingTemplate} onClick={saveDraft} className="inline-flex h-[38px] items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white cursor-pointer">
@@ -1783,91 +1879,101 @@ export function CampaignsView() {
             width="100%"
             className="min-h-0 flex-1"
           >
-            <Step title="Identificação" description="Nome da campanha">
+            <Step title="Configuração e público" description="Nome, canal e quem recebe">
               <div className="space-y-4">
-                <section aria-label="Criar campanha com IA" className="space-y-3 rounded-xl border border-[#002187]/15 bg-[#002187]/5 p-4 dark:border-[#C4D600]/20 dark:bg-[#C4D600]/5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" />
-                    <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Criar com IA</h3><p className="mt-0.5 text-xs font-normal text-slate-500 dark:text-slate-400">Descreva a campanha; a IA seleciona segmentos e filtros reais deste workspace.</p></div>
+                <WizardSection
+                  icon={Megaphone}
+                  title="Campanha"
+                  hint="Nome para encontrar depois e o objetivo comercial."
+                  action={(
+                    <AiPopover label="Criar com IA" title="Montar a campanha com IA" hint="Descreva a ação; a IA escolhe segmentos e filtros reais e escreve a mensagem." open={campaignAiOpen} onOpenChange={setCampaignAiOpen}>
+                      <textarea
+                        value={campaignPrompt}
+                        onChange={(event) => { setCampaignPrompt(event.target.value); setCampaignAiError(""); }}
+                        rows={3}
+                        maxLength={2000}
+                        placeholder="Ex.: Reativar clientes Ouro e Diamante sem comprar há mais de 90 dias com cupom de 15%"
+                        aria-label="Descreva a campanha para a IA"
+                        className="w-full resize-none rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]"
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {["Reativação de clientes Ouro e Diamante sem comprar há mais de 90 dias com cupom de 15%", "Novidades de armações para clientes fiéis que compraram nos últimos 180 dias"].map((suggestion) => (
+                          <button key={suggestion} type="button" onClick={() => { setCampaignPrompt(suggestion); setCampaignAiError(""); }} className="max-w-full truncate rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer" title={suggestion}>{suggestion}</button>
+                        ))}
+                      </div>
+                      {campaignAiError && <p role="alert" className="text-[11px] font-medium text-[#9a3d12] dark:text-[#F7915E]">{campaignAiError}</p>}
+                      <button type="button" disabled={isGeneratingCampaign || !campaignPrompt.trim()} onClick={() => void generateCampaignWithAi().then((ok) => { if (ok) setCampaignAiOpen(false); })} className={`${primaryButton} w-full justify-center`}>
+                        {isGeneratingCampaign ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{isGeneratingCampaign ? "Gerando..." : "Gerar campanha"}
+                      </button>
+                    </AiPopover>
+                  )}
+                >
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} placeholder="Ex.: Black Friday Ouro e Diamante" aria-required="true" className={inputClass} /></label>
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Objetivo <span className="font-normal text-slate-400">(opcional)</span></span><input value={campaignObjective} onChange={(event) => setCampaignObjective(event.target.value)} placeholder="Ex.: Recuperar clientes inativos" className={inputClass} /></label>
+                    <div className="space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Canal de envio</span><ChannelCard /></div>
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Categoria na Meta</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={`${inputClass} cursor-pointer`}><option value="MARKETING">Marketing: promoções e ofertas</option><option value="UTILITY">Utilidade: avisos e transações</option></select></label>
                   </div>
-                  <textarea
-                    value={campaignPrompt}
-                    onChange={(event) => { setCampaignPrompt(event.target.value); setCampaignAiError(""); }}
-                    rows={2}
-                    maxLength={2000}
-                    placeholder="Ex.: Campanha de reativação para clientes Diamante e Ouro sem comprar há mais de 90 dias com cupom de 15%"
-                    aria-label="Descreva a campanha para a IA"
-                    className="min-h-16 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]"
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        "Reativação de clientes Ouro e Diamante sem comprar há mais de 90 dias com cupom de 15%",
-                        "Novidades de armações para clientes fiéis que compraram nos últimos 180 dias",
-                      ].map((suggestion) => (
-                        <button key={suggestion} type="button" onClick={() => { setCampaignPrompt(suggestion); setCampaignAiError(""); }} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-medium text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer">{suggestion}</button>
-                      ))}
+                </WizardSection>
+
+                <WizardSection icon={Users} title="Público" hint="Um ou mais segmentos salvos. Cada pessoa recebe uma única mensagem.">
+                  {campaignAudienceDescription && <p className="rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">{campaignAudienceDescription}</p>}
+                  <div className="grid items-start gap-3 md:grid-cols-2">
+                    <FormMultiSelect
+                      label="Segmentos"
+                      selected={selectedAudienceSegments}
+                      options={segmentOptions}
+                      onChange={(segmentNames) => { setSelectedAudienceSegments(segmentNames); setFormError(""); }}
+                      placeholder="Selecione os segmentos"
+                      required
+                    />
+                    <AudienceSummaryCard state={audienceValid?.signature === overlapSignature ? audienceValid : selectedAudienceSegments.length ? { loading: true } : null} segments={selectedAudienceSegments.length} />
+                  </div>
+                  {campaignCriteriaFilters.length > 0 && (
+                    <div className="space-y-1.5 rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3">
+                      <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Filtros da IA (todos precisam bater)</p><button type="button" onClick={() => setCampaignCriteriaFilters([])} className="text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600] cursor-pointer">Remover filtros</button></div>
+                      <ul className="flex flex-wrap gap-1.5">
+                        {campaignCriteriaFilters.flatMap((criterion) => criterion.regras ?? []).map((rule, index) => (
+                          <li key={`${rule.campo}-${index}`} className="rounded-lg bg-white/80 px-2 py-1 text-[11px] text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">{rule.campo === "lastPurchase" ? "Última compra" : rule.campo === "rfvpSegment" ? "Segmento RFV-P" : rule.campo === "pipelineStage" ? "Etapa do pipeline" : rule.campo === "tier" ? "Nível VIP" : rule.campo === "tag" ? "Tag" : rule.campo} {rule.operador === "older_days" ? "há mais de" : rule.operador === "in" ? "em" : "é"} {rule.valor}{rule.campo === "lastPurchase" ? " dias" : ""}</li>
+                        ))}
+                      </ul>
                     </div>
-                    <button type="button" disabled={isGeneratingCampaign || !campaignPrompt.trim()} onClick={() => void generateCampaignWithAi()} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
-                      <Sparkles className="h-3.5 w-3.5" />{isGeneratingCampaign ? "Gerando..." : "Criar campanha"}
-                    </button>
-                  </div>
-                  {campaignAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{campaignAiError}</p>}
-                </section>
-                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Identifique sua campanha</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Escolha um nome para encontrá-la depois.</p></div>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Nome da campanha <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span><input value={form.nome} onChange={(event) => { setForm({ ...form, nome: event.target.value }); setFormError(""); }} className={inputClass} /></label>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Objetivo</span><input value={campaignObjective} onChange={(event) => setCampaignObjective(event.target.value)} placeholder="Ex.: Recuperar clientes inativos" className={inputClass} /></label>
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Categoria do template Meta</span><select value={campaignCategory} onChange={(event) => setCampaignCategory(event.target.value as "MARKETING" | "UTILITY")} className={inputClass}><option value="MARKETING">MARKETING — promoções e ofertas</option><option value="UTILITY">UTILITY — mensagens transacionais</option></select></label>
-                <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
-                <CampaignDeliverySettings value={deliverySettings} onChange={setDeliverySettings} />
-                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+                  )}
+                  {audienceOverlapNotice && (
+                    <details className="group rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+                      <summary className="cursor-pointer list-none text-[11px] font-semibold text-slate-600 marker:hidden dark:text-slate-300"><span className="inline-flex items-center gap-1"><ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />Sobreposição entre segmentos e custo estimado</span></summary>
+                      <div className="mt-2">{audienceOverlapNotice}</div>
+                    </details>
+                  )}
+                </WizardSection>
+
+                <WizardSection icon={Bot} title="Quando o cliente responder" hint="Pode ser trocado depois, mesmo com a campanha em andamento.">
+                  <CampaignAiReplyChoice value={campaignAiReply} onChange={setCampaignAiReply} />
+                </WizardSection>
+                {formError && <p role="alert" className="rounded-lg border border-[#F7915E]/40 bg-[#F7915E]/10 px-3 py-2 text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
               </div>
             </Step>
-            <Step title="Público" description="Quem receberá">
-              <div className="space-y-4">
-                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Defina o público</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Selecione um ou mais segmentos salvos para receber a campanha.</p></div>
-                {campaignAudienceDescription && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">{campaignAudienceDescription}</p>}
-                <FormMultiSelect
-                  label="Público-alvo"
-                  selected={selectedAudienceSegments}
-                  options={segmentOptions}
-                  onChange={(segmentNames) => { setSelectedAudienceSegments(segmentNames); setFormError(""); }}
-                  placeholder="Selecione os segmentos"
-                  required
-                />
-                {audienceOverlapNotice}
-                {campaignCriteriaFilters.length > 0 && (
-                  <section className="space-y-2 rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3">
-                    <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Filtros adicionais gerados pela IA (todos devem corresponder)</p><button type="button" onClick={() => setCampaignCriteriaFilters([])} className="text-[11px] font-semibold text-[#002187] hover:underline dark:text-[#C4D600] cursor-pointer">Remover filtros</button></div>
-                    {campaignCriteriaFilters.flatMap((criterion) => criterion.regras ?? []).map((rule, index) => (
-                      <p key={`${rule.campo}-${index}`} className="text-xs text-slate-600 dark:text-slate-300">{rule.campo === "lastPurchase" ? "Última compra" : rule.campo === "rfvpSegment" ? "Segmento RFV-P" : rule.campo === "pipelineStage" ? "Etapa do pipeline" : rule.campo === "tier" ? "Nível VIP" : rule.campo === "tag" ? "Tag" : rule.campo} {rule.operador === "older_days" ? "há mais de" : rule.operador === "in" ? "em" : "é"} {rule.valor}{rule.campo === "lastPurchase" ? " dias" : ""}</p>
-                    ))}
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">O público final será a união dos segmentos selecionados, refinada por estes filtros.</p>
-                  </section>
-                )}
-                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
-              </div>
-            </Step>
-            <Step title="Mensagem" description="Modelo e mídia">
-              <div className="space-y-3">
-                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Escolha o modelo ou escreva a mensagem</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Modelos aprovados pela Meta podem ter imagem no cabeçalho.</p></div>
-                <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} />
-                <section aria-label="Gerar template com IA" className="space-y-2 rounded-xl border border-[#002187]/15 bg-[#002187]/5 p-3 dark:border-[#C4D600]/20 dark:bg-[#C4D600]/5">
-                  <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" /><div><p className="text-xs font-semibold text-slate-800 dark:text-white">Gerar mensagem/template com IA</p><p className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Usa o nome da campanha e o público selecionado para criar um template revisável da Meta.</p></div></div>
-                  <div className="flex gap-2">
-                    <input value={templatePrompt} onChange={(event) => { setTemplatePrompt(event.target.value); setTemplateAiError(""); }} placeholder="Opcional: tom, oferta ou chamada para ação" aria-label="Orientação para gerar mensagem" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]" />
-                    <button type="button" disabled={isGeneratingTemplate || !form.nome.trim() || selectedAudienceSegments.length === 0} onClick={() => void generateMessageTemplateWithAi()} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer"><Sparkles className="h-3.5 w-3.5" />{isGeneratingTemplate ? "Gerando..." : "Gerar mensagem"}</button>
-                  </div>
-                  {templateAiError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{templateAiError}</p>}
-                </section>
+            <Step title="Mensagem" description="Modelo, variáveis e prévia">
+              <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+              <div className="min-w-0 space-y-4">
+                <WizardSection
+                  icon={FileText}
+                  title="Modelo oficial aprovado pela Meta"
+                  hint="Fora da janela de 24 h a Meta só entrega modelos aprovados."
+                  action={!campaignTemplate ? templateAiButton : undefined}
+                >
+                  <CampaignTemplatePicker value={campaignTemplate} onChange={changeCampaignTemplate} showPreview={false} paramsAction={templateAiButton} label="Modelo" emptyLabel={aiTemplateDraft ? "Novo modelo gerado pela IA (abaixo)" : "Sem modelo: mensagem livre"} />
+                </WizardSection>
                 {aiTemplateDraft && (
-                  <section aria-label="Revisar template da Meta" className="space-y-3 rounded-xl border border-[#C4D600]/50 bg-[#C4D600]/5 p-3 dark:bg-[#C4D600]/[0.04]">
-                    <div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-slate-800 dark:text-white">Revise o template antes da análise</p><p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">O disparo fica bloqueado até a Meta aprovar este conteúdo.</p></div><button type="button" onClick={() => setAiTemplateDraft(null)} className="text-[10px] font-semibold text-slate-500 hover:underline cursor-pointer">Descartar</button></div>
-                    <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => { const category = event.target.value as "MARKETING" | "UTILITY"; setCampaignCategory(category); setAiTemplateDraft((current) => current ? { ...current, category } : current); }} className={inputClass}><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option></select></label>
-                    {aiTemplateDraft.headerFormat === "TEXT" && <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Cabeçalho de texto (opcional)</span><input maxLength={60} value={aiTemplateDraft.headerText} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, headerText: event.target.value } : current)} className={inputClass} /></label>}
-                    <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé (opcional, até 60 caracteres)</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label>
+                  <section aria-label="Revisar modelo da Meta" className="space-y-3 rounded-2xl border border-[#C4D600]/50 bg-[#C4D600]/5 p-4 dark:bg-[#C4D600]/[0.04]">
+                    <div className="flex items-start justify-between gap-2"><div><p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"><Sparkles className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" />Novo modelo gerado pela IA</p><p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">Revise e envie para análise. O disparo fica bloqueado até a Meta aprovar.</p></div><button type="button" onClick={() => setAiTemplateDraft(null)} className="text-[11px] font-semibold text-slate-500 hover:underline cursor-pointer">Descartar</button></div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Categoria</span><select value={campaignCategory} onChange={(event) => { const category = event.target.value as "MARKETING" | "UTILITY"; setCampaignCategory(category); setAiTemplateDraft((current) => current ? { ...current, category } : current); }} className={`${inputClass} cursor-pointer`}><option value="MARKETING">Marketing</option><option value="UTILITY">Utilidade</option></select></label>
+                      <label className="block space-y-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span>Rodapé (opcional, até 60)</span><input maxLength={60} value={aiTemplateDraft.footer} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, footer: event.target.value } : current)} className={inputClass} /></label>
+                      {aiTemplateDraft.headerFormat === "TEXT" && <label className="block space-y-1 text-[11px] font-semibold text-slate-600 sm:col-span-2 dark:text-slate-300"><span>Cabeçalho de texto (opcional)</span><input maxLength={60} value={aiTemplateDraft.headerText} onChange={(event) => setAiTemplateDraft((current) => current ? { ...current, headerText: event.target.value } : current)} className={inputClass} /></label>}
+                    </div>
                     {aiTemplateDraft.params.map((field, index) => (
-                      <label key={`template-param-${index}`} className="flex items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span className="w-10 shrink-0">{`{{${index + 1}}}`}</span><select value={field} onChange={(event) => updateGeneratedTemplateParam(index, event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal dark:border-slate-700 dark:bg-slate-900 cursor-pointer">{messageVariables.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                      <label key={`template-param-${index}`} className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300"><span className="rounded-md bg-[#002187]/10 px-1.5 py-0.5 text-center font-mono font-bold text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">{`{{${index + 1}}}`}</span><select value={field} onChange={(event) => updateGeneratedTemplateParam(index, event.target.value)} aria-label={`Conteúdo da variável ${index + 1}`} className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal dark:border-slate-700 dark:bg-slate-900 cursor-pointer">{messageVariables.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
                     ))}
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Respostas rápidas (opcional)</p><button type="button" disabled={aiTemplateDraft.buttons.length >= 3} onClick={() => setAiTemplateDraft((current) => current ? { ...current, buttons: [...current.buttons, { type: "QUICK_REPLY", text: "" }] } : current)} className="text-[10px] font-semibold text-[#002187] hover:underline disabled:opacity-50 dark:text-[#C4D600] cursor-pointer">Adicionar botão</button></div>
@@ -1879,29 +1985,30 @@ export function CampaignsView() {
                   </section>
                 )}
                 {!campaignTemplate && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Variáveis de personalização</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {messageVariables.map((item) => (
-                      <button
-                        key={item.value}
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => insertMessageVariable(item.value)}
-                        className="rounded-lg border border-[#002187]/20 bg-[#002187]/5 px-2.5 py-1.5 text-[10px] font-semibold text-[#002187] transition-colors hover:bg-[#C4D600]/30 dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/20 cursor-pointer"
-                        title={`Inserir ${item.value}`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-slate-400">Clique em uma variável para inseri-la no ponto selecionado da mensagem.</p>
-                </div>
+                  <WizardSection icon={MessageSquareText} title={aiTemplateDraft ? "Texto do novo modelo" : "Mensagem livre"} hint={aiTemplateDraft ? "Use {{1}}, {{2}}... para as variáveis." : "Clique numa variável para inserir no ponto do cursor."}>
+                    {!aiTemplateDraft && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {messageVariables.map((item) => (
+                          <button
+                            key={item.value}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => insertMessageVariable(item.value)}
+                            className="rounded-md border border-[#002187]/20 bg-[#002187]/5 px-2 py-1 text-[10px] font-semibold text-[#002187] transition-colors hover:bg-[#C4D600]/30 dark:border-[#C4D600]/30 dark:bg-[#C4D600]/10 dark:text-[#C4D600] dark:hover:bg-[#C4D600]/20 cursor-pointer"
+                            title={`Inserir ${item.value}`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      <span className="sr-only">Mensagem</span>
+                      <textarea ref={messageInputRef} rows={5} value={form.mensagem} onChange={(event) => aiTemplateDraft ? updateGeneratedTemplateBody(event.target.value) : (setForm({ ...form, mensagem: event.target.value }), setFormError(""))} aria-required="true" placeholder="Olá {{nome}}! ..." className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
+                    </label>
+                  </WizardSection>
                 )}
-                <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  <span>Mensagem <span aria-hidden="true" className="text-red-600 dark:text-red-400">*</span></span>
-                  <textarea ref={messageInputRef} rows={4} value={form.mensagem} readOnly={Boolean(campaignTemplate)} onChange={(event) => aiTemplateDraft ? updateGeneratedTemplateBody(event.target.value) : (setForm({ ...form, mensagem: event.target.value }), setFormError(""))} className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-[#C4D600]" />
-                </label>
+                <WizardSection icon={ImageIcon} title="Mídia" hint={campaignTemplate?.hasImage ? "O modelo tem imagem no cabeçalho: sem anexo, vai a imagem do modelo." : "Opcional: imagem, vídeo ou PDF."}>
                 <div className="space-y-2">
                   <input
                     ref={attachmentInputRef}
@@ -1913,10 +2020,7 @@ export function CampaignsView() {
                     onChange={(event) => addAttachments(event.currentTarget.files)}
                   />
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Imagem ou mídia {isUploading && <span className="font-normal text-slate-400">(enviando...)</span>}</p>
-                      <p className="mt-0.5 text-[10px] text-slate-400">Imagens, vídeos ou PDFs</p>
-                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{isUploading ? "Enviando arquivos..." : selectedAttachments.length ? `${selectedAttachments.length} arquivo(s) anexado(s)` : "Nenhum arquivo anexado"}</p>
                     <button type="button" onClick={() => attachmentInputRef.current?.click()} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#002187] hover:bg-[#002187]/5 dark:border-slate-700 dark:text-slate-200 dark:hover:border-[#C4D600] dark:hover:bg-[#C4D600]/10 cursor-pointer">
                       <Paperclip className="h-3.5 w-3.5" />Adicionar arquivo
                     </button>
@@ -1965,90 +2069,107 @@ export function CampaignsView() {
                     </ul>
                   )}
                 </div>
-                <section aria-label="Prévia para o destinatário" className="space-y-2">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">Prévia para o destinatário</p>
-                  <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-900/60">
-                    {selectedAttachments.length > 0 || form.mensagem.trim() ? (
-                      <div className="flex justify-end">
-                        <div className="w-fit max-w-[90%] space-y-2 rounded-xl rounded-br-sm bg-[#C4D600]/20 p-2.5 text-sm text-[#051647] shadow-sm dark:bg-[#C4D600]/15 dark:text-slate-100">
-                          {campaignTemplate?.hasImage && campaignTemplate.headerImageUrl && !selectedAttachments.some((file) => ["image/jpeg", "image/png"].includes(file.type)) && (
-                            <div className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
-                              {/* eslint-disable-next-line @next/next/no-img-element -- imagem hospedada pela Meta */}
-                              <img src={campaignTemplate.headerImageUrl} alt="Imagem do cabeçalho do modelo" className="aspect-[1.91/1] w-72 max-w-full object-cover" />
-                            </div>
-                          )}
-                          {selectedAttachments.map((file, index) => {
-                            const previewUrl = attachmentPreviewUrls.get(file);
-                            return (
-                              <div key={`${file.name}-${file.lastModified}-${index}`} className="overflow-hidden rounded-lg bg-white/80 dark:bg-[#051647]/70">
-                                {file.type.startsWith("image/") && previewUrl ? (
-                                  <Image
-                                    src={previewUrl}
-                                    alt={file.name}
-                                    width={480}
-                                    height={320}
-                                    unoptimized
-                                    className="max-h-48 w-full object-contain"
-                                  />
-                                ) : file.type.startsWith("video/") && previewUrl ? (
-                                  <video src={previewUrl} controls className="max-h-48 w-full" aria-label={file.name}>
-                                    Seu navegador não oferece suporte à reprodução de vídeo.
-                                  </video>
-                                ) : (
-                                  <div className="flex max-w-72 items-center gap-2.5 p-3">
-                                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#002187]/10 text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">
-                                      {file.type.startsWith("video/") ? <Film className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                                    </span>
-                                    <span className="min-w-0">
-                                      <span className="block truncate text-xs font-semibold" title={file.name}>{file.name}</span>
-                                      <span className="text-[10px] text-slate-500 dark:text-slate-400">Documento · {formatFileSize(file.size)}</span>
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                          {aiTemplateDraft?.headerText && <p className="font-semibold">{aiTemplateDraft.headerText}</p>}
-                          {form.mensagem.trim() && <p className="whitespace-pre-wrap break-words">{aiTemplateDraft ? form.mensagem.trim().replace(/\{\{(\d+)\}\}/g, (_match, number: string) => aiTemplateDraft.examples[Number(number) - 1] ?? `{{${number}}}`) : form.mensagem.trim()}</p>}
-                          {aiTemplateDraft?.footer && <p className="text-[10px] text-slate-500">{aiTemplateDraft.footer}</p>}
-                          {aiTemplateDraft?.buttons.map((button, index) => <span key={`preview-template-button-${index}`} className="block rounded-lg bg-white/70 px-2 py-1 text-center text-xs font-medium text-[#002187] dark:bg-[#051647]/60 dark:text-[#C4D600]">{button.text || "Resposta rápida"}</span>)}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="rounded-xl bg-white/80 px-3 py-2 text-xs text-slate-400 dark:bg-slate-800/80 dark:text-slate-500">
-                        A mensagem e os arquivos aparecerão aqui.
-                      </p>
-                    )}
-                  </div>
-                </section>
-                {formError && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+                </WizardSection>
+                {formError && <p role="alert" className="rounded-lg border border-[#F7915E]/40 bg-[#F7915E]/10 px-3 py-2 text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{formError}</p>}
+              </div>
+              <aside aria-label="Prévia no WhatsApp" className="min-w-0 lg:sticky lg:top-0 lg:self-start">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><Smartphone className="h-3.5 w-3.5" />Como o cliente recebe</p>
+                {messagePreview}
+              </aside>
               </div>
             </Step>
-            <Step title="Disparo" description="Revise e envie">
+            <Step title="Agendamento e revisão" description="Quando enviar e conferência">
               <div className="space-y-4">
-                <div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Revise e dispare</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ao disparar, o envio começa em segundo plano e você acompanha o progresso ao vivo.</p></div>
-                <dl className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Campanha</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{form.nome || "—"}</dd></div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Segmento</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{selectedAudienceSegments.join(", ") || "—"}</dd></div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Modelo / mensagem</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{campaignTemplate ? campaignTemplate.name : aiTemplateDraft ? "Template novo · aguardando submissão" : "Mensagem livre"}</dd></div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Categoria Meta</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{campaignCategory}{campaignObjective ? ` · ${campaignObjective}` : ""}</dd></div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50"><dt className="text-[10px] font-semibold uppercase text-slate-400">Mídia</dt><dd className="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-white">{selectedAttachments.length > 0 ? `${selectedAttachments.length} arquivo(s)` : campaignTemplate?.hasImage ? "Imagem do modelo" : "Sem mídia"}</dd></div>
-                </dl>
-                {aiTemplateDraft && <p role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">Este template ainda precisa ser enviado para análise. Volte à etapa Mensagem e clique em “Aprovar e enviar para análise da Meta”. O botão de disparo ficará bloqueado até a aprovação.</p>}
-                <div className="rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 dark:text-slate-200">
-                  {!dispatchEstimate || dispatchEstimate.loading ? (
-                    <span className="inline-flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Calculando público e custo estimado...</span>
-                  ) : dispatchEstimate.error ? (
-                    <span className="text-[#9a3d12] dark:text-[#F7915E]">{dispatchEstimate.error}</span>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-                      <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /><b>{int(dispatchEstimate.contacts)}</b> contato(s) com telefone</span>
-                      <span>Custo estimado: <b>{dispatchEstimate.cost === null ? "indisponível" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</b></span>
-                      {cooldownDays > 0 && !ignoreCooldown && <span className="w-full text-[10px] text-slate-500 dark:text-slate-400">Quem recebeu campanha nos últimos {cooldownDays} dias é pulado, então o valor real tende a ser menor.</span>}
+                <WizardSection icon={CalendarClock} title="Quando enviar" hint="Horário de Brasília. Agendada, a campanha começa sozinha no horário escolhido.">
+                  <div role="radiogroup" aria-label="Quando enviar" className="grid gap-2 sm:grid-cols-2">
+                    {([
+                      { mode: "now" as const, icon: Send, title: "Enviar agora", description: "O envio começa assim que você confirmar." },
+                      { mode: "later" as const, icon: CalendarClock, title: "Agendar data e horário", description: "Escolha o dia e a hora do disparo." },
+                    ]).map((option) => {
+                      const active = scheduleMode === option.mode;
+                      const Icon = option.icon;
+                      return (
+                        <button
+                          key={option.mode}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onClick={() => {
+                            setScheduleMode(option.mode);
+                            setFormError("");
+                            if (option.mode === "later" && !scheduleDay) setScheduleDay(addDays(brDay(), 1));
+                          }}
+                          className={`flex min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-colors cursor-pointer ${active ? "border-[#002187] bg-[#002187]/5 ring-1 ring-[#002187]/30 dark:border-[#C4D600] dark:bg-[#C4D600]/10 dark:ring-[#C4D600]/30" : "border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600"}`}
+                        >
+                          <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? "text-[#002187] dark:text-[#C4D600]" : "text-slate-400"}`} />
+                          <span className="min-w-0"><span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">{option.title}</span><span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">{option.description}</span></span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {scheduleMode === "later" && (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)] sm:items-end">
+                      <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Data</span><input type="date" value={scheduleDay} min={brDay()} max={addDays(brDay(), MAX_SCHEDULE_DAYS)} onChange={(event) => { setScheduleDay(event.target.value); setFormError(""); }} className={`${inputClass} cursor-pointer dark:[color-scheme:dark]`} /></label>
+                      <label className="block space-y-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"><span>Horário</span><input type="time" value={scheduleTime} onChange={(event) => { setScheduleTime(event.target.value); setFormError(""); }} className={`${inputClass} cursor-pointer dark:[color-scheme:dark]`} /></label>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">{scheduleError ? <span className="font-medium text-[#9a3d12] dark:text-[#F7915E]">{scheduleError}</span> : `Dispara em ${scheduleLabel}.`}</p>
                     </div>
                   )}
-                </div>
-                {cooldownToggle}
+                  {scheduleMode === "later" && !scheduleError && outsideSendWindow(scheduleDay, scheduleTime, deliverySettings.sendWindow) && (
+                    <p role="status" className="flex items-start gap-1.5 rounded-lg bg-[#F7915E]/10 p-2.5 text-[11px] text-[#9a3d12] dark:text-[#F7915E]"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />O horário está fora da janela permitida ({deliverySettings.sendWindow?.start} às {deliverySettings.sendWindow?.end}{deliverySettings.sendWindow?.skipSundays ? ", sem domingos" : ""}): o envio espera o próximo início da janela.</p>
+                  )}
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700">
+                    <button type="button" aria-expanded={showAdvanced} onClick={() => setShowAdvanced((current) => !current)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                      <span className="flex min-w-0 items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" /><span className="truncate">Envio seguro: ritmo, janela de horário e follow-up</span></span>
+                      <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-slate-500 dark:text-slate-400">{safetySummary}<ChevronDown className={`h-4 w-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`} /></span>
+                    </button>
+                    {showAdvanced && (
+                      <div className="space-y-3 border-t border-slate-200 p-3 dark:border-slate-700">
+                        <CampaignDeliverySettings value={deliverySettings} onChange={setDeliverySettings} />
+                        {cooldownToggle}
+                      </div>
+                    )}
+                  </div>
+                </WizardSection>
+
+                <section aria-label="Revisão da campanha" className="space-y-3">
+                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"><ClipboardCheck className="h-4 w-4 text-[#002187] dark:text-[#C4D600]" />Revisão antes de confirmar</h3>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_260px]">
+                    <div className="grid min-w-0 gap-3 sm:grid-cols-2 md:col-span-2">
+                      <ReviewBlock title="Campanha" icon={Megaphone} onEdit={() => setCreateStep(1)}>
+                        <p className="font-semibold">{form.nome || "—"}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{[campaignObjective, campaignCategory === "UTILITY" ? "Utilidade" : "Marketing", campaignAiReply ? "IA atende as respostas" : "Respostas na fila humana"].filter(Boolean).join(" · ")}</p>
+                      </ReviewBlock>
+                      <ReviewBlock title="Público válido" icon={Users} onEdit={() => setCreateStep(1)}>
+                        <p className="font-semibold tabular-nums">{validSummary ? `${int(validSummary.valid)} contato${validSummary.valid === 1 ? "" : "s"}` : "Calculando..."}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{selectedAudienceSegments.join(", ") || "—"}{validSummary && validSummary.optedOut + validSummary.invalidPhone > 0 ? ` · ${int(validSummary.optedOut + validSummary.invalidPhone)} fora (descadastro ou sem celular)` : ""}</p>
+                      </ReviewBlock>
+                      <ReviewBlock title="Modelo" icon={FileText} onEdit={() => setCreateStep(2)}>
+                        <p className="font-semibold">{campaignTemplate ? campaignTemplate.name : aiTemplateDraft ? "Novo modelo (aguardando envio à Meta)" : "Mensagem livre"}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{campaignTemplate?.params.length ? campaignTemplate.params.map((field, index) => `{{${index + 1}}} ${isFixedParam(field) ? `"${fixedText(field)}"` : fieldLabel(field)}`).join(" · ") : selectedAttachments.length ? `${selectedAttachments.length} arquivo(s) anexado(s)` : campaignTemplate?.hasImage ? "Imagem do modelo" : "Sem variáveis"}</p>
+                      </ReviewBlock>
+                      <ReviewBlock title="Disparo" icon={Clock3}>
+                        <p className="font-semibold">{scheduleMode === "later" ? (scheduleError ? "Horário inválido" : scheduleLabel) : "Agora, ao confirmar"}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{safetySummary}</p>
+                      </ReviewBlock>
+                      <div className="rounded-xl border border-[#C4D600]/40 bg-[#C4D600]/10 p-3 text-xs text-slate-700 sm:col-span-2 dark:text-slate-200">
+                        {!dispatchEstimate || dispatchEstimate.loading ? (
+                          <span className="inline-flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Calculando custo estimado...</span>
+                        ) : dispatchEstimate.error ? (
+                          <span className="text-[#9a3d12] dark:text-[#F7915E]">{dispatchEstimate.error}</span>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+                            <span>Custo estimado na Meta: <b>{dispatchEstimate.cost === null ? "indisponível" : dispatchEstimate.cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</b></span>
+                            {cooldownDays > 0 && !ignoreCooldown && <span className="w-full text-[10px] text-slate-500 dark:text-slate-400">Quem recebeu campanha nos últimos {cooldownDays} dias é pulado, então o valor real tende a ser menor.</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <ReviewBlock title="Mensagem" icon={Smartphone} onEdit={() => setCreateStep(2)}>
+                      <div className="origin-top scale-[0.86] -mb-12">{messagePreview}</div>
+                    </ReviewBlock>
+                  </div>
+                </section>
+                {aiTemplateDraft && <p role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">O modelo gerado pela IA ainda precisa ir para análise. Volte à etapa Mensagem e clique em “Aprovar e enviar para análise da Meta”; o disparo fica bloqueado até a aprovação.</p>}
                 {formError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">{formError}</p>}
               </div>
             </Step>
@@ -2082,7 +2203,7 @@ export function CampaignsView() {
                     {selectedJob && (selectedJob.status === "running" || selectedJob.status === "paused") && (
                       <div className="flex items-center gap-2">
                         {selectedJob.status === "paused" ? (
-                          <button type="button" disabled={jobBusy === selectedCampaign.id} onClick={() => void controlDispatch(selectedCampaign.id, "resume")} className={primaryButton}><Play className="h-3.5 w-3.5" />Retomar</button>
+                          <button type="button" disabled={jobBusy === selectedCampaign.id} onClick={() => void controlDispatch(selectedCampaign.id, "resume")} className={primaryButton}><Play className="h-3.5 w-3.5" />{selectedJob.scheduledAt && selectedJob.cursor === 0 && selectedJob.pause?.kind === "schedule" ? "Enviar agora" : "Retomar"}</button>
                         ) : (
                           <button type="button" disabled={jobBusy === selectedCampaign.id} onClick={() => void controlDispatch(selectedCampaign.id, "pause")} className={ghostButton}><Pause className="h-3.5 w-3.5" />Pausar</button>
                         )}

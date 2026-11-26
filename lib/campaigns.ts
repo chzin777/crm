@@ -54,7 +54,7 @@ function campaignStatusForTemplate(status: string) {
 }
 
 function isDispatchInProgress(status: string) {
-  return ["Enviando", "Envio pausado", "Enviada", "Envio parcial"].includes(status);
+  return ["Enviando", "Envio pausado", "Enviada", "Envio parcial", "Agendada"].includes(status);
 }
 
 export async function syncCampaignTemplateStatus(

@@ -14,6 +14,7 @@ import { withoutOptedOut } from "@/lib/marketing-opt-out";
 import { dedupeRecipients } from "@/lib/campaign-audience";
 import { loadOptOutKeys } from "@/lib/marketing-opt-out-db";
 import { reportError } from "@/lib/monitoring/error-reporter";
+import { firstName, resolveParam, summarizeAudience } from "@/lib/campaign-wizard";
 import { cadenceWaitMs, insideWindow, nextWindowStart, normalizeCadence, normalizeFollowUp, normalizeWindow } from "@/lib/campaign-schedule";
 
 /** `origens`: segmentos da campanha em que o contato aparece (métrica; o envio continua sendo um só). */
@@ -56,6 +57,8 @@ export type DispatchJob = {
   coldRemoved?: number;
   errors: string[];
   pause?: PauseReason;
+  /** Disparo agendado: fica pausado (kind "schedule") até esta hora e o relógio do chat inicia sozinho. */
+  scheduledAt?: string;
   startedAt: string;
   finishedAt?: string;
 };
@@ -158,8 +161,13 @@ function describePause(error: unknown): PauseReason | null {
   return { kind, code, message: messages[kind] ?? detail };
 }
 
+/** Agendada e ainda esperando a hora (nenhum contato processado). */
+export const isScheduledWait = (job: Pick<DispatchJob, "status" | "pause" | "scheduledAt" | "cursor">) =>
+  job.status === "paused" && job.pause?.kind === "schedule" && Boolean(job.scheduledAt) && job.cursor === 0;
+
 function campaignStatus(job: DispatchJob) {
   if (job.status === "running") return "Enviando";
+  if (isScheduledWait(job)) return "Agendada";
   if (job.status === "paused") return "Envio pausado";
   if (job.failed === 0 && job.sent > 0) return "Enviada";
   if (job.sent > 0) return "Envio parcial";
@@ -170,6 +178,7 @@ function campaignStatus(job: DispatchJob) {
 function campaignNote(job: DispatchJob) {
   const done = job.cursor;
   if (job.status === "running") return `Disparo em andamento (${done} de ${job.total})`;
+  if (isScheduledWait(job)) return `Agendada para ${formatBr(job.scheduledAt)} · ${job.total} contatos`;
   if (job.status === "paused") return `Pausado: ${done} de ${job.total} processados · ${job.pause?.message ?? ""}`.trim();
   const skipped = job.skipped > 0 ? `, ${job.skipped} pulados (campanha nos últimos ${CONTACT_COOLDOWN_DAYS} dias)` : "";
   return `${formatBr(new Date(), { dateStyle: "short", timeStyle: "medium" })} · ${job.sent} enviados, ${job.failed} falhas${skipped}`;
@@ -215,19 +224,20 @@ async function sendToRecipient(
     telefone: recipient.telefone,
     segmento: recipient.segmento,
     data_nascimento: recipient.dataNascimento,
+    primeiro_nome: firstName(recipient.nome),
   };
   // Atendente do contato (conversa aberta com operador) ou o nome da equipe: só consulta quando a campanha usa.
   if (campaign.modelo ? campaign.modelo.params.some(isAttendantField) : hasAttendantToken(campaign.mensagem)) {
     Object.assign(values, await assignedAttendantValues({ contactId: recipient.id, phone: recipient.telefone }));
   }
   if (campaign.modelo) {
-    const params = campaign.modelo.params.map((field) => values[field] || "-");
+    const params = campaign.modelo.params.map((field) => resolveParam(field, values));
     const quickReplyPayloads = (campaign.metaTemplateDraft?.buttons ?? campaign.modelo.buttons ?? [])
       .flatMap((button, index) => button.type === "QUICK_REPLY" && button.text.trim() ? [{ index, payload: button.text }] : []);
     const sent = await sendTemplate(recipient.telefone, campaign.modelo.name, campaign.modelo.language, params, header, [], quickReplyPayloads);
     return { messageId: sent.messages?.[0]?.id ?? null, text: renderTemplateText(templateInfo, campaign.modelo.name, params) };
   }
-  const text = campaign.mensagem.replace(/\{\{(nome|email|telefone|segmento|data_nascimento|nome_atendente|primeiro_nome_atendente)\}\}/g, (_match, key: string) => values[key] ?? "");
+  const text = campaign.mensagem.replace(/\{\{(primeiro_nome|nome|email|telefone|segmento|data_nascimento|nome_atendente|primeiro_nome_atendente)\}\}/g, (_match, key: string) => values[key] ?? "");
   const media = (campaign.anexos ?? []).filter((file) => file.url);
   if (media.length === 0) {
     const sent = await sendText(recipient.telefone, text);
@@ -480,7 +490,16 @@ async function assertCampaignTemplateReady(campaign: CampaignRecord) {
   }
 }
 
-export async function startDispatch(campaignId: string, requested: DispatchRecipient[], options: { ignoreCooldown?: boolean } = {}) {
+/** Prévia do público no assistente: total, repetidos, descadastrados (SAIR/PARAR), sem celular válido e válidos. */
+export async function previewAudience(recipients: DispatchRecipient[]) {
+  return summarizeAudience(recipients, await loadOptOutKeys());
+}
+
+export async function startDispatch(campaignId: string, requested: DispatchRecipient[], options: { ignoreCooldown?: boolean; scheduledAt?: string } = {}) {
+  const scheduledAt = options.scheduledAt ? new Date(options.scheduledAt) : null;
+  if (scheduledAt && (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now() + 60_000 || scheduledAt.getTime() > Date.now() + 61 * 86_400_000)) {
+    throw new DispatchError("Horário de agendamento inválido: escolha a partir de 5 minutos e até 60 dias à frente.", 400);
+  }
   // Quem pediu para sair (marketingOptOut) nunca entra na fila de uma campanha.
   // Cada pessoa recebe no máximo uma vez, mesmo estando em vários segmentos (por contato e por celular).
   const { unique, removed: duplicatesRemoved } = dedupeRecipients(requested);
@@ -525,6 +544,12 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
     coldRemoved: cold.size,
     errors: [],
     startedAt: new Date().toISOString(),
+    // Agendado: espera pausado até a hora; o relógio do chat retoma (uma instância só, gravação condicional).
+    ...(scheduledAt ? {
+      status: "paused" as const,
+      scheduledAt: scheduledAt.toISOString(),
+      pause: { kind: "schedule" as const, message: `Agendada para ${formatBr(scheduledAt)}.`, resumeAt: scheduledAt.toISOString() },
+    } : {}),
   };
   await prisma.crmWorkspaceData.upsert({
     where: { key: recipientsKey(campaignId) },
@@ -533,7 +558,7 @@ export async function startDispatch(campaignId: string, requested: DispatchRecip
   });
   await writeJob(job);
   await syncCampaign(job);
-  enqueue(campaignId);
+  if (!scheduledAt) enqueue(campaignId);
   return job;
 }
 

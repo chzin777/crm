@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { CONTACT_COOLDOWN_DAYS, DispatchError, listDispatchJobs, resumeDispatch, startDispatch, stopDispatch, type DispatchRecipient } from "@/lib/campaign-dispatch";
+import { CONTACT_COOLDOWN_DAYS, DispatchError, listDispatchJobs, previewAudience, resumeDispatch, startDispatch, stopDispatch, type DispatchRecipient } from "@/lib/campaign-dispatch";
 import { forbidUnless } from "@/lib/api-auth";
 
 export async function GET() {
@@ -26,7 +26,17 @@ export async function POST(request: Request) {
   const forbidden = await forbidUnless("campaigns/dispatch", "POST");
   if (forbidden) return forbidden;
   if (!(await requireApiSession())) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-  const body = await request.json().catch(() => null) as { action?: string; campaignId?: string; recipients?: unknown; ignoreCooldown?: unknown } | null;
+  const body = await request.json().catch(() => null) as { action?: string; campaignId?: string; recipients?: unknown; ignoreCooldown?: unknown; scheduledAt?: unknown } | null;
+  // Prévia do público válido no assistente (ainda sem campanha salva): não grava nada.
+  if (body?.action === "preview") {
+    if (!Array.isArray(body.recipients) || !body.recipients.every(isRecipient)) return NextResponse.json({ error: "Lista de contatos inválida." }, { status: 400 });
+    try {
+      return NextResponse.json({ summary: await previewAudience(body.recipients) });
+    } catch (error) {
+      console.error("[campaigns/dispatch] prévia:", error);
+      return NextResponse.json({ error: "Não foi possível conferir o público agora." }, { status: 500 });
+    }
+  }
   if (!body || typeof body.campaignId !== "string" || !body.campaignId) {
     return NextResponse.json({ error: "Campanha inválida." }, { status: 400 });
   }
@@ -36,7 +46,8 @@ export async function POST(request: Request) {
         if (!Array.isArray(body.recipients) || !body.recipients.every(isRecipient)) {
           return NextResponse.json({ error: "Lista de contatos inválida." }, { status: 400 });
         }
-        return NextResponse.json({ job: await startDispatch(body.campaignId, body.recipients, { ignoreCooldown: body.ignoreCooldown === true }) });
+        if (body.scheduledAt !== undefined && body.scheduledAt !== null && typeof body.scheduledAt !== "string") return NextResponse.json({ error: "Horário de agendamento inválido." }, { status: 400 });
+        return NextResponse.json({ job: await startDispatch(body.campaignId, body.recipients, { ignoreCooldown: body.ignoreCooldown === true, scheduledAt: body.scheduledAt || undefined }) });
       }
       case "resume":
         return NextResponse.json({ job: await resumeDispatch(body.campaignId) });
