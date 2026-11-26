@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
-import { invalidateCache } from "@/lib/cache";
+import { cachedStale, invalidateCache } from "@/lib/cache";
 import { phoneVariants } from "@/lib/chat/phone";
 import { forbidUnless } from "@/lib/api-auth";
+import { buildContactSearch, formatCpf } from "@/lib/contact-search";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -45,7 +46,7 @@ const toContact = (contact: {
   categoria: contact.category,
   segmento: contact.segment ?? "",
   loja: contact.store ?? "",
-  cpf: contact.cpf ?? "",
+  cpf: contact.cpf ? formatCpf(contact.cpf) : "",
   genero: contact.gender ?? "",
   ocupacao: contact.occupation ?? "",
   cidade: contact.city ?? "",
@@ -97,14 +98,8 @@ export async function GET(request: Request) {
   const sortField = allowedSortFields[sortByRaw] ?? "lastPurchaseDate";
   const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
 
-  const where: Record<string, unknown> = {};
-  if (search) {
-    where.OR = [
-      { name: { contains: search, mode: "insensitive" } },
-      { phone: { contains: search, mode: "insensitive" } },
-      { email: { contains: search, mode: "insensitive" } },
-    ];
-  }
+  // Nome, telefone, e-mail e CPF (com ou sem pontuação), pelas colunas indexadas (prisma/contact-search.sql).
+  const where: Record<string, unknown> = { ...buildContactSearch(search) };
   if (category && ["cliente", "lead", "nps", "inativo"].includes(category)) {
     where.category = category;
   }
@@ -137,7 +132,8 @@ export async function GET(request: Request) {
         totalSpent: true,
       },
     }),
-    prisma.contact.count({ where }),
+    // Sem busca, contar a base inteira (~350 mil) leva quase 1 s: total em cache curto (renova em segundo plano).
+    search ? prisma.contact.count({ where }) : cachedStale(`contacts:count:${category || "todos"}`, 60, 600, () => prisma.contact.count({ where })),
   ]);
 
   return Response.json({
@@ -197,6 +193,6 @@ export async function POST(request: Request) {
       totalSpent: true,
     },
   });
-  await invalidateCache("dashboard", "audience:store:");
+  await invalidateCache("dashboard", "audience:store:", "contacts:count:");
   return Response.json({ data: toContact(contact) }, { status: 201 });
 }

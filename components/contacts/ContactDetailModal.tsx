@@ -190,7 +190,7 @@ export function ContactEditTabs({
                 <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${categoryStyles[form.categoria]}`}>
                   {form.segmento.length > 0 ? form.segmento.join(", ") : contactCategoryNames[form.categoria]}
                 </span>
-                <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatBrazilianPhone(form.telefone)}</p>
+                <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">{formatBrazilianPhone(form.telefone)}{selectedContact.cpf ? <span className="tabular-nums"> · CPF {selectedContact.cpf}</span> : null}</p>
                 <div className="mt-1"><MarketingOptOutBadge contactId={selectedContact.id} /></div>
               </div>
             </div>

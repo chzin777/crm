@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { BirthdayDatePicker } from "@/components/BirthdayDatePicker";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
 import Stepper, { Step } from "@/components/Stepper";
 import { ContactEditTabs, categoryStyles, contactCategoryNames, contactCategoryOptions, currency, formatBrazilianPhone, fromDateInput, isValidEmail, toDateInput } from "@/components/contacts/ContactDetailModal";
 import type { Contact, ContactCategory } from "@/lib/contacts";
@@ -95,7 +94,12 @@ export default function ContatosPage() {
     Inativos: "inativo",
   };
 
+  // Só a última busca vale: a anterior é cancelada (digitação rápida não sobrepõe resultados).
+  const requestRef = useRef<AbortController | null>(null);
   const fetchContacts = useCallback(async (page = 1, search = "", filter: ContactFilter = "Todos", size?: number, sort?: { field: string; order: "asc" | "desc" }) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setContactsLoading(true);
     setDataError("");
     try {
@@ -109,15 +113,16 @@ export default function ContatosPage() {
       params.set("sortBy", activeSort.field);
       params.set("sortOrder", activeSort.order);
 
-      const response = await fetch(`/api/contacts?${params.toString()}`);
+      const response = await fetch(`/api/contacts?${params.toString()}`, { signal: controller.signal });
       const result = await response.json() as { data?: Contact[]; error?: string; pagination?: typeof pagination };
       if (!response.ok) throw new Error(result.error || "Não foi possível carregar os contatos.");
       setContacts(result.data ?? []);
       if (result.pagination) setPagination(result.pagination);
     } catch (error: unknown) {
+      if (controller.signal.aborted) return;
       setDataError(error instanceof Error ? error.message : "Não foi possível carregar os contatos.");
     } finally {
-      setContactsLoading(false);
+      if (requestRef.current === controller) setContactsLoading(false);
     }
   }, []);
 
@@ -125,13 +130,15 @@ export default function ContatosPage() {
     fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig);
   }, [activeFilter, sortConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced search
+  // Busca com espera de 300 ms depois da última tecla (a ordenação e o filtro buscam na hora, no efeito acima).
+  const firstSearch = useRef(true);
   useEffect(() => {
+    if (firstSearch.current) { firstSearch.current = false; return; }
     const timer = setTimeout(() => {
       fetchContacts(1, searchTerm, activeFilter, undefined, sortConfig);
-    }, 400);
+    }, 300);
     return () => clearTimeout(timer);
-  }, [searchTerm, sortConfig]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedContact && !isCreateOpen) return;
@@ -299,7 +306,7 @@ export default function ContatosPage() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="search"
-                placeholder="Nome, telefone ou e-mail"
+                placeholder="Nome, telefone, e-mail ou CPF"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 aria-label="Buscar contatos"
@@ -348,11 +355,13 @@ export default function ContatosPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {contactsLoading && (
-                    <tr><td colSpan={6} className="px-5 py-8">
-                      <LoadingSpinner label="Carregando contatos..." className="w-full justify-center" />
-                    </td></tr>
-                  )}
+                  {contactsLoading && Array.from({ length: 8 }, (_, index) => (
+                    <tr key={`skeleton-${index}`} aria-hidden="true" className="animate-pulse">
+                      <td className="px-5 py-3"><div className="flex items-center gap-3"><span className="h-9 w-9 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800" /><div className="space-y-1.5"><span className="block h-3 w-40 rounded bg-slate-100 dark:bg-slate-800" /><span className="block h-2.5 w-28 rounded bg-slate-100 dark:bg-slate-800" /></div></div></td>
+                      {[16, 20, 20, 10, 16].map((width, cell) => <td key={cell} className="px-4 py-3"><span className="block h-3 rounded bg-slate-100 dark:bg-slate-800" style={{ width: `${width * 4}px` }} /></td>)}
+                    </tr>
+                  ))}
+                  {contactsLoading && <tr className="sr-only"><td colSpan={6}>Carregando contatos...</td></tr>}
                   {!contactsLoading && contacts.map((contact) => (
                     <tr
                       key={contact.id}
@@ -372,7 +381,7 @@ export default function ContatosPage() {
                           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[10px] font-bold ${categoryStyles[contact.categoria]}`}>{contact.iniciais}</span>
                           <div className="min-w-0">
                             <p className="truncate text-xs font-semibold text-slate-900 group-hover:text-[#002187] dark:text-white dark:group-hover:text-[#C4D600]">{contact.nome}</p>
-                            <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{formatBrazilianPhone(contact.telefone)}</p>
+                            <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">{formatBrazilianPhone(contact.telefone)}{contact.cpf ? <span className="tabular-nums"> · CPF {contact.cpf}</span> : null}</p>
                           </div>
                         </div>
                       </td>

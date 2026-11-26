@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
 import { forbidUnless } from "@/lib/api-auth";
+import { formatCpf } from "@/lib/contact-search";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -48,7 +49,7 @@ function toContact(contact: Prisma.ContactGetPayload<{ select: typeof CONTACT_SE
     categoria: contact.category,
     segmento: contact.segment ?? "",
     loja: contact.store ?? "",
-    cpf: contact.cpf ?? "",
+    cpf: contact.cpf ? formatCpf(contact.cpf) : "",
     genero: contact.gender ?? "",
     ocupacao: contact.occupation ?? "",
     cidade: contact.city ?? "",

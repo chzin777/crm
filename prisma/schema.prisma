@@ -94,6 +94,9 @@ model Contact {
   name                      String
   cpf                       String?
   phone                     String?
+  /// Só dígitos do CPF (11, com zeros à esquerda) e do telefone: preenchidos pelo gatilho contact_digits (prisma/contact-search.sql), nunca pelo app.
+  cpfDigits                 String?
+  phoneDigits               String?
   email                     String?
   birthDate                 String?
   gender                    String?
