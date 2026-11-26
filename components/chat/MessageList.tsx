@@ -105,27 +105,41 @@ function Sticker({ message, onOpen }: { message: ChatMessageItem; onOpen: () => 
   );
 }
 
-/** Texto do áudio do cliente, abaixo do player (discreto enquanto processa ou se falhar). */
+/** Acima disto (~4 linhas na largura do player) a transcrição abre recolhida, com "Ver mais". */
+const LONG_TRANSCRIPTION = 220;
+
+/** Texto do áudio, dentro do balão do player e abaixo da divisória (discreto enquanto processa ou se falhar). */
 function Transcription({ value }: { value: NonNullable<ChatMessageItem["transcription"]> }) {
+  const [expanded, setExpanded] = useState(false);
   if (value.status === "pending") {
     return (
-      <p className="mt-1 flex items-center gap-1.5 px-1 text-[11px] italic opacity-60">
+      <p className="flex items-center gap-1.5 text-[11px] italic opacity-60">
         <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> Transcrevendo áudio...
       </p>
     );
   }
   if (value.status === "failed") {
     return (
-      <p className="mt-1 flex items-center gap-1.5 px-1 text-[11px] italic opacity-60">
+      <p className="flex items-center gap-1.5 text-[11px] italic opacity-60">
         <AlertCircle className="h-3 w-3 shrink-0" /> Não foi possível transcrever este áudio.
       </p>
     );
   }
   const text = value.text?.trim();
+  const long = (text?.length ?? 0) > LONG_TRANSCRIPTION;
   return (
-    <div className="mt-1.5 flex min-w-0 gap-1.5 rounded-lg bg-black/5 px-2 py-1.5 text-xs leading-relaxed dark:bg-white/10">
-      <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
-      <p className="min-w-0 whitespace-pre-wrap break-words">{text ? text : <span className="italic opacity-60">Sem fala reconhecível.</span>}</p>
+    <div className="flex min-w-0 gap-1.5">
+      <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50" aria-label="Transcrição" />
+      <div className="min-w-0 flex-1">
+        <p className={`whitespace-pre-wrap break-words text-[13px] leading-relaxed ${long && !expanded ? "line-clamp-4" : ""}`}>
+          {text ? text : <span className="italic opacity-60">Sem fala reconhecível.</span>}
+        </p>
+        {long && (
+          <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded} className="mt-0.5 cursor-pointer text-[11px] font-semibold opacity-70 hover:underline hover:opacity-100">
+            {expanded ? "Ver menos" : "Ver mais"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -164,7 +178,7 @@ export function Attachment({ message, onOpen }: { message: ChatMessageItem; onOp
   if (attachment.kind === "image") return <BubbleImage src={mediaUrl(message)} name={attachment.name} onOpen={onOpen} />;
   if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 max-h-64 rounded-lg" />;
   if (attachment.kind === "audio") {
-    return <AudioPlayer src={mediaUrl(message)} />;
+    return <AudioPlayer src={mediaUrl(message)} footer={message.transcription ? <Transcription value={message.transcription} /> : undefined} />;
   }
   return (
     <a href={mediaUrl(message)} target="_blank" rel="noreferrer" className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg bg-black/10 p-2 dark:bg-white/10">
@@ -447,17 +461,18 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                       {pill ? (
                         <AudioPlayer
                           src={mediaUrl(message)}
+                          tone={fromUs ? "dark" : "light"}
+                          footer={message.transcription ? <Transcription value={message.transcription} /> : undefined}
                           meta={
                             <>
                               <span>{clockTime(message.createdAt)}</span>
-                              {fromUs && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={false} onLight />}
+                              {fromUs && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={false} onLight={false} />}
                             </>
                           }
                         />
                       ) : (
                         message.attachment && <Attachment message={message} onOpen={() => setViewing(message.id)} />
                       )}
-                      {voice && message.transcription && <Transcription value={message.transcription} />}
                       {missing && <MissingMedia kind={missing} onRetry={message.pendingMedia && onReply ? () => retryMedia(message.id) : undefined} />}
                       {message.interactive ? (
                         <InteractiveListBubble list={message.interactive} messageId={message.id} />
