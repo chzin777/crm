@@ -63,7 +63,7 @@ export type LiveOrder = {
 
 export type StoreRank = { store: string; storeLabel: string; amount: number; orders: number };
 export type LiveKpis = { revenue: number; orders: number; ticket: number; topStores: StoreRank[] };
-export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; kpis: LiveKpis; stores: { store: string; storeLabel: string }[]; from?: string; to?: string };
+export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; kpis: LiveKpis; stores: { store: string; storeLabel: string; search?: string }[]; from?: string; to?: string };
 /** Mensagens do canal ao vivo: retrato inteiro (conexão, virada do dia, cancelamento) ou só os pedidos novos/alterados. */
 export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
 

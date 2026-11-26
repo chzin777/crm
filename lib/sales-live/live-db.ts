@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { brDay } from "@/lib/br-time";
+import { storeErpCode, storeFriendlyLabel } from "@/lib/stores";
 import { buildOrders, changedOrders, dayKpis, phoneKey, type LiveEvent, type LiveSnapshot, type SaleItem } from "@/lib/sales-live/feed";
 
 /**
@@ -35,8 +36,37 @@ const globalState = globalThis as unknown as { __salesLive?: State };
 const state: State = (globalState.__salesLive ??= { snapshot: null, items: [], crmKeys: new Set(), crmConversations: new Map(), resolved: new Set(), listeners: new Set(), timer: null, lastDemand: 0, running: null, error: null, labels: { at: 0, map: new Map() } });
 state.crmConversations ??= new Map();
 
-/** Nome da loja como vem do VMSet: o código da loja ("Loja 1", "Loja 18", "Loja 306"). */
-const storeLabel = (store: string) => `Loja ${store.replace(/^0+(?=\d)/, "")}`;
+type StoreRow = { number: number; name: string; neighborhoods: string[]; city: string | null; address: string | null };
+const STORE_TTL_MS = 10 * 60_000;
+const storeCache = ((globalState as { __salesLiveStores?: { at: number; rows: StoreRow[] } }).__salesLiveStores ??= { at: 0, rows: [] });
+
+/** Cadastro de lojas (nome, bairro e cidade) para o rótulo da unidade; relido a cada 10 min. */
+async function storeRows(): Promise<StoreRow[]> {
+  if (storeCache.rows.length && Date.now() - storeCache.at < STORE_TTL_MS) return storeCache.rows;
+  const rows = await prisma.store.findMany({ select: { number: true, name: true, neighborhoods: true, city: true, address: true } }).catch((error) => {
+    console.error("[vendas-ao-vivo] cadastro de lojas:", error);
+    return null;
+  });
+  if (rows) Object.assign(storeCache, { at: Date.now(), rows });
+  return storeCache.rows;
+}
+
+/** Rótulo da loja do VMSet com o lugar da unidade ("Loja 18 · Setor Bueno"); sem cadastro, só o código. */
+const labelerFor = (rows: StoreRow[]) => {
+  const memo = new Map<string, string>();
+  return (store: string) => {
+    let label = memo.get(store);
+    if (label === undefined) memo.set(store, (label = storeFriendlyLabel(rows, store)));
+    return label;
+  };
+};
+
+/** Texto de busca da loja: nome no cadastro, endereço, bairros e cidade (ex.: "GYN SHOPPING", "Flamboyant"). */
+const storeSearchText = (rows: StoreRow[], store: string) => {
+  const code = store.replace(/^0+(?=\d)/, "");
+  const row = rows.find((item) => storeErpCode(item.name) === code);
+  return row ? [row.name, row.address, ...row.neighborhoods, row.city].filter(Boolean).join(" ") : "";
+};
 
 /** Pedidos de clientes atendidos pelo CRM / WhatsApp nos últimos 30 dias (telefone DDD+8 dígitos ou CPF). */
 async function resolveCrmOrders(items: SaleItem[], keys: string[]) {
@@ -91,8 +121,8 @@ async function matchCrmOrders(items: SaleItem[], pending: Set<string>) {
   return result;
 }
 
-const storesOf = (orders: LiveSnapshot["orders"]) =>
-  [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel, "pt-BR", { numeric: true }));
+const storesOf = (orders: LiveSnapshot["orders"], rows: StoreRow[]) =>
+  [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel, search: storeSearchText(rows, order.store) }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel, "pt-BR", { numeric: true }));
 
 /**
  * Vendas faturadas de um período (Esta semana, Este mês, Personalizado): mesma fonte e mesma regra do ao vivo
@@ -104,13 +134,15 @@ export async function periodSnapshot(from: string, to: string): Promise<LiveSnap
   if (!response.ok) throw new Error(`API do VMSet respondeu ${response.status}`);
   const body = (await response.json()) as { items?: SaleItem[] };
   const items = Array.isArray(body.items) ? body.items : [];
+  const rows = await storeRows();
+  const storeLabel = labelerFor(rows);
   const draft = buildOrders(items, from, { storeLabel });
   const matched = await matchCrmOrders(items, new Set(draft.map((order) => order.key))).catch((error) => {
     console.error("[vendas-periodo] cruzamento CRM:", error);
     return new Map<string, string | null>();
   });
   const orders = buildOrders(items, from, { storeLabel, fromCrm: (key) => matched.has(key), conversationOf: (key) => matched.get(key) ?? null });
-  return { day: from, from, to, updatedAt: new Date().toISOString(), seq: 0, orders, kpis: dayKpis(orders), stores: storesOf(orders) };
+  return { day: from, from, to, updatedAt: new Date().toISOString(), seq: 0, orders, kpis: dayKpis(orders), stores: storesOf(orders, rows) };
 }
 
 function emit(event: LiveEvent) {
@@ -136,13 +168,14 @@ async function tick() {
     state.crmConversations = new Map();
     state.resolved = new Set();
   }
-  const label = storeLabel;
+  const rows = await storeRows();
+  const label = labelerFor(rows);
   const draft = buildOrders(items, day, { storeLabel: label });
   await resolveCrmOrders(items, draft.map((order) => order.key)).catch((error) => console.error("[vendas-ao-vivo] cruzamento CRM:", error));
   const orders = buildOrders(items, day, { storeLabel: label, fromCrm: (key) => state.crmKeys.has(key), conversationOf: (key) => state.crmConversations.get(key) ?? null });
   const changed = dayChanged ? orders : changedOrders(previous.orders, orders);
   const removed = !dayChanged && previous.orders.length > 0 && orders.length < previous.orders.length;
-  const stores = storesOf(orders);
+  const stores = storesOf(orders, rows);
   const seq = (previous?.seq ?? 0) + (changed.length || removed ? 1 : 0);
   const snapshot: LiveSnapshot = { day, updatedAt: new Date().toISOString(), seq, orders, kpis: dayKpis(orders), stores };
   state.snapshot = snapshot;

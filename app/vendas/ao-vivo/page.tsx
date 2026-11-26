@@ -11,6 +11,8 @@ import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import { Avatar, ChartTooltip, FadeGradient, SegmentedControl, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
+import { StoreMultiSelect } from "@/components/sales-live/StoreMultiSelect";
+import { ordersInStores, searchOrders, storeSelectionLabel } from "@/lib/sales-live/filters";
 import {
   KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, saleWhen, topSellers, validPeriod,
   type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset,
@@ -338,8 +340,10 @@ export default function LiveSalesPage() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState("");
-  const [store, setStore] = useState("");
+  const [selectedStores, setSelectedStores] = useState<string[]>([]);
   const [origin, setOrigin] = useState<Origin>("all");
+  // Busca global: o campo responde na hora, o filtro do feed espera 200 ms depois da última tecla.
+  const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<MobileTab>("feed");
   const [sound, setSound] = useState(false);
@@ -354,6 +358,10 @@ export default function LiveSalesPage() {
   const [page, setPage] = useState(1);
   const [loadingPeriod, setLoadingPeriod] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setQuery(search); setPage(1); }, 200);
+    return () => window.clearTimeout(timer);
+  }, [search]);
   const today = dayOfInstant(now.toISOString());
   const isLive = period === "today";
   const range = useMemo(() => periodRange(period, today, { from: customFrom, to: customTo }), [period, today, customFrom, customTo]);
@@ -539,7 +547,8 @@ export default function LiveSalesPage() {
   };
 
   const currentHour = brHour(now);
-  const scoped = useMemo(() => (store ? orders.filter((order) => order.store === store) : orders), [orders, store]);
+  const scoped = useMemo(() => ordersInStores(orders, selectedStores), [orders, selectedStores]);
+  const store = selectedStores.length > 0;
   const kpis = useMemo(() => dayKpis(scoped), [scoped]);
   const allKpis = useMemo(() => dayKpis(orders), [orders]);
   const allStores = useMemo(() => {
@@ -560,15 +569,11 @@ export default function LiveSalesPage() {
   const kindMix = useMemo(() => mixByKind(scoped), [scoped]);
   const paymentMix = useMemo(() => mixByPayment(scoped), [scoped]);
   const topStoreKeys = useMemo(() => new Set(allStores.slice(0, 3).map((item) => item.store)), [allStores]);
-  const feed = useMemo(() => {
-    const text = query.trim().toLowerCase();
-    return scoped.filter((order) => {
-      if (origin === "crm" && !order.fromCrm) return false;
-      if (origin === "top" && !topStoreKeys.has(order.store)) return false;
-      if (!text) return true;
-      return [order.storeLabel, order.seller, order.summary, order.order, order.customer, order.payment].some((value) => value?.toLowerCase().includes(text));
-    });
-  }, [scoped, origin, query, topStoreKeys]);
+  const feed = useMemo(() => searchOrders(scoped, query).filter((order) => {
+    if (origin === "crm" && !order.fromCrm) return false;
+    if (origin === "top" && !topStoreKeys.has(order.store)) return false;
+    return true;
+  }), [scoped, origin, query, topStoreKeys]);
   const paged = useMemo(() => paginate(feed, page, PAGE_SIZE), [feed, page]);
   const revenue = useAnimatedNumber(kpis.revenue);
   const peak = hourly.reduce<HourPoint | null>((best, point) => (point.revenue > (best?.revenue ?? 0) ? point : best), null);
@@ -578,11 +583,11 @@ export default function LiveSalesPage() {
   const rangeLabel = range.from === range.to ? shortDate(range.from) : `${shortDate(range.from)} a ${shortDate(range.to)}`;
   const rangeDays = rangeValid ? Math.round((new Date(`${range.to}T12:00:00Z`).getTime() - new Date(`${range.from}T12:00:00Z`).getTime()) / 86_400_000) + 1 : 0;
   const selectedOrder = selected ? orders.find((order) => order.key === selected) ?? null : null;
-  const storeLabel = store ? stores.find((item) => item.store === store)?.storeLabel ?? "" : "";
+  const storeLabel = store ? storeSelectionLabel(stores, selectedStores) : "";
   const newCount = scoped.filter((order) => isNewSale(order, now, arrived[order.key])).length;
 
-  const pickStore = (value: string) => {
-    setStore(value);
+  const pickStores = (next: string[]) => {
+    setSelectedStores(next);
     setPage(1);
   };
   const pickOrigin = (value: Origin) => {
@@ -632,6 +637,30 @@ export default function LiveSalesPage() {
           <div className="-mx-3 overflow-x-auto px-3 [scrollbar-width:none] md:mx-0 md:px-0">
             <SegmentedControl<PeriodPreset> label="Período" value={period} onChange={choosePeriod} options={PERIOD_OPTIONS} />
           </div>
+          <div className="grid min-w-0 grid-cols-2 gap-2 lg:flex lg:flex-1 lg:items-center">
+            <div className="min-w-0 lg:w-72 lg:shrink-0">
+              <StoreMultiSelect options={allStores} selected={selectedStores} onChange={pickStores} />
+            </div>
+            <label className="relative min-w-0 lg:flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Escape") setSearch(""); }}
+                placeholder="Buscar por vendedor, cliente, produto ou pedido..."
+                aria-label="Buscar vendas por vendedor, cliente, produto ou pedido"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:focus:border-[#C4D600] [&::-webkit-search-cancel-button]:hidden"
+              />
+              {search && (
+                <button type="button" onClick={() => setSearch("")} aria-label="Limpar busca" className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </label>
+          </div>
+        </div>
+        <div className={`flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center ${period === "custom" || (!isLive && rangeValid) ? "" : "hidden"}`}>
           {period === "custom" && (
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
               <label className="flex items-center gap-1.5 font-semibold text-slate-500 dark:text-slate-400">
@@ -656,15 +685,6 @@ export default function LiveSalesPage() {
             </p>
           )}
         </div>
-        <nav aria-label="Filtrar por loja" className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
-          <button type="button" onClick={() => pickStore("")} className={pill(!store)}><Store className="h-3.5 w-3.5" />Todas</button>
-          {allStores.map((item) => (
-            <button key={item.store} type="button" onClick={() => pickStore(store === item.store ? "" : item.store)} className={pill(store === item.store)}>
-              {item.storeLabel}
-              {item.orders > 0 && <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${store === item.store ? "bg-white/20" : "bg-slate-100 dark:bg-white/10"}`}>{item.orders}</span>}
-            </button>
-          ))}
-        </nav>
       </header>
 
       {error && status === "offline" && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
@@ -734,10 +754,11 @@ export default function LiveSalesPage() {
               <button type="button" onClick={() => pickOrigin("crm")} className={pill(origin === "crm")}><MessageCircle className="h-3.5 w-3.5" />Via WhatsApp/CRM</button>
               <button type="button" onClick={() => pickOrigin("top")} className={pill(origin === "top")}><Trophy className="h-3.5 w-3.5" />Top lojas</button>
             </div>
-            <label className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Buscar loja, vendedor, marca, pedido..." aria-label="Buscar vendas" className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100" />
-            </label>
+            {query.trim() && (
+              <button type="button" onClick={() => setSearch("")} className="inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 self-start rounded-full bg-[#C4D600]/20 px-3 text-xs font-semibold text-[#051647] hover:bg-[#C4D600]/30 dark:text-[#C4D600] sm:ml-auto">
+                <Search className="h-3.5 w-3.5 shrink-0" /><span className="max-w-[14rem] truncate">&ldquo;{query.trim()}&rdquo;</span><X className="h-3.5 w-3.5 shrink-0" />
+              </button>
+            )}
           </div>
           {(status === "connecting" || loadingPeriod) && orders.length === 0 ? (
             <ul className="space-y-2.5">{[0, 1, 2, 3].map((index) => <li key={index} className="h-[104px] animate-pulse rounded-2xl bg-slate-100 dark:bg-white/[0.04]" />)}</ul>
@@ -768,10 +789,10 @@ export default function LiveSalesPage() {
               <ol className="space-y-2">
                 {allStores.filter((item) => item.orders > 0).slice(0, 8).map((item, index) => {
                   const share = allKpis.revenue ? (item.amount / allKpis.revenue) * 100 : 0;
-                  const active = store === item.store;
+                  const active = selectedStores.includes(item.store);
                   return (
                     <li key={item.store}>
-                      <button type="button" onClick={() => pickStore(active ? "" : item.store)} className={`w-full cursor-pointer rounded-xl p-2 text-left transition-colors ${active ? "bg-[#C4D600]/15 ring-1 ring-[#C4D600]/50" : "hover:bg-slate-50 dark:hover:bg-white/[0.04]"}`}>
+                      <button type="button" onClick={() => pickStores(active ? selectedStores.filter((code) => code !== item.store) : [...selectedStores, item.store])} className={`w-full cursor-pointer rounded-xl p-2 text-left transition-colors ${active ? "bg-[#C4D600]/15 ring-1 ring-[#C4D600]/50" : "hover:bg-slate-50 dark:hover:bg-white/[0.04]"}`}>
                         <span className="flex items-center gap-2.5">
                           <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-extrabold shadow-sm ${MEDALS[index] ?? "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"}`}>{index + 1}</span>
                           <span className="min-w-0 flex-1">
