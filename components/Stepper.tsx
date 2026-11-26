@@ -560,6 +560,8 @@ const nextLabel = isLast ? completeButtonText : nextButtonText;
 const { className: backClass = '', onClick: onBackClick, ...backRest } = backButtonProps;
 const { className: nextClass = '', onClick: onNextClick, ...nextRest } = nextButtonProps;
 const isModal = !!modalTitle;
+// Na 1ª etapa, com cancelButtonText + onCancel, o botão "Voltar" (que ficaria oculto) vira "Cancelar".
+const cancelInstead = current <= 1 && !!cancelButtonText && !!onCancel;
 const modalContent = (
 <>
 {isModal && (
@@ -638,15 +640,19 @@ aria-hidden={completed ? true : undefined}
 type="button"
 {...backRest}
 className={`${BUTTON_CLASS} ${BACK_CLASS} ${backClass}`.trim()}
-data-hidden={current <= 1 ? '' : undefined}
+data-hidden={current <= 1 && !cancelInstead ? '' : undefined}
 tabIndex={completed ? -1 : backRest.tabIndex}
 onClick={event => {
+if (cancelInstead) {
+onCancel?.();
+return;
+}
 onBackClick?.(event);
 if (!event.defaultPrevented) go(current - 1);
 }}
 >
-<HugeiconsIcon icon={ArrowLeft01Icon} size={16} strokeWidth={2} />
-<span>{backButtonText}</span>
+{!cancelInstead && <HugeiconsIcon icon={ArrowLeft01Icon} size={16} strokeWidth={2} />}
+<span>{cancelInstead ? cancelButtonText : backButtonText}</span>
 </button>
 {isLast && lastStepSecondaryAction && <div className="ml-auto flex items-center">{lastStepSecondaryAction}</div>}
 <button
