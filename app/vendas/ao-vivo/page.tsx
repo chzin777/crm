@@ -9,12 +9,14 @@ import {
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
-import { Avatar, ChartTooltip, FadeGradient, SegmentedControl, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
+import { ChartTooltip, FadeGradient, SegmentedControl, cardClass, chartTheme } from "@/components/dashboard/DashboardKit";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { StoreMultiSelect } from "@/components/sales-live/StoreMultiSelect";
 import { ordersInStores, searchOrders, storeSelectionLabel } from "@/lib/sales-live/filters";
+import { LeaderboardCard } from "@/components/sales-live/LeaderboardCard";
+import { sellerKey, sellerLeaders, storeLeaders } from "@/lib/sales-live/leaderboard";
 import {
-  KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, saleWhen, topSellers, validPeriod,
+  KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, saleWhen, validPeriod,
   type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset,
 } from "@/lib/sales-live/feed";
 
@@ -42,8 +44,6 @@ const shortDate = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day
 const KIND_ICON: Record<CategoryKind, React.ElementType> = { sol: Sun, grau: Glasses, lentes: Eye, outros: Package };
 const KIND_COLOR: Record<CategoryKind, string> = { sol: "#F7915E", grau: "#002187", lentes: "#0ea5e9", outros: "#94a3b8" };
 const PAYMENT_COLORS = ["#002187", LIME, "#F7915E", "#0ea5e9", "#8b5cf6", "#94a3b8", "#64748b"];
-const SELLER_TONES: Tone[] = ["indigo", "emerald", "amber", "sky", "violet"];
-const MEDALS = ["bg-gradient-to-br from-amber-300 to-amber-500 text-amber-950", "bg-gradient-to-br from-slate-200 to-slate-400 text-slate-800", "bg-gradient-to-br from-orange-300 to-orange-600 text-orange-950"];
 
 const compactMoney = (value: number) => (value >= 1000 ? `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : formatMoney(value));
 /** Valor curto sem centavos: "R$ 988", "R$ 1,2 mil". */
@@ -341,6 +341,8 @@ export default function LiveSalesPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState("");
   const [selectedStores, setSelectedStores] = useState<string[]>([]);
+  // Vendedor escolhido no ranking (loja|nome): filtra o feed; clicar de novo limpa.
+  const [seller, setSeller] = useState<string | null>(null);
   const [origin, setOrigin] = useState<Origin>("all");
   // Busca global: o campo responde na hora, o filtro do feed espera 200 ms depois da última tecla.
   const [search, setSearch] = useState("");
@@ -565,15 +567,18 @@ export default function LiveSalesPage() {
   // Hoje: hora a hora; períodos: dia a dia (destaque no dia de hoje, se estiver no intervalo).
   const hourly = useMemo<HourPoint[]>(() => (isLive ? hourlySeries(scoped, currentHour) : dailySeries(scoped, rangeFrom, rangeTo)), [isLive, scoped, currentHour, rangeFrom, rangeTo]);
   const highlight = isLive ? currentHour : (hourly as (HourPoint & { day?: string })[]).find((point) => point.day === today)?.hour ?? -1;
-  const sellers = useMemo(() => topSellers(scoped, 5), [scoped]);
+  const storeRanking = useMemo(() => storeLeaders(allStores), [allStores]);
+  const sellerRanking = useMemo(() => sellerLeaders(scoped), [scoped]);
+  const sellerName = seller ? sellerRanking.find((item) => item.key === seller)?.name ?? null : null;
   const kindMix = useMemo(() => mixByKind(scoped), [scoped]);
   const paymentMix = useMemo(() => mixByPayment(scoped), [scoped]);
   const topStoreKeys = useMemo(() => new Set(allStores.slice(0, 3).map((item) => item.store)), [allStores]);
   const feed = useMemo(() => searchOrders(scoped, query).filter((order) => {
+    if (seller && sellerKey(order) !== seller) return false;
     if (origin === "crm" && !order.fromCrm) return false;
     if (origin === "top" && !topStoreKeys.has(order.store)) return false;
     return true;
-  }), [scoped, origin, query, topStoreKeys]);
+  }), [scoped, origin, query, topStoreKeys, seller]);
   const paged = useMemo(() => paginate(feed, page, PAGE_SIZE), [feed, page]);
   const revenue = useAnimatedNumber(kpis.revenue);
   const peak = hourly.reduce<HourPoint | null>((best, point) => (point.revenue > (best?.revenue ?? 0) ? point : best), null);
@@ -589,6 +594,11 @@ export default function LiveSalesPage() {
   const pickStores = (next: string[]) => {
     setSelectedStores(next);
     setPage(1);
+  };
+  const pickSeller = (next: string | null) => {
+    setSeller(next);
+    setPage(1);
+    if (next) setTab("feed");
   };
   const pickOrigin = (value: Origin) => {
     setOrigin(value);
@@ -754,6 +764,11 @@ export default function LiveSalesPage() {
               <button type="button" onClick={() => pickOrigin("crm")} className={pill(origin === "crm")}><MessageCircle className="h-3.5 w-3.5" />Via WhatsApp/CRM</button>
               <button type="button" onClick={() => pickOrigin("top")} className={pill(origin === "top")}><Trophy className="h-3.5 w-3.5" />Top lojas</button>
             </div>
+            {sellerName && (
+              <button type="button" onClick={() => pickSeller(null)} title="Mostrar todos os vendedores" className="inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 self-start rounded-full bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] sm:ml-auto">
+                <UserRound className="h-3.5 w-3.5 shrink-0" /><span className="max-w-[14rem] truncate">{sellerName}</span><X className="h-3.5 w-3.5 shrink-0" />
+              </button>
+            )}
             {query.trim() && (
               <button type="button" onClick={() => setSearch("")} className="inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 self-start rounded-full bg-[#C4D600]/20 px-3 text-xs font-semibold text-[#051647] hover:bg-[#C4D600]/30 dark:text-[#C4D600] sm:ml-auto">
                 <Search className="h-3.5 w-3.5 shrink-0" /><span className="max-w-[14rem] truncate">&ldquo;{query.trim()}&rdquo;</span><X className="h-3.5 w-3.5 shrink-0" />
@@ -781,63 +796,29 @@ export default function LiveSalesPage() {
         </section>
 
         <aside className={`min-w-0 space-y-4 lg:col-span-5 ${mobileOnly("rank")}`}>
-          <section className={`${cardClass} p-4 lg:p-5`}>
-            <SectionTitle icon={Trophy} title={`Top lojas ${suffix}`}hint="Toque para filtrar o painel pela loja" />
-            {allKpis.topStores.length === 0 ? (
-              <p className="text-sm text-slate-400">Sem vendas ainda.</p>
-            ) : (
-              <ol className="space-y-2">
-                {allStores.filter((item) => item.orders > 0).slice(0, 8).map((item, index) => {
-                  const share = allKpis.revenue ? (item.amount / allKpis.revenue) * 100 : 0;
-                  const active = selectedStores.includes(item.store);
-                  return (
-                    <li key={item.store}>
-                      <button type="button" onClick={() => pickStores(active ? selectedStores.filter((code) => code !== item.store) : [...selectedStores, item.store])} className={`w-full cursor-pointer rounded-xl p-2 text-left transition-colors ${active ? "bg-[#C4D600]/15 ring-1 ring-[#C4D600]/50" : "hover:bg-slate-50 dark:hover:bg-white/[0.04]"}`}>
-                        <span className="flex items-center gap-2.5">
-                          <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-extrabold shadow-sm ${MEDALS[index] ?? "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"}`}>{index + 1}</span>
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center justify-between gap-2 text-sm">
-                              <span className="min-w-0 break-words font-semibold text-slate-800 dark:text-slate-100">{item.storeLabel}</span>
-                              <span className="shrink-0 font-bold tabular-nums text-[#051647] dark:text-white">{formatMoney(item.amount)}</span>
-                            </span>
-                            <span className="mt-1 flex items-center gap-2">
-                              <span className="block h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
-                                <span className={`block h-full rounded-full transition-[width] duration-700 ${index === 0 ? "bg-gradient-to-r from-[#C4D600] to-[#9fb000]" : "bg-gradient-to-r from-[#002187] to-[#3b5bdb]"}`} style={{ width: `${(item.amount / (allStores[0]?.amount || 1)) * 100}%` }} />
-                              </span>
-                              <span className="shrink-0 text-[11px] tabular-nums text-slate-500 dark:text-slate-400">{percent(share)} · {item.orders} ped.</span>
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
+          <LeaderboardCard
+            title={`Top lojas ${suffix}`}
+            icon={Trophy}
+            kind="store"
+            items={storeRanking}
+            countLabel={(count) => `${count} ${count === 1 ? "loja ativa" : "lojas ativas"}`}
+            hint="toque para filtrar"
+            activeKeys={selectedStores}
+            onSelect={(key) => pickStores(selectedStores.includes(key) ? selectedStores.filter((code) => code !== key) : [...selectedStores, key])}
+            emptyText="Sem vendas ainda."
+          />
 
-          <section className={`${cardClass} p-4 lg:p-5`}>
-            <SectionTitle icon={Users} title={`Top vendedores ${suffix}`}hint={storeLabel || "Todas as lojas"} />
-            {sellers.length === 0 ? (
-              <p className="text-sm text-slate-400">Sem vendas com vendedor ainda.</p>
-            ) : (
-              <ol className="space-y-1.5">
-                {sellers.map((seller, index) => (
-                  <li key={seller.key} className="flex min-w-0 items-center gap-2.5 rounded-xl p-1.5">
-                    <span className="relative">
-                      <Avatar name={seller.seller} tone={SELLER_TONES[index % SELLER_TONES.length]} size="sm" />
-                      {index < 3 && <span className={`absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full text-[9px] font-extrabold ring-2 ring-white dark:ring-[#071440] ${MEDALS[index]}`}>{index + 1}</span>}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block break-words text-sm font-semibold text-slate-800 dark:text-slate-100">{seller.seller}</span>
-                      <span className="block break-words text-[11px] text-slate-500 dark:text-slate-400">{seller.storeLabel} · {seller.orders} {seller.orders === 1 ? "venda" : "vendas"}</span>
-                    </span>
-                    <span className="shrink-0 text-sm font-bold tabular-nums text-[#051647] dark:text-white">{compactMoney(seller.amount)}</span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+          <LeaderboardCard
+            title={`Top vendedores ${suffix}`}
+            icon={Users}
+            kind="seller"
+            items={sellerRanking}
+            countLabel={(count) => `${count} ${count === 1 ? "consultor" : "consultores"}`}
+            hint={storeLabel || "todas as lojas"}
+            activeKeys={seller ? [seller] : []}
+            onSelect={(key) => pickSeller(seller === key ? null : key)}
+            emptyText="Sem vendas com vendedor ainda."
+          />
 
           <section className={`${cardClass} p-4 lg:p-5`}>
             <SectionTitle icon={Package} title={`Mix ${suffix}`}hint="Participação no faturamento" />
