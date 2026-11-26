@@ -1659,7 +1659,7 @@ export function CampaignsView() {
 
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-[#07194f]">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] border-collapse text-left">
+            <table className="w-full min-w-[960px] border-collapse text-left">
               <thead className="bg-slate-50/80 text-[10px] font-bold uppercase text-slate-400 dark:bg-slate-800/40">
                 <tr>
                   <th className="w-10 px-3 py-3">
@@ -1686,7 +1686,6 @@ export function CampaignsView() {
                   <th className="px-4 py-3"><button type="button" onClick={() => handleSort("status")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Status{sortIcon(sortConfig, "status")}</button></th>
                   <th className="w-44 px-4 py-3"><button type="button" onClick={() => handleSort("total")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Progresso / total{sortIcon(sortConfig, "total")}</button></th>
                   <th className="px-4 py-3"><button type="button" onClick={() => handleSort("enviados")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Enviados · Entregues · Lidos · Respostas{sortIcon(sortConfig, "enviados")}</button></th>
-                  <th className="px-4 py-3"><button type="button" onClick={() => handleSort("atualizacao")} className="inline-flex items-center gap-1 cursor-pointer hover:text-slate-600 dark:hover:text-slate-200">Atualização{sortIcon(sortConfig, "atualizacao")}</button></th>
                   <th className="px-4 py-3 text-right">Ações</th>
                 </tr>
               </thead>
@@ -1775,7 +1774,6 @@ export function CampaignsView() {
                           <span className="inline-flex items-center gap-1" title="Respostas"><MessageCircleReply className="h-3 w-3 text-slate-400" />{int(row.stats.replied)}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2 xl:py-3.5 text-xs text-slate-500 dark:text-slate-400">{row.kind === "campaign" && row.updatedAt > 0 ? formatDateTime(new Date(row.updatedAt).toISOString()) : row.updatedLabel}</td>
                       <td className="px-4 py-2 xl:py-3.5 text-right" onClick={(event) => event.stopPropagation()}>
                         <div className="flex justify-end gap-1.5">
                           {row.kind === "campaign" && row.campaign && (
@@ -1800,7 +1798,7 @@ export function CampaignsView() {
                   );
                 })}
                 {filteredRows.length === 0 && (
-                  <tr><td colSpan={9} className="px-5 py-14 text-center">
+                  <tr><td colSpan={8} className="px-5 py-14 text-center">
                     <Search className="mx-auto h-5 w-5 text-slate-400" />
                     <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{rows.length === 0 ? "Nenhuma campanha ainda" : "Nenhuma campanha encontrada"}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{rows.length === 0 ? "Clique em Nova campanha para criar e disparar o primeiro envio." : "Tente mudar a busca ou o filtro."}</p>
