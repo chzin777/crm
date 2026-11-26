@@ -625,6 +625,8 @@ class Snapshot:
 # Fora: cancelados/abertos/inconsistentes, transferências entre lojas (cliente = unidade da rede) e depósitos.
 # "A Liberar" (venda feita aguardando liberação de desconto/crédito) conta como no relatório de vendas do VMSET:
 # só "Faturado" deixava ~R$ 20 mil de fora em 26/11/2026 (R$ 133.871,56 no painel x R$ 153.947,14 no VMSET).
+# Só movimento do tipo "Venda": "Outras Saídas" (bonificação, livre emissão, devolução de compra, cancelamento fora
+# do dia, transferência para a matriz) somavam ~R$ 103 mil em novembro/2026 sem ser venda.
 SALES_SQL = """
 SELECT NVL(TO_CHAR(I.ITEM_PEDIDO_SAIDA_ID), 'P' || PS.PEDIDO_SAIDA_ID), UE.UNEM_CODIGO, PS.PDSD_NR_PEDIDO,
        PS.PDSD_DT_EMISSAO, V.PRCR_NOME, P.PRCR_NOME, P.PRCR_CGC_CPF, P.PRCR_CELULAR, P.PRCR_FONE, M.MARC_DESCRICAO,
@@ -634,6 +636,7 @@ SELECT NVL(TO_CHAR(I.ITEM_PEDIDO_SAIDA_ID), 'P' || PS.PEDIDO_SAIDA_ID), UE.UNEM_
        D.TPDC_DESCRICAO, CPG.CDPG_DESCRICAO, PS.PDSD_VLR_TOTAL
 FROM PEDIDO_SAIDA PS
 JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PS.UNIDADE_EMPRESARIAL_ID
+JOIN TIPO_MOV_ESTOQUE TM ON TM.TIPO_MOV_ESTOQUE_ID = PS.TIPO_MOV_ESTOQUE_ID AND TM.TPME_TIPO = 'Venda'
 LEFT JOIN ITEM_PEDIDO_SAIDA I ON I.PEDIDO_SAIDA_ID = PS.PEDIDO_SAIDA_ID
 LEFT JOIN PRODUTO PR ON PR.PRODUTO_ID = I.PRODUTO_ID
 LEFT JOIN SUBCATEGORIA_PRODUTO SP ON SP.SUBCATEGORIA_PRODUTO_ID = PR.SUBCATEGORIA_PRODUTO_ID
@@ -650,6 +653,16 @@ WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 1000 AND 2999
 """
 MAX_SALES_DAYS = 93
+
+# Devoluções de cliente no dia da devolução (BI do VMSet, VALOR_TOTAL negativo por item): abatidas do faturamento
+# para chegar ao líquido do relatório (em novembro/2026: R$ 242.925,75 na rede, R$ 81.762,49 na loja 4).
+RETURNS_SQL = """
+SELECT T.LOJA, T.NUM_PEDIDO, T.DATA_PEDIDO, SUM(T.VALOR_TOTAL)
+FROM tab_dados_dinamicos T
+WHERE T.TIPO = 'Devolucao Cliente' AND T.DATA_PEDIDO >= :a AND T.DATA_PEDIDO < :b
+  AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999
+GROUP BY T.LOJA, T.NUM_PEDIDO, T.DATA_PEDIDO
+"""
 
 
 def digits(value, pad=0):
@@ -685,6 +698,19 @@ def sales_between(start, end):
         return [item for item in (sale_item(row) for row in cur.fetchall()) if item["id"]]
 
 
+def returns_between(start, end):
+    """Devoluções de cliente com data em [start, end): [{"store", "order", "date", "amount"}] (amount positivo)."""
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        cur.execute(RETURNS_SQL, a=datetime.datetime.combine(start, datetime.time()), b=datetime.datetime.combine(end, datetime.time()))
+        rows = cur.fetchall()
+    return [
+        {"store": text(store), "order": text(order), "date": day.strftime("%Y-%m-%d") if day else None, "amount": round(-float(total or 0), 2)}
+        for store, order, day, total in rows
+        if store is not None and total
+    ]
+
+
 class SalesCache:
     """Vendas por período em memória: o Oracle é consultado no máximo uma vez por janela (hoje a cada 10 s, períodos
     que incluem hoje a cada 60 s, períodos fechados a cada 10 min), não importa quantos navegadores estejam abertos."""
@@ -700,7 +726,7 @@ class SalesCache:
         with self.lock:
             entry = self.entries.get(key)
             if not entry or time.time() - entry["at"] >= ttl:
-                entry = {"at": time.time(), "items": sales_between(start, end)}
+                entry = {"at": time.time(), "items": sales_between(start, end), "returns": returns_between(start, end)}
                 self.entries = {k: v for k, v in self.entries.items() if time.time() - v["at"] < 600}
                 self.entries[key] = entry
             return entry
@@ -790,7 +816,7 @@ class Handler(BaseHTTPRequestHandler):
             today = datetime.date.today()
             try:
                 entry = sales_cache.get(today, today + datetime.timedelta(days=1))
-                return self._send(200, {"at": int(entry["at"] * 1000), "day": today.isoformat(), "items": entry["items"]})
+                return self._send(200, {"at": int(entry["at"] * 1000), "day": today.isoformat(), "items": entry["items"], "returns": entry["returns"]})
             except Exception as error:
                 log(f"ERRO vendas do dia: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
@@ -805,7 +831,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": f"período inválido (até {MAX_SALES_DAYS} dias)"})
             try:
                 entry = sales_cache.get(start, last + datetime.timedelta(days=1))
-                return self._send(200, {"at": int(entry["at"] * 1000), "from": start.isoformat(), "to": last.isoformat(), "items": entry["items"]})
+                return self._send(200, {"at": int(entry["at"] * 1000), "from": start.isoformat(), "to": last.isoformat(), "items": entry["items"], "returns": entry["returns"]})
             except Exception as error:
                 log(f"ERRO vendas do período: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})

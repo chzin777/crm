@@ -16,8 +16,8 @@ import { ordersInStores, searchOrders, storeSelectionLabel } from "@/lib/sales-l
 import { LeaderboardCard } from "@/components/sales-live/LeaderboardCard";
 import { sellerKey, sellerLeaders, storeLeaders } from "@/lib/sales-live/leaderboard";
 import {
-  KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, saleWhen, validPeriod,
-  type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset,
+  KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, returnsByStore, saleWhen, validPeriod,
+  type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset, type StoreReturn,
 } from "@/lib/sales-live/feed";
 
 type Status = "connecting" | "live" | "polling" | "offline" | "period";
@@ -336,6 +336,8 @@ function MixBars({ slices, colorOf }: { slices: { key: string; label: string; am
 export default function LiveSalesPage() {
   const { isDark } = useCrmTheme();
   const [orders, setOrders] = useState<LiveOrder[]>([]);
+  // Devoluções de cliente do período: abatem o faturamento (líquido, como no relatório do VMSET).
+  const [returns, setReturns] = useState<StoreReturn[]>([]);
   const [stores, setStores] = useState<LiveSnapshot["stores"]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
@@ -405,11 +407,12 @@ export default function LiveSalesPage() {
     ordersRef.current = [];
     loadedRef.current = false;
 
-    const apply = (incoming: LiveOrder[], replace: boolean, meta: { updatedAt: string; stores: LiveSnapshot["stores"] }) => {
+    const apply = (incoming: LiveOrder[], replace: boolean, meta: { updatedAt: string; stores: LiveSnapshot["stores"]; returns?: StoreReturn[] }) => {
       const base = replace ? ordersRef.current.filter((order) => incoming.some((item) => item.key === order.key)) : ordersRef.current;
       const { orders: merged, fresh: added } = mergeOrders(base, incoming);
       ordersRef.current = merged;
       setOrders(merged);
+      setReturns(meta.returns ?? []);
       setStores(meta.stores);
       setUpdatedAt(meta.updatedAt);
       setError("");
@@ -510,6 +513,7 @@ export default function LiveSalesPage() {
         if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível carregar as vendas do período.");
         ordersRef.current = body.data.orders;
         setOrders(body.data.orders);
+        setReturns(body.data.returns ?? []);
         setStores(body.data.stores);
         setUpdatedAt(body.data.updatedAt);
         setStatus("period");
@@ -540,6 +544,7 @@ export default function LiveSalesPage() {
     }
     ordersRef.current = [];
     setOrders([]);
+    setReturns([]);
     setStores([]);
     setArrived({});
     setSelected(null);
@@ -551,8 +556,9 @@ export default function LiveSalesPage() {
   const currentHour = brHour(now);
   const scoped = useMemo(() => ordersInStores(orders, selectedStores), [orders, selectedStores]);
   const store = selectedStores.length > 0;
-  const kpis = useMemo(() => dayKpis(scoped), [scoped]);
-  const allKpis = useMemo(() => dayKpis(orders), [orders]);
+  const scopedReturns = useMemo(() => (selectedStores.length ? returns.filter((item) => selectedStores.includes(item.store)) : returns), [returns, selectedStores]);
+  const kpis = useMemo(() => dayKpis(scoped, scopedReturns), [scoped, scopedReturns]);
+  const allKpis = useMemo(() => dayKpis(orders, returns), [orders, returns]);
   const allStores = useMemo(() => {
     const byStore = new Map<string, { amount: number; orders: number }>();
     for (const order of orders) {
@@ -561,8 +567,13 @@ export default function LiveSalesPage() {
       entry.orders += 1;
       byStore.set(order.store, entry);
     }
+    // Faturamento líquido por loja: vendas − devoluções da própria loja.
+    for (const [storeKey, amount] of returnsByStore(returns)) {
+      const entry = byStore.get(storeKey);
+      if (entry) entry.amount -= amount;
+    }
     return stores.map((item) => ({ ...item, ...(byStore.get(item.store) ?? { amount: 0, orders: 0 }) })).sort((a, b) => b.amount - a.amount || b.orders - a.orders);
-  }, [orders, stores]);
+  }, [orders, returns, stores]);
   const crm = useMemo(() => crmShare(scoped), [scoped]);
   // Hoje: hora a hora; períodos: dia a dia (destaque no dia de hoje, se estiver no intervalo).
   const hourly = useMemo<HourPoint[]>(() => (isLive ? hourlySeries(scoped, currentHour) : dailySeries(scoped, rangeFrom, rangeTo)), [isLive, scoped, currentHour, rangeFrom, rangeTo]);
@@ -709,6 +720,7 @@ export default function LiveSalesPage() {
               {newCount > 0 && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C4D600] px-2 py-0.5 text-[10px] font-extrabold uppercase text-[#051647]"><Zap className="h-3 w-3" />{newCount} {newCount === 1 ? "nova" : "novas"}</span>}
             </div>
             <p className="mt-1 text-[2.6rem] font-extrabold leading-none tabular-nums tracking-tight text-white sm:text-5xl xl:text-6xl">{formatMoney(revenue)}</p>
+            {kpis.returns > 0 && <p className="mt-1 text-[11px] text-white/60" title="Faturamento líquido, como no relatório do VMSET: vendas menos devoluções de clientes do período.">Líquido de {formatMoney(kpis.returns)} em devoluções</p>}
             {store && allKpis.revenue > 0 && <p className="mt-1.5 text-xs text-white/70"><span className="font-bold text-[#C4D600]">{percent((kpis.revenue / allKpis.revenue) * 100)}</span> do faturamento total ({formatMoney(allKpis.revenue)})</p>}
             {!store && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
             {!isLive && rangeValid && <p className="mt-1.5 text-xs tabular-nums text-white/70">{rangeLabel}{loadingPeriod && <Loader2 className="ml-1.5 inline h-3.5 w-3.5 animate-spin" />}</p>}

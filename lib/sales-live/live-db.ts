@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { brDay } from "@/lib/br-time";
 import { storeErpCode, storeFriendlyLabel } from "@/lib/stores";
-import { buildOrders, changedOrders, dayKpis, phoneKey, type LiveEvent, type LiveSnapshot, type SaleItem } from "@/lib/sales-live/feed";
+import { buildOrders, changedOrders, dayKpis, parseReturns, phoneKey, type LiveEvent, type LiveSnapshot, type SaleItem } from "@/lib/sales-live/feed";
 
 /**
  * Poller único das vendas do dia (uma consulta à API do VMSet a cada ciclo, não importa quantos celulares estejam
@@ -132,8 +132,9 @@ export async function periodSnapshot(from: string, to: string): Promise<LiveSnap
   const url = `${API_URL()}/sales/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const response = await fetch(url, { headers: { "x-api-key": API_TOKEN() }, signal: AbortSignal.timeout(30_000), cache: "no-store" });
   if (!response.ok) throw new Error(`API do VMSet respondeu ${response.status}`);
-  const body = (await response.json()) as { items?: SaleItem[] };
+  const body = (await response.json()) as { items?: SaleItem[]; returns?: unknown };
   const items = Array.isArray(body.items) ? body.items : [];
+  const returns = parseReturns(body.returns, from);
   const rows = await storeRows();
   const storeLabel = labelerFor(rows);
   const draft = buildOrders(items, from, { storeLabel });
@@ -142,7 +143,7 @@ export async function periodSnapshot(from: string, to: string): Promise<LiveSnap
     return new Map<string, string | null>();
   });
   const orders = buildOrders(items, from, { storeLabel, fromCrm: (key) => matched.has(key), conversationOf: (key) => matched.get(key) ?? null });
-  return { day: from, from, to, updatedAt: new Date().toISOString(), seq: 0, orders, kpis: dayKpis(orders), stores: storesOf(orders, rows) };
+  return { day: from, from, to, updatedAt: new Date().toISOString(), seq: 0, orders, returns, kpis: dayKpis(orders, returns), stores: storesOf(orders, rows) };
 }
 
 function emit(event: LiveEvent) {
@@ -158,9 +159,10 @@ function emit(event: LiveEvent) {
 async function tick() {
   const response = await fetch(`${API_URL()}/sales/today`, { headers: { "x-api-key": API_TOKEN() }, signal: AbortSignal.timeout(15_000), cache: "no-store" });
   if (!response.ok) throw new Error(`API do VMSet respondeu ${response.status}`);
-  const body = (await response.json()) as { day?: string; items?: SaleItem[] };
+  const body = (await response.json()) as { day?: string; items?: SaleItem[]; returns?: unknown };
   const day = body.day && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : brDay();
   const items = Array.isArray(body.items) ? body.items : [];
+  const returns = parseReturns(body.returns, day);
   const previous = state.snapshot;
   const dayChanged = !previous || previous.day !== day;
   if (dayChanged) {
@@ -177,14 +179,15 @@ async function tick() {
   const removed = !dayChanged && previous.orders.length > 0 && orders.length < previous.orders.length;
   const stores = storesOf(orders, rows);
   const seq = (previous?.seq ?? 0) + (changed.length || removed ? 1 : 0);
-  const snapshot: LiveSnapshot = { day, updatedAt: new Date().toISOString(), seq, orders, kpis: dayKpis(orders), stores };
+  const returnsChanged = JSON.stringify(previous?.returns ?? []) !== JSON.stringify(returns);
+  const snapshot: LiveSnapshot = { day, updatedAt: new Date().toISOString(), seq: seq + (returnsChanged && !changed.length && !removed ? 1 : 0), orders, returns, kpis: dayKpis(orders, returns), stores };
   state.snapshot = snapshot;
   state.items = items;
   state.error = null;
-  // Virada do dia ou pedido cancelado (saiu do VMSet): retrato inteiro; senão, só os pedidos novos/alterados.
+  // Virada do dia ou pedido cancelado (saiu do VMSet): retrato inteiro; senão, só os pedidos novos/alterados
+  // (as devoluções do dia vão sempre inteiras: são poucas).
   if (dayChanged || removed) emit({ type: "snapshot", snapshot });
-  else if (changed.length) emit({ type: "orders", orders: changed, kpis: snapshot.kpis, seq, updatedAt: snapshot.updatedAt, stores });
-  else emit({ type: "orders", orders: [], kpis: snapshot.kpis, seq, updatedAt: snapshot.updatedAt, stores });
+  else emit({ type: "orders", orders: changed, returns, kpis: snapshot.kpis, seq: snapshot.seq, updatedAt: snapshot.updatedAt, stores });
 }
 
 function runOnce() {

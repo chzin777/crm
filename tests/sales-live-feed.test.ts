@@ -49,7 +49,7 @@ describe("agregados do dia", () => {
     const kpis = dayKpis(orders);
     expect(kpis).toMatchObject({ revenue: 650.35, orders: 4, ticket: 162.59 });
     expect(kpis.topStores.map((store) => [store.store, store.amount, store.orders])).toEqual([["1", 400, 2], ["2", 250.25, 1], ["3", 0.1, 1]]);
-    expect(dayKpis([])).toEqual({ revenue: 0, orders: 0, ticket: 0, topStores: [] });
+    expect(dayKpis([])).toEqual({ revenue: 0, orders: 0, ticket: 0, topStores: [], returns: 0 });
   });
 
   it("formatação: há X seg · HH:MM, resumo de marcas e horário de Brasília", () => {

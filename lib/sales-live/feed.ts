@@ -62,10 +62,32 @@ export type LiveOrder = {
 };
 
 export type StoreRank = { store: string; storeLabel: string; amount: number; orders: number };
-export type LiveKpis = { revenue: number; orders: number; ticket: number; topStores: StoreRank[] };
-export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; kpis: LiveKpis; stores: { store: string; storeLabel: string; search?: string }[]; from?: string; to?: string };
+/** revenue = vendas − devoluções (líquido do relatório do VMSET); returns = total devolvido abatido. */
+export type LiveKpis = { revenue: number; orders: number; ticket: number; topStores: StoreRank[]; returns: number };
+/** Devolução de cliente no dia em que aconteceu (abate o faturamento da loja). */
+export type StoreReturn = { store: string; order: string | null; day: string; amount: number };
+export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; stores: { store: string; storeLabel: string; search?: string }[]; from?: string; to?: string };
 /** Mensagens do canal ao vivo: retrato inteiro (conexão, virada do dia, cancelamento) ou só os pedidos novos/alterados. */
-export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
+export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
+
+/** Devoluções da API do VMSet (valor positivo, dia AAAA-MM-DD); linhas inválidas ficam de fora. */
+export function parseReturns(raw: unknown, fallbackDay: string): StoreReturn[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    const item = (entry ?? {}) as { store?: unknown; order?: unknown; date?: unknown; amount?: unknown };
+    const amount = typeof item.amount === "number" && Number.isFinite(item.amount) ? money2(item.amount) : 0;
+    if (!item.store || amount <= 0) return [];
+    const day = typeof item.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : fallbackDay;
+    return [{ store: String(item.store), order: item.order ? String(item.order) : null, day, amount }];
+  });
+}
+
+/** Total devolvido por loja. */
+export function returnsByStore(returns: StoreReturn[]) {
+  const byStore = new Map<string, number>();
+  for (const item of returns) byStore.set(item.store, money2((byStore.get(item.store) ?? 0) + item.amount));
+  return byStore;
+}
 
 const BRAND_WORDS: Record<string, string> = { "RAY BAN": "Ray-Ban", RAYBAN: "Ray-Ban", "MIU MIU": "Miu Miu", MIUMIU: "Miu Miu", ZEISS: "Zeiss", "D&G": "D&G", "DOLCE & GABBANA": "Dolce & Gabbana" };
 
@@ -148,9 +170,13 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
   return orders.sort((a, b) => b.at.localeCompare(a.at) || b.key.localeCompare(a.key));
 }
 
-/** Faturamento, pedidos, ticket médio e as 5 lojas que mais faturaram no dia. */
-export function dayKpis(orders: LiveOrder[]): LiveKpis {
-  const revenue = money2(orders.reduce((sum, order) => sum + order.amount, 0));
+/**
+ * Faturamento líquido (vendas − devoluções, como o relatório do VMSET), pedidos, ticket médio (das vendas) e as
+ * 5 lojas que mais faturaram. Mesma conta para Hoje, Esta semana, Este mês e Personalizado.
+ */
+export function dayKpis(orders: LiveOrder[], returns: StoreReturn[] = []): LiveKpis {
+  const sales = money2(orders.reduce((sum, order) => sum + order.amount, 0));
+  const returned = money2(returns.reduce((sum, item) => sum + item.amount, 0));
   const byStore = new Map<string, StoreRank>();
   for (const order of orders) {
     const rank = byStore.get(order.store) ?? { store: order.store, storeLabel: order.storeLabel, amount: 0, orders: 0 };
@@ -158,11 +184,16 @@ export function dayKpis(orders: LiveOrder[]): LiveKpis {
     rank.orders += 1;
     byStore.set(order.store, rank);
   }
+  for (const [store, amount] of returnsByStore(returns)) {
+    const rank = byStore.get(store);
+    if (rank) rank.amount = money2(rank.amount - amount);
+  }
   return {
-    revenue,
+    revenue: money2(sales - returned),
     orders: orders.length,
-    ticket: orders.length ? money2(revenue / orders.length) : 0,
+    ticket: orders.length ? money2(sales / orders.length) : 0,
     topStores: [...byStore.values()].sort((a, b) => b.amount - a.amount || b.orders - a.orders).slice(0, 5),
+    returns: returned,
   };
 }
 
