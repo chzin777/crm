@@ -36,11 +36,11 @@ export type ChatMenuSettings = {
   /** Desligado: o encerramento por inatividade herda farewellText. */
   silenceCloseCustom: boolean;
   silenceCloseText: string;
-  /** Pesquisa de 1 a 5 depois que um atendente encerra a conversa. */
+  /** Pesquisa de 0 a 10 depois que um atendente encerra a conversa. */
   npsEnabled: boolean;
   npsPromptText: string;
   npsThanksText: string;
-  /** Pergunta enviada depois de nota 1, 2 ou 3; vazia, a nota baixa recebe direto o agradecimento. */
+  /** Convite ao comentário opcional, enviado depois de qualquer nota; vazio, a nota recebe direto o agradecimento. */
   npsCommentText: string;
   options: MenuOption[];
   canvas: MenuCanvas;
@@ -68,26 +68,39 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   silenceCloseCustom: false,
   silenceCloseText: "",
   npsEnabled: true,
-  npsPromptText: "De 1 a 5, como você avalia o atendimento recebido hoje?",
+  npsPromptText: "De 0 a 10, que nota você dá para o atendimento recebido hoje?",
   npsThanksText: "Agradecemos pela sua avaliação! Ela é muito importante para nós.",
-  npsCommentText: "Sentimos muito que sua experiência não tenha sido ideal. Poderia nos contar brevemente o que podemos melhorar?",
+  npsCommentText: "Obrigado pela nota! Se quiser, conte em poucas palavras o que motivou sua avaliação. O comentário é opcional e nos ajuda muito.",
   options: [],
   canvas: { positions: {}, drafts: [] },
 };
 
-/** Escala fixa: a leitura da nota depende destes rótulos, por isso não são editáveis. */
+/** Escala antiga (1 a 5): só para reconhecer pesquisas antigas no histórico e as respostas pendentes delas. */
 export const NPS_SCORE_LABELS = ["Muito insatisfeito", "Insatisfeito", "Neutro", "Satisfeito", "Muito satisfeito"];
 export const NPS_SCORE_EMOJIS = ["😡", "🙁", "😐", "🙂", "🤩"];
 /** Emoji colado no rótulo em todas as notas: com espaço, "1 - Muito insatisfeito 😡" passa dos 24 da lista. */
 export const npsScoreLine = (label: string, index: number) => `${index + 1} - ${label}${NPS_SCORE_EMOJIS[index]}`;
 export const npsScoreTitle = npsScoreLine;
-export const NPS_SCALE_TEXT = NPS_SCORE_LABELS.map(npsScoreLine).join("\n");
-/** Formatos anteriores da escala (sem emoji e com emoji separado): ainda marcam pesquisas antigas no histórico. */
+/**
+ * Escala de 0 a 10 (texto fixo no fim da pesquisa; marca a mensagem como pesquisa no histórico).
+ * Sem lista interativa: o WhatsApp aceita no máximo 10 opções e a escala tem 11.
+ */
+export const NPS_SCALE_TEXT = "Responda com um número de 0 a 10. Sendo 0 a 6 baixa, 7 e 8 boa e 9 e 10 excelente.";
+/** Formatos anteriores da escala de 1 a 5: ainda marcam pesquisas antigas no histórico. */
 export const NPS_LEGACY_SCALES = [
+  NPS_SCORE_LABELS.map(npsScoreLine).join("\n"),
   NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label}`).join("\n"),
   NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label} ${NPS_SCORE_EMOJIS[index]}`).join("\n"),
 ];
-export const npsPrompt = (settings: ChatMenuSettings) => settings.npsPromptText.trim() || DEFAULT_CHAT_SETTINGS.npsPromptText;
+/** Pergunta salva ainda com "de 1 a 5" passa a falar da escala nova. */
+export const npsPrompt = (settings: ChatMenuSettings) =>
+  (settings.npsPromptText.trim() || DEFAULT_CHAT_SETTINGS.npsPromptText).replace(/\b(de|entre)\s+1\s+(a|e)\s+5\b/gi, (_match, word: string) => `${word} 0 a 10`);
+const LEGACY_NPS_COMMENT = "Sentimos muito que sua experiência não tenha sido ideal. Poderia nos contar brevemente o que podemos melhorar?";
+/** Convite ao comentário (qualquer nota). O texto antigo, pensado só para nota baixa, vira o convite novo. */
+export const npsCommentPrompt = (settings: ChatMenuSettings) => {
+  const text = settings.npsCommentText.trim();
+  return text === LEGACY_NPS_COMMENT ? DEFAULT_CHAT_SETTINGS.npsCommentText : text;
+};
 
 /** 30 minutos, 1 hora, 24 horas, 2 dias: o tempo por extenso para a mensagem ao cliente. */
 export function silenceDurationText(minutes: number) {

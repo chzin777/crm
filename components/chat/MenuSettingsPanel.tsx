@@ -8,7 +8,8 @@ import { ChoiceCards, DurationField, MessageField, SettingCard, Switch, SwitchRo
 import { CUSTOMER_VARIABLES, MenuOptionFields, menuActionSummary, type MenuPeople } from "@/components/chat/MenuOptionFields";
 import { MenuSimulator } from "@/components/chat/MenuSimulator";
 import { ClosingSimulator } from "@/components/chat/ClosingSimulator";
-import { DEFAULT_CHAT_SETTINGS, NPS_SCORE_LABELS, npsScoreLine, addToTree, moveInTree, newMenuOption, removeFromTree, silenceDurationText, updateTree, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
+import { NPS_BANDS, NPS_BAND_BADGE } from "@/lib/nps-scale";
+import { DEFAULT_CHAT_SETTINGS, npsCommentPrompt, addToTree, moveInTree, newMenuOption, removeFromTree, silenceDurationText, updateTree, type ChatMenuSettings, type MenuOption } from "@/lib/chat/settings";
 
 const MenuFlowCanvas = dynamic(() => import("@/components/chat/MenuFlowCanvas").then((module) => module.MenuFlowCanvas), {
   ssr: false,
@@ -386,15 +387,16 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                 {settings.npsEnabled && (
                   <>
                     <MessageField id="menu-nps-prompt" label="Pergunta" rows={2} value={settings.npsPromptText} onChange={(value) => set("npsPromptText", value)} placeholder={DEFAULT_CHAT_SETTINGS.npsPromptText} hint="Vazia: usa a pergunta padrão." />
-                    <MessageField id="menu-nps-comment" label="Pergunta para notas 1, 2 e 3" rows={2} value={settings.npsCommentText} onChange={(value) => set("npsCommentText", value)} hint="A resposta do cliente nos 5 minutos seguintes vira o comentário da avaliação. Vazia: a nota baixa recebe direto o agradecimento." />
-                    <MessageField id="menu-nps-thanks" label="Agradecimento" rows={2} value={settings.npsThanksText} onChange={(value) => set("npsThanksText", value)} hint="Notas 4 e 5 recebem logo após a nota; notas baixas, depois do comentário. Vazio: nada é enviado." />
+                    <MessageField id="menu-nps-comment" label="Convite ao comentário (qualquer nota)" rows={2} value={npsCommentPrompt(settings)} onChange={(value) => set("npsCommentText", value)} hint="Enviado depois de qualquer nota, inclusive 9 e 10. A resposta do cliente nos 10 minutos seguintes vira o comentário. Vazio: a nota recebe direto o agradecimento." />
+                    <MessageField id="menu-nps-thanks" label="Agradecimento" rows={2} value={settings.npsThanksText} onChange={(value) => set("npsThanksText", value)} hint="Enviado depois do comentário (ou logo após a nota, sem convite ao comentário). Vazio: nada é enviado." />
                     <div>
-                      <p className={labelClass}>Escala de notas</p>
+                      <p className={labelClass}>Escala de notas (0 a 10)</p>
                       <ul className="flex flex-wrap gap-1.5" aria-label="Escala de notas">
-                        {NPS_SCORE_LABELS.map((label, index) => (
-                          <li key={label} className={`rounded-full border px-2 py-0.5 text-[11px] ${index >= 3 ? "border-[#C4D600] bg-[#C4D600]/10 text-slate-700 dark:text-slate-200" : "border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300"}`}>{npsScoreLine(label, index)}</li>
+                        {(Object.keys(NPS_BANDS) as (keyof typeof NPS_BANDS)[]).map((band) => (
+                          <li key={band} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${NPS_BAND_BADGE[band]}`}>{NPS_BANDS[band].range}: {NPS_BANDS[band].label.toLowerCase()}</li>
                         ))}
                       </ul>
+                      <p className="mt-1 text-[10px] text-slate-400">O cliente responde com o número (o WhatsApp não permite lista com 11 opções).</p>
                     </div>
                   </>
                 )}

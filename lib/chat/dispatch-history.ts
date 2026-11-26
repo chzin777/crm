@@ -35,7 +35,7 @@ export async function recordDispatchInChat(input: {
   campaignId?: string;
   campaignName?: string;
   sentAt?: Date;
-}) {
+}): Promise<string | null> {
   const sentAt = input.sentAt ?? new Date();
   try {
     let conversationId: string | null = (await prisma.chatConversation.findUnique({ where: { openKey: input.contactId }, select: { id: true } }))?.id ?? null;
@@ -84,8 +84,10 @@ export async function recordDispatchInChat(input: {
       where: { id: conversationId, OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: sentAt } }] },
       data: { lastMessageAt: sentAt },
     });
+    return conversationId;
   } catch (error) {
     // O envio já saiu: falha ao registrar no chat não pode interromper o disparo.
     console.error(`[chat] falha ao registrar envio no histórico de ${input.contactId}:`, error);
+    return null;
   }
 }

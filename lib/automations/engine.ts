@@ -1,6 +1,9 @@
 import { isPresenceMode, type PresenceMode } from "@/lib/chat/presence";
 import { TIERS } from "@/lib/scoring";
 import { rfvpTriggerMatches, type RfvpSnapshot } from "@/lib/rfvp";
+import { fixedText, isFixedParam, resolveParam } from "@/lib/campaign-wizard";
+import { isNpsSurveyType, npsOrderKey, type NpsSurveyType } from "@/lib/nps-scale";
+import { readNodeTemplate, type NodeTemplate } from "@/lib/automations/nodes";
 import { readDistribute, describeBusinessWindow, nextBusinessOpening, outputHandles, pickVariant, readVariants, variantLetter, describeFilters, evaluateFilters, isErpTrigger, isTrigger, type ErpTriggerType, NODE_DEF, readDuration, readFilters, shiftDate, triggerNode, triggerNodes, type ContactFacts, type FlowEdge, type FlowGraph, type FlowNode, type NoteTarget } from "@/lib/automations/nodes";
 
 export type { ContactFacts } from "@/lib/automations/nodes";
@@ -47,7 +50,9 @@ export type EnginePorts = {
   lastReply: (state: ExecutionState, since: Date) => Promise<string | null>;
   nextBusinessTime: (date: Date) => Promise<Date>;
   /** audio: URL http(s) ou "storage:<chave>" (upload), enviado como nota de voz. presence: digitando/gravando antes de cada bloco. */
-  sendWhatsApp: (state: ExecutionState, input: { text: string; mediaUrl: string; audio?: string; presence?: { mode: PresenceMode; seconds: number | null }; trackLinks?: boolean }) => Promise<string>;
+  sendWhatsApp: (state: ExecutionState, input: { text: string; mediaUrl: string; audio?: string; presence?: { mode: PresenceMode; seconds: number | null }; trackLinks?: boolean; template?: ResolvedTemplate }) => Promise<string>;
+  /** Pesquisa NPS de 0 a 10 por modelo da Meta (uma por pedido + tipo); skipped = já enviada para este pedido. */
+  sendNps?: (state: ExecutionState, input: { surveyType: NpsSurveyType; template: ResolvedTemplate; orderKey: string | null; store: string; seller: string }) => Promise<string>;
   aiAgent: (state: ExecutionState, objective: string) => Promise<string>;
   moveStage: (state: ExecutionState, stage: string) => Promise<string>;
   createOpportunity: (state: ExecutionState) => Promise<string>;
@@ -95,6 +100,28 @@ const VAR_ALIASES: Record<string, string> = {
 export function readVar(vars: Record<string, string>, key: string): string {
   const name = key.trim().replace(/^\{\{\s*|\s*\}\}$/g, "");
   return vars[name] ?? vars[VAR_ALIASES[name] ?? ""] ?? "";
+}
+
+/** Modelo da Meta pronto para envio: variáveis {{1}}, {{2}}... já preenchidas para o contato. */
+export type ResolvedTemplate = NodeTemplate & { values: string[] };
+
+/**
+ * Variáveis do modelo no fluxo: campo do contato (primeiro nome, nome completo, telefone...) ou texto fixo, que aceita
+ * variáveis do fluxo ({{venda.loja}}). Vazio vira "-" (a Meta recusa parâmetro vazio).
+ */
+export function resolveTemplateParams(template: NodeTemplate, context: ExecutionContext): string[] {
+  const vars = context.vars;
+  const values: Record<string, string> = {
+    primeiro_nome: vars.nome ?? "",
+    nome: vars.nome_completo || vars.nome || "",
+    telefone: vars.telefone ?? "",
+    email: vars.email ?? "",
+    segmento: vars.segmento ?? "",
+    data_nascimento: vars.data_nascimento ?? "",
+    nome_atendente: vars.nome_atendente ?? vars["venda.vendedor"] ?? "",
+    primeiro_nome_atendente: (vars.nome_atendente ?? vars["venda.vendedor"] ?? "").split(/\s+/)[0] ?? "",
+  };
+  return template.params.map((field) => (isFixedParam(field) ? renderTemplate(fixedText(field), context).trim().slice(0, 1000) || "-" : resolveParam(field, values)));
 }
 
 /** {{nome}}, {{contato.nome}}, {{cidade}}, {{http.campo}}...: variáveis desconhecidas viram vazio. */
@@ -200,7 +227,25 @@ async function runNode(node: FlowNode, state: ExecutionState, ports: EnginePorts
     case "send_whatsapp": {
       const seconds = config.presenceSeconds === undefined || config.presenceSeconds === "" ? null : Number(config.presenceSeconds);
       const presence = { mode: isPresenceMode(config.presenceMode) ? config.presenceMode : "auto" as const, seconds };
+      const template = readNodeTemplate(config);
+      if (template) return { message: await ports.sendWhatsApp(state, { text: "", mediaUrl: "", template: { ...template, values: resolveTemplateParams(template, state.context) } }) };
       return { message: await ports.sendWhatsApp(state, { text: text("text"), mediaUrl: text("mediaUrl"), audio: text("audio").trim(), presence, trackLinks: config.trackLinks === true }) };
+    }
+    case "send_nps": {
+      if (!ports.sendNps) throw new Error("Pesquisa NPS indisponível.");
+      const template = readNodeTemplate(config);
+      // Regra da Meta: pesquisa ativa (pós-compra) só sai por modelo aprovado.
+      if (!template) throw new Error("Pesquisa NPS sem modelo aprovado da Meta vinculado.");
+      const vars = state.context.vars;
+      return {
+        message: await ports.sendNps(state, {
+          surveyType: isNpsSurveyType(config.surveyType) ? config.surveyType : "ATENDIMENTO",
+          template: { ...template, values: resolveTemplateParams(template, state.context) },
+          orderKey: npsOrderKey(vars["venda.loja"], vars["venda.numero"]),
+          store: vars["venda.loja"] ?? "",
+          seller: vars["venda.vendedor"] ?? "",
+        }),
+      };
     }
     case "change_score": {
       if (!ports.changeScore) throw new Error("Pontuação indisponível.");

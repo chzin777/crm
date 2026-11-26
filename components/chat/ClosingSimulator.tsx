@@ -1,21 +1,19 @@
 "use client";
 import { useState } from "react";
-import { PreviewBubble, PreviewFrame, PreviewHint, PreviewListBubble, PreviewListSheet, PreviewNote, type PreviewRow } from "@/components/chat/ChatPreview";
-import { NPS_SCORE_LABELS, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
+import { PreviewBubble, PreviewFrame, PreviewHint, PreviewNote } from "@/components/chat/ChatPreview";
+import { NPS_SCALE_TEXT, npsCommentPrompt, npsPrompt, type ChatMenuSettings } from "@/lib/chat/settings";
 import { fillVariables } from "@/lib/chat/text";
+import { NPS_BANDS, NPS_BAND_BADGE, npsBand } from "@/lib/nps-scale";
 
-const SURVEY_BUTTON = "Avaliar atendimento";
-const ROWS: PreviewRow[] = NPS_SCORE_LABELS.map((label, index) => ({ id: String(index + 1), title: npsScoreTitle(label, index) }));
+const SCORES = Array.from({ length: 11 }, (_, index) => index);
 
-/** Encerramento como o cliente vê: despedida, pesquisa e o agradecimento depois da nota. */
+/** Encerramento como o cliente vê: despedida, pesquisa de 0 a 10, convite ao comentário e agradecimento. */
 export function ClosingSimulator({ settings }: { settings: ChatMenuSettings }) {
-  const [answer, setAnswer] = useState<PreviewRow | null>(null);
-  const [open, setOpen] = useState(false);
+  const [answer, setAnswer] = useState<number | null>(null);
   const [commented, setCommented] = useState(false);
 
   const reset = () => {
     setAnswer(null);
-    setOpen(false);
     setCommented(false);
   };
 
@@ -29,40 +27,40 @@ export function ClosingSimulator({ settings }: { settings: ChatMenuSettings }) {
 
   const farewell = fillVariables(settings.farewellText, { customer: "Maria Silva", agent: "Ana" }).trim();
   const thanks = settings.npsThanksText.trim();
-  const askComment = settings.npsCommentText.trim();
-  // Nota 1, 2 ou 3 com pergunta configurada: o agradecimento espera o comentário.
-  const waitsComment = !!answer && Number(answer.id) < 4 && !!askComment;
-  const thanksNow = !!answer && (!waitsComment || commented);
+  const askComment = npsCommentPrompt(settings);
+  // Qualquer nota com convite configurado: o agradecimento espera o comentário.
+  const waitsComment = answer !== null && !!askComment;
+  const thanksNow = answer !== null && (!waitsComment || commented);
 
   const footer = !settings.npsEnabled ? (
     <PreviewHint text="Pesquisa desligada: o cliente recebe só a despedida." />
+  ) : answer === null ? (
+    <div className="space-y-1.5 px-1">
+      <span className="block text-center text-xs text-slate-500 dark:text-slate-400">Toque numa nota para simular a resposta</span>
+      <div className="flex flex-wrap justify-center gap-1" role="group" aria-label="Simular nota">
+        {SCORES.map((score) => <button key={score} type="button" onClick={() => setAnswer(score)} className={`h-7 w-7 cursor-pointer rounded-md text-xs font-bold ${NPS_BAND_BADGE[npsBand(score)]}`}>{score}</button>)}
+      </div>
+    </div>
   ) : waitsComment && !commented ? (
     <div className="flex items-center justify-between gap-2 px-1">
-      <span className="text-xs text-slate-500 dark:text-slate-400">Aguarda o comentário por 5 min.</span>
+      <span className="text-xs text-slate-500 dark:text-slate-400">Aguarda o comentário por 10 min.</span>
       <button type="button" onClick={() => setCommented(true)} className="h-8 shrink-0 cursor-pointer rounded-lg bg-[#051647] px-3 text-xs font-semibold text-white hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647]">Simular comentário</button>
     </div>
-  ) : answer ? (
-    <PreviewHint text={`Nota ${answer.id}${commented ? " e comentário gravados" : " gravada"} no painel de NPS.`} />
   ) : (
-    <PreviewHint text={`Toque em “${SURVEY_BUTTON}” para simular a nota.`} />
+    <PreviewHint text={`Nota ${answer} (${NPS_BANDS[npsBand(answer)].label.toLowerCase()})${commented ? " e comentário gravados" : " gravada"} no painel de NPS.`} />
   );
 
   return (
-    <PreviewFrame
-      onReset={reset}
-      scrollKey={`${answer?.id ?? ""}${commented}${signature}`}
-      footer={footer}
-      overlay={open && <PreviewListSheet title={SURVEY_BUTTON} rows={ROWS} onPick={(row) => { setOpen(false); setAnswer(row); }} onClose={() => setOpen(false)} />}
-    >
+    <PreviewFrame onReset={reset} scrollKey={`${answer ?? ""}${commented}${signature}`} footer={footer}>
       <PreviewBubble from="customer" text="Obrigada, era só isso!" />
       <PreviewNote text="Ana encerrou a conversa" />
       {farewell ? <PreviewBubble from="bot" text={farewell} /> : <PreviewNote text="Despedida desligada" />}
       {settings.npsEnabled && (
         <>
-          <PreviewListBubble body={npsPrompt(settings)} button={SURVEY_BUTTON} active={!answer} onOpen={() => setOpen(true)} />
-          {answer && <PreviewBubble from="customer" text={answer.title} />}
+          <PreviewBubble from="bot" text={`${npsPrompt(settings)}\n${NPS_SCALE_TEXT}`} />
+          {answer !== null && <PreviewBubble from="customer" text={String(answer)} />}
           {waitsComment && <PreviewBubble from="bot" text={askComment} />}
-          {commented && <PreviewBubble from="customer" text="Demoraram um pouco para me responder." />}
+          {commented && <PreviewBubble from="customer" text={answer !== null && answer >= 9 ? "A vendedora foi muito atenciosa, adorei!" : "Demoraram um pouco para me responder."} />}
           {thanksNow && (thanks ? <PreviewBubble from="bot" text={thanks} /> : <PreviewNote text="Sem agradecimento: a nota é gravada em silêncio" />)}
         </>
       )}

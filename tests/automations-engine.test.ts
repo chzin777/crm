@@ -187,7 +187,12 @@ describe("gatilhos, condições e validação", () => {
   it("validação exige gatilho conectado e campos obrigatórios; modelos prontos são válidos", () => {
     expect(validateGraph({ nodes: [], edges: [] })).toContain("Adicione um gatilho para iniciar o fluxo.");
     expect(validateGraph({ nodes: [node("t", "trigger_tag", { tag: "x" }), node("m", "send_whatsapp", { text: "" })], edges: [] })).toEqual(["Conecte o gatilho ao primeiro passo.", "Enviar WhatsApp: escreva a mensagem ou anexe um áudio."]);
-    for (const template of FLOW_TEMPLATES) expect(validateGraph(sanitizeGraph(template.graph))).toEqual([]);
+    // Modelos prontos são válidos; os que enviam fora da janela de 24 h (NPS pós-compra, pós-venda em 3 dias) só pedem o modelo da Meta.
+    for (const template of FLOW_TEMPLATES) {
+      const problems = validateGraph(sanitizeGraph(template.graph));
+      expect(problems.every((problem) => /modelo (aprovado|oficial)/.test(problem))).toBe(true);
+    }
+    expect(validateGraph(sanitizeGraph(FLOW_TEMPLATES.find((item) => item.id === "boas-vindas")!.graph))).toEqual([]);
     expect(sanitizeGraph({ nodes: [{ id: "x", type: "inventado" }, node("a", "delay")], edges: [edge("a", "zz")] })).toMatchObject({ nodes: [{ id: "a" }], edges: [] });
   });
 });

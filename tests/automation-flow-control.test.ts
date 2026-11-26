@@ -132,6 +132,7 @@ describe("gerador por IA com os novos nós", () => {
     expect(handles).toEqual(expect.arrayContaining(["v0", "v1", "timeout"]));
     expect(result.settings.cancelOnConversion).toEqual(["purchase", "won"]);
     expect(result.graph.nodes.find((item) => item.type === "business_hours")?.data.config.days).toEqual([1, 2, 3, 4, 5]);
-    expect(validateGraph(result.graph)).toEqual([]);
+    // O follow-up do timeout (1 dia sem resposta) sai fora da janela de 24 h: exige modelo da Meta.
+    expect(validateGraph(result.graph)).toEqual([expect.stringContaining("vincule um modelo oficial")]);
   });
 });

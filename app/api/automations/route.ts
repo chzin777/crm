@@ -4,7 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultHandoffFlow } from "@/lib/automations/ai-handoff";
-import { NODE_DEF, sanitizeGraph, triggerNodes, triggerTypesOf, type FlowGraph } from "@/lib/automations/nodes";
+import { NODE_DEF, readNodeTemplate, sanitizeGraph, sendsOutsideWindow, triggerNodes, triggerTypesOf, type FlowGraph } from "@/lib/automations/nodes";
 import { FLOW_TEMPLATES } from "@/lib/automations/templates";
 
 /** Lista de automações com gatilho e contadores de execuções. */
@@ -14,17 +14,22 @@ export async function GET() {
   // Fluxo padrão "Transbordo da IA" (antigo "Para onde vai" de /ia), criado uma única vez.
   await ensureDefaultHandoffFlow().catch((error) => console.error("[automacoes] fluxo padrão de transbordo:", error));
   const [flows, counts] = await Promise.all([
-    prisma.automationFlow.findMany({ orderBy: { updatedAt: "desc" }, select: { id: true, name: true, description: true, status: true, triggerType: true, nodes: true, updatedAt: true } }),
+    prisma.automationFlow.findMany({ orderBy: { updatedAt: "desc" }, select: { id: true, name: true, description: true, status: true, triggerType: true, nodes: true, edges: true, updatedAt: true } }),
     prisma.automationExecution.groupBy({ by: ["flowId", "status"], _count: { _all: true } }),
   ]);
   return NextResponse.json({
     flows: flows.map((flow) => {
       const of = (statuses: string[]) => counts.filter((row) => row.flowId === flow.id && statuses.includes(row.status)).reduce((sum, row) => sum + row._count._all, 0);
       const triggers = triggerNodes(sanitizeGraph({ nodes: flow.nodes, edges: [] }));
+      // Alerta de conformidade com a Meta: envio fora da janela de 24 h sem modelo aprovado vinculado.
+      const graph = sanitizeGraph({ nodes: flow.nodes, edges: flow.edges });
+      const outside = sendsOutsideWindow(graph);
+      const missingTemplate = graph.nodes.some((node) => !readNodeTemplate(node.data.config) && (node.type === "send_nps" || (node.type === "send_whatsapp" && outside.has(node.id))));
       return {
         id: flow.id, name: flow.name, description: flow.description, status: flow.status, updatedAt: flow.updatedAt,
         trigger: triggers.length ? [...new Set(triggers.map((item) => NODE_DEF[item.type].label))].join(" · ") : "Sem gatilho",
         steps: Array.isArray(flow.nodes) ? flow.nodes.length : 0,
+        missingTemplate,
         running: of(["running", "waiting"]), completed: of(["completed"]), failed: of(["failed"]), cancelled: of(["cancelled"]),
       };
     }),

@@ -7,7 +7,39 @@ const edge = (source: string, target: string, sourceHandle: "true" | "false" | n
 
 export type FlowTemplate = { id: string; name: string; description: string; graph: FlowGraph };
 
+/**
+ * Pesquisas oficiais de NPS pós-compra (vendas faturadas no VMSet): saem só por modelo aprovado da Meta, uma de cada
+ * tipo por pedido. 20 minutos depois avalia o atendimento; 30 dias depois, o produto e a adaptação.
+ */
+export const NPS_FLOWS: FlowTemplate[] = [
+  {
+    id: "nps-atendimento-20min",
+    name: "NPS Atendimento (20 minutos após a compra)",
+    description: "Venda faturada no VMSet: 20 minutos depois pede nota de 0 a 10 para o atendimento na loja (modelo da Meta).",
+    graph: {
+      nodes: [
+        node("t", "trigger_erp_after_sale", 0, 0, { amount: 20, unit: "minutes", businessHours: false }),
+        node("n", "send_nps", 0, 160, { surveyType: "ATENDIMENTO", template: null }),
+      ],
+      edges: [edge("t", "n")],
+    },
+  },
+  {
+    id: "nps-produto-30dias",
+    name: "NPS Produto & Adaptação (30 dias após a compra)",
+    description: "Venda faturada no VMSet: 30 dias depois pede nota de 0 a 10 para o produto e a adaptação aos óculos/lentes (modelo da Meta).",
+    graph: {
+      nodes: [
+        node("t", "trigger_erp_after_sale", 0, 0, { amount: 30, unit: "days", businessHours: true }),
+        node("n", "send_nps", 0, 160, { surveyType: "PRODUTO_ADAPTACAO", template: null }),
+      ],
+      edges: [edge("t", "n")],
+    },
+  },
+];
+
 export const FLOW_TEMPLATES: FlowTemplate[] = [
+  ...NPS_FLOWS,
   {
     id: "follow-up-orcamento",
     name: "Follow-up de Orçamento 24h",

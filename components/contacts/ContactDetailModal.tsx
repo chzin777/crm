@@ -11,6 +11,7 @@ import { FormSelect } from "@/components/FormSelect";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ContactPurchaseHistory } from "@/components/contacts/ContactPurchaseHistory";
+import { ContactNpsSummary } from "@/components/contacts/ContactNpsSummary";
 import { WhatsAppIcon } from "@/components/WhatsAppIcon";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
@@ -296,6 +297,7 @@ export function ContactEditTabs({
                 </div>
               )}
             </dl>
+            <ContactNpsSummary contactId={selectedContact.id} />
           </div>
         )}
 

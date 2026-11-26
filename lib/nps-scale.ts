@@ -1,0 +1,163 @@
+/**
+ * NPS de 0 a 10 (regras puras: tela, API, chat e automações).
+ * 0 a 6 = Baixa (detrator), 7 e 8 = Boa (neutro), 9 e 10 = Excelente (promotor).
+ * Avaliações antigas de 1 a 5 ficam gravadas com scale = 5 e não entram nos cálculos novos.
+ */
+
+export const NPS_MAX = 10;
+export const NPS_SCALE = 10;
+export const LEGACY_NPS_SCALE = 5;
+
+export type NpsBand = "detractor" | "neutral" | "promoter";
+
+export const NPS_BANDS: Record<NpsBand, { label: string; group: string; range: string }> = {
+  detractor: { label: "Baixa", group: "Detratores", range: "0 a 6" },
+  neutral: { label: "Boa", group: "Neutros", range: "7 e 8" },
+  promoter: { label: "Excelente", group: "Promotores", range: "9 e 10" },
+};
+
+export function npsBand(score: number): NpsBand {
+  if (score >= 9) return "promoter";
+  if (score >= 7) return "neutral";
+  return "detractor";
+}
+
+/** Badge da nota: vermelha (baixa), âmbar (boa) e verde (excelente). */
+export const NPS_BAND_BADGE: Record<NpsBand, string> = {
+  detractor: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
+  neutral: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  promoter: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+};
+
+export const isNpsScore = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= NPS_MAX;
+
+// ---------------------------------------------------------------- Tipos de pesquisa
+
+export const NPS_SURVEY_TYPES = ["ATENDIMENTO", "PRODUTO_ADAPTACAO"] as const;
+export type NpsSurveyType = (typeof NPS_SURVEY_TYPES)[number];
+export const isNpsSurveyType = (value: unknown): value is NpsSurveyType => (NPS_SURVEY_TYPES as readonly unknown[]).includes(value);
+
+export const NPS_SURVEY_LABELS: Record<NpsSurveyType, string> = {
+  ATENDIMENTO: "Atendimento",
+  PRODUTO_ADAPTACAO: "Produto e adaptação",
+};
+
+// ---------------------------------------------------------------- Leitura da nota no WhatsApp
+
+const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu;
+const WORDS: Record<string, number> = { zero: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10 };
+const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/**
+ * Nota de 0 a 10: "9", "10!", "nota 8", "8 - gostei", "dez", "10️⃣" ou o toque num botão/lista (id nps_N).
+ * Frase solta como "2 óculos" ou "comprei 3" não vira nota.
+ */
+export function parseNps10(text: string, choiceId?: string | null): number | null {
+  const picked = choiceId?.match(/^nps_(\d{1,2})$/);
+  if (picked && isNpsScore(Number(picked[1]))) return Number(picked[1]);
+  const clean = plain(text.replace(EMOJI, " ")).replace(/\s+/g, " ").trim();
+  if (!clean) return null;
+  const match = clean.match(/^(?:(?:a\s+)?nota|dou|minha nota e|e)?\s*:?\s*(\d{1,2}|zero|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)(?:\s*(?:\/\s*10|de 10))?\s*(?:[-.)!:,]\s*.*|\s+(?:pontos?|estrelas?))?[!.]*$/);
+  if (!match) return null;
+  const score = /^\d+$/.test(match[1]) ? Number(match[1]) : WORDS[match[1]];
+  return isNpsScore(score) ? score : null;
+}
+
+// ---------------------------------------------------------------- Indicadores
+
+export type NpsMetrics = {
+  count: number;
+  sum: number;
+  average: number | null;
+  /** % promotores − % detratores (−100 a 100); null sem respostas. */
+  nps: number | null;
+  promoters: number;
+  neutrals: number;
+  detractors: number;
+};
+
+export function npsMetrics(scores: number[]): NpsMetrics {
+  const valid = scores.filter(isNpsScore);
+  const promoters = valid.filter((score) => score >= 9).length;
+  const detractors = valid.filter((score) => score <= 6).length;
+  const sum = valid.reduce((total, score) => total + score, 0);
+  return {
+    count: valid.length,
+    sum,
+    average: valid.length ? Math.round((sum / valid.length) * 10) / 10 : null,
+    nps: valid.length ? Math.round(((promoters - detractors) / valid.length) * 100) : null,
+    promoters,
+    neutrals: valid.length - promoters - detractors,
+    detractors,
+  };
+}
+
+export type NpsAnswer = { contactId: string; surveyType: string; score: number; comment?: string | null; answeredAt: Date | string; orderKey?: string | null };
+
+export type CustomerNps = {
+  contactId: string;
+  count: number;
+  /** Soma de todas as notas do cliente (atendimento + produto). */
+  sum: number;
+  /** Média geral do cliente (1 casa). */
+  average: number;
+  /** Última nota de cada tipo de pesquisa. */
+  latest: Partial<Record<NpsSurveyType, number>>;
+  lastAnsweredAt: string;
+};
+
+/** Consolidado por cliente: soma, média geral e a última nota de cada pesquisa. */
+export function consolidateByCustomer(answers: NpsAnswer[]): CustomerNps[] {
+  const byContact = new Map<string, NpsAnswer[]>();
+  for (const answer of answers) {
+    if (!isNpsScore(answer.score)) continue;
+    byContact.set(answer.contactId, [...(byContact.get(answer.contactId) ?? []), answer]);
+  }
+  return [...byContact.entries()].map(([contactId, list]) => {
+    const sorted = [...list].sort((a, b) => new Date(a.answeredAt).getTime() - new Date(b.answeredAt).getTime());
+    const sum = sorted.reduce((total, item) => total + item.score, 0);
+    const latest: Partial<Record<NpsSurveyType, number>> = {};
+    for (const item of sorted) if (isNpsSurveyType(item.surveyType)) latest[item.surveyType] = item.score;
+    return {
+      contactId,
+      count: sorted.length,
+      sum,
+      average: Math.round((sum / sorted.length) * 10) / 10,
+      latest,
+      lastAnsweredAt: new Date(sorted[sorted.length - 1].answeredAt).toISOString(),
+    };
+  }).sort((a, b) => b.lastAnsweredAt.localeCompare(a.lastAnsweredAt));
+}
+
+// ---------------------------------------------------------------- Modelo oficial (Meta) da pesquisa
+
+/** Modelo pronto para enviar à análise da Meta (sem travessões ou hífens). */
+export const NPS_TEMPLATE = {
+  name: "nps_avaliacao_0_10",
+  language: "pt_BR",
+  category: "UTILITY" as const,
+  body: "Olá, {{1}}! Tudo bem? Aqui é da {{2}}. De 0 a 10, que nota você dá para sua experiência com {{3}}? Sendo 0 a 6 baixa, 7 e 8 boa e 9 e 10 excelente. Basta responder com o número!",
+  footer: "Sua opinião nos ajuda a melhorar",
+  examples: ["Maria", "Óticas Brasil", "o atendimento na loja"],
+};
+
+export const NPS_COMPANY = "Óticas Brasil";
+
+/** Assunto do {{3}} por tipo de pesquisa. */
+export const NPS_SUBJECT: Record<NpsSurveyType, string> = {
+  ATENDIMENTO: "o atendimento que você recebeu na loja",
+  PRODUTO_ADAPTACAO: "seus óculos novos e a adaptação às lentes",
+};
+
+/** Variáveis padrão do modelo de NPS: {{1}} primeiro nome, {{2}} empresa, {{3}} assunto da pesquisa. */
+export function npsTemplateParams(surveyType: NpsSurveyType, count = 3): string[] {
+  const defaults = ["primeiro_nome", `fixo:${NPS_COMPANY}`, `fixo:${NPS_SUBJECT[surveyType]}`];
+  return Array.from({ length: count }, (_, index) => defaults[index] ?? "primeiro_nome");
+}
+
+/** Chave do pedido no VMSet (loja + número) usada para nunca repetir a mesma pesquisa no mesmo pedido. */
+export const npsOrderKey = (store: string | null | undefined, orderNumber: string | null | undefined) => {
+  const loja = String(store ?? "").trim();
+  const numero = String(orderNumber ?? "").trim();
+  return loja && numero ? `${loja}-${numero}`.slice(0, 160) : null;
+};

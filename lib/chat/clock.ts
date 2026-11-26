@@ -24,6 +24,7 @@ import { reportError } from "@/lib/monitoring/error-reporter";
 import { checkInactiveTriggers, resumeDueExecutions } from "@/lib/automations/engine-db";
 import { checkConversions, checkErpTriggers } from "@/lib/automations/erp-sync";
 import { ensureScoringFlows } from "@/lib/automations/scoring-seed";
+import { ensureNpsFlows } from "@/lib/automations/nps-seed";
 import { attributeSales } from "@/lib/automations/attribution";
 import { scheduleDailyRfvp } from "@/lib/rfvp-db";
 import { runBudgetRecovery, runRecurrenceReminders, runWeeklyObjections } from "@/lib/commercial/jobs-db";
@@ -318,6 +319,8 @@ export async function runClock() {
   await block("automações", async () => {
     // Automações padrão do Lead Score: criadas uma única vez (editáveis em /automacoes).
     await ensureScoringFlows();
+    // Automações de NPS pós-compra (20 min e 30 dias): criadas uma única vez em rascunho.
+    await ensureNpsFlows().catch((error: unknown) => console.error("[automacoes] automações de NPS:", error));
     // Matriz RFV-P: recálculo diário a partir das 6h (em segundo plano, numa réplica só).
     await scheduleDailyRfvp(new Date(now)).catch((error: unknown) => console.error("[rfvp] agendamento:", error));
     // Vendas do VMSet atribuídas aos nós por onde o cliente passou (badges do canvas), a cada 5 min.

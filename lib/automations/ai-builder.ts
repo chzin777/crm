@@ -60,6 +60,7 @@ const PARAM_KEYS = {
   method: { type: ["string", "null"], enum: ["GET", "POST", null] },
   url: { type: ["string", "null"] },
   body: { type: ["string", "null"] },
+  surveyType: { type: ["string", "null"], enum: ["ATENDIMENTO", "PRODUTO_ADAPTACAO", null] },
 } as const;
 
 const strictObject = (properties: Record<string, unknown>) => ({ type: "object", additionalProperties: false, required: Object.keys(properties), properties });
@@ -138,7 +139,8 @@ export function builderSystemPrompt(workspace: BuilderWorkspace): string {
     "- Pipeline interno x ERP: gatilhos trigger_stage/trigger_tag reagem a movimentações DENTRO do CRM (Kanban, tags). Fatos comerciais e financeiros reais (compra, venda faturada, devolução, parcela vencida/a vencer, pagamento, aniversário, tempo sem comprar, óculos prontos no laboratório) vêm do ERP VMSet: use os gatilhos trigger_erp_*.",
     "- Ex.: \"NPS 5 minutos após a compra\" = trigger_erp_after_sale (amount 5, unit minutes, businessHours false), nunca trigger_stage. \"Cobrar quem está com parcela atrasada há 10 dias\" = trigger_erp_overdue (amount 10, unit days). \"Lembrar 3 dias antes do vencimento\" = trigger_erp_due_soon (amount 3). \"Parabéns no aniversário\" = trigger_erp_birthday (amount 0). \"Reativar quem não compra há 1 ano\" = trigger_erp_no_purchase (amount 1, unit years). \"Avisar que os óculos estão prontos\" = trigger_erp_lab_ready.",
     "- trigger_erp_sale/after_sale: customerType (any, first = primeira compra, repeat = recompra), minAmount em reais, store e category (texto contido). trigger_erp_paid: mode any ou settled (quitou o carnê). Variáveis do ERP nos textos: {{venda.valor}}, {{venda.numero}}, {{venda.loja}}, {{venda.itens}}, {{financeiro.valor_aberto}}, {{financeiro.dias_atraso}}, {{financeiro.vencimento}}, {{os.loja}}, {{cliente.idade}}.",
-    "- WhatsApp livre só chega se o cliente falou nas últimas 24 h: para cobrança, aniversário e reativação, prefira notify/add_note/add_tag para a equipe agir (ou envie e deixe a equipe ciente).",
+    "- WhatsApp livre só chega se o cliente falou nas últimas 24 h: para cobrança, aniversário e reativação, prefira notify/add_note/add_tag para a equipe agir (ou envie e deixe a equipe ciente). Envio fora da janela (gatilhos do VMSet, inatividade, esperas de 24 h ou mais) só é ativado com modelo aprovado da Meta, que a equipe vincula no editor.",
+    "- Pesquisa de satisfação / NPS pós-compra: use send_nps (surveyType ATENDIMENTO ou PRODUTO_ADAPTACAO), nunca send_whatsapp com texto. Ex.: \"NPS 20 minutos depois da compra\" = trigger_erp_after_sale (amount 20, unit minutes) → send_nps (surveyType ATENDIMENTO).",
     "- condition: field (reply = resposta do cliente após o início; message = mensagem do gatilho; tag; stage; city; hour; variable = variável em params.variable), operator (equals, not_equals, contains, not_contains, exists, empty, gte, lt) e value.",
     "- add_note: target (opportunity, contact ou both) e text com a observação interna; pode usar {{contato.nome}} e {{mensagem.texto}}.",
     "- filters (Regras & Filtros) só quando o pedido restringir o público (ex.: só clientes, só uma cidade); senão null.",

@@ -44,7 +44,9 @@ async function loadDashboard() {
     const stage = String(item.coluna);
     pipelineCounts.set(stage, (pipelineCounts.get(stage) ?? 0) + 1);
   }
-  const ratings = npsResponses.map((response) => response.rating);
+  // NPS da rede: respostas lançadas à mão + pesquisas do WhatsApp na escala de 0 a 10 (as antigas de 1 a 5 ficam fora).
+  const whatsappScores = await prisma.npsFeedback.findMany({ where: { scale: 10, status: "ANSWERED", score: { not: null } }, select: { score: true } });
+  const ratings = [...npsResponses.map((response) => response.rating), ...whatsappScores.map((row) => row.score ?? 0)];
   const nps = ratings.length
     ? Math.round((ratings.filter((rating) => rating >= 9).length - ratings.filter((rating) => rating <= 6).length) / ratings.length * 100)
     : null;

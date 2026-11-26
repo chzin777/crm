@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CommercialAutomations } from "@/components/automations/CommercialAutomations";
 import { useToast } from "@/components/ToastProvider";
 
-type FlowRow = { id: string; name: string; description: string; status: "draft" | "active" | "paused"; trigger: string; steps: number; running: number; completed: number; failed: number; cancelled: number; updatedAt: string };
+type FlowRow = { id: string; name: string; description: string; status: "draft" | "active" | "paused"; trigger: string; steps: number; missingTemplate?: boolean; running: number; completed: number; failed: number; cancelled: number; updatedAt: string };
 type Template = { id: string; name: string; description: string };
 
 const STATUS = {
@@ -148,6 +148,7 @@ export default function AutomationsPage() {
                   <Link href={`/automacoes/${flow.id}`} className="min-w-0 cursor-pointer">
                     <span className="block truncate text-sm font-semibold text-[#051647] hover:underline dark:text-white">{flow.name}</span>
                     <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">{flow.description || `${flow.steps} passo${flow.steps === 1 ? "" : "s"}`}</span>
+                    {flow.missingTemplate && <span role="alert" className="mt-1 inline-flex items-center gap-1 rounded-md bg-[#F7915E]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#9a3d12] dark:text-[#F7915E]" title="Envios fora da janela de 24 h do WhatsApp exigem modelo aprovado da Meta. Abra a automação e vincule o modelo no passo indicado."><AlertTriangle className="h-3 w-3" />Vincule um modelo aprovado da Meta para ativar</span>}
                   </Link>
                   <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300"><Zap className="h-3.5 w-3.5 shrink-0 text-[#002187] dark:text-[#C4D600]" /><span className="truncate">{flow.trigger}</span></span>
                   <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />{status.label}</span>

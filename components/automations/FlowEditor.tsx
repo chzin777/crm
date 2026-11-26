@@ -26,6 +26,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
+  Star, ExternalLink, ShieldAlert,
   AlertTriangle, AlignHorizontalSpaceAround, AlignVerticalSpaceAround, ArrowLeft, ArrowRightLeft, Award, BadgeCheck, Bell, Bot, Cake, CalendarClock, Glasses, ShoppingBag, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Filter, FlaskConical, GitBranch, Globe, History, Kanban, Loader2, MessageCircle, Mic, Upload, Hourglass, Split, Flag, Settings2, Shuffle, Radio, Grid3x3, Users, TrendingUp, MousePointerClick, Gauge, Gem, PenLine, MessageSquare, Pause, Play, Plus, PlusCircle, Redo2, Save, Scan, Search, ShieldOff, SkipForward, StickyNote, Tag, Tags, Timer, Trash2, Undo2, UserPlus, UserX, Webhook, Workflow, X, XCircle, Zap, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
@@ -36,7 +37,10 @@ import {
   readDistribute, MAX_ATTRIBUTION_DAYS, AUDIO_STORAGE_PREFIX, CONVERSION_KINDS, describeBusinessWindow, handleLabel, MAX_AB_VARIANTS, outputHandles, readVariants, variantLetter, WEEKDAY_LABELS, type ConversionKind, type FlowSettings, type OutputHandle,
   CONDITION_FIELDS, describeCondition, ERP_TRIGGER_VARIABLES, isErpTrigger, describeFilters, durationLabel, FILTER_KINDS, NODE_CATEGORIES, NOTE_TARGETS, operatorsFor, NODE_DEF, NODE_DEFS, readDuration, readFilters, STAGE_OPTIONS, isTrigger,
   type FieldDef, type FilterKind, type FilterRule, type FlowEdge, type FlowNode, type NodeCategory, type NodeFilters, type NodeType,
+  readNodeTemplate, sendsOutsideWindow,
 } from "@/lib/automations/nodes";
+import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/CampaignTemplatePicker";
+import { NPS_TEMPLATE, isNpsSurveyType, npsTemplateParams } from "@/lib/nps-scale";
 
 type FlowStatus = "draft" | "active" | "paused";
 type FlowData = { id: string; name: string; description: string; status: FlowStatus; webhookToken: string; settings?: FlowSettings; nodes: FlowNode[]; edges: FlowEdge[] };
@@ -52,7 +56,7 @@ const ICONS: Record<NodeType, typeof Zap> = {
   trigger_message: MessageCircle, trigger_stage: Kanban, trigger_tag: Tag, trigger_inactive: UserX, trigger_webhook: Webhook, trigger_ai_handoff: ArrowRightLeft,
   trigger_erp_sale: ShoppingBag, trigger_erp_after_sale: CalendarClock, trigger_erp_return: Undo2, trigger_erp_overdue: AlertTriangle, trigger_erp_due_soon: CalendarClock,
   trigger_erp_paid: BadgeCheck, trigger_erp_good_payer: Award, trigger_erp_birthday: Cake, trigger_erp_no_purchase: UserX, trigger_erp_lab_ready: Glasses,
-  send_whatsapp: MessageSquare, delay: Timer, business_hours: Clock, wait_reply: Hourglass, ab_split: Split, end_flow: Flag, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, add_note: StickyNote, opt_out: ShieldOff, condition: GitBranch, http: Globe,
+  send_whatsapp: MessageSquare, send_nps: Star, delay: Timer, business_hours: Clock, wait_reply: Hourglass, ab_split: Split, end_flow: Flag, ai_agent: Bot, move_stage: Kanban, create_opportunity: PlusCircle, add_tag: Tags, remove_tag: Tag, assign: UserPlus, notify: Bell, add_note: StickyNote, opt_out: ShieldOff, condition: GitBranch, http: Globe,
 };
 const HEADER: Record<NodeCategory, string> = {
   gatilho_crm: "bg-[#C4D600] text-[#051647]",
@@ -113,7 +117,8 @@ function summary(kind: NodeType, config: Record<string, unknown>, options: Optio
     case "trigger_erp_birthday": return Number(config.amount) > 0 ? `${Number(config.amount)} dia(s) antes do aniversário` : "No dia do aniversário";
     case "trigger_erp_no_purchase": return `Sem comprar há ${durationLabel(Number(config.amount) || 0, (config.unit as Parameters<typeof durationLabel>[1]) || "months")}`;
     case "trigger_erp_lab_ready": return String(config.store || "Todas as lojas");
-    case "send_whatsapp": return String(config.text || (config.audio ? "Nota de voz" : "(mensagem vazia)"));
+    case "send_whatsapp": { const template = readNodeTemplate(config); return template ? `Modelo: ${template.name}` : String(config.text || (config.audio ? "Nota de voz" : "(mensagem vazia)")); }
+    case "send_nps": { const template = readNodeTemplate(config); return `${config.surveyType === "PRODUTO_ADAPTACAO" ? "Produto e adaptação" : "Atendimento"} · ${template ? `modelo ${template.name}` : "sem modelo da Meta"}`; }
     case "business_hours": return describeBusinessWindow(config);
     case "wait_reply": { const { amount, unit } = readDuration(config, "days"); return `Até ${durationLabel(amount, unit)} pela resposta`; }
     case "ab_split": return readVariants(config).map((percent, index) => `${variantLetter(index)} ${percent}%`).join(" / ");
@@ -338,9 +343,33 @@ function AudioField({ label, hint, value, placeholder, onChange }: { label: Reac
   );
 }
 
-function Field({ field, value, onChange, options }: { field: FieldDef; value: unknown; onChange: (value: unknown) => void; options: Options }) {
+/**
+ * Modelo aprovado da Meta no passo (mesmo seletor de Campanhas). Na Pesquisa NPS, ao trocar o modelo, as variáveis já
+ * vêm preenchidas: {{1}} primeiro nome, {{2}} Óticas Brasil e {{3}} o assunto da pesquisa.
+ */
+function NodeTemplateField({ field, value, onChange, nodeConfig, nodeKind }: { field: Extract<FieldDef, { kind: "template" }>; value: unknown; onChange: (value: unknown) => void; nodeConfig?: Record<string, unknown>; nodeKind?: NodeType }) {
+  const current = value && typeof value === "object" ? (value as CampaignTemplate) : null;
+  const surveyType = nodeKind === "send_nps" && isNpsSurveyType(nodeConfig?.surveyType) ? nodeConfig.surveyType : nodeKind === "send_nps" ? "ATENDIMENTO" : null;
+  return (
+    <div className="space-y-1">
+      <CampaignTemplatePicker
+        value={current}
+        label={field.label}
+        emptyLabel={field.required ? "Escolha o modelo aprovado" : "Sem modelo (texto livre, só com a janela de 24 h aberta)"}
+        onChange={(next) => {
+          const changed = next && (!current || current.name !== next.name || current.language !== next.language);
+          onChange(next && changed && surveyType ? { ...next, params: npsTemplateParams(surveyType, next.params.length) } : next);
+        }}
+      />
+      {field.hint && <span className="block text-[10px] text-slate-400">{field.hint}</span>}
+    </div>
+  );
+}
+
+function Field({ field, value, onChange, options, nodeConfig, nodeKind }: { field: FieldDef; value: unknown; onChange: (value: unknown) => void; options: Options; nodeConfig?: Record<string, unknown>; nodeKind?: NodeType }) {
   const label = <span className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">{field.label}</span>;
   const hint = field.hint ? <span className="block text-[10px] text-slate-400">{field.hint}</span> : null;
+  if (field.kind === "template") return <NodeTemplateField field={field} value={value} onChange={onChange} nodeConfig={nodeConfig} nodeKind={nodeKind} />;
   if (field.kind === "boolean") {
     return (
       <label className="flex cursor-pointer items-center justify-between gap-3 py-1">
@@ -907,6 +936,8 @@ function Editor({ flowId }: { flowId: string }) {
   const dirty = !!flow && JSON.stringify({ name, ...graph, settings }) !== saved;
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
   const triggers = nodes.filter((node) => isTrigger(node.data.kind));
+  // Envios que podem sair fora da janela de 24 h (exigem modelo aprovado da Meta).
+  const outsideWindow = useMemo(() => sendsOutsideWindow(graph), [graph]);
   const direction = nodes.some((node) => node.data.dir === "LR") ? "LR" : undefined;
 
   const onConnect = useCallback((connection: Connection) => {
@@ -978,6 +1009,8 @@ function Editor({ flowId }: { flowId: string }) {
     if (field.key === "keywords" && selected.data.config.mode !== "keywords") return false;
     if (selected.data.kind === "condition" && (field.key === "operator" || field.key === "value") && selected.data.config.field === "none") return false;
     if (field.key === "presenceSeconds" && selected.data.config.presenceMode !== "custom") return false;
+    // Com modelo da Meta, o conteúdo é o do modelo: texto, mídia, áudio, links e digitando não se aplicam.
+    if (selected.data.kind === "send_whatsapp" && readNodeTemplate(selected.data.config) && ["text", "mediaUrl", "audio", "trackLinks", "presenceMode", "presenceSeconds"].includes(field.key)) return false;
     if (field.key === "flowId" && selected.data.config.mode !== "goto") return false;
     if (selected.data.kind === "distribute_lead" && field.key === "userIds" && selected.data.config.pool !== "users") return false;
     if (selected.data.kind === "trigger_rfvp") {
@@ -1087,8 +1120,18 @@ function Editor({ flowId }: { flowId: string }) {
                   {selected.data.kind === "condition" ? (
                     <ConditionEditor config={selected.data.config} onChange={updateConfig} />
                   ) : selectedFields.map((field) => (
-                    <Field key={field.key} field={field} value={selected.data.config[field.key]} options={options} onChange={(value) => updateConfig(field.key, value)} />
+                    <Field key={field.key} field={field} value={selected.data.config[field.key]} options={options} nodeConfig={selected.data.config} nodeKind={selected.data.kind} onChange={(value) => updateConfig(field.key, value)} />
                   ))}
+                  {((selected.data.kind === "send_whatsapp" && outsideWindow.has(selected.id)) || selected.data.kind === "send_nps") && !readNodeTemplate(selected.data.config) && (
+                    <div role="alert" className="space-y-2 rounded-lg border border-[#F7915E]/50 bg-[#F7915E]/10 p-2.5 text-[11px] text-[#9a3d12] dark:text-[#F7915E]">
+                      <p className="flex items-start gap-1.5 font-semibold"><ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />Modelo oficial da Meta obrigatório</p>
+                      <p>{selected.data.kind === "send_nps" ? "A pesquisa é enviada sem o cliente ter escrito antes" : `Este envio pode sair fora da janela de 24 h: ${outsideWindow.get(selected.id)}`}. A Meta bloqueia texto livre nesse caso, então a automação só pode ser ativada com um modelo aprovado vinculado acima.</p>
+                      <p className="flex flex-wrap gap-x-3 gap-y-1">
+                        <a href={selected.data.kind === "send_nps" ? `/modelos?preset=${NPS_TEMPLATE.name}` : "/modelos"} target="_blank" rel="noopener" className="inline-flex items-center gap-1 font-semibold underline cursor-pointer"><ExternalLink className="h-3 w-3" />{selected.data.kind === "send_nps" ? "Criar o modelo pronto de NPS 0 a 10" : "Criar modelo em Modelos"}</a>
+                        <span>Depois da aprovação, clique em “Atualizar lista” no seletor.</span>
+                      </p>
+                    </div>
+                  )}
                   {VAR_TARGET[selected.data.kind] && (
                     <VariablesPicker triggers={triggers.map((node) => node.data.kind)} onPick={(variable) => { const key = VAR_TARGET[selected.data.kind]!; const current = String(selected.data.config[key] ?? ""); updateConfig(key, `${current}${current && !current.endsWith(" ") ? " " : ""}{{${variable}}}`); }} />
                   )}

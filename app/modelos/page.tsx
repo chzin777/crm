@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CheckCircle2, Clock3, FileText, Image as ImageIcon, Pencil, Plus, RefreshCw, Search, Send, Trash2, X, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, FileText, Image as ImageIcon, Pencil, Plus, RefreshCw, Search, Send, Star, Trash2, X, XCircle } from "lucide-react";
+import { NPS_TEMPLATE } from "@/lib/nps-scale";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -242,6 +243,28 @@ export default function ModelosPage() {
     setIsCreateOpen(true);
   };
 
+  // Modelo pronto da pesquisa NPS de 0 a 10 (automações pós-compra): abre o formulário preenchido para enviar à Meta.
+  const openNpsPreset = useCallback(() => {
+    setEditTarget(null);
+    setKeepImage(false);
+    setName(NPS_TEMPLATE.name);
+    setCategory(NPS_TEMPLATE.category);
+    setBody(NPS_TEMPLATE.body);
+    setFooter(NPS_TEMPLATE.footer);
+    setButtons([]);
+    setExamples([...NPS_TEMPLATE.examples]);
+    setHeaderImage(null);
+    setCreateError("");
+    setIsCreateOpen(true);
+  }, []);
+
+  // /modelos?preset=nps_avaliacao_0_10 (link do alerta em /automacoes) abre o modelo pronto.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("preset") !== NPS_TEMPLATE.name) return;
+    const timer = window.setTimeout(openNpsPreset, 0);
+    return () => window.clearTimeout(timer);
+  }, [openNpsPreset]);
+
   const openEdit = (template: Template) => {
     setEditTarget(template);
     setKeepImage(template.headerFormat === "IMAGE");
@@ -369,6 +392,11 @@ export default function ModelosPage() {
               <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 cursor-pointer">
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar
               </button>
+              {!templates.some((template) => template.name === NPS_TEMPLATE.name) && (
+                <button type="button" onClick={openNpsPreset} title="Modelo pronto da pesquisa de 0 a 10 usada nas automações de NPS pós-compra" className="inline-flex items-center gap-2 rounded-lg border border-[#C4D600] bg-[#C4D600]/15 px-3 py-2 text-sm font-medium text-[#051647] shadow-sm hover:bg-[#C4D600]/30 dark:text-[#C4D600] cursor-pointer">
+                  <Star className="h-4 w-4" /> Modelo NPS 0 a 10
+                </button>
+              )}
               <button type="button" onClick={openCreate} className="inline-flex items-center gap-2 rounded-lg bg-[#051647] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#002187] dark:bg-[#C4D600] dark:text-[#051647] dark:hover:bg-[#CFDB6D] cursor-pointer">
                 <Plus className="h-4 w-4" /> Novo modelo
               </button>

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { NpsWhatsappPanel } from "@/components/NpsWhatsappPanel";
-import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, RefreshCw, Star, TrendingUp, Users, X } from "lucide-react";
+import Link from "next/link";
+import { Award, Bell, CalendarDays, Check, MessageSquare, Pencil, RefreshCw, Star, TrendingUp, Users, Workflow, X } from "lucide-react";
+import { NPS_BANDS, NPS_BAND_BADGE, npsBand } from "@/lib/nps-scale";
 import { useCrmData } from "@/hooks/useCrmData";
 import { useToast } from "@/components/ToastProvider";
 import { addDays, brDay, brStartOfDay, formatBr } from "@/lib/br-time";
@@ -29,7 +31,7 @@ interface Feedback {
 }
 
 const surveys: SurveyDefinition[] = [
-  { key: "atendimento", title: "Atendimento", timing: "30 minutos após a compra", color: "#002187", description: "Pesquisa enviada após o atendimento na loja." },
+  { key: "atendimento", title: "Atendimento", timing: "20 minutos após a compra", color: "#002187", description: "Pesquisa enviada após o atendimento na loja." },
   { key: "produto", title: "Produto & lentes", timing: "30 dias após a compra", color: "#C4D600", description: "Acompanhamento da adaptação ao produto." },
 ];
 
@@ -244,7 +246,13 @@ export default function NpsPage() {
 
           <NpsWhatsappPanel />
 
-          <h2 className="text-sm font-bold text-slate-900 dark:text-white">Pesquisas de loja e produto</h2>
+          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Respostas registradas manualmente</h2>
+              <p className="mt-1 text-[11px] text-slate-400">Avaliações lançadas pela equipe em “Registrar resposta”. As pesquisas automáticas pós-compra ficam no painel acima.</p>
+            </div>
+            <Link href="/automacoes" className="inline-flex h-8 items-center gap-1.5 self-start rounded-lg border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-600 hover:border-[#002187] hover:text-[#002187] dark:border-slate-700 dark:text-slate-300 dark:hover:border-[#C4D600] dark:hover:text-[#C4D600] cursor-pointer"><Workflow className="h-3.5 w-3.5" />Automações de NPS</Link>
+          </div>
           <section aria-label="Indicadores gerais de NPS" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { label: "Avaliações recebidas", value: overallMetrics.count, detail: "nas duas pesquisas", icon: MessageSquare, color: "bg-blue-50 text-[#002187] dark:bg-blue-950/50 dark:text-[#C4D600]" },
@@ -346,7 +354,7 @@ export default function NpsPage() {
                 <li key={feedback.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
                   <div className="min-w-32"><p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{feedback.nome}</p><p className="mt-0.5 text-[10px] text-slate-400">{feedback.survey} · {feedback.date}</p></div>
                   <p className="min-w-0 flex-1 text-xs text-slate-600 dark:text-slate-300">{feedback.comment}</p>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C4D600]/20 px-2.5 py-1 text-[10px] font-bold text-[#051647] dark:text-[#C4D600]"><Star className="h-3 w-3 fill-current" />{feedback.rating}/10</span>
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${NPS_BAND_BADGE[npsBand(feedback.rating)]}`}><Star className="h-3 w-3 fill-current" />{feedback.rating}/10 · {NPS_BANDS[npsBand(feedback.rating)].label}</span>
                 </li>
               ))}
             </ul>

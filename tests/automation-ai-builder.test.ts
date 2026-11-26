@@ -22,7 +22,8 @@ describe("criação de automação com IA", () => {
     expect(name).toBe("Follow-up de fechamento");
     expect(graph.nodes.map((node) => node.type)).toEqual(["trigger_stage", "delay", "condition", "send_whatsapp", "assign"]);
     expect(graph.edges.find((edge) => edge.source === "n2")?.sourceHandle).toBe("false");
-    expect(validateGraph(graph)).toEqual([]);
+    // Texto livre 2 dias depois sai fora da janela de 24 h: o único bloqueio é vincular um modelo da Meta.
+    expect(validateGraph(graph)).toEqual([expect.stringContaining("vincule um modelo oficial")]);
     const y = Object.fromEntries(graph.nodes.map((node) => [node.id, node.position.y]));
     expect(y.trigger).toBeLessThan(y.n1);
     expect(y.n3).toBeLessThan(y.n4);

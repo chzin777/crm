@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
-import { readFlowSettings, sanitizeGraph, triggerTypesOf, validateGraph } from "@/lib/automations/nodes";
+import { flowTemplates, readFlowSettings, sanitizeGraph, templateApprovalProblems, triggerTypesOf, validateGraph } from "@/lib/automations/nodes";
+import { listTemplates } from "@/lib/meta-whatsapp";
 
 type Context = { params: Promise<{ id: string }> };
 const STATUSES = ["draft", "active", "paused"];
@@ -32,6 +33,12 @@ export async function PUT(request: Request, { params }: Context) {
   const status = typeof body?.status === "string" && STATUSES.includes(body.status) ? body.status : current.status;
   if (status === "active") {
     const problems = validateGraph(graph);
+    // Conformidade com a Meta: só ativa com os modelos do fluxo aprovados (status atual na Meta).
+    if (!problems.length && flowTemplates(graph).length) {
+      const templates = await listTemplates().catch(() => null);
+      if (!templates) problems.push("Não foi possível conferir na Meta se os modelos do fluxo estão aprovados. Tente ativar de novo em instantes.");
+      else problems.push(...templateApprovalProblems(graph, templates));
+    }
     if (problems.length) return NextResponse.json({ error: problems[0], problems }, { status: 400 });
   }
   const name = typeof body?.name === "string" && body.name.trim() ? body.name.trim().slice(0, 120) : current.name;

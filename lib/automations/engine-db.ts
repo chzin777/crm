@@ -1,7 +1,7 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { advance, inactiveSince, pickTrigger, type AdvanceResult, type EnginePorts, type ExecutionContext, type ExecutionState, type StepStatus, type TriggerEvent } from "@/lib/automations/engine";
+import { advance, inactiveSince, pickTrigger, type AdvanceResult, type EnginePorts, type ExecutionContext, type ExecutionState, type ResolvedTemplate, type StepStatus, type TriggerEvent } from "@/lib/automations/engine";
 import { pickSeller, AUDIO_STORAGE_PREFIX, readFlowSettings, type ConversionKind, NODE_DEF, readDuration, sanitizeGraph, triggerNodes, type FlowGraph, type FlowNode } from "@/lib/automations/nodes";
 import { addedTags, stageChanges } from "@/lib/automations/events";
 import { addSystemMessage, firstDispatch, isWindowOpen, openConversationFor } from "@/lib/chat/conversation";
@@ -13,7 +13,10 @@ import { aiTakeoverPatch } from "@/lib/chat/queue-rules";
 import { hoursFor } from "@/lib/chat/operations";
 import { isOpenAt } from "@/lib/chat/hours";
 import { phoneVariants } from "@/lib/chat/phone";
-import { sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
+import { sendTemplate, sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
+import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
+import { attachSurveyConversation, releaseAutomationSurvey, reserveAutomationSurvey } from "@/lib/chat/nps";
+import { NPS_SURVEY_LABELS } from "@/lib/nps-scale";
 import { changeScore } from "@/lib/scoring-db";
 import { rfvpVars } from "@/lib/rfvp";
 import { setContactFields } from "@/lib/contact-fields-db";
@@ -61,6 +64,28 @@ async function requireConversation(state: ExecutionState) {
   const conversation = await conversationOf(state);
   if (!conversation) throw new Error("Contato sem conversa no WhatsApp.");
   return conversation;
+}
+
+/** Imagem do cabeçalho do modelo (a de exemplo cadastrada na Meta). */
+async function templateHeaderImage(template: ResolvedTemplate) {
+  if (!template.hasImage) return undefined;
+  if (!template.headerImageUrl) throw new Error("Este modelo exige uma imagem no cabeçalho e a Meta não retornou a do modelo.");
+  const downloaded = await fetch(template.headerImageUrl, { signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  if (!downloaded?.ok) throw new Error("Não foi possível carregar a imagem do modelo.");
+  return { mimetype: downloaded.headers.get("content-type")?.split(";")[0] || "image/jpeg", fileName: "header", base64: Buffer.from(await downloaded.arrayBuffer()).toString("base64") };
+}
+
+/** Envia o modelo aprovado ao contato e registra no /chat (conversa aberta ou conversa de envios). */
+async function sendTemplateTo(state: ExecutionState, template: ResolvedTemplate) {
+  const contact = await prisma.contact.findUnique({ where: { id: state.contactId }, select: { phone: true, invalidWhatsApp: true } });
+  const phone = chatPhone(contact?.phone ?? "");
+  if (!contact || contact.invalidWhatsApp || phone.length < 12) throw new Error("Contato sem WhatsApp válido.");
+  const sent = await sendTemplate(phone, template.name, template.language, template.values, await templateHeaderImage(template));
+  const externalId = sent.messages?.[0]?.id ?? null;
+  const text = renderTemplateText({ body: template.body, headerFormat: template.headerText ? "TEXT" : null, headerText: template.headerText ?? undefined }, template.name, template.values);
+  const conversationId = await recordDispatchInChat({ contactId: state.contactId, phone, text, externalId, authorName: AUTHOR });
+  notifyChatChange();
+  return { externalId, conversationId };
 }
 
 async function supervisorIds() {
@@ -111,6 +136,12 @@ export function databasePorts(flowId: string): EnginePorts {
       return date;
     },
     sendWhatsApp: async (state, input) => {
+      if (input.template) {
+        // Modelo aprovado da Meta: vale fora da janela de 24 h; o envio fica no histórico do /chat (conversa de envios).
+        const { externalId, conversationId } = await sendTemplateTo(state, input.template);
+        if (state.currentNodeId) await prisma.automationMessageTouch.create({ data: { flowId: state.flowId, nodeId: state.currentNodeId, executionId: state.id, contactId: state.contactId, conversationId, externalId } }).catch(() => undefined);
+        return `Modelo "${input.template.name}" enviado no WhatsApp`;
+      }
       const conversation = await requireConversation(state);
       if (!isWindowOpen(conversation.lastInboundAt)) throw new Error("Janela de 24 h do WhatsApp fechada: o cliente precisa ter escrito nas últimas 24 h (fora dela, use um modelo em Campanhas).");
       if (!input.text.trim() && !input.mediaUrl && !input.audio) throw new Error("Mensagem vazia.");
@@ -150,6 +181,23 @@ export function databasePorts(flowId: string): EnginePorts {
       // Métricas do canvas: entregue (tique da Meta pelo externalId) e respondida (próxima mensagem do cliente).
       if (state.currentNodeId) await prisma.automationMessageTouch.create({ data: { flowId: state.flowId, nodeId: state.currentNodeId, executionId: state.id, contactId: state.contactId, conversationId: conversation.id, externalId } }).catch(() => undefined);
       return `${done.join(" + ").replace(/^./, (char) => char.toUpperCase())} enviada no WhatsApp`;
+    },
+    sendNps: async (state, input) => {
+      const contact = await prisma.contact.findUnique({ where: { id: state.contactId }, select: { phone: true } });
+      const phone = chatPhone(contact?.phone ?? "");
+      if (phone.length < 12) throw new Error("Contato sem WhatsApp válido.");
+      // Reserva antes do envio: nunca a mesma pesquisa duas vezes no mesmo pedido (nem entre blue/green).
+      const survey = await reserveAutomationSurvey({ contactId: state.contactId, phone, surveyType: input.surveyType, orderKey: input.orderKey, store: input.store, seller: input.seller, flowId: state.flowId });
+      if (!survey) return `Pesquisa de ${NPS_SURVEY_LABELS[input.surveyType].toLowerCase()} já enviada para o pedido ${input.orderKey}: nada enviado`;
+      try {
+        const { externalId, conversationId } = await sendTemplateTo(state, input.template);
+        await attachSurveyConversation(survey.id, conversationId);
+        if (state.currentNodeId) await prisma.automationMessageTouch.create({ data: { flowId: state.flowId, nodeId: state.currentNodeId, executionId: state.id, contactId: state.contactId, conversationId, externalId } }).catch(() => undefined);
+      } catch (error) {
+        await releaseAutomationSurvey(survey.id);
+        throw error;
+      }
+      return `Pesquisa NPS (${NPS_SURVEY_LABELS[input.surveyType].toLowerCase()}) enviada${input.orderKey ? ` para o pedido ${input.orderKey}` : ""}`;
     },
     aiAgent: async (state, objective) => {
       const conversation = await requireConversation(state);
@@ -459,7 +507,10 @@ export async function simulateFlow(graph: FlowGraph, contactId: string, triggerN
     ...real,
     isOptedOut: async () => contact.marketingOptOut,
     nextBusinessTime: async (date) => date,
-    sendWhatsApp: async (_state, input) => `Simulado: enviaria "${input.text.slice(0, 160)}"${input.mediaUrl ? " com imagem" : ""}${input.audio ? " + nota de voz (gravando...)" : ""}${input.presence?.mode === "off" ? " sem digitando" : ""}`,
+    sendWhatsApp: async (_state, input) => input.template
+      ? `Simulado: enviaria o modelo "${input.template.name}" (${input.template.values.join(" | ").slice(0, 160)})`
+      : `Simulado: enviaria "${input.text.slice(0, 160)}"${input.mediaUrl ? " com imagem" : ""}${input.audio ? " + nota de voz (gravando...)" : ""}${input.presence?.mode === "off" ? " sem digitando" : ""}`,
+    sendNps: async (_state, input) => `Simulado: enviaria a pesquisa NPS de ${input.surveyType === "ATENDIMENTO" ? "atendimento" : "produto e adaptação"} pelo modelo "${input.template.name}"${input.orderKey ? ` (pedido ${input.orderKey})` : ""}`,
     aiAgent: async (_state, objective) => `Simulado: passaria a conversa para a IA${objective ? ` (${objective.slice(0, 120)})` : ""}`,
     moveStage: async (_state, stage) => `Simulado: moveria a oportunidade para ${stage}`,
     createOpportunity: describe("criaria a oportunidade em Novo lead"),

@@ -12,7 +12,7 @@ export const ERP_TRIGGER_TYPES = [
 export const TRIGGER_TYPES = ["trigger_message", "trigger_stage", "trigger_tag", "trigger_inactive", "trigger_webhook", "trigger_ai_handoff", "trigger_link_click", "trigger_score", "trigger_tier", "trigger_rfvp", ...ERP_TRIGGER_TYPES] as const;
 export type ErpTriggerType = (typeof ERP_TRIGGER_TYPES)[number];
 export const isErpTrigger = (type: string): type is ErpTriggerType => (ERP_TRIGGER_TYPES as readonly string[]).includes(type);
-export const ACTION_TYPES = ["send_whatsapp", "delay", "business_hours", "wait_reply", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "distribute_lead", "notify", "add_note", "change_score", "update_field", "opt_out", "condition", "ab_split", "end_flow", "http"] as const;
+export const ACTION_TYPES = ["send_whatsapp", "send_nps", "delay", "business_hours", "wait_reply", "ai_agent", "move_stage", "create_opportunity", "add_tag", "remove_tag", "assign", "distribute_lead", "notify", "add_note", "change_score", "update_field", "opt_out", "condition", "ab_split", "end_flow", "http"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export type NodeType = TriggerType | (typeof ACTION_TYPES)[number];
 export type NodeCategory = "gatilho_crm" | "gatilho_whatsapp" | "erp_vendas" | "erp_financeiro" | "mensagem" | "ia" | "crm" | "logica";
@@ -35,7 +35,88 @@ export type FieldDef =
   | { key: string; label: string; kind: "list"; placeholder?: string; hint?: string }
   | { key: string; label: string; kind: "stage" | "queue" | "user" | "users" | "flow" | "contact_field"; hint?: string }
   /** weekdays: dias da semana (0 = domingo); time: HH:MM; variants: percentuais do Teste A/B. */
-  | { key: string; label: string; kind: "weekdays" | "time" | "variants"; hint?: string };
+  | { key: string; label: string; kind: "weekdays" | "time" | "variants"; hint?: string }
+  /** template: modelo aprovado da Meta + variáveis {{1}}, {{2}}... (campo do contato ou texto fixo). */
+  | { key: string; label: string; kind: "template"; hint?: string; required?: boolean };
+
+// ---------------------------------------------------------------- Modelo oficial da Meta no nó
+
+/** Modelo da Meta gravado no nó (mesmo formato do seletor de Campanhas). */
+export type NodeTemplate = { name: string; language: string; body: string; params: string[]; hasImage?: boolean; headerImageUrl?: string | null; headerText?: string | null; footer?: string | null; category?: string | null; buttons?: { type: string; text: string }[] };
+
+export function readNodeTemplate(config: Record<string, unknown>): NodeTemplate | null {
+  const raw = config.template;
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const name = String(value.name ?? "").trim();
+  const language = String(value.language ?? "").trim();
+  if (!name || !language) return null;
+  return {
+    name, language,
+    body: String(value.body ?? ""),
+    params: Array.isArray(value.params) ? value.params.map((item) => String(item ?? "")) : [],
+    hasImage: value.hasImage === true,
+    headerImageUrl: typeof value.headerImageUrl === "string" ? value.headerImageUrl : null,
+    headerText: typeof value.headerText === "string" ? value.headerText : null,
+    footer: typeof value.footer === "string" ? value.footer : null,
+    category: typeof value.category === "string" ? value.category : null,
+    buttons: Array.isArray(value.buttons) ? (value.buttons as { type: string; text: string }[]) : [],
+  };
+}
+
+/**
+ * Gatilhos ativos (o cliente não escreveu agora): a mensagem pode sair fora da janela de 24 h do WhatsApp.
+ * Mensagem recebida, transbordo da IA, etapa e tag acontecem durante a conversa (janela aberta).
+ */
+const PROACTIVE_TRIGGERS = new Set<string>(["trigger_inactive", "trigger_webhook", "trigger_link_click", "trigger_score", "trigger_tier", "trigger_rfvp", ...ERP_TRIGGER_TYPES]);
+export const WINDOW_MS = 24 * 3_600_000;
+
+function durationMs(config: Record<string, unknown>, fallback: TimeUnit): number {
+  const { amount, unit } = readDuration(config, fallback);
+  if (unit === "months") return amount * 30 * FIXED_MS.days;
+  if (unit === "years") return amount * 365 * FIXED_MS.days;
+  return amount * FIXED_MS[unit];
+}
+
+/**
+ * Envios de WhatsApp que podem sair fora da janela de 24 h: gatilho ativo (VMSet, inatividade, webhook...) ou soma das
+ * esperas desde o gatilho de 24 h ou mais (a saída "Respondeu" do Aguardar resposta reabre a janela). Devolve o motivo.
+ */
+export function sendsOutsideWindow(graph: FlowGraph): Map<string, string> {
+  const result = new Map<string, string>();
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const visit = (nodeId: string, waited: number, proactive: string | null, seen: Set<string>) => {
+    const node = byId.get(nodeId);
+    if (!node || seen.has(nodeId)) return;
+    const path = new Set(seen).add(nodeId);
+    let total = waited;
+    if (node.type === "delay") total += durationMs(node.data.config, "hours");
+    if (node.type === "send_whatsapp" && !result.has(node.id)) {
+      if (proactive) result.set(node.id, `o gatilho "${proactive}" envia sem o cliente ter escrito nas últimas 24 h`);
+      else if (total >= WINDOW_MS) result.set(node.id, "as esperas antes deste envio somam 24 h ou mais");
+    }
+    for (const edge of graph.edges.filter((item) => item.source === node.id)) {
+      if (node.type === "wait_reply" && edge.sourceHandle === "replied") visit(edge.target, 0, null, path);
+      else visit(edge.target, node.type === "wait_reply" ? total + durationMs(node.data.config, "days") : total, proactive, path);
+    }
+  };
+  for (const trigger of triggerNodes(graph)) visit(trigger.id, 0, PROACTIVE_TRIGGERS.has(trigger.type) ? NODE_DEF[trigger.type].label : null, new Set());
+  return result;
+}
+
+/** Modelos da Meta usados no fluxo (Enviar WhatsApp com modelo e Pesquisa NPS). */
+export function flowTemplates(graph: FlowGraph): NodeTemplate[] {
+  return graph.nodes.flatMap((node) => (node.type === "send_whatsapp" || node.type === "send_nps" ? [readNodeTemplate(node.data.config)].filter((item): item is NodeTemplate => !!item) : []));
+}
+
+/** Modelos do fluxo que não estão aprovados na Meta (status atual da lista de modelos). */
+export function templateApprovalProblems(graph: FlowGraph, approved: { name: string; language: string; status: string }[]): string[] {
+  return [...new Set(flowTemplates(graph).flatMap((template) => {
+    const found = approved.find((item) => item.name === template.name && item.language === template.language);
+    if (!found) return [`O modelo "${template.name}" não existe mais na Meta. Escolha outro modelo aprovado.`];
+    return found.status === "APPROVED" ? [] : [`O modelo "${template.name}" ainda não foi aprovado pela Meta (status ${found.status}). Ative depois da aprovação.`];
+  }))];
+}
 
 /** Áudio enviado pelo editor (upload no armazenamento): o valor do campo é "storage:<chave>"; URL http(s) também vale. */
 export const AUDIO_STORAGE_PREFIX = "storage:";
@@ -534,7 +615,8 @@ export const NODE_DEFS: NodeDef[] = [
     defaults: { mode: "segment", segment: "em_risco", pillar: "p", operator: "lte", value: 2, code: "555-5" },
   },
 
-  { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis, imagem e nota de voz opcionais, com digitando/gravando antes de cada bloco (janela de 24 h aberta).", fields: [{ key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }, { key: "audio", label: "Nota de voz (opcional)", kind: "audio", placeholder: "https://.../audio.mp3", hint: "Envie .mp3, .ogg ou .opus (ou cole a URL): chega como áudio gravado na hora, depois da mensagem." }, { key: "trackLinks", label: "Rastrear links (encurta e identifica quem clicou)", kind: "boolean" }, { key: "presenceMode", label: "Digitando / gravando antes do envio", kind: "select", options: PRESENCE_MODE_OPTIONS }, { key: "presenceSeconds", label: "Tempo de digitando/gravando (segundos)", kind: "number", hint: "De 0 a 20 s, aplicado a cada bloco (texto e áudio)." }], defaults: { text: "", mediaUrl: "", audio: "", trackLinks: false, presenceMode: "auto", presenceSeconds: 5 } },
+  { type: "send_nps", category: "mensagem", label: "Pesquisa NPS (0 a 10)", description: "Envia a pesquisa de 0 a 10 por um modelo aprovado da Meta e grava a nota, o comentário opcional, o pedido e a loja no painel de NPS. Uma pesquisa de cada tipo por pedido do VMSet.", fields: [{ key: "surveyType", label: "O que o cliente avalia", kind: "select", options: [{ value: "ATENDIMENTO", label: "Atendimento" }, { value: "PRODUTO_ADAPTACAO", label: "Produto e adaptação" }] }, { key: "template", label: "Modelo aprovado da Meta (obrigatório)", kind: "template", required: true, hint: "Use o modelo pronto de NPS 0 a 10 (em Modelos). Texto fixo aceita variáveis do fluxo, ex.: {{venda.loja}}." }], defaults: { surveyType: "ATENDIMENTO", template: null } },
+  { type: "send_whatsapp", category: "mensagem", label: "Enviar WhatsApp", description: "Texto com variáveis, imagem e nota de voz opcionais (janela de 24 h aberta) ou modelo aprovado da Meta (obrigatório fora da janela de 24 h).", fields: [{ key: "template", label: "Modelo aprovado da Meta", kind: "template", hint: "Obrigatório quando a mensagem pode sair fora da janela de 24 h. Texto fixo aceita variáveis do fluxo, ex.: {{venda.loja}}." }, { key: "text", label: "Mensagem", kind: "textarea", placeholder: "Oi {{nome}}, tudo bem?", hint: "Variáveis: {{nome}}, {{nome_completo}}, {{cidade}}, {{telefone}} e campos do webhook." }, { key: "mediaUrl", label: "URL da imagem (opcional)", kind: "url", placeholder: "https://..." }, { key: "audio", label: "Nota de voz (opcional)", kind: "audio", placeholder: "https://.../audio.mp3", hint: "Envie .mp3, .ogg ou .opus (ou cole a URL): chega como áudio gravado na hora, depois da mensagem." }, { key: "trackLinks", label: "Rastrear links (encurta e identifica quem clicou)", kind: "boolean" }, { key: "presenceMode", label: "Digitando / gravando antes do envio", kind: "select", options: PRESENCE_MODE_OPTIONS }, { key: "presenceSeconds", label: "Tempo de digitando/gravando (segundos)", kind: "number", hint: "De 0 a 20 s, aplicado a cada bloco (texto e áudio)." }], defaults: { template: null, text: "", mediaUrl: "", audio: "", trackLinks: false, presenceMode: "auto", presenceSeconds: 5 } },
   { type: "delay", category: "mensagem", label: "Aguardar", description: "Pausa o fluxo de segundos até anos.", fields: [...DURATION_FIELDS("Quanto tempo"), { key: "businessHours", label: "Retomar só em horário comercial", kind: "boolean" }], defaults: { amount: 1, unit: "hours", businessHours: false } },
   { type: "business_hours", category: "mensagem", label: "Esperar até horário útil", description: "Janela de horário comercial: dentro dela o fluxo segue na hora; fora, pausa e retoma exatamente na abertura do próximo horário útil (horário de Brasília).", fields: [{ key: "days", label: "Dias da semana", kind: "weekdays" }, { key: "start", label: "Abre às", kind: "time" }, { key: "end", label: "Fecha às", kind: "time" }], defaults: { days: [1, 2, 3, 4, 5, 6], start: "08:00", end: "18:00" } },
   { type: "wait_reply", category: "mensagem", label: "Aguardar resposta do cliente", description: "Pausa até o cliente mandar mensagem no WhatsApp ou o prazo acabar: saída Respondeu no prazo (na hora em que ele responde) ou Não respondeu (Timeout). A resposta vira {{resposta}}.", fields: [{ key: "amount", label: "Prazo para responder", kind: "number" }, { key: "unit", label: "Unidade", kind: "select", options: WAIT_REPLY_UNITS }], defaults: { amount: 1, unit: "days" } },
@@ -637,9 +719,14 @@ export function validateGraph(graph: FlowGraph): string[] {
   for (const trigger of triggers) {
     if (!graph.edges.some((edge) => edge.source === trigger.id)) problems.push(triggers.length > 1 ? `Conecte o gatilho "${NODE_DEF[trigger.type].label}" ao primeiro passo.` : "Conecte o gatilho ao primeiro passo.");
   }
+  const outsideWindow = sendsOutsideWindow(graph);
   for (const node of graph.nodes) {
     const config = node.data.config;
-    if (node.type === "send_whatsapp" && !String(config.text ?? "").trim() && !String(config.mediaUrl ?? "").trim() && !String(config.audio ?? "").trim()) problems.push("Enviar WhatsApp: escreva a mensagem ou anexe um áudio.");
+    const template = readNodeTemplate(config);
+    if (node.type === "send_whatsapp" && !template && outsideWindow.has(node.id)) problems.push(`Enviar WhatsApp: ${outsideWindow.get(node.id)}. Fora da janela de 24 h a Meta só aceita modelo aprovado: vincule um modelo oficial no passo (crie em Modelos se ainda não tiver).`);
+    if (node.type === "send_nps" && !template) problems.push("Pesquisa NPS: vincule o modelo aprovado da Meta (use o modelo pronto de NPS 0 a 10 em Modelos).");
+    if ((node.type === "send_whatsapp" || node.type === "send_nps") && template && template.params.some((field) => field.startsWith("fixo:") && !field.slice(5).trim())) problems.push(`${NODE_DEF[node.type].label}: preencha o texto fixo de todas as variáveis do modelo.`);
+    if (node.type === "send_whatsapp" && !template && !String(config.text ?? "").trim() && !String(config.mediaUrl ?? "").trim() && !String(config.audio ?? "").trim()) problems.push("Enviar WhatsApp: escreva a mensagem ou anexe um áudio.");
     if (node.type === "send_whatsapp" && String(config.audio ?? "").trim() && !String(config.audio).startsWith(AUDIO_STORAGE_PREFIX) && !/^https?:\/\//i.test(String(config.audio).trim())) problems.push("Enviar WhatsApp: a nota de voz precisa ser um arquivo enviado ou uma URL http(s).");
     if (node.type === "http" && !/^https?:\/\//i.test(String(config.url ?? ""))) problems.push("Requisição HTTP: informe uma URL http(s).");
     if ((node.type === "add_tag" || node.type === "remove_tag" || node.type === "trigger_tag") && !String(config.tag ?? "").trim()) problems.push(`${NODE_DEF[node.type].label}: informe a tag.`);

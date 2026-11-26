@@ -341,7 +341,7 @@ enum NpsFeedbackStatus {
   EXPIRED
 }
 
-/// Pesquisa de 1 a 5 enviada no WhatsApp; PENDING é o estado de "aguardando nota".
+/// Pesquisa enviada no WhatsApp (0 a 10; as antigas de 1 a 5 têm scale = 5); PENDING é o estado de "aguardando nota".
 model NpsFeedback {
   id             String            @id @default(cuid())
   conversationId String?
@@ -354,15 +354,28 @@ model NpsFeedback {
   status         NpsFeedbackStatus @default(PENDING)
   createdAt      DateTime          @default(now())
   answeredAt     DateTime?
+  /// Escala da nota: 10 (0 a 10) ou 5 (pesquisas antigas de 1 a 5, fora dos cálculos novos).
+  scale          Int               @default(5)
+  /// "ATENDIMENTO" | "PRODUTO_ADAPTACAO".
+  surveyType     String            @default("ATENDIMENTO")
+  /// "chat" (encerramento do atendimento) | "automacao" (pós-compra do VMSet).
+  source         String            @default("chat")
+  /// Pedido do VMSet (loja-número): uma pesquisa de cada tipo por pedido.
+  orderKey       String?
+  store          String?
+  seller         String?
+  flowId         String?
   conversation   ChatConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   contact        Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
   attendant      User?             @relation(fields: [attendantId], references: [id], onDelete: SetNull)
   queue          ChatQueue?        @relation(fields: [queueId], references: [id], onDelete: SetNull)
 
+  @@unique([orderKey, surveyType])
   @@index([phone, status])
   @@index([status, createdAt])
   @@index([attendantId, createdAt])
   @@index([answeredAt])
+  @@index([contactId, scale])
 }
 
 model CampaignMessage {
