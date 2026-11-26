@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { asksCustomerCity, cityQuestion, extractBudget, isProductBrowseRequest, wantsCheap } from "@/lib/ai/catalog-context";
-import { activeClosing, activeCta, asksGlassesType, asksSpecificModel, FRAME_PRICE_NOTE, isBroadStockCall, isGenericGlassesRequest, needsTypeFirst, oneQualifyingQuestion, priceTransparency, qualifyQuestion, SUN_PRICE_NOTE, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, SALES_CONSULTANT_RULES, withBudgetArgs } from "@/lib/ai/sales-consultant";
+import { activeClosing, activeCta, asksGlassesType, asksSpecificModel, FRAME_PRICE_NOTE, isBroadStockCall, isGenericGlassesRequest, needsTypeFirst, oneQualifyingQuestion, priceTransparency, qualifyQuestion, SUN_PRICE_NOTE, budgetBlock, conversationBudget, conversationWantsKids, isGatedStockCall, mergeProactiveReply, needsCityFirst, withBudgetArgs } from "@/lib/ai/sales-consultant";
 import { isKidsProduct, mentionsKids } from "@/lib/ai/catalog-search";
-import { FORMAT_RULES } from "@/lib/ai/bubbles";
+
 import { applyPriceFilter, diverseByBrand, formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
 import { STOCK_TOOL } from "@/lib/ai/stock";
 import { cardOpening } from "@/lib/ai/product-card";
-import { loadPromptModule } from "@/lib/ai/prompt-composer";
+import { SALES_CONSULTANT_RULES, FORMAT_RULES, loadPromptModule } from "./helpers/prompt-seed";
+
 
 describe("orçamento na fala do cliente", () => {
   it.each([

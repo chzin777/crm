@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildSystemPrompt } from "@/lib/ai/agent-core";
-import { asksEyeExam, BUSINESS_HARD_RULES, claimsEyeExam, consultarLojas, CONSULTAR_LOJAS_TOOL, guardBusinessReply, mentionedCity } from "@/lib/ai/business-guard";
+import { asksEyeExam, claimsEyeExam, consultarLojas, CONSULTAR_LOJAS_TOOL, guardBusinessReply, mentionedCity } from "@/lib/ai/business-guard";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import type { StoreInfo } from "@/lib/ai/stock";
+import { BUSINESS_HARD_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 // Cadastro: Goiânia (Setor Marista), Paraíso (Tocantins) e a 502 encerrada; nenhuma loja em Trindade.
 const marista: StoreInfo = { name: "LJ 10 MARISTA", address: "AVENIDA T-10", addressNumber: "1300", neighborhood: "SETOR MARISTA", city: "Goiânia", state: "GO", lat: -16.70, lng: -49.26 };
@@ -28,7 +29,7 @@ describe("exame de vista", () => {
   });
 
   it("regra inegociável entra no prompt do sistema e a marca não cita mais exames", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(BUSINESS_HARD_RULES);
     expect(prompt).not.toMatch(/armações e exames de vista/);
   });

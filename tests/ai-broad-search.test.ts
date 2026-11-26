@@ -6,7 +6,8 @@ import { buildProductCard, cardStore, commercialName } from "@/lib/ai/product-ca
 import { asksForPhoto, shouldSendProductPhoto } from "@/lib/ai/product-details";
 import { buildStockResult, STOCK_TOOL, type StockLookup, type StoreInfo } from "@/lib/ai/stock";
 import { expandModelNicknames, modelNickname } from "@/lib/ai/product-names";
-import { allowsProductPhoto, BROAD_SEARCH_RULES, buildShowcaseResult, classifySearch, showcaseCandidates, showcaseQuestion } from "@/lib/ai/stock-showcase";
+import { allowsProductPhoto, buildShowcaseResult, classifySearch, showcaseCandidates, showcaseQuestion } from "@/lib/ai/stock-showcase";
+import { BROAD_SEARCH_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 const stores = new Map<string, StoreInfo>([
   ["34", { name: "LJ 34 SETOR MARISTA", address: "Rua 27", addressNumber: "2106", neighborhood: "Setor Marista", city: "Goiânia" }],
@@ -118,7 +119,7 @@ describe("busca ampla (marca/categoria) x busca específica (modelo)", () => {
   });
 
   it("prompt traz as 2 etapas com os exemplos literais", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(BROAD_SEARCH_RULES);
     for (const piece of ["Etapa 1 — descoberta", "tipoBusca \"marca_ampla\"", "SEM foto e SEM lista de lojas", "comentário curto seu", "Etapa 2 — detalhamento", "tipoBusca \"modelo_especifico\"", "me manda foto do Justin"]) {
       expect(BROAD_SEARCH_RULES).toContain(piece);

@@ -3,6 +3,7 @@ import { buildSystemPrompt } from "@/lib/ai/agent-core";
 import { asksForHuman, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_RULES, CLOSE_TOOL, isPostCloseCourtesy, POST_CLOSE_WINDOW_MS, runAiClose } from "@/lib/ai/ai-close";
 import { applySkillsToSettings, ENCERRAMENTO_MD, fallbackSkills, filterToolsBySkills, skillsPromptBlock } from "@/lib/ai/studio";
+import { SEED_MODULES } from "./helpers/prompt-seed";
 
 const settings = { ...DEFAULT_AI_SETTINGS, closeWhenResolved: true };
 const decide = (pendingText: string, extra: { queued?: boolean; assigned?: boolean } = {}) =>
@@ -40,7 +41,7 @@ describe("encerramento pela IA no fluxo oficial (encerra no banco + pesquisa de 
     if (decision.close) await runAiClose("", { sendFarewell: async () => undefined, close, survey });
     expect(close).not.toHaveBeenCalled();
     expect(survey).not.toHaveBeenCalled();
-    expect(buildSystemPrompt({ settings, info: "", queued: { queueName: "Comercial" } })).toContain("Nunca encerre o atendimento (não chame encerrarAtendimento");
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings, info: "", queued: { queueName: "Comercial" } })).toContain("Nunca encerre o atendimento (não chame encerrarAtendimento");
   });
 
   it("trava fixa: atendente atribuído, pedido de atendente, dúvida pendente ou opção desligada", () => {
@@ -71,8 +72,8 @@ describe("encerramento pela IA no fluxo oficial (encerra no banco + pesquisa de 
     expect(ENCERRAMENTO_MD).toContain("não faça perguntas abertas");
     const skills = fallbackSkills();
     expect(skillsPromptBlock(skills)).toContain("chame encerrarAtendimento");
-    expect(buildSystemPrompt({ settings, info: "" })).toContain('action "resolved"');
-    expect(buildSystemPrompt({ settings: { ...settings, closeWhenResolved: false }, info: "" })).not.toContain('action "resolved" com a despedida');
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings, info: "" })).toContain('action "resolved"');
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings: { ...settings, closeWhenResolved: false }, info: "" })).not.toContain('action "resolved" com a despedida');
   });
 
   it("skill desligada desliga o encerramento e a ferramenta; ligada mantém", () => {

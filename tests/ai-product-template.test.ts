@@ -4,6 +4,7 @@ import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { splitBubbles } from "@/lib/ai/bubbles";
 import { buildProductCard, CARD_QUESTION, cardStore, commercialName, PRODUCT_CARD_TEMPLATE, type ProductCardFields } from "@/lib/ai/product-card";
 import { cardGuidance, parseSheet, shortAttribute } from "@/lib/ai/product-details";
+import { SEED_MODULES } from "./helpers/prompt-seed";
 
 const justin: ProductCardFields = {
   ...commercialName("OCS RAY BAN REF-RB4165 JUSTIN 622/8G", "RAY BAN"),
@@ -70,7 +71,7 @@ describe("ficha de produto no template visual do negócio", () => {
   });
 
   it("prompt orienta comentário próprio + fichaFormatada copiada, sem abertura pronta", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(PRODUCT_CARD_TEMPLATE);
     for (const piece of ["copie fichaFormatada exatamente como veio", "comentário curto, com suas palavras", "---SPLIT---", "Nunca escreva atributos sem dado"]) {
       expect(PRODUCT_CARD_TEMPLATE).toContain(piece);

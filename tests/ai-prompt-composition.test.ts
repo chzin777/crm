@@ -1,6 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
 import { sanitizeAiResponse } from "@/lib/ai/sanitize";
-import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreInfo } from "@/lib/ai/stock";
 
@@ -20,7 +18,7 @@ const INVENTORY = vi.hoisted(() => ({
   RAYBAN: [1, 2, 3, 4, 5].map((n) => ({ code: `r${n}`, description: `OCS RAY BAN REF RB910${n} 55`, brand: "RAY BAN", unit: "36" })),
 } as Record<string, { code: string; description: string; brand: string; unit: string }[]>));
 
-const calls = vi.hoisted(() => ({ stock: [] as Record<string, unknown>[], prompts: [] as string[] }));
+const calls = vi.hoisted(() => ({ stock: [] as Record<string, unknown>[], prompts: [] as string[], roles: [] as string[][] }));
 const photos = vi.hoisted(() => ({ byCode: {} as Record<string, string> }));
 type Tool = { definition: { function: { name: string } }; run: (args: Record<string, unknown>) => Promise<unknown> };
 const model = vi.hoisted(() => ({ script: null as null | ((tools: Record<string, Tool["run"]>) => Promise<Record<string, unknown>>) }));
@@ -67,18 +65,21 @@ vi.mock("@/lib/ai/openai", () => ({
   transcribeAudio: vi.fn(),
   aiJson: vi.fn(async (messages: { role: string; content: unknown }[], meta: { tools?: Tool[] }) => {
     calls.prompts.push(String(messages[0].content));
+    calls.roles.push(messages.map((message) => message.role));
     const tools = Object.fromEntries((meta.tools ?? []).map((tool) => [tool.definition.function.name, tool.run]));
     return model.script ? model.script(tools) : { reply: "Certo!", action: "reply" };
   }),
 }));
 
-import { composeSystemPrompt, loadPromptModule, PROMPT_MODULES, selectPromptModules } from "@/lib/ai/prompt-composer";
+import { SEED_MODULES, composeSystemPrompt, selectPromptModules } from "./helpers/prompt-seed";
 import { simulateAgent, type PlaygroundMessage } from "@/lib/ai/agent";
+import { loadPromptModules } from "@/lib/ai/prompt-modules-db";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { brandFallbackReply, brandSearchArgs, equivalentBrands } from "@/lib/ai/catalog-search";
 import { extractPreferredCity, updateCatalogContext, EMPTY_CATALOG_CONTEXT } from "@/lib/ai/catalog-context";
 import { singleEmoji } from "@/lib/ai/response-opening";
 import { resolveListedChoice } from "@/lib/ai/showcase-choice";
+import { loadPromptModule, PROMPT_MODULES } from "./helpers/prompt-seed";
 
 const settings = { ...DEFAULT_AI_SETTINGS, sendProductImage: false, canQuotePrices: true, useStores: false, useOperatingHours: false, topics: [], aiChoosesQueue: false, maxAiReplies: 20, closeWhenResolved: false };
 const GREETING_START = /^\s*(bom dia|boa tarde|boa noite|oi|olá)\b/i;
@@ -90,19 +91,15 @@ beforeEach(() => {
   photos.byCode = {};
 });
 
-describe("higiene dos módulos de prompt (lib/ai/prompts/*.md)", () => {
-  const dir = path.join(process.cwd(), "lib", "ai", "prompts");
-  const files = readdirSync(dir).filter((file) => file.endsWith(".md"));
-
+describe("higiene dos módulos de prompt (seed do banco, editável em /ia)", () => {
   it("todos os módulos esperados existem e não estão vazios", () => {
-    expect(files.sort()).toEqual(PROMPT_MODULES.map((name) => `${name}.md`).sort());
     for (const name of PROMPT_MODULES) expect(loadPromptModule(name).length).toBeGreaterThan(50);
   });
 
-  it.each(files)("%s não contém nome próprio real (só o marcador <PRIMEIRO_NOME>)", (file) => {
-    const text = readFileSync(path.join(dir, file), "utf8");
+  it.each(PROMPT_MODULES)("%s não contém nome próprio real (só o marcador <PRIMEIRO_NOME>)", (name) => {
+    const text = loadPromptModule(name);
     const names = ["Michel", "Christofer", "Cristofer", "Ana", "João", "Joao", "Maria", "José", "Jose", "Pedro", "Paulo", "Carlos", "Lucas", "Leandro", "Vivi", "Juliana", "Fernanda", "Mariana", "Gabriel", "Rafael", "Bruno", "Marcos", "Patrícia", "Camila", "Amanda"];
-    for (const name of names) expect(text).not.toMatch(new RegExp(`(?<![\\p{L}])${name}(?![\\p{L}])`, "u"));
+    for (const name of names) expect(text).not.toMatch(new RegExp(`(?<![\p{L}])${name}(?![\p{L}])`, "u"));
   });
 });
 
@@ -110,7 +107,7 @@ describe("composeSystemPrompt carrega só os módulos do estágio/intenção", (
   it("primeiro turno traz saudação; turno já saudado não traz saudacao.md e proíbe repetir", () => {
     expect(selectPromptModules({ hasGreetedInSession: false, text: "boa tarde, tudo bem ?" })).toEqual(["core", "saudacao"]);
     const later = composeSystemPrompt({ hasGreetedInSession: true, text: "estou procurando armações miu miu", activeBrand: "Miu Miu" });
-    expect(later).not.toContain(loadPromptModule("saudacao"));
+    expect(later).not.toContain(loadPromptModule("saudacao").split("{{")[0]);
     expect(later).toContain("SEM SAUDAÇÃO REPETIDA");
     expect(later).toContain("não comece a resposta com bom dia, boa tarde, boa noite, oi ou olá");
   });
@@ -181,7 +178,7 @@ describe("fluxo multi-turno: saudação única, marca ativa e cidade", () => {
     const t1 = await turn("boa tarde, tudo bem ?", async () => ({ reply: "Boa tarde! Tudo ótimo por aqui, e com você? 😊 Em que posso te ajudar?", action: "reply" }));
     expect(t1.result.reply).toMatch(/^(Bom dia|Boa tarde|Boa noite)! /);
     expect(t1.result.reply.match(/\b(Bom dia|Boa tarde|Boa noite)\b/g)).toHaveLength(1);
-    expect(t1.prompt).toContain(loadPromptModule("saudacao"));
+    expect(t1.prompt).toContain(loadPromptModule("saudacao").split("{{")[0]);
     expect(t1.stock).toHaveLength(0);
 
     // 2) Marca pedida: salva activeBrand, pede a cidade e não repete "Boa tarde" (mesmo se o modelo tentar).
@@ -190,7 +187,7 @@ describe("fluxo multi-turno: saudação única, marca ativa e cidade", () => {
     expect(t2.result.reply).not.toMatch(GREETING_START);
     expect(t2.result.reply).not.toMatch(/boa tarde/i);
     expect(t2.result.reply).toMatch(/cidade/i);
-    expect(t2.prompt).not.toContain(loadPromptModule("saudacao"));
+    expect(t2.prompt).not.toContain(loadPromptModule("saudacao").split("{{")[0]);
     expect(t2.prompt).toContain("QUALIFICAÇÃO");
     expect(t2.stock).toHaveLength(0);
 
@@ -354,5 +351,23 @@ describe("conversa livre: typos e variações sempre passam pelo LLM", () => {
     expect(run.catalogContext?.preferredCity).toBe("Goiânia");
     expect(calls.stock.at(-1)).toMatchObject({ cidade: "Goiânia", tipoBusca: "marca_ampla" });
     expect(run.messages[0].startsWith("Que bom! Olha as que estão aí:")).toBe(true);
+  });
+});
+
+describe("Testar IA Agora com todos os módulos desligados", () => {
+  it("a chamada à OpenAI vai sem mensagem system (GPT puro + ferramentas) e o resultado mostra 0 módulos", async () => {
+    vi.mocked(loadPromptModules).mockResolvedValueOnce(SEED_MODULES.map((module) => ({ ...module, isActive: false })));
+    calls.roles.length = 0;
+    const result = await simulateAgent(settings, [{ from: "customer", text: "quero ver óculos de sol" }], "user-1");
+    expect(calls.roles.at(-1)).toEqual(["user"]);
+    expect(result.prompt?.system).toBe("");
+    expect(result.prompt?.used).toEqual([]);
+  });
+
+  it("com os módulos ativos, o system enviado é o mesmo que o playground mostra", async () => {
+    const result = await simulateAgent(settings, [{ from: "customer", text: "quero ver óculos de sol" }], "user-1");
+    expect(calls.roles.at(-1)?.[0]).toBe("system");
+    expect(calls.prompts.at(-1)).toBe(result.prompt?.system);
+    expect(result.prompt?.used.length).toBeGreaterThan(0);
   });
 });

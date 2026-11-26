@@ -4,7 +4,8 @@ import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { asksAvailability, buildProductCard, cardOpening, cardStore, commercialName, DETAILS_OPENING, PRODUCT_CARD_TEMPLATE } from "@/lib/ai/product-card";
 import { modelFamilyKey, referenceKey } from "@/lib/ai/product-names";
 import { type StoreInfo } from "@/lib/ai/stock";
-import { BROAD_SEARCH_RULES, buildShowcaseResult, showcaseCandidates } from "@/lib/ai/stock-showcase";
+import { buildShowcaseResult, showcaseCandidates } from "@/lib/ai/stock-showcase";
+import { BROAD_SEARCH_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 const stores = new Map<string, StoreInfo>([["34", { name: "LJ 34 SETOR MARISTA", address: "Rua 27", addressNumber: "2106", neighborhood: null, city: "Goiânia" }]]);
 const unit = (qty: number, price: number) => [{ unit: "34", name: "LJ 34 LOJA", qty, price }];
@@ -45,7 +46,7 @@ describe("abertura do card e vitrine sem referência duplicada", () => {
   });
 
   it("prompt diferencia as aberturas", () => {
-    expect(buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(PRODUCT_CARD_TEMPLATE);
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(PRODUCT_CARD_TEMPLATE);
     // Sem frase pronta de abertura: o comentário antes da ficha é escrito pela IA.
     expect(PRODUCT_CARD_TEMPLATE).toContain("comentário curto, com suas palavras");
     expect(PRODUCT_CARD_TEMPLATE).not.toMatch(/Temos sim|Aqui estão os detalhes/);

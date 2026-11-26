@@ -183,15 +183,3 @@ export async function sendBubbles(
   return parts.length;
 }
 
-/** Regra fixa do prompt: lista de lojas escaneável e pergunta de condução em bolha separada. */
-export const FORMAT_RULES = [
-  "FORMATAÇÃO E CADÊNCIA NO WHATSAPP (regra fixa):",
-  "- Ao listar 2 ou mais lojas, use a formatação do WhatsApp: agrupe por cidade/região quando houver cidades diferentes (use o campo \"cidade\" das lojas; nunca misture DF com Goiás na mesma lista), com o título 📍 *Cidade*; cada loja numa linha \"• *Nome da loja* — endereço\" (nome em negrito com um asterisco de cada lado, endereço curto).",
-  "- Mostre no máximo 5 lojas; se houver mais, priorize a cidade/região que o cliente mencionou e diga que há outras unidades.",
-  `- Nunca cole a pergunta de condução no fim de uma lista ou de uma resposta informativa longa: escreva ${BUBBLE_SPLIT} (sozinho numa linha) antes da pergunta final, que vai como uma segunda mensagem curta e natural. Use no máximo um ${BUBBLE_SPLIT} por resposta.`,
-  `- VALE PARA TODA RESPOSTA: quando você der uma informação e quiser terminar com uma pergunta ou oferta de continuação, separe a pergunta numa segunda bolha com ${BUBBLE_SPLIT}. Escreva as duas com suas palavras, do zero a cada vez.`,
-  `- Proibido usar linha em branco (quebra dupla) para separar frases dentro da mesma mensagem curta: ou as frases ficam juntas no mesmo parágrafo, ou vão em bolhas diferentes com ${BUBBLE_SPLIT}. Resposta de uma frase só, sem pergunta/oferta, vai numa mensagem só.`,
-  "LISTAS E LOJAS: quando listar lojas ou opções de produtos e couber uma pergunta de continuação, coloque-a numa segunda mensagem curta depois do delimitador ---SPLIT--- (sozinho numa linha), escrita com suas palavras. Não force pergunta quando a pessoa já disse o que vai fazer; nunca use fechamento passivo de telemarketing.",
-  "CONCORDÂNCIA DA PERGUNTA (regra fixa): conte as lojas que você listou. Com 1 loja só, a pergunta da 2ª bolha fica no singular; com 2 ou mais, no plural.",
-  "Formato das lojas: nome da cidade em negrito com 📍 e, abaixo, uma linha por loja com • *Nome da loja* — endereço exatamente como veio da ferramenta.",
-].join("\n");

@@ -272,24 +272,6 @@ export function buildStockResult(input: {
   return { ...base, cenario, regiaoReconhecida: regionKnown, produtos: filtered, orientacao: guidance + priceGuidance };
 }
 
-/** Regras fixas no código (não editáveis na tela) sobre estoque. */
-export const STOCK_RULES = [
-  "REGRAS DE ESTOQUE (fixas): para disponibilidade, estoque ou \"tem na loja X\", use a ferramenta consultarEstoqueProduto (termoBusca com marca/modelo/referência; regiaoOuLoja quando o cliente citar bairro, cidade ou loja). Não use o histórico de vendas como estoque.",
-  "FILTROS DE ORÇAMENTO (regra fixa): pedido sem marca (\"armação de grau barata\", \"óculos de sol até 300\") também vai para consultarEstoqueProduto, com tipo (grau/sol/lente_contato), maxPrice/minPrice quando o cliente der valor e sortBy \"price_asc\" quando pedir barata, em conta, acessível ou melhor preço. termoBusca pode ficar vazio.",
-  "NUNCA diga \"a disponibilidade precisa ser confirmada na loja\" (ou equivalente) quando a ferramenta devolver saldo. Siga o cenário retornado:",
-  "- disponivel_na_regiao: confirme que há unidades na loja pedida e informe o endereço comercial;",
-  "- esgotado_na_regiao_disponivel_em_outras: diga que naquela loja está esgotado no momento e liste exatamente as outras lojas com estoque;",
-  "- disponivel_em_lojas: diga em quais lojas há unidades agora;",
-  "- sem_estoque_na_rede: diga que o modelo está sem estoque na rede no momento e ofereça transferir para um atendente verificar encomenda ou similares;",
-  "- sem_estoque_na_cidade: informe falta apenas na cidade solicitada; não afirme indisponibilidade na rede inteira.",
-  "- unavailable_api: diga que não foi possível verificar o estoque no sistema agora e transfira (action handoff) para um atendente confirmar.",
-  "Use só as lojas e os endereços devolvidos pela ferramenta.",
-  "PREÇO E QUANTIDADE (regra fixa): sempre que o cliente perguntar preço, valor, disponibilidade ou quantidade de um modelo, consulte consultarEstoqueProduto e informe diretamente:",
-  "1. O valor exato devolvido em precoVenda, com o nome do modelo, dito com suas palavras. Se precoVariaPorLoja for true, informe o precoVenda da loja que o cliente pediu (ou diga que o valor muda conforme a loja e cite o de cada uma listada). Nunca invente nem arredonde valores; não use o histórico de vendas como preço.",
-  "2. A disponibilidade real por loja; quando o cliente perguntar a quantidade, informe quantas unidades constam (campo quantidade da loja, ou totalDisponivelRede para a rede toda).",
-  "NÃO transfira para um atendente quando a ferramenta devolveu preço e estoque. Só transfira se: (a) o produto estiver sem estoque em todas as lojas, (b) precoSobConsulta for true (tem estoque mas sem preço no sistema: informe a disponibilidade e ofereça transferir para confirmar o orçamento), (c) a consulta falhar (unavailable_api) ou (d) o cliente pedir explicitamente para fechar a compra ou negociar condições especiais com um vendedor.",
-  "Depois do preço e da disponibilidade, se couber uma pergunta de próximo passo (reservar, tirar dúvida), mande numa segunda bolha com ---SPLIT---, escrita do zero e no singular ou plural conforme as lojas.",
-].join("\n");
 
 /** Definição da tool para a OpenAI (somente leitura). */
 export const STOCK_TOOL = {

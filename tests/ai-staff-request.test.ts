@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { bareNameHint, contactFirstName, defaultHandoffNotice, detectStaffRequest, matchStaff, STAFF_NAME_RULES, staffConfirmation, type StaffMember } from "@/lib/ai/staff-request";
-import { agentRules, customerMessages } from "@/lib/ai/agent-core";
+import { bareNameHint, contactFirstName, defaultHandoffNotice, detectStaffRequest, matchStaff, staffConfirmation, type StaffMember } from "@/lib/ai/staff-request";
+import { customerMessages } from "@/lib/ai/agent-core";
+import { agentRules } from "./helpers/prompt-seed";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { STAFF_NAME_RULES } from "./helpers/prompt-seed";
 
 const STAFF: StaffMember[] = [
   { id: "u-leandro", name: "Leandro Martins", queueId: "q-vendas", queueName: "Vendas" },

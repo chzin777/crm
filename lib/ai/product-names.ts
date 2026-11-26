@@ -62,14 +62,6 @@ export function modelKey(description: string, brand?: string | null) {
   return parsed.referencia ? `${norm(parsed.marca ?? "")}|${norm(parsed.referencia)}` : null;
 }
 
-/** Regra fixa do prompt: nomes humanizados e redação variada, sem oferecer o que já foi dito. */
-export const NATURAL_RULES = [
-  "LINGUAGEM NATURAL (regra fixa):",
-  "- Nunca despeje o nome bruto do sistema (ex.: \"ARM MIUMIU REF 0MU 01XV 19P1O150\"). Use o campo nomeProduto das ferramentas, já traduzido (ex.: \"Armação Miu Miu (ref. 0MU 01XV)\"), ou um nome natural como \"esse modelo da Miu Miu\" depois da primeira menção. Códigos de cor/tamanho só se o cliente pedir.",
-  "- Varie a redação: nunca repita a mesma frase ou a mesma estrutura das suas mensagens anteriores (leia a conversa). Não comece toda resposta com \"Temos o ...\".",
-  "- Nunca ofereça algo que você já entregou na conversa: se já disse o nome ou o endereço da loja, NÃO ofereça \"te passar o nome da loja certinho\" nem repita o endereço sem necessidade. Ofereça o próximo passo lógico: enviar a localização no mapa, ver outras cores/variações, detalhes do modelo ou reservar na loja.",
-  "- Sem frases vazias como \"Posso te ajudar com disponibilidade e lojas\": responda com conteúdo real ou faça uma pergunta específica.",
-].join("\n");
 
 /** Marcas conhecidas (chaves do cadastro do ERP), usadas para reconhecer busca só por marca. */
 export const KNOWN_BRANDS = Object.keys(BRANDS);

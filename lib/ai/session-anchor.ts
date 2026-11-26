@@ -191,10 +191,3 @@ export function anchorPromptBlock(anchor: SessionAnchor) {
   return ["ÂNCORA DO ATENDIMENTO ATUAL (fixada no código a partir das suas mensagens desta sessão):", ...lines].join("\n");
 }
 
-/** Regra fixa do prompt: nunca misturar modelos nem reabrir a lista de lojas quando a loja já foi informada. */
-export const SESSION_ANCHOR_RULES = [
-  "ÂNCORA DA SESSÃO (regra fixa):",
-  "- Cada atendimento começa do zero: use só a conversa atual. Nunca traga produtos, lojas ou fotos de atendimentos anteriores.",
-  "- Antes de responder sobre detalhes, material, formato ou lentes de um produto, confira o activeProduct (o modelo fixado nesta conversa). Quando o cliente pedir \"mais detalhes\", \"como ele é?\" ou \"fala mais dele\" sem citar outro modelo, consulte e descreva SOMENTE o activeProduct (mesma referência). Nunca misture características de outro modelo (ex.: atribuir nylon/formato quadrado do Justin a um Aviator de metal) e nunca envie foto de outro modelo.",
-  "- Se você já informou uma loja com endereço específico (ex.: Rua 9, 2106) e o cliente pedir a localização \"da loja\" / \"dessa loja\", envie a localização desse exato endereço (enviarLocalizacaoLoja com o nome e a rua da activeStore, ex.: \"Setor Marista Rua 9 2106\") sem abrir nova lista de unidades.",
-].join("\n");

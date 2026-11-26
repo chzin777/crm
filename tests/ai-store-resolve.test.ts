@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildSystemPrompt } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { type StoreInfo } from "@/lib/ai/stock";
-import { addressKey, findStores, LOCATION_RULES, resolveStoreMatch, sameStorePlace } from "@/lib/ai/store-location";
+import { addressKey, findStores, resolveStoreMatch, sameStorePlace } from "@/lib/ai/store-location";
+import { LOCATION_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 // Cadastro real: duas lojas distintas no Setor Sul (Rua 95 e Rua 90) e outra fora.
 const rua95: StoreInfo = { name: "LJ 37 UNILENTES PROCESSO", address: "RUA 95", addressNumber: "95", neighborhood: "SETOR SUL", city: "GOIANIA", lat: -16.697876, lng: -49.277922 };
@@ -46,7 +47,7 @@ describe("resolução de lojas para localização", () => {
   });
 
   it("prompt proíbe opções sem endereço e manda enviar direto em \"essa loja\"", () => {
-    expect(buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(LOCATION_RULES);
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(LOCATION_RULES);
     expect(LOCATION_RULES).toContain("NUNCA pergunte \"Qual dessas unidades você quer?\" listando nomes iguais sem endereço");
     expect(LOCATION_RULES).toContain("envie direto, sem pedir confirmação");
     expect(LOCATION_RULES).toContain("com o endereço completo");

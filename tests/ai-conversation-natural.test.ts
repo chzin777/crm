@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { buildSystemPrompt, customerMessages, interpretDecision, preAgentOutcome } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { sendBubbles } from "@/lib/ai/bubbles";
-import { humanizeProductName, modelKey, NATURAL_RULES, parseErpName } from "@/lib/ai/product-names";
-import { buildDetailsResult, cleanDetails, createProductDetailsService, DETAILS_RULES, DETAILS_TOOL, webSearchDetails, type DetailsCacheRow } from "@/lib/ai/product-details";
-import { deliverLocation, findStores, googleMapsUrl, LOCATION_RULES, LOCATION_TOOL, locationPayload, locationText, storeLocation } from "@/lib/ai/store-location";
-import { CLOSING_RULES, isCourtesyClosing, isFarewell, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
+import { humanizeProductName, modelKey, parseErpName } from "@/lib/ai/product-names";
+import { buildDetailsResult, cleanDetails, createProductDetailsService, DETAILS_TOOL, webSearchDetails, type DetailsCacheRow } from "@/lib/ai/product-details";
+import { deliverLocation, findStores, googleMapsUrl, LOCATION_TOOL, locationPayload, locationText, storeLocation } from "@/lib/ai/store-location";
+import { isCourtesyClosing, isFarewell, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
 import type { StoreInfo } from "@/lib/ai/stock";
+import { NATURAL_RULES, DETAILS_RULES, LOCATION_RULES, CLOSING_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
-const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
 
 describe("nomes do ERP humanizados e redação anti-robô", () => {
   it('"ARM MIUMIU REF 0MU 01XV 19P1O150" vira "Armação Miu Miu (ref. 0MU 01XV)"', () => {

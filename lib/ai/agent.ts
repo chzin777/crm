@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
 import { assertCanReceive, closeConversation } from "@/lib/chat/actions";
 import { bareNameHint, detectStaffRequest, defaultHandoffNotice, staffConfirmation } from "@/lib/ai/staff-request";
-import { isPureGreeting, PURE_GREETING_HINT } from "@/lib/ai/greeting";
+import { isPureGreeting } from "@/lib/ai/greeting";
 import { activeStaff } from "@/lib/ai/staff-db";
 import { savePrescriptionFromAi } from "@/lib/prescriptions-db";
 import { detectSalesEvents, isSalesQueue, parseBrl, type SalesEvent } from "@/lib/sales-pipeline";
@@ -21,16 +21,20 @@ import { hoursFor } from "@/lib/chat/operations";
 import { ChatRuleError, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { describeSchedule, GLOBAL_HOURS_SCOPE, isOpenAt, sanitizeSchedule } from "@/lib/chat/hours";
 import { fillVariables, withoutSplitMarkers } from "@/lib/chat/text";
-import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta } from "@/lib/ai/openai";
+import { aiConfigured, aiJson, AiError, transcribeAudio, type AiCallMeta, type AiCallTrace, type ChatMessage } from "@/lib/ai/openai";
+import { loadPromptModules } from "@/lib/ai/prompt-modules-db";
+import { wantsJson, type UsedModule } from "@/lib/ai/prompt-modules";
+import { knowledgePromptBlock } from "@/lib/ai/studio";
+import { semanticMemoryBlock } from "@/lib/ai/vector-memory";
 import { conversationTemperature } from "@/lib/ai/temperature";
 import { AI_ATTACHMENT_MAX_BYTES, AI_ATTACHMENTS_PER_BATCH, aiAttachmentKind, baseType, extensionOf, TRANSCRIBABLE_VIDEO, unsupportedReason, type AiAttachmentKind } from "@/lib/ai/attachments";
-import { attachSummary, failedMedia, MEDIA_RULES, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
+import { attachSummary, failedMedia, mediaParts, mergeMedia, stickerMedia, type AiMediaInput, type PreparedMedia } from "@/lib/ai/multimodal";
 import { DOCUMENT_EXTRACT_PROMPT, documentHandoffReason, documentKind, documentQueue, documentReply, formatExtraction, type DocumentExtraction, type ReadDocument } from "@/lib/ai/document-extract";
 import { readFile } from "@/lib/minio";
 import { transcribeMessageAudio } from "@/lib/chat/transcription";
 import { activeSourceNotes, type KnowledgeSourceKey } from "@/lib/ai/knowledge-sources";
 import { emitAiHandoff, hasActiveHandoffFlow } from "@/lib/automations/ai-handoff";
-import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, modelShownIds, showcaseGuidance, CATALOG_FOUND_RULE, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
+import { analysisName, analysisPromptBlock, asksProductInfo, brandSearchArgs, brandStockFallback, buildVisualCatalog, modelShownIds, showcaseGuidance, explicitBrand, shownProductsOf, VISUAL_CATALOG_MAX, withoutShowcaseRefs, type VisualCatalog, imageAnalysis as makeImageAnalysis, informativeReply, normalizeTerm, readVision, sanitizeImageAnalysis, VISION_PROMPT, type CatalogQuery, type ImageAnalysis, type SearchLog, type VisionResult } from "@/lib/ai/catalog-search";
 import { catalogProducts } from "@/lib/ai/catalog-db";
 import { canonicalCity, EMPTY_CATALOG_CONTEXT, extractPreferredCity, isBroadBrandRequest, rememberShown, sanitizeCatalogContext, updateCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
 import { needsQualificationFirst, qualifyFirstBlock, qualifyGatedResult } from "@/lib/ai/sales-consultant";
@@ -51,7 +55,7 @@ import { clearStoreDirectory, erpUnitDirectory, storeDirectory } from "@/lib/ai/
 import { ensureStorePin } from "@/lib/store-pin";
 import { geocodeStoreAddress } from "@/lib/ai/store-geolocation";
 import { nearbyStorePrompt } from "@/lib/ai/store-nearby";
-import { asksStorePlace, consultarLojas, CONSULTAR_LOJAS_TOOL, guardBusinessReply, mentionedCity, noStoreMessage, storeCities } from "@/lib/ai/business-guard";
+import { asksStorePlace, consultarLojas, CONSULTAR_LOJAS_TOOL, guardBusinessReply, mentionedCity, storeCities } from "@/lib/ai/business-guard";
 import { contactFirstName } from "@/lib/ai/staff-request";
 import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, resolveStoreRequest, LOCATION_TOOL, locationText, storeLocation, type SessionStore, type StoreLocation } from "@/lib/ai/store-location";
 import { isCourtesyClosing } from "@/lib/ai/closing";
@@ -63,16 +67,16 @@ import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { AI_AUTHOR_NAME, sanitizeAiResponse } from "@/lib/ai/sanitize";
 import { listFieldDefinitions, setContactFields } from "@/lib/contact-fields-db";
-import { IMAGE_CAPTION_RULE, type ProductImage } from "@/lib/ai/product-image";
+import { type ProductImage } from "@/lib/ai/product-image";
 import { catalogImages, imageSearchStatus, invalidateProductImage, searchAndCacheProductImage } from "@/lib/ai/product-image-db";
-import { humanRequestMode, resolveHandoffQueue, ROUTE_NOW, TRIAGE_NOW, type HumanRequestMode } from "@/lib/ai/routing";
-import { detectPromptInjection, INJECTION_ALERT, securityLog, type InjectionCheck } from "@/lib/ai/guard";
+import { humanRequestMode, resolveHandoffQueue, type HumanRequestMode } from "@/lib/ai/routing";
+import { detectPromptInjection, securityLog, type InjectionCheck } from "@/lib/ai/guard";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 import { catalog, conversationContext, sessionStartedAt } from "@/lib/ai/assist";
-import { anchorPromptBlock, asksStoreLocation, EMPTY_ANCHOR, extractSessionAnchor, isProductFollowUp, isStoreFollowUp, storesIn, modelNumbers, SESSION_ANCHOR_RULES, type AnchorMessage, type SessionAnchor } from "@/lib/ai/session-anchor";
+import { anchorPromptBlock, asksStoreLocation, EMPTY_ANCHOR, extractSessionAnchor, isProductFollowUp, isStoreFollowUp, storesIn, modelNumbers, type AnchorMessage, type SessionAnchor } from "@/lib/ai/session-anchor";
 import { readAiSettings, readAiStatus } from "@/lib/ai/store";
 import { aiShouldAttend, asksForHuman, bubbleDelayFor, type AiSettings } from "@/lib/ai/settings";
-import { buildSystemPrompt, carriesProductExtras, greetingName, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
+import { assembleSystemPrompt, carriesProductExtras, greetingName, customerMessages, formatContext, interpretDecision, preAgentOutcome, SIMULATED_PROFILES, simulatedHistory, transcriptLine, type AgentDecision, type AgentOutcome, type QueuedState, type SimulatedProfileId } from "@/lib/ai/agent-core";
 import type { ChatConversation } from "@/generated/prisma/client";
 import { reportError } from "@/lib/monitoring/error-reporter";
 import { campaignAiReplyEnabled } from "@/lib/chat/campaign-origin";
@@ -457,7 +461,7 @@ export type AgentRunInput = {
   /** Consulta de parcelas no VMSet (testes injetam a sua). */
   lookupInstallments?: (cpf: string) => Promise<InstallmentLookup>;
 };
-export type AgentRun = { outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; catalogContext?: CatalogContext; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog; /** Vitrine como catálogo visual: abertura → 1 foto com legenda curta por modelo → pergunta de escolha. */ visualCatalog?: VisualCatalog | null };
+export type AgentRun = { /** Prompt de sistema enviado (módulos de /ia), módulos usados e ferramentas chamadas: inspeção e teste. */ prompt?: { system: string; used: UsedModule[]; tokens: number; tools: string[] }; outcome: AgentOutcome; media: PreparedMedia | null; mediaTriggerSkipped: boolean; search: SearchLog | null; injection: InjectionCheck; stock?: StockLog[]; humanMode?: HumanRequestMode; image?: ProductImage | null; details?: DetailsLog[]; location?: StoreLocation | null; close?: CloseDecision; anchor?: SessionAnchor; catalogContext?: CatalogContext; /** Receitas/comprovantes lidos (resumo estruturado). */ documents?: ReadDocument[]; /** Vitrine como Lista Interativa nativa do WhatsApp (2+ modelos). */ interactiveList?: InteractiveShowcase | null; /** Análise da foto de produto enviada nesta mensagem (salva na sessão). */ imageAnalysis?: ImageAnalysis | null; /** Resposta da foto enviada como uma única mensagem. */ singleReply?: boolean; /** Modelo com ficha enviada nesta resposta (oportunidade no funil de vendas). */ productInterest?: { name: string; price: number | null } | null; /** Parcelas consultadas aguardando aprovação do operador (nada financeiro foi ao cliente). */ financialApproval?: FinancialApprovalDraft | null; financialLog?: FinancialLog; /** Vitrine como catálogo visual: abertura → 1 foto com legenda curta por modelo → pergunta de escolha. */ visualCatalog?: VisualCatalog | null };
 
 /** Item da vitrine escolhido na lista interativa; fora da vitrine lida, busca específica só pela referência/código. */
 export function selectedListedItem(ref: string, listed: ListedProduct[]): ListedProduct {
@@ -588,7 +592,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
       if (kind) documents.push({ kind, summary: formatExtraction(kind, read?.documento), extraction: read?.documento, source: item.source });
     }
   }
-  const catalogContext = catalogContexts.length ? `${CATALOG_FOUND_RULE}\n\n${catalogContexts.join("\n\n")}` : "";
+  const catalogContext = catalogContexts.join("\n\n");
   // Receita/comprovante lidos: com a regra de documentos ligada, transfere com o resumo; a confirmação ao cliente
   // é escrita pelo modelo (documentReply só cobre resposta vazia do modelo).
   let documentRoute: { kinds: ReadDocument["kind"][]; reason: string; queue: string } | null = null;
@@ -604,12 +608,17 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const customerText = [input.pendingText, media?.transcript ?? ""].filter(Boolean).join("\n");
   // Regras da empresa casam com o assunto das últimas mensagens do cliente; o RAG busca pela mensagem atual.
   const conversationText = [customerText, ...(input.earlierCustomerTexts ?? []).slice(0, 4)].join("\n");
-  const [context, info, queues, studioContext] = await Promise.all([
+  const [context, info, queues, studioContext, promptModules] = await Promise.all([
     input.buildContext(media),
     aiKnowledge(settings),
     settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
-    loadStudioContext(customerText, { userId: input.meta.userId, conversationId: input.meta.conversationId, memoryText: [customerText, ...(input.earlierCustomerTexts ?? []).slice(0, 2)].join("\n") }).catch(() => ({ skills })),
+    loadStudioContext(customerText, { userId: input.meta.userId, conversationId: input.meta.conversationId, memoryText: [customerText, ...(input.earlierCustomerTexts ?? []).slice(0, 2)].join("\n") }).catch(() => ({ skills } as Awaited<ReturnType<typeof loadStudioContext>>)),
+    loadPromptModules(),
   ]);
+  // Trechos do RAG e da memória semântica desta mensagem ({{trechos_conhecimento}} do módulo da base).
+  const knowledgeBlocks = [knowledgePromptBlock(studioContext.knowledge ?? []), semanticMemoryBlock(studioContext.memory, (studioContext.knowledge ?? []).map((hit) => hit.content))].filter(Boolean).join("\n\n");
+  // Guardrail de negócio (exame de vista, cidade da loja): só com o módulo "Regras Críticas" ativo.
+  const criticalRules = promptModules.some((module) => module.slug === "regras-criticas" && module.isActive && module.contentMarkdown.trim());
   const directory = await storeDirectory();
   const cities = [...directory.values()].map((store) => store.city ?? "");
   const previousCatalog = input.catalogContext?.brand || input.catalogContext?.preferredCity
@@ -674,19 +683,30 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const yesToDetails = !forceCatalog && !photoQueries.length && !input.selectedProductRef && !choice && genericYesToDetails({ text: input.pendingText, lastAiText: input.lastAiText, listed });
   const nearbyBlock = nearbyStorePrompt({ customerText, earlierCustomerTexts: input.earlierCustomerTexts ?? [], cityHint: catalogState.preferredCity || input.knownCity, knownPlace: input.knownCity, directory });
   const humanMode = input.queued ? null : humanRequestMode(settings, { pendingText: input.pendingText, aiReplies: input.aiReplies, asked: asksForHuman(settings, input.pendingText) });
-  // Regras, resultado do catálogo e alerta ficam só no "system"; o "user" leva só dados do cliente, delimitados.
-  const system = buildSystemPrompt({
+  // Prompt de sistema = só os módulos de /ia (montado na chamada, com os fatos do turno em {{contexto_do_turno}}).
+  // Condições do motor (@...) ligam os módulos sob demanda; o "user" leva só dados do cliente, delimitados.
+  const promptFlags = [
+    media ? "@midia" : "",
+    catalogContext ? "@catalogo_encontrado" : "",
+    injection.risk === "high" ? "@alerta_injecao" : "",
+    settings.sendProductImage && imageSearchStatus() ? "@legenda_foto" : "",
+    humanMode === "triage" ? "@triagem" : humanMode === "route" ? "@transferir_agora" : "",
+    isPureGreeting(input.pendingText) ? "@saudacao_pura" : "",
+  ].filter(Boolean);
+  const promptBase = {
+    modules: promptModules,
     settings,
     queues,
     info,
+    knowledge: knowledgeBlocks,
     // Saudação só na primeira resposta da IA nesta conversa (WhatsApp e teste contam as respostas iguais).
     firstReply: input.aiReplies === 0,
     queued: input.queued,
-    // Módulos de lib/ai/prompts escolhidos pelo assunto desta mensagem e pelo estado da sessão.
-    // Estúdio de IA: regras da empresa ligadas ao assunto, skills e trechos do RAG entram no composeSystemPrompt.
     prompt: { text: customerText, activeBrand, preferredCity: catalogState.preferredCity, category: catalogState.category, showcase: listed.length > 0 || forceCatalog || !!photoQueries.length, studio: { ...studioContext, skills }, conversationText },
-    extra: [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", nearbyBlock, budgetBlock(budget, cheap), SESSION_ANCHOR_RULES, anchorPromptBlock(anchor), listedPromptBlock(listed, choice), media ? MEDIA_RULES : "", analysisPromptBlock(analysis), catalogContext, documentContext, injection.risk === "high" ? INJECTION_ALERT : "", settings.sendProductImage && imageSearchStatus() ? IMAGE_CAPTION_RULE : "", humanMode === "triage" ? TRIAGE_NOW : humanMode === "route" ? ROUTE_NOW : "", isPureGreeting(input.pendingText) ? PURE_GREETING_HINT : input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))],
-  });
+    skills,
+    flags: promptFlags,
+  };
+  const turnExtra = [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", nearbyBlock, budgetBlock(budget, cheap), anchorPromptBlock(anchor), listedPromptBlock(listed, choice), analysisPromptBlock(analysis), catalogContext, documentContext, isPureGreeting(input.pendingText) || input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))];
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
   // Foto do produto (web + cache por código): 1ª consulta do modelo na etapa ou pedido do cliente; mesmo pipeline
@@ -1089,7 +1109,7 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
   // pin sai logo depois da resposta. Mais de uma unidade possível: o modelo pergunta qual, pela ferramenta.
   const missingCity = asksStorePlace(input.pendingText) ? await cityWithoutStore().catch(() => null) : null;
   if (missingCity) {
-    turnFacts.push(`CIDADE SEM LOJA: o cliente pediu ${missingCity.cidade_consultada} e não há unidade da Óticas Brasil lá. Diga explicitamente "${noStoreMessage(missingCity.cidade_consultada)}" e não passe endereço de outra cidade como se fosse dela. Cidades com loja: ${missingCity.cidades_com_loja.join(", ")}.`);
+    turnFacts.push(`CIDADE SEM LOJA (cadastro de lojas): ${missingCity.cidade_consultada} não tem unidade ativa. Cidades com loja: ${missingCity.cidades_com_loja.join(", ")}.`);
   } else if (storeFollowUp || asksStoreLocation(input.pendingText)) {
     const fixed = await anchoredLocation("").catch(() => null);
     const requested = fixed ?? (asksStoreLocation(input.pendingText) ? await locateStoreRequest([input.pendingText]).then((request) => (request.type === "found" ? request.location : null)).catch(() => null) : null);
@@ -1102,12 +1122,14 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
   if (documentRoute) turnFacts.push(`DOCUMENTO RECEBIDO: ${documentRoute.kinds.join(" e ")} lido(s). A conversa segue para a equipe${documentRoute.queue ? ` (${documentRoute.queue})` : ""} conferir logo depois da sua resposta: confirme com suas palavras que recebeu e que a equipe vai conferir, sem detalhar graus nem valores e sem perguntas (action "reply").`);
   if (input.isReturningContact && input.aiReplies === 0) turnFacts.push("CLIENTE QUE VOLTOU: ele já conversou ou comprou com a gente antes. Dê as boas-vindas de volta com naturalidade, com suas palavras, sem exagero.");
   const preset = preResult;
+  const assembled = assembleSystemPrompt({ ...promptBase, extra: [...turnExtra, ...turnFacts] });
+  const system = assembled.system;
+  const userMessage: ChatMessage = { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context };
+  // Sem módulo ativo: nenhuma mensagem "system" (o modelo responde como o GPT padrão, só com as ferramentas técnicas).
+  const trace: AiCallTrace = { toolCalls: [] };
   const decision = await aiJson<AgentDecision>(
-    [
-      { role: "system", content: [system, ...turnFacts].join("\n\n") },
-      { role: "user", content: sendParts.length ? [{ type: "text", text: context }, ...sendParts] : context },
-    ],
-    { ...input.meta, maxTokens: 700, temperature: conversationTemperature(settings), tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), storesTool, ...(await contactFieldTools(input.contactId))] },
+    system ? [{ role: "system", content: system }, userMessage] : [userMessage],
+    { ...input.meta, trace, plainText: !wantsJson(system), maxTokens: 700, temperature: conversationTemperature(settings), tools: [...filterToolsBySkills([...(photoQuery ? [] : [preset ? { ...stockTool, run: async () => preset } : stockTool, detailsTool]), locationTool, closeTool], skills), storesTool, ...(await contactFieldTools(input.contactId))] },
   );
   let outcome = interpretDecision(decision);
   // Transferência já decidida (pessoa pelo nome, documento lido): a confirmação é a que o modelo escreveu; a frase
@@ -1117,7 +1139,7 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
     const routed: AgentOutcome = staffRoute
       ? { action: "handoff", reply: written || staffConfirmation(input.contactName, staffRoute.name), reason: staffRoute.reason, queue: staffRoute.queue, trigger: "staff", ...(staffRoute.assigneeId ? { assigneeId: staffRoute.assigneeId, assigneeName: staffRoute.assigneeName } : {}), ...(staffRoute.staffQueueId ? { staffQueueId: staffRoute.staffQueueId } : {}) }
       : { action: "handoff", reply: written || documentReply(documentRoute!.kinds), reason: documentRoute!.reason, queue: documentRoute!.queue, trigger: "prescription" };
-    return { outcome: routed, media, mediaTriggerSkipped, search, injection, stock, documents };
+    return { outcome: routed, media, mediaTriggerSkipped, search, injection, stock, documents, prompt: { system, used: assembled.used, tokens: assembled.tokens, tools: trace.toolCalls } };
   }
   // Opções já enviadas: se o modelo copiou a mesma lista de novo, ela sai da resposta (o texto dele fica).
   if (!forceCatalog && !intent.changed && outcome.action === "reply" && listed.length && !asksListAgain(input.pendingText) && repeatsShowcase(outcome.reply, listed)) {
@@ -1197,7 +1219,7 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
   }
   // Guardrail de negócio antes do envio: exame de vista nunca afirmado; loja de outra cidade nunca vira a pedida.
   let guardedPin = location as StoreLocation | null;
-  if (outcome.reply) {
+  if (outcome.reply && criticalRules) {
     const guarded = guardBusinessReply({ customerText, reply: outcome.reply, directory: await storeDirectory(), firstName: contactFirstName(input.contactName), locationText: guardedPin ? `${guardedPin.nome} ${guardedPin.endereco}` : null });
     if (guarded.fixed) {
       console.warn(`[ai][guard] resposta corrigida (${guarded.fixed}) conversation=${input.meta.conversationId ?? "-"}`);
@@ -1217,7 +1239,7 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
   const list = interactiveList as InteractiveShowcase | null;
   const showsList = !!list && outcome.action === "reply" && !close.close && splitBubbles(outcome.reply).some((part) => parseShowcase(part).length >= 2);
   if (outcome.action === "reply" && currentCatalogFilterHash && parseShowcase(outcome.reply).length) catalogState.lastCatalogFilterHash = currentCatalogFilterHash;
-  return { outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList && !visualCatalog ? list : null, imageAnalysis, singleReply: false, documents, productInterest: productInterest as { name: string; price: number | null } | null, visualCatalog: visualCatalog && outcome.action === "reply" ? visualCatalog : null };
+  return { prompt: { system, used: assembled.used, tokens: assembled.tokens, tools: trace.toolCalls }, outcome, media, mediaTriggerSkipped, search, injection, stock, humanMode, image: photo && answered && !close.close ? photo : null, details, location: pin && answered && !close.close ? pin : null, close, anchor, catalogContext: catalogState, interactiveList: showsList && !visualCatalog ? list : null, imageAnalysis, singleReply: false, documents, productInterest: productInterest as { name: string; price: number | null } | null, visualCatalog: visualCatalog && outcome.action === "reply" ? visualCatalog : null };
 }
 
 /**
@@ -1545,6 +1567,7 @@ export type PlaygroundMessage = { from: "customer" | "ai"; text: string; imageSk
 /** queued: simula o cliente já na fila (espera assistida), com o mesmo pipeline de produto. sessionId: sessão de teste (nova a cada "Limpar"). */
 export type PlaygroundOptions = { profile?: SimulatedProfileId; ignoreMediaTrigger?: boolean; queued?: boolean; sessionId?: string; /** Nome do contato simulado (ex.: "Vivi"); sem ele, o do perfil. */ contactName?: string; /** Cidade do cadastro simulado (sem ela, a IA pergunta antes de listar produtos). */ knownCity?: string };
 export type PlaygroundResult = AgentOutcome & {
+  prompt?: AgentRun["prompt"];
   /** O que o cliente receberia no WhatsApp (resposta e/ou mensagem de transferência). */
   messages: string[];
   /** Eventos que criariam/avançariam a oportunidade no funil de vendas (WhatsApp). */
@@ -1645,6 +1668,8 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
   const target = outcome.action === "handoff" ? await handoffQueue(settings, null, outcome.queue, outcome.staffQueueId) : null;
   return {
     ...outcome,
+    // Módulos de /ia usados, ferramentas chamadas e o system exato enviado (mesmo montador da produção).
+    prompt: run.prompt,
     // Teste em /ia mostra o mesmo texto que sairia no WhatsApp (já sem travessões).
     messages: (run.visualCatalog ? [run.visualCatalog.opening, ...run.visualCatalog.items.map((item) => item.caption), run.visualCatalog.closing].filter(Boolean)
       : run.interactiveList || run.singleReply ? [withoutSplitMarkers(outcome.reply)] : customerMessages(outcome, settings, { customer: contactName, queue: target?.name })).map(sanitizeAiResponse),
@@ -1674,4 +1699,22 @@ export async function simulateAgent(settings: AiSettings, messages: PlaygroundMe
     // Parcelas: o teste mostra o card que o operador veria no /chat (o CPF completo nunca sai do servidor).
     financial: run.financialLog ? { ...run.financialLog, ...(run.financialApproval ? { approval: { customerNameVmset: run.financialApproval.customerNameVmset, customerCpfMasked: run.financialApproval.customerCpfMasked, installmentsSummary: run.financialApproval.installmentsSummary, draftMessage: run.financialApproval.draftMessage, transcribedText: run.financialApproval.transcribedText, nameMatches: run.financialApproval.nameMatches } } : {}) } : undefined,
   };
+}
+
+/**
+ * "Inspecionar Prompt Final Montado" de /ia: o mesmo assembleSystemPrompt do atendimento, com os módulos, a base
+ * de conhecimento, as filas e as skills salvos agora, para uma mensagem de exemplo. Os fatos calculados no turno
+ * (busca feita, foto lida...) só existem numa resposta real e aparecem no teste da IA.
+ */
+export async function inspectSystemPrompt(input: { text: string; firstReply: boolean; queued?: boolean }) {
+  const settings = await readAiSettings();
+  const [info, queues, studio, modules] = await Promise.all([
+    aiKnowledge(settings),
+    settings.aiChoosesQueue ? prisma.chatQueue.findMany({ where: { archivedAt: null }, select: { id: true, name: true, description: true }, orderBy: { order: "asc" } }) : [],
+    loadStudioContext(input.text, { memoryText: input.text }).catch(() => undefined),
+    loadPromptModules(),
+  ]);
+  const knowledge = [knowledgePromptBlock(studio?.knowledge ?? []), semanticMemoryBlock(studio?.memory, (studio?.knowledge ?? []).map((hit) => hit.content))].filter(Boolean).join("\n\n");
+  const assembled = assembleSystemPrompt({ modules, settings, queues, info, knowledge, firstReply: input.firstReply, queued: input.queued ? { queueName: null } : null, prompt: { text: input.text, conversationText: input.text, studio }, skills: studio?.skills, flags: isPureGreeting(input.text) ? ["@saudacao_pura"] : [] });
+  return { ...assembled, model: settings.model, temperature: conversationTemperature(settings), json: wantsJson(assembled.system) };
 }

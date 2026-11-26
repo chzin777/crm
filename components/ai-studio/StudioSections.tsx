@@ -432,13 +432,7 @@ export function SkillsSection() {
                         {linked.tools.map((tool) => <code key={tool} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-white/10 dark:text-slate-300">{tool}</code>)}
                       </p>
                     )}
-                    <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Quando acionar (gatilho)
-                      <input value={skill.triggerDescription} onChange={(event) => patch(skill.id, { triggerDescription: event.target.value })} placeholder="Ex.: cliente pergunta de parcelas, boleto ou crediário" className={input} maxLength={600} />
-                    </label>
-                    <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Instruções (Markdown)
-                      <textarea rows={Math.min(22, Math.max(8, skill.instructionsMd.split("\n").length + 1))} value={skill.instructionsMd} onChange={(event) => patch(skill.id, { instructionsMd: event.target.value })} className={`${area} resize-y font-mono`} />
-                      <span className="block text-right text-[10px] font-normal text-slate-400">{skill.instructionsMd.length.toLocaleString("pt-BR")} caracteres</span>
-                    </label>
+                    <p className="rounded-lg border border-[#C8E600]/60 bg-[#C8E600]/10 px-3 py-2 text-[11px] text-slate-600 dark:text-slate-300">As instruções desta skill ficam no módulo <strong>Skill: {skill.name}</strong> em Módulos de Prompt (condição <code>@skill_{skill.slug}</code>). Aqui só se liga ou desliga a ferramenta.</p>
                     <div className="flex justify-end">
                       <button type="button" disabled={busy === skill.id || !skill.dirty} onClick={() => void save(skill)} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
                         {busy === skill.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Salvar skill

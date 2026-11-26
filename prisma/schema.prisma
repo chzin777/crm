@@ -867,6 +867,39 @@ model AiSkillConfig {
   updatedAt    DateTime @updatedAt
 }
 
+/// Módulo de prompt da IA (/ia): o prompt de sistema é só a junção dos módulos ativos (prisma/ai-prompt-modules.sql).
+model AiPromptModule {
+  id              String                   @id @default(cuid())
+  slug            String                   @unique
+  title           String
+  /// persona | regras | conhecimento | lojas | fluxo
+  category        String                   @default("regras")
+  contentMarkdown String                   @default("")
+  isActive        Boolean                  @default(true)
+  /// Sempre no prompt quando ativo; senão sob demanda (keywords: palavras da conversa ou condições "@...").
+  alwaysInclude   Boolean                  @default(false)
+  keywords        String[]                 @default([])
+  priorityOrder   Int                      @default(1000)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  revisions       AiPromptModuleRevision[]
+
+  @@index([isActive, priorityOrder])
+}
+
+/// Versão anterior de um módulo (gravada a cada salvamento): "Restaurar versão anterior" em /ia.
+model AiPromptModuleRevision {
+  id              String         @id @default(cuid())
+  moduleId        String
+  module          AiPromptModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  title           String
+  contentMarkdown String
+  userId          String?
+  createdAt       DateTime       @default(now())
+
+  @@index([moduleId, createdAt])
+}
+
 /// Skill da IA em Markdown (Estúdio de IA). Nativas (builtin) ligam/desligam ferramentas do motor pelo slug.
 model AiSkill {
   id                 String   @id @default(cuid())

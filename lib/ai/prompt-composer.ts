@@ -1,35 +1,13 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { isProductBrowseRequest } from "@/lib/ai/catalog-context";
 import { isInstallmentQuestion } from "@/lib/ai/installments";
-import { semanticMemoryBlock } from "@/lib/ai/vector-memory";
-import { businessRulesBlock, knowledgePromptBlock, selectBusinessRules, skillEnabled, skillsPromptBlock, type StudioPromptContext } from "@/lib/ai/studio";
+import { skillEnabled, type AiSkill, type StudioPromptContext } from "@/lib/ai/studio";
 
 /**
- * Dynamic Prompt Composition: o prompt de sistema é montado a partir de módulos Markdown curtos em
- * lib/ai/prompts/*.md, escolhidos pelo estado/intenção da conversa. Só servidor (lê arquivos); cache em memória
- * em produção, leitura a cada chamada em desenvolvimento (edição do .md vale sem reiniciar).
+ * Estado/intenção da conversa → condições "@..." que os módulos sob demanda de /ia usam como gatilho. Aqui não há
+ * nenhum texto de prompt: só a detecção do assunto (o conteúdo vem todo dos módulos Markdown do banco).
  */
-export const PROMPT_MODULES = ["core", "saudacao", "qualificacao", "vitrine-estoque", "receituario-lentes", "financeiro-crediario", "pos-venda-suporte"] as const;
-export type PromptModule = (typeof PROMPT_MODULES)[number];
 
-const PROMPTS_DIR = path.join(process.cwd(), "lib", "ai", "prompts");
-const cache = new Map<PromptModule, string>();
-
-export function promptModulePath(name: PromptModule) {
-  return path.join(PROMPTS_DIR, `${name}.md`);
-}
-
-/** Texto do módulo (sem espaços nas pontas). Arquivo ausente é erro: a IA não responde sem as regras. */
-export function loadPromptModule(name: PromptModule): string {
-  const cached = process.env.NODE_ENV === "production" ? cache.get(name) : undefined;
-  if (cached !== undefined) return cached;
-  const text = readFileSync(promptModulePath(name), "utf8").replace(/\r\n/g, "\n").trim();
-  cache.set(name, text);
-  return text;
-}
-
-/** Estado da conversa que decide os módulos. text: mensagem atual do cliente (com a transcrição do áudio). */
+/** Estado da conversa. text: mensagem atual do cliente (com a transcrição do áudio). */
 export type PromptState = {
   hasGreetedInSession: boolean;
   text?: string;
@@ -41,9 +19,9 @@ export type PromptState = {
   category?: string;
   /** Há vitrine/ficha de produto nesta resposta ou na sessão. */
   showcase?: boolean;
-  /** Estúdio de IA: regras da empresa (Markdown), skills e trechos da base de conhecimento (RAG). */
+  /** Estúdio de IA: skills e trechos da base de conhecimento (RAG). */
   studio?: StudioPromptContext;
-  /** Texto da conversa usado para casar as palavras-chave das regras (padrão: text). */
+  /** Texto da conversa usado para casar as palavras-chave dos módulos (padrão: text). */
   conversationText?: string;
 };
 
@@ -64,8 +42,8 @@ export function isAfterSalesTopic(text: string) {
   return AFTER_SALES.test(plain(text));
 }
 
-/** Módulos compatíveis com o estágio/intenção, na ordem em que entram no prompt. */
-export function selectPromptModules(state: PromptState): PromptModule[] {
+/** Condições de assunto deste turno: @produto, @qualificar, @receita, @financeiro, @pos_venda. */
+export function promptConditions(state: Partial<PromptState>): string[] {
   const text = state.text ?? "";
   const financial = isFinancialTopic(text);
   const prescription = isPrescriptionTopic(text);
@@ -75,27 +53,20 @@ export function selectPromptModules(state: PromptState): PromptModule[] {
   const sessionProduct = !!state.activeBrand || !!state.category || !!state.showcase;
   // Pagamento e pós-venda não carregam vitrine, a menos que o cliente fale de produto nesta mesma mensagem.
   const productInterest = financial || afterSales ? isProductBrowseRequest(text) && !financial : browsing || sessionProduct;
-  const modules: PromptModule[] = ["core"];
-  if (!state.hasGreetedInSession) modules.push("saudacao");
-  if (productInterest && (!state.preferredCity || !state.category)) modules.push("qualificacao");
-  if (productInterest || prescription) modules.push("vitrine-estoque");
-  if (prescription && skillEnabled(state.studio?.skills, "calculo_lentes")) modules.push("receituario-lentes");
-  if (financial && skillEnabled(state.studio?.skills, "crediario_aprovacao")) modules.push("financeiro-crediario");
-  if (afterSales) modules.push("pos-venda-suporte");
-  return modules;
+  const conditions: string[] = [];
+  if (productInterest && (!state.preferredCity || !state.category)) conditions.push("@qualificar");
+  if (productInterest || prescription) conditions.push("@produto");
+  if (prescription && skillEnabled(state.studio?.skills, "calculo_lentes")) conditions.push("@receita");
+  if (financial && skillEnabled(state.studio?.skills, "crediario_aprovacao")) conditions.push("@financeiro");
+  if (afterSales) conditions.push("@pos_venda");
+  return conditions;
 }
 
-/**
- * Prompt dos módulos escolhidos, separados por linha em branco, seguido do que o time edita no Estúdio de IA:
- * regras da empresa ligadas ao assunto da conversa (ou "sempre incluir"), skills e trechos do RAG.
- */
-export function composeSystemPrompt(state: PromptState): string {
-  const studio = state.studio;
-  return [
-    ...selectPromptModules(state).map(loadPromptModule),
-    studio?.rules ? businessRulesBlock(selectBusinessRules(studio.rules, state.conversationText ?? state.text ?? "")) : "",
-    skillsPromptBlock(studio?.skills),
-    knowledgePromptBlock(studio?.knowledge ?? []),
-    semanticMemoryBlock(studio?.memory, (studio?.knowledge ?? []).map((hit) => hit.content)),
-  ].filter(Boolean).join("\n\n");
+/** Skills: "@skill_<slug>" para cada ativa, "@skills_ativas" se houver alguma, "@skill_off_<slug>" das nativas desligadas. */
+export function skillConditions(skills: AiSkill[] | undefined): string[] {
+  if (!skills?.length) return [];
+  const conditions = skills.filter((skill) => skill.isActive).map((skill) => `@skill_${skill.slug}`);
+  if (conditions.length) conditions.push("@skills_ativas");
+  for (const key of ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao"] as const) if (!skillEnabled(skills, key)) conditions.push(`@skill_off_${key}`);
+  return conditions;
 }

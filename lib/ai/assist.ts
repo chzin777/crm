@@ -1,14 +1,16 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { cached } from "@/lib/cache";
-import { BRAND_RULES, formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
+import { formatContext, transcriptLine, type TranscriptRow } from "@/lib/ai/agent-core";
+import { loadPromptModules } from "@/lib/ai/prompt-modules-db";
+import { fillModule, wantsJson } from "@/lib/ai/prompt-modules";
+import { knowledgePromptBlock } from "@/lib/ai/studio";
 import { loadCustomerHistory } from "@/lib/chat/customer-history";
 import { aiJson } from "@/lib/ai/openai";
 import { conversationTemperature } from "@/lib/ai/temperature";
 import { sessionRows } from "@/lib/ai/session-anchor";
 import { readAiSettings } from "@/lib/ai/store";
 import { loadStudioContext } from "@/lib/ai/studio-db";
-import { composeSystemPrompt } from "@/lib/ai/prompt-composer";
 import { buildCopilotPrompt } from "@/lib/ai/reply-copilot";
 import { sanitizeAiResponse } from "@/lib/ai/sanitize";
 import { classifyVague, vagueMessageBlock } from "@/lib/ai/vague-message";
@@ -20,7 +22,11 @@ const CATALOG_DAYS = 180;
 
 export type ConversationRef = { id: string; contactId: string; phone: string; subject: string; queueId: string | null };
 
-export { BRAND_RULES };
+/** Identidade da marca para tarefas internas (resumo, sugestões): o módulo "identidade" de /ia, se ativo. */
+async function brandIdentity(agentName: string) {
+  const identity = (await loadPromptModules()).find((module) => module.slug === "identidade" && module.isActive);
+  return identity ? fillModule(identity.contentMarkdown, { nome_agente: agentName }) : "";
+}
 
 /**
  * Início do atendimento atual: cliente que volta depois do encerramento abre conversa nova; conversa reaberta
@@ -103,11 +109,12 @@ export async function suggestReply(conversation: ConversationRef & { campaignId?
     loadStudioContext(customerText, { userId, conversationId: conversation.id }).catch(() => undefined),
   ]);
   const system = buildCopilotPrompt({
-    brandRules: BRAND_RULES,
-    modules: composeSystemPrompt({ hasGreetedInSession: true, text: lastCustomer[0]?.text ?? "", conversationText: customerText, preferredCity: contact?.city ?? undefined, studio }),
+    modules: await loadPromptModules(),
+    text: lastCustomer[0]?.text ?? "",
+    conversationText: customerText,
     settings,
     agentName,
-    knowledge,
+    knowledge: [knowledge, knowledgePromptBlock(studio?.knowledge ?? [])].filter(Boolean).join("\n\n"),
     turnHint: vagueMessageBlock(classifyVague(lastCustomer[0]?.text ?? "")),
     customer: {
       name: contact?.name ?? null,
@@ -119,9 +126,9 @@ export async function suggestReply(conversation: ConversationRef & { campaignId?
     },
   });
   const result = await aiJson<{ reply?: string }>([
-    { role: "system", content: system },
+    ...(system ? [{ role: "system" as const, content: system }] : []),
     { role: "user", content: context.text },
-  ], { maxTokens: 700, feature: "reply", conversationId: conversation.id, userId, settings, temperature: conversationTemperature(settings) });
+  ], { plainText: !wantsJson(system), maxTokens: 700, feature: "reply", conversationId: conversation.id, userId, settings, temperature: conversationTemperature(settings) });
   // Copiloto: o texto que vai para o composer já sai sem travessão/hífen como pontuação.
   const reply = sanitizeAiResponse(result.reply?.trim() ?? "");
   if (!reply) throw new Error("A IA não sugeriu nenhuma resposta.");
@@ -135,7 +142,7 @@ export async function summarizeConversation(conversation: ConversationRef, userI
   const result = await aiJson<Partial<ConversationSummary>>([
     {
       role: "system",
-      content: `${BRAND_RULES}\nSua tarefa: resumir o atendimento para outro membro da equipe que vai assumir a conversa. Seja objetivo. Responda em JSON: {"summary": "resumo em até 5 frases", "customerNeed": "o que o cliente quer, em uma frase", "nextSteps": ["próximo passo", "..."], "sentiment": "positivo" | "neutro" | "negativo", "pending": true se há algo pendente para a equipe responder}.`,
+      content: `${await brandIdentity((await readAiSettings()).agentName)}\nSua tarefa: resumir o atendimento para outro membro da equipe que vai assumir a conversa. Seja objetivo. Responda em JSON: {"summary": "resumo em até 5 frases", "customerNeed": "o que o cliente quer, em uma frase", "nextSteps": ["próximo passo", "..."], "sentiment": "positivo" | "neutro" | "negativo", "pending": true se há algo pendente para a equipe responder}.`,
     },
     { role: "user", content: context.text },
   ], { maxTokens: 900, feature: "summary", conversationId: conversation.id, userId });
@@ -155,7 +162,7 @@ export async function suggestProducts(conversation: ConversationRef, userId?: st
   const result = await aiJson<{ suggestions?: Partial<ProductSuggestion>[] }>([
     {
       role: "system",
-      content: `${BRAND_RULES}\nSua tarefa: sugerir até 3 oportunidades de venda para este cliente, com base no que ele comprou, no que pediu na conversa e na validade da receita. Escolha produtos do catálogo de mais vendidos abaixo ou categorias coerentes (ex.: renovação de lentes, óculos de sol, lentes de contato, segundo par). Não cite preço exato; diga "a partir de" só se usar o preço médio do catálogo. Responda em JSON: {"suggestions": [{"product": "produto ou categoria", "reason": "por que faz sentido para este cliente", "pitch": "mensagem curta de WhatsApp oferecendo"}]}.\n\nCatálogo (mais vendidos nos últimos ${CATALOG_DAYS} dias):\n${products || "(sem dados de vendas)"}`,
+      content: `${await brandIdentity((await readAiSettings()).agentName)}\nSua tarefa: sugerir até 3 oportunidades de venda para este cliente, com base no que ele comprou, no que pediu na conversa e na validade da receita. Escolha produtos do catálogo de mais vendidos abaixo ou categorias coerentes (ex.: renovação de lentes, óculos de sol, lentes de contato, segundo par). Não cite preço exato; diga "a partir de" só se usar o preço médio do catálogo. Responda em JSON: {"suggestions": [{"product": "produto ou categoria", "reason": "por que faz sentido para este cliente", "pitch": "mensagem curta de WhatsApp oferecendo"}]}.\n\nCatálogo (mais vendidos nos últimos ${CATALOG_DAYS} dias):\n${products || "(sem dados de vendas)"}`,
     },
     { role: "user", content: context.text },
   ], { maxTokens: 1000, feature: "products", conversationId: conversation.id, userId });

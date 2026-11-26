@@ -26,29 +26,13 @@ export function defaultQueueHint(name: string) {
   return "";
 }
 
-/** Bloco do prompt com as filas que a IA pode escolher. */
-export function queueRoutingBlock(queues: RoutingQueue[], hints: Record<string, string>) {
-  const active = queues.filter((queue) => !queue.archived);
-  if (!active.length) return "";
-  const lines = active.map((queue) => {
+/** Filas que a IA pode escolher ({{filas}} do módulo de roteamento): só dados, uma por linha. */
+export function queueRoutingData(queues: RoutingQueue[], hints: Record<string, string>) {
+  return queues.filter((queue) => !queue.archived).map((queue) => {
     const hint = hints[queue.id]?.trim() || queue.description?.trim() || defaultQueueHint(queue.name) || "sem descrição";
     return `- queue_id "${queue.id}": ${queue.name} — usar para: ${hint}`;
-  });
-  return `FILAS DE TRANSBORDO (escolha uma pelo queue_id ao transferir):\n${lines.join("\n")}`;
+  }).join("\n");
 }
-
-/** Regra fixa no código: rotear direto quando o assunto é claro; 1 pergunta de triagem quando não é. */
-export const ROUTING_RULES = [
-  "ROTEAMENTO DO TRANSBORDO (regra fixa):",
-  "- Ao transferir (action \"handoff\"), preencha \"queue_id\" com a fila cujo uso combina com o assunto da conversa, e \"reason\" com um resumo curto para o atendente do que o cliente precisa (ex.: \"Orçamento de óculos de grau com receita nova\").",
-  "- Roteamento direto: se a conversa já deixa claro o assunto (orçamento, receita, compra → vendas/comercial; ajuste, conserto, garantia, troca, pedido já comprado → pós-venda/assistência; pagamento, boleto → financeiro; loja específica → fila da loja), transfira já para essa fila, sem perguntas repetidas.",
-  "- Triagem em 1 pergunta: se o cliente só pedir um atendente sem dizer o assunto, faça UMA pergunta curta, com suas palavras, para identificar o setor (orçamento/compra, acompanhamento de pedido ou assistência/garantia). Se depois disso continuar genérico, transfira para a fila de atendimento geral.",
-  "- Nunca invente queue_id: use só os da lista de filas.",
-].join("\n");
-
-/** Instruções extras do turno quando o cliente pediu uma pessoa. */
-export const TRIAGE_NOW = "O cliente pediu um atendente sem dizer o assunto: NÃO transfira ainda. Responda (action \"reply\") só com a pergunta curta de triagem do setor, cumprimentando se for a primeira resposta.";
-export const ROUTE_NOW = "O cliente pediu para falar com uma pessoa: transfira agora (action \"handoff\"), escolhendo o queue_id pelo assunto da conversa (genérico ou não identificado → atendimento geral) e com o resumo em \"reason\". Não faça mais perguntas.";
 
 const FILLER = new Set(("quero queria gostaria preciso precisava falar conversar com um uma o a os as atendente atendentes atendimento pessoa pessoas humano humana " +
   "alguem real por favor pf pfv pls oi ola opa bom dia boa tarde noite me passa passar transfere transferir transfira pode poderia voce vc vcs chamar chama " +
@@ -100,15 +84,3 @@ export function resolveHandoffQueue(queues: RoutingQueue[], input: { fixedQueueI
   return { queueId: null, source: "none" };
 }
 
-/** Espera assistida: a conversa já está na fila humana e a IA segue ajudando sem transferir de novo. */
-export function queuedAssistBlock(queueName: string | null | undefined) {
-  const fila = queueName?.trim() ? `na fila ${queueName.trim()}` : "na fila de atendimento";
-  return [
-    `ESTADO DA CONVERSA: o cliente já foi transferido e está aguardando atendimento ${fila} (alreadyQueued = true). Nenhum atendente assumiu ainda.`,
-    "- Continue respondendo com atenção total: dúvidas, produtos, estoque, endereços e horários das lojas e informações gerais.",
-    "- NÃO transfira de novo (não use action \"handoff\") e não repita que vai transferir ou encaminhar para a fila.",
-    `- Se o cliente perguntar pelo atendente humano, tranquilize: diga que ele já está ${fila} e logo um atendente assume por aqui, e que enquanto isso pode perguntar o que precisar.`,
-    "- Não cumprimente de novo.",
-    "- Nunca encerre o atendimento (não chame encerrarAtendimento nem use action \"resolved\"): quem encerra é o atendente. Se o cliente agradecer, despeça-se com carinho e diga que o atendente segue por aqui se precisar.",
-  ].join("\n");
-}

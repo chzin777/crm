@@ -33,7 +33,12 @@ export type AiCallMeta = {
   jsonSchema?: { name: string; schema: object };
   /** Modelo próprio para tarefas simples e frequentes (ex.: triagem); sem ele, o modelo configurado em /ia. */
   model?: string;
+  /** Resposta livre (sem response_format json): o texto vira { reply } quando não for JSON. */
+  plainText?: boolean;
+  /** Recebe os nomes das ferramentas chamadas (inspeção e teste de /ia). */
+  trace?: AiCallTrace;
 };
+export type AiCallTrace = { toolCalls: string[] };
 /** Rodadas de ferramenta por resposta (evita laço e custo descontrolado). */
 const MAX_TOOL_ROUNDS = 2;
 
@@ -71,7 +76,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model, messages: history,
-        response_format: meta.jsonSchema ? { type: "json_schema", json_schema: { name: meta.jsonSchema.name, strict: true, schema: meta.jsonSchema.schema } } : { type: "json_object" },
+        ...(meta.plainText ? {} : { response_format: meta.jsonSchema ? { type: "json_schema", json_schema: { name: meta.jsonSchema.name, strict: true, schema: meta.jsonSchema.schema } } : { type: "json_object" } }),
         max_completion_tokens: meta.maxTokens ?? 1200,
         ...(temperature === null ? {} : { temperature }),
         // Na última rodada as ferramentas seguem declaradas (o histórico tem chamadas), mas o modelo precisa responder.
@@ -113,6 +118,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
     // Ferramentas somente leitura: o resultado volta ao modelo como mensagem "tool" e ele escreve a resposta.
     history.push({ role: "assistant", content: body.choices?.[0]?.message?.content ?? null, tool_calls: calls });
     for (const toolCall of calls) {
+      meta.trace?.toolCalls.push(toolCall.function.name);
       const tool = tools.find((item) => item.definition.function.name === toolCall.function.name);
       let output: unknown;
       try {
@@ -129,6 +135,8 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   try {
     return JSON.parse(content) as T;
   } catch {
+    // Sem formato JSON pedido pelos módulos: o texto do modelo é a resposta ao cliente.
+    if (meta.plainText) return { reply: content.trim() } as T;
     throw new AiError("A IA devolveu uma resposta fora do formato. Tente de novo.");
   }
 }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildStockResult, createStockClient, formatBrl, mainPrice, STOCK_RULES, type StoreInfo } from "@/lib/ai/stock";
+import { buildStockResult, createStockClient, formatBrl, mainPrice, type StoreInfo } from "@/lib/ai/stock";
 import { buildSystemPrompt, interpretDecision } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { STOCK_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 const stores = new Map<string, StoreInfo>([
   ["17", { name: "LJ 17 OTICAS BRASIL LTDA", address: "AVENIDA T-8", addressNumber: "235", neighborhood: "SETOR BUENO", city: "GOIANIA" }],
@@ -55,7 +56,7 @@ describe("preço de venda e quantidade na tool de estoque", () => {
 
 describe("regras fixas: informar preço e quantidade sem transbordo", () => {
   it('"Quanto custa o Ray-Ban Justin e quantos tem no Setor Bueno?": preço em R$ e quantidade da loja, sem transferir', () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(STOCK_RULES);
     expect(STOCK_RULES).toContain("informe diretamente");
     expect(STOCK_RULES).toContain("O valor exato devolvido em precoVenda");

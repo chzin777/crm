@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { consultativeGreeting } from "@/lib/ai/response-opening";
-import { loadPromptModule } from "@/lib/ai/prompt-composer";
+import { loadPromptModule } from "./helpers/prompt-seed";
+
 
 // 08:59 em Brasília (UTC−3).
 const morning = new Date("2026-11-25T11:59:00Z");

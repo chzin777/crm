@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["./tests/setup-prompt-modules.ts"],
     // Datas dos testes de horário são lidas no fuso de Brasília, como no servidor.
     env: { TZ: "America/Sao_Paulo" },
   },

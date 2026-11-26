@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompt, formatContext, greetingName, GREETING_RULES } from "@/lib/ai/agent-core";
+import { buildSystemPrompt, formatContext, greetingName } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { fixDoubleGreeting, splitAiResponseMessages } from "@/lib/ai/bubbles";
+import { GREETING_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 describe("saudação sem nome real de exemplo no prompt", () => {
   it("system prompt não traz nomes hardcoded nos templates de saudação, só o marcador <PRIMEIRO_NOME>", () => {
     for (const firstReply of [true, false]) {
-      const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "", firstReply });
+      const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "", firstReply });
       expect(prompt).not.toMatch(/Christofer/i);
       // saudacao.md só entra no primeiro turno; depois, o núcleo proíbe abrir com "Boa tarde"/"Oi" de novo.
       if (firstReply) expect(prompt).toContain("SAUDAÇÃO (primeira resposta desta conversa)");
@@ -55,8 +56,8 @@ describe("saudação única", () => {
   });
 
   it("prompt proíbe duas saudações juntas e não traz frase pronta para copiar", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
-    expect(prompt).toContain(GREETING_RULES);
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "", firstReply: true });
+    expect(prompt).toContain(GREETING_RULES.split("{{")[0]);
     for (const piece of ["Uma saudação só", "sem nome válido, cumprimente sem nome e sem inventar um", "com palavras suas e diferentes a cada conversa"]) expect(GREETING_RULES).toContain(piece);
     // Nenhum modelo de frase entre aspas (o modelo tende a copiar literalmente).
     expect(GREETING_RULES).not.toMatch(/"[^"]{12,}"/);

@@ -111,13 +111,6 @@ export function defaultHandoffNotice(contactName?: string | null) {
   return `Claro${first ? `, ${first}` : ""}! Vou te transferir agora mesmo para um dos nossos atendentes. Só um instante! 😊`;
 }
 
-/** Regra fixa do prompt: nome solto é do atendente pedido, nunca do cliente; nada de transferência silenciosa. */
-export const STAFF_NAME_RULES = [
-  "NOMES PRÓPRIOS E TRANSFERÊNCIA (regras fixas):",
-  '- Nunca presuma que um nome próprio solto enviado pelo cliente (ex.: "Leandro") é o nome do próprio cliente, principalmente se você já o chamou pelo nome dele. Um nome solto depois da saudação geralmente é o vendedor/atendente com quem o cliente quer falar. Só trate como nome do cliente se ele disser "Meu nome é..." ou "Aqui é o...".',
-  "- Continue chamando o cliente pelo nome do cadastro; nunca troque pelo nome que ele citou.",
-  "- Nunca faça transferência silenciosa: ao transferir para fila ou atendente (action \"handoff\"), escreva em reply a mensagem avisando o cliente que está transferindo.",
-].join("\n");
 
 /** Dica do turno: a mensagem é só um nome que não é o do cliente (vendedor de loja fora do cadastro). */
 export function bareNameHint(text: string, contactName?: string | null) {

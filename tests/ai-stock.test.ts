@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildStockResult, createStockClient, isRetailUnit, retailStock, STOCK_CACHE_TTL_MS, STOCK_RULES, STOCK_TIMEOUT_MS, storeCity, storeLabel, stockSearchTerms, type StoreInfo } from "@/lib/ai/stock";
-import { agentRules } from "@/lib/ai/agent-core";
+import { buildStockResult, createStockClient, isRetailUnit, retailStock, STOCK_CACHE_TTL_MS, STOCK_TIMEOUT_MS, storeCity, storeLabel, stockSearchTerms, type StoreInfo } from "@/lib/ai/stock";
+import { agentRules } from "./helpers/prompt-seed";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { STOCK_RULES } from "./helpers/prompt-seed";
 
 const ok = (items: unknown[]) => ({ ok: true, status: 200, json: async () => ({ items }) });
 

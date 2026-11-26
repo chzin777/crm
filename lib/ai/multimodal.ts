@@ -175,12 +175,6 @@ export function mediaParts(kind: AiAttachmentKind, media: AiMediaInput, transcri
   }
 }
 
-/** Orientação extra do sistema quando há anexo na conversa. */
-export const MEDIA_RULES = [
-  "Anexos do cliente: use o conteúdo de PDFs, documentos, planilhas e transcrições de áudio/vídeo para responder normalmente (estoque, preço, lojas, dúvidas), sem repetir ou resumir para o cliente o que ele mesmo enviou. Áudio é uma mensagem como outra qualquer: responda ao que foi dito.",
-  "Receitas, laudos, comprovantes e orçamentos de outra ótica exigem conferência humana: confirme o recebimento com acolhimento e transfira (action handoff). Imagens seguem a REGRA CRÍTICA SOBRE IMAGENS.",
-  "[FALHA_LEITURA_MIDIA: ...] significa que o arquivo não pôde ser lido: avise o cliente com naturalidade e empatia, com suas palavras, sugerindo reenviar ou mandar em outro formato (texto, PDF, foto ou print). Nunca invente o conteúdo nem transfira só por isso.",
-].join("\n");
 
 type TurnMessage = { from: "customer" | "ai"; text: string };
 

@@ -231,17 +231,7 @@ export const DETAILS_TOOL = {
   },
 };
 
-/** Regra fixa do prompt: pedido de detalhes vira ficha real, nunca resposta genérica. */
-export const DETAILS_RULES = [
-  "DETALHES DO PRODUTO (regra fixa): quando o cliente quiser saber mais sobre o modelo (detalhes, diferenciais, material, como ele é), chame buscarDetalhesProdutoWeb com o produto da conversa e responda com as características reais devolvidas (material, formato, público, lentes/proteção, funções especiais) e as cores/variações com saldo no ERP.",
-  "Nunca responda pedido de detalhes com frase vazia nem repetindo só a loja e o estoque.",
-].join("\n");
 
-/** Regra fixa do prompt: ficha no template visual na 1ª consulta do modelo e descrição técnica em "mais detalhes". */
-export const PRODUCT_CARD_RULES = [
-  PRODUCT_CARD_TEMPLATE,
-  "Quando o cliente pedir mais detalhes ou informações do modelo: NÃO repita a ficha nem a lista de lojas; chame buscarDetalhesProdutoWeb e entregue a descricaoDetalhada (materiais, diferenciais técnicos, conforto e cores em estoque) em texto natural, com suas palavras.",
-].join("\n");
 
 /** O cliente pediu para ver o modelo/foto ("manda a foto", "tem imagem?", "quero ver"). */
 export function asksForPhoto(text: string) {

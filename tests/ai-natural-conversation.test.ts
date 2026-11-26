@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadPromptModule } from "@/lib/ai/prompt-composer";
+
 import { formatContext, speakerLabel, transcriptLine } from "@/lib/ai/agent-core";
 import { qualifyFirstBlock, typeFirstBlock } from "@/lib/ai/sales-consultant";
 import { classifyVague, vagueMessageBlock } from "@/lib/ai/vague-message";
@@ -7,6 +7,7 @@ import { CONSULTORIA_POS_CAMPANHA_MD, DEFAULT_SKILLS, ESTOQUE_MD } from "@/lib/a
 import { CONVERSATION_TEMPERATURE, conversationTemperature } from "@/lib/ai/temperature";
 import { buildCopilotPrompt } from "@/lib/ai/reply-copilot";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { SEED_MODULES, loadPromptModule } from "./helpers/prompt-seed";
 
 describe("IA conversacional: sem roteiro engessado", () => {
   it("núcleo manda ler o fio inteiro, tratar mensagem vaga como gente e manter o escopo da ótica", () => {
@@ -53,16 +54,16 @@ describe("contexto enviado ao modelo", () => {
     expect(formatContext({ contactName: null, queueName: null, subject: "", includeHistory: false, history: null, conversation: "" })).not.toContain("Cadastro:");
   });
 
-  it("temperatura baixa nas conversas (0,1 a 0,2); a escolha da equipe só vale para baixo", () => {
+  it("temperatura padrão baixa (0,2); a escolha da equipe em /ia (0 a 1) é respeitada", () => {
     expect(CONVERSATION_TEMPERATURE).toBeGreaterThanOrEqual(0.1);
     expect(CONVERSATION_TEMPERATURE).toBeLessThanOrEqual(0.2);
     expect(conversationTemperature({ temperature: null })).toBe(CONVERSATION_TEMPERATURE);
-    expect(conversationTemperature({ temperature: 0.7 })).toBe(CONVERSATION_TEMPERATURE);
+    expect(conversationTemperature({ temperature: 0.7 })).toBe(0.7);
     expect(conversationTemperature({ temperature: 0.1 })).toBe(0.1);
   });
 
   it("copiloto do /chat recebe a regra do turno (mensagem vaga) junto do perfil", () => {
-    const prompt = buildCopilotPrompt({ brandRules: "B", modules: "M", settings: DEFAULT_AI_SETTINGS, agentName: "Ana", knowledge: "", customer: { name: "Christofer", city: "Vitória", store: null, tier: null, rfvpSegment: null, campaign: null }, turnHint: vagueMessageBlock("accidental") });
+    const prompt = buildCopilotPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, agentName: "Ana", knowledge: "", customer: { name: "Christofer", city: "Vitória", store: null, tier: null, rfvpSegment: null, campaign: null }, turnHint: vagueMessageBlock("accidental") });
     expect(prompt).toContain("MENSAGEM VAGA NESTE TURNO");
     expect(prompt).toContain("nunca com frase genérica de primeiro contato");
   });

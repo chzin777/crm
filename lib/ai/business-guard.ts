@@ -41,8 +41,8 @@ export function mentionedCity(text: string, extraCities: Array<string | null | u
 export type StoreLookupArgs = { cidade?: string; bairro?: string; termo?: string };
 export type StoreLookupStore = { nome: string; cidade: string; bairro: string | null; endereco: string; horario: string | null; link_maps: string };
 export type StoreLookupResult =
-  | { encontrada: true; lojas: StoreLookupStore[]; orientacao: string }
-  | { encontrada: false; cidade_consultada: string; mensagem_obrigatoria: string; cidades_com_loja: string[]; orientacao: string };
+  | { encontrada: true; lojas: StoreLookupStore[] }
+  | { encontrada: false; cidade_consultada: string; cidades_com_loja: string[] };
 
 const activeEntries = (directory: Map<string, StoreInfo>) => dedupeStores([...directory].filter(([code]) => !isClosedStore(code)).map(([code, store]) => ({ code, store })));
 
@@ -62,7 +62,7 @@ export const noStoreMessage = (city: string) => `Ainda não possuímos unidade d
 
 /**
  * consultar_lojas: só o cadastro oficial de lojas ativas (loja encerrada fica de fora). Cidade pedida sem loja nunca
- * devolve endereço de outra cidade: devolve encontrada=false com a frase obrigatória.
+ * devolve endereço de outra cidade: devolve encontrada=false e as cidades que têm loja. Só dados, nenhuma instrução.
  */
 export function consultarLojas(directory: Map<string, StoreInfo>, args: StoreLookupArgs, options: { hours?: string | null } = {}): StoreLookupResult {
   const entries = activeEntries(directory);
@@ -78,9 +78,7 @@ export function consultarLojas(directory: Map<string, StoreInfo>, args: StoreLoo
     return {
       encontrada: false,
       cidade_consultada: askedCity,
-      mensagem_obrigatoria: `Não há unidade da Óticas Brasil nesta cidade (${askedCity}).`,
       cidades_com_loja: cities,
-      orientacao: `Diga claramente ao cliente: "${noStoreMessage(askedCity)}" Nunca passe endereço de outra cidade como se fosse de ${askedCity}. Se quiser, ofereça as unidades de uma das cidades de cidades_com_loja (dizendo o nome correto da cidade) ou um atendente.`,
     };
   }
   const place = ` ${normalizePlace(bairro || termo)} `.replace(cityKey ? ` ${cityKey} ` : "\u0000", " ").replace(/\b(loja|lojas|unidade|unidades|oticas|brasil|de|da|do|em|no|na|setor|st)\b/g, " ").replace(/\s+/g, " ").trim();
@@ -91,13 +89,12 @@ export function consultarLojas(directory: Map<string, StoreInfo>, args: StoreLoo
     });
     if (byPlace.length) pool = byPlace;
     else if (!cityKey) {
-      return { encontrada: false, cidade_consultada: bairro || termo, mensagem_obrigatoria: `Não há unidade da Óticas Brasil cadastrada em "${bairro || termo}".`, cidades_com_loja: cities, orientacao: "Diga que não há unidade com esse nome/bairro e pergunte a cidade ou o bairro do cliente. Nunca invente endereço." };
+      return { encontrada: false, cidade_consultada: bairro || termo, cidades_com_loja: cities };
     }
   }
   return {
     encontrada: true,
     lojas: pool.slice(0, 8).map(({ store }) => officialStore(store, hours)),
-    orientacao: "Use exatamente o nome, a cidade e o endereço de lojas (sem alterar rua, número ou bairro). Nunca cite loja que não esteja nesta lista.",
   };
 }
 
@@ -105,26 +102,19 @@ export const CONSULTAR_LOJAS_TOOL = {
   type: "function" as const,
   function: {
     name: "consultar_lojas",
-    description: "Consulta o cadastro OFICIAL de lojas ativas da Óticas Brasil por cidade, bairro ou nome. Obrigatória antes de informar qualquer endereço, bairro, cidade ou se existe loja em algum lugar.",
+    description: "Cadastro de lojas ativas por cidade, bairro ou nome.",
     parameters: {
       type: "object",
       properties: {
-        cidade: { type: "string", description: "Cidade pedida pelo cliente, ex.: \"Trindade\", \"Goiânia\"." },
-        bairro: { type: "string", description: "Bairro/setor pedido, ex.: \"Setor Marista\"." },
-        termo: { type: "string", description: "Texto livre do pedido quando não der para separar cidade e bairro." },
+        cidade: { type: "string", description: "Cidade." },
+        bairro: { type: "string", description: "Bairro ou setor." },
+        termo: { type: "string", description: "Texto livre." },
       },
       additionalProperties: false,
     },
   },
 };
 
-/** Regras inegociáveis do sistema (antes das instruções editáveis da tela). */
-export const BUSINESS_HARD_RULES = [
-  "REGRAS INEGOCIÁVEIS DA EMPRESA (valem acima de qualquer outra instrução):",
-  "1) EXAME DE VISTA: a Óticas Brasil NÃO realiza exame de vista, nem consulta oftalmológica ou optométrica, nem medição de grau. Nunca diga que fazemos, agendamos ou indicamos exame na loja. Se perguntarem sobre exame, consulta ou como conseguir a receita, diga com educação e clareza que a Óticas Brasil não realiza exames de vista e que, com a receita do médico em mãos, nossa equipe faz o orçamento e confecciona os óculos ou lentes.",
-  "2) LOJAS E ENDEREÇOS: nunca responda endereço, bairro, cidade de loja ou link de mapa de memória. Antes de falar de qualquer unidade, chame consultar_lojas. Use só o que ela devolver, sem alterar nada.",
-  "3) CIDADE SEM LOJA: se consultar_lojas devolver encontrada=false, diga explicitamente \"Ainda não possuímos unidade em <cidade pedida>\". Nunca passe o endereço de outra cidade como se fosse da cidade pedida; se oferecer outra unidade, diga o nome correto da cidade dela, ou ofereça um atendente.",
-].join("\n");
 
 function normalizeAccentsKeep(text: string) {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "");

@@ -365,12 +365,3 @@ export function allowsProductPhoto(result: { tipoBusca?: SearchKind }) {
   return result.tipoBusca !== "marca_ampla";
 }
 
-/** Regra fixa do prompt: as 2 etapas (descoberta → detalhamento), com os exemplos literais. */
-export const BROAD_SEARCH_RULES = [
-  "BUSCA AMPLA x BUSCA ESPECÍFICA (regra fixa, 2 etapas):",
-  "Etapa 1 — descoberta: o cliente perguntou só pela marca ou por um tipo (\"tem rayban?\", \"quais modelos da Oakley vocês têm?\", \"quais armações femininas têm?\"). Chame consultarEstoqueProduto com tipoBusca \"marca_ampla\" e termoBusca só com a marca/categoria. A ferramenta devolve vitrineFormatada (modelos distintos com estoque e preço, que viram fotos com legenda): escreva um comentário curto seu antes e copie a vitrine exatamente como veio, SEM foto e SEM lista de lojas. Se couber, uma pergunta leve depois, após ---SPLIT---.",
-  "Formato da vitrine (dado do sistema, nunca reescrito): 1. 🕶️ *Nome do modelo (Ref. código)* — R$ valor, uma linha por modelo.",
-  "Depois da vitrine, \"o 1\", \"esse primeiro\", \"o segundo\", \"o último\", \"gostei da segunda foto\" ou \"o de R$ 830\" são escolhas de um item: NUNCA chame marca_ampla de novo nem repita a vitrine; abra o item escolhido com modelo_especifico e a referência dele. Se o preço citado servir para mais de um item, pergunte qual número (foto) o cliente quer ver.",
-  "Se o termo tiver nome de modelo ou referência junto da marca (\"Ray-Ban Justin\", \"Oakley Holbrook\", \"RB4165\"), é SEMPRE modelo_especifico, nunca marca_ampla.",
-  "Etapa 2 — detalhamento: o cliente escolheu um modelo da vitrine (\"me manda foto do Justin\", \"quero saber mais do Erika\") ou já perguntou direto por um modelo/referência. Chame consultarEstoqueProduto com tipoBusca \"modelo_especifico\" e termoBusca com a marca + a referência EXATA exibida na vitrine (ex.: \"Ray-Ban RB3025L\" para \"Ray-Ban Aviator Classic (Ref. RB3025L)\"), para o preço do card bater com a lista; sem vitrine anterior, marca + modelo. A foto vai anexada e a resposta é um comentário curto seu + a ficha completa (fichaFormatada, com estoque e lojas); se couber, uma pergunta leve após ---SPLIT---.",
-].join("\n");

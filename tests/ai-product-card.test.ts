@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildSystemPrompt, carriesProductExtras } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
-import { STOCK_RULES } from "@/lib/ai/stock";
-import { asksForPhoto, buildDetailsResult, createProductDetailsService, DETAILS_RULES, parseSheet, PRODUCT_CARD_RULES, ratingLabel, shortLine, shouldSendProductPhoto, type DetailsCacheRow } from "@/lib/ai/product-details";
+
+import { asksForPhoto, buildDetailsResult, createProductDetailsService, parseSheet, ratingLabel, shortLine, shouldSendProductPhoto, type DetailsCacheRow } from "@/lib/ai/product-details";
+import { STOCK_RULES, DETAILS_RULES, PRODUCT_CARD_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 const WEB = JSON.stringify({
   miniDescricao: "Armação leve em acetato com design oval feminino",
@@ -12,8 +13,8 @@ const WEB = JSON.stringify({
 
 describe("paridade do pipeline de produto com o cliente na fila (alreadyQueued = true)", () => {
   it("o prompt da espera assistida tem as mesmas regras de estoque, ficha e detalhes", () => {
-    const queued = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "", queued: { queueName: "Vendas" } });
-    const normal = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const queued = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "", queued: { queueName: "Vendas" } });
+    const normal = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     for (const rule of [STOCK_RULES, PRODUCT_CARD_RULES, DETAILS_RULES]) {
       expect(queued).toContain(rule);
       expect(normal).toContain(rule);

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { agentRules, buildSystemPrompt, interpretDecision, preAgentOutcome } from "@/lib/ai/agent-core";
-import { defaultQueueHint, humanRequestMode, isBareHumanRequest, queueRoutingBlock, resolveHandoffQueue, ROUTE_NOW, ROUTING_RULES, TRIAGE_NOW } from "@/lib/ai/routing";
+import { buildSystemPrompt, interpretDecision, preAgentOutcome } from "@/lib/ai/agent-core";
+import { agentRules } from "./helpers/prompt-seed";
+import { defaultQueueHint, humanRequestMode, isBareHumanRequest, resolveHandoffQueue } from "@/lib/ai/routing";
+import { queueRoutingBlock } from "./helpers/prompt-seed";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { ROUTE_NOW, ROUTING_RULES, TRIAGE_NOW, SEED_MODULES } from "./helpers/prompt-seed";
 
 const QUEUES = [
   { id: "q-geral", name: "Atendimento Geral", description: "" },
@@ -13,7 +16,7 @@ const settings = { ...DEFAULT_AI_SETTINGS, aiChoosesQueue: true, handoffQueueId:
 
 describe("filas ativas no prompt", () => {
   it("lista id, nome e quando usar cada fila, com a regra fixa de roteamento", () => {
-    const prompt = buildSystemPrompt({ settings: { ...settings, queueHints: { "q-fin": "boletos e crediário" } }, queues: QUEUES, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: { ...settings, queueHints: { "q-fin": "boletos e crediário" } }, queues: QUEUES, info: "" });
     expect(prompt).toContain(ROUTING_RULES);
     expect(prompt).toContain('- queue_id "q-vendas": Vendas — usar para: orçamento, compra');
     expect(prompt).toContain('- queue_id "q-pos": Pós-venda — usar para: ajuste, conserto, garantia');

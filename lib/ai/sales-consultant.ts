@@ -8,10 +8,8 @@ import { BUBBLE_SPLIT, splitBubbles } from "@/lib/ai/bubbles";
 import { parseShowcase } from "@/lib/ai/showcase-choice";
 import { iconicModel, expandModelNicknames } from "@/lib/ai/product-names";
 import { classifySearch } from "@/lib/ai/stock-showcase";
-import { loadPromptModule } from "@/lib/ai/prompt-composer";
 
-/** Regras da consultora (lib/ai/prompts/vitrine-estoque.md): entram no prompt só em busca/vitrine/orçamento. */
-export const SALES_CONSULTANT_RULES = loadPromptModule("vitrine-estoque");
+
 
 /**
  * Cidade desconhecida: pergunta SÓ a cidade antes de listar. Grau ou sol e faixa de valor ficam para os próximos

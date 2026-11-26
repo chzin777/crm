@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, ChevronDown, Coins, ExternalLink, FileText, FlaskConical, List, MessagesSquare, Mic, ImageIcon, MapPin, PackageSearch, Paperclip, PlugZap, RefreshCw, RotateCcw, Save, ScrollText, Search, Send, ShieldAlert, ShieldCheck, Sparkles, Trash2, UserRoundCheck, Wallet, X, XCircle } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
-import { Collapse, KnowledgeSection, RulesSection, SkillsSection } from "@/components/ai-studio/StudioSections";
-import { AI_TONES, DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
+import { Collapse, KnowledgeSection, SkillsSection } from "@/components/ai-studio/StudioSections";
+import { PromptModulesStudio } from "@/components/ai-studio/PromptModulesStudio";
+import { DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
 import { extractClipboardImages } from "@/lib/clipboard";
@@ -17,11 +18,11 @@ import { productSelectRef, selectionText, type InteractiveShowcase, type Showcas
 import type { SalesEvent, SalesTrigger } from "@/lib/sales-pipeline";
 import type { PlaygroundFinancial } from "@/lib/ai/installments";
 /** Seções do Estúdio de IA (menu lateral interno). */
-type Tab = "geral" | "regras" | "skills" | "conhecimento" | "simulador";
+type Tab = "modulos" | "geral" | "skills" | "conhecimento" | "simulador";
 type PlaygroundMedia = { kind: AiAttachmentKind; name: string; url: string; transcript?: string };
 /** historyText: texto + resumo do anexo devolvido pelo servidor, usado como histórico nas próximas mensagens. */
 /** silent: turno sem resposta (encerramento silencioso), só aparece no teste e não entra no histórico. */
-type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string; imageAnalysis?: PlaygroundResult["imageAnalysis"]; catalogContext?: CatalogContext; financial?: PlaygroundFinancial };
+type PlaygroundMessage = { from: "customer" | "ai"; text: string; note?: string; prompt?: PlaygroundResult["prompt"]; search?: PlaygroundResult["search"]; injection?: PlaygroundResult["injection"]; stock?: StockLog[]; image?: PlaygroundResult["image"]; details?: PlaygroundResult["details"]; location?: PlaygroundResult["location"]; media?: PlaygroundMedia; historyText?: string; handoff?: boolean; silent?: boolean; list?: InteractiveShowcase; selectedProductRef?: string; imageAnalysis?: PlaygroundResult["imageAnalysis"]; catalogContext?: CatalogContext; financial?: PlaygroundFinancial };
 
 /** Lista Interativa do WhatsApp simulada: botão "Ver modelos" abre a gaveta; tocar num modelo envia a escolha. */
 function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveShowcase; disabled: boolean; onPick: (row: ShowcaseListRow) => void }) {
@@ -48,6 +49,7 @@ function InteractiveListPreview({ list, disabled, onPick }: { list: InteractiveS
 }
 /** Mesmo resultado do motor do WhatsApp (runAiAgent), mais o que o cliente receberia. */
 type PlaygroundResult = AgentOutcome & {
+  prompt?: { system: string; used: { id: string; title: string; reason: string; tokens: number }[]; tokens: number; tools: string[] };
   messages: string[];
   handoffQueue: string;
   handoffQueueSource?: "fixed" | "ai" | "fallback" | "current" | "none" | "staff";
@@ -126,11 +128,11 @@ const DETAILS_SOURCE_LABELS = { web: "pesquisada na web", cache: "do cache (30 d
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const TABS: { id: Tab; label: string; hint: string; icon: typeof Bot }[] = [
-  { id: "geral", label: "Geral & Identidade", hint: "Status, modelo, tom, horário e transbordo", icon: Bot },
-  { id: "regras", label: "Regras da Empresa", hint: "Markdown por assunto", icon: ScrollText },
-  { id: "skills", label: "Skills da IA", hint: "Habilidades liga/desliga", icon: Sparkles },
+  { id: "modulos", label: "Módulos de Prompt", hint: "Tudo o que a IA sabe e segue", icon: ScrollText },
+  { id: "geral", label: "Motor & Atendimento", hint: "Status, modelo, temperatura, horário", icon: Bot },
+  { id: "skills", label: "Ferramentas (Skills)", hint: "Ferramentas liga/desliga", icon: Sparkles },
   { id: "conhecimento", label: "Base de Conhecimento", hint: "RAG: arquivos e textos", icon: BookOpenText },
-  { id: "simulador", label: "Simulador", hint: "Testar com tudo aplicado", icon: FlaskConical },
+  { id: "simulador", label: "Testar IA Agora", hint: "Chat de teste com os módulos salvos", icon: FlaskConical },
 ];
 
 /** Título de grupo dentro de uma seção do Estúdio. */
@@ -372,7 +374,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
         from: "ai",
         text: part || "(nenhuma mensagem ao cliente)",
         historyText: part,
-        ...(position === 0 ? { search: data.search, injection: data.injection, stock: data.stock, image: data.image, details: data.details } : {}),
+        ...(position === 0 ? { prompt: data.prompt, search: data.search, injection: data.injection, stock: data.stock, image: data.image, details: data.details } : {}),
         // Catálogo visual: cada legenda é uma foto própria, na mesma ordem do WhatsApp.
         ...(data.visualCatalog && position >= 1 && data.visualCatalog.items[position - 1] ? { image: { url: data.visualCatalog.items[position - 1].imageUrl, source: "cache" as const, query: data.visualCatalog.items[position - 1].name, sku: data.visualCatalog.items[position - 1].sku } } : {}),
         ...(position === parts.length - 1 ? { note: notes.join(" "), handoff: data.action === "handoff", ...(data.financial ? { financial: data.financial } : {}) } : {}),
@@ -471,6 +473,13 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
               {message.injection && <p className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300" title="Só aparece no teste; no WhatsApp fica no log de segurança"><ShieldAlert className="h-3 w-3" />{message.injection.risk === "high" ? "Tentativa de manipulação detectada" : "Sinal fraco de manipulação"}: {message.injection.matches.join(", ")}</p>}
               {message.stock?.map((item, index) => <p key={index} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${item.scenario === "unavailable_api" ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" : "bg-[#C4D600]/15 text-[#051647] dark:text-[#C4D600]"}`} title="Só aparece no teste: consulta de estoque no VMSet"><PackageSearch className="h-3 w-3" />Estoque VMSet: “{item.term}”{item.region ? ` em ${item.region}` : ""} · {item.kind === "marca_ampla" ? `busca ampla (vitrine sem foto) · ${item.products} modelo${item.products === 1 ? "" : "s"} com estoque` : `${STOCK_SCENARIO_LABELS[item.scenario]} · ${item.products} produto${item.products === 1 ? "" : "s"}, ${item.stores} loja${item.stores === 1 ? "" : "s"}`} · {item.ms} ms{item.cached ? " (cache)" : ""}{item.sheet ? ` · ficha resumida ${DETAILS_SOURCE_LABELS[item.sheet]}` : ""}{item.sheet ? (item.rating ? ` · avaliação ${item.rating}` : " · sem avaliação confiável") : ""}{item.image === "sent" ? " · foto já enviada nesta etapa" : item.image === "none" ? " · foto não encontrada" : ""}</p>)}
               {message.details?.map((item, index) => <p key={`d${index}`} className="inline-flex items-center gap-1 rounded-md bg-[#002187]/10 px-2 py-0.5 text-[10px] font-medium text-[#002187] dark:bg-white/10 dark:text-slate-200" title="Só aparece no teste: ficha do produto"><BookOpenText className="h-3 w-3" />Ficha do produto: {item.product} · {DETAILS_SOURCE_LABELS[item.source]} · {item.variations} cor{item.variations === 1 ? "" : "es"} com saldo{item.rating ? ` · avaliação ${item.rating}` : ""} · {item.ms} ms</p>)}
+              {message.prompt && (
+                <details className="w-full rounded-md bg-[#07163B]/5 px-2 py-1 text-[10px] text-slate-600 dark:bg-white/5 dark:text-slate-300">
+                  <summary className="cursor-pointer font-semibold">{message.prompt.used.length ? `${message.prompt.used.length} módulos · ~${message.prompt.tokens.toLocaleString("pt-BR")} tokens` : "Sem módulo ativo: sem mensagem system"}{message.prompt.tools.length ? ` · ferramentas: ${[...new Set(message.prompt.tools)].join(", ")}` : " · nenhuma ferramenta"}</summary>
+                  <ul className="mt-1 flex flex-wrap gap-1">{message.prompt.used.map((module) => <li key={module.id} className="rounded bg-white px-1.5 py-0.5 dark:bg-white/10" title={module.reason}>{module.title} <span className="text-slate-400">({module.reason})</span></li>)}</ul>
+                  {message.prompt.system && <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-100">{message.prompt.system}</pre>}
+                </details>
+              )}
               {message.search && <p className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-300" title="Só aparece no teste"><Search className="h-3 w-3" />{message.search.kind === "produto" ? <>Busca no ERP: “{message.search.term}” · {message.search.found} resultado{message.search.found === 1 ? "" : "s"}</> : <>Foto identificada como {message.search.kind}{message.search.kind === "outro" ? " (sem busca)" : " (conferência humana)"}</>}</p>}
             </div>
           </div>
@@ -514,7 +523,7 @@ function Playground({ settings, onUsed }: { settings: AiSettings; onUsed: () => 
 /** Página Inteligência Artificial (/ia): parâmetros definidos pelo administrador, consumo e teste. */
 export function AiSettingsPanel() {
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>("geral");
+  const [tab, setTab] = useState<Tab>("modulos");
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [saved, setSaved] = useState<string>("");
   const [configured, setConfigured] = useState(true);
@@ -649,7 +658,7 @@ export function AiSettingsPanel() {
     setKeywordDraft("");
   };
 
-  const activeTriggers = [settings.handoffKeywords.length > 0, settings.handoffOnComplaint, settings.handoffOnPurchaseIntent, settings.handoffWhenUnsure, settings.handoffOnMedia].filter(Boolean).length;
+  const activeTriggers = [settings.handoffKeywords.length > 0, settings.handoffOnMedia].filter(Boolean).length;
   const counters: Partial<Record<Tab, number>> = { geral: activeTriggers };
   const balanceTone = usage && (usage.balance.low || usage.status.creditExhausted) ? "warn" : "default";
 
@@ -745,28 +754,11 @@ export function AiSettingsPanel() {
       <div className="min-w-0 flex-1 space-y-6">
       {tab === "geral" && (
         <div className="space-y-6">
-          <GroupTitle icon={Bot} title="Identidade e tom" />
-          <Block title="Identidade" hint="Como a IA fala com o cliente. Ela cumprimenta pelo horário de Brasília (Bom dia, Boa tarde, Boa noite) sem se apresentar como assistente virtual.">
-            <label className={labelCls}>Nome no atendimento (usado só se o cliente perguntar)
+          <GroupTitle icon={Bot} title="Identidade" />
+          <Block title="Nome da IA" hint="Valor da variável {{nome_agente}} nos módulos. Tom de voz, restrições e todo o comportamento ficam em Módulos de Prompt.">
+            <label className={labelCls}>Nome no atendimento
               <input value={settings.agentName} onChange={(event) => set("agentName", event.target.value)} className={input} maxLength={60} />
             </label>
-            <div>
-              <p className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">Tom de voz</p>
-              <div className="grid gap-2 sm:grid-cols-4">
-                {AI_TONES.map((tone) => (
-                  <label key={tone.id} className={`cursor-pointer rounded-lg border p-3 text-xs transition ${settings.tone === tone.id ? "border-[#002187] bg-[#002187]/5 dark:border-[#C4D600] dark:bg-white/5" : "border-slate-200 dark:border-slate-700"}`}>
-                    <input type="radio" name="ai-tone" className="sr-only" checked={settings.tone === tone.id} onChange={() => set("tone", tone.id)} />
-                    <span className="block font-semibold text-slate-800 dark:text-white">{tone.label}</span>
-                    <span className="mt-0.5 block text-[10px] text-slate-500 dark:text-slate-400">{tone.hint}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </Block>
-
-          <Block title="Instruções e restrições" hint="Regras de comportamento que valem para todas as respostas (ex.: o que nunca prometer). Segurança, estoque e imagens têm regras fixas no sistema que estas instruções não substituem.">
-            <textarea aria-label="Instruções adicionais" rows={Math.min(18, Math.max(6, settings.extraInstructions.split("\n").length + 1))} value={settings.extraInstructions} onChange={(event) => set("extraInstructions", event.target.value)} className={`${area} resize-y text-sm`} />
-            <p className="text-right text-xs text-slate-400">{settings.extraInstructions.length.toLocaleString("pt-BR")} caracteres</p>
           </Block>
 
           <GroupTitle icon={UserRoundCheck} title="Atendimento, horário e transbordo" />
@@ -846,9 +838,6 @@ export function AiSettingsPanel() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {([
-                { key: "handoffOnComplaint", label: "Reclamação ou cliente irritado", description: "Problema com pedido, produto ou atendimento." },
-                { key: "handoffOnPurchaseIntent", label: "Intenção de compra ou orçamento", description: "Fechar compra, orçamento com receita ou negociar condições." },
-                { key: "handoffWhenUnsure", label: "A IA não tiver certeza da resposta", description: "Assunto fora do que está cadastrado." },
                 { key: "handoffOnMedia", label: "O cliente enviar receita ou comprovante", description: "A IA lê primeiro (foto ou PDF), extrai graus/valor/data, confirma o recebimento e transfere para a fila comercial com o resumo na nota interna. Áudio, vídeo, documentos, planilhas, fotos de produto e figurinhas nunca transferem: a IA ouve/lê e responde." },
               ] as const).map((item) => (
                 <div key={item.key} className={`rounded-lg border px-3 transition ${settings[item.key] ? "border-[#C4D600]/70 bg-[#C4D600]/5" : "border-slate-200/70 dark:border-slate-800"}`}>
@@ -1056,7 +1045,7 @@ export function AiSettingsPanel() {
       )}
 
       {/* Os antigos "Assuntos rápidos" foram unificados nas Regras da empresa (migrados para AiBusinessRule). */}
-      {tab === "regras" && <RulesSection />}
+      {tab === "modulos" && <PromptModulesStudio />}
 
       {tab === "skills" && <SkillsSection />}
 

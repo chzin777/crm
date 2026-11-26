@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { agentRules, customerMessages, preAgentOutcome } from "@/lib/ai/agent-core";
-import { CATALOG_MISS_REPLY, IMAGE_RULE, formatCatalogResults, normalizeTerm, productImageFlow, searchSteps, type CatalogSearch, type SearchStep } from "@/lib/ai/catalog-search";
+import { customerMessages, preAgentOutcome } from "@/lib/ai/agent-core";
+import { agentRules } from "./helpers/prompt-seed";
+import { CATALOG_MISS_REPLY, formatCatalogResults, normalizeTerm, productImageFlow, searchSteps, type CatalogSearch, type SearchStep } from "@/lib/ai/catalog-search";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { IMAGE_RULE } from "./helpers/prompt-seed";
 
 const settings = { ...DEFAULT_AI_SETTINGS, handoffMessage: "Vou te passar para a equipe." };
 const rayBan: CatalogSearch = {

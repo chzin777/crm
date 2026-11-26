@@ -3,7 +3,10 @@
  * mas para o ATENDENTE revisar. Funciona com o atendimento autônomo ligado ou desligado e nunca envia nada.
  * Sem banco: testável.
  */
-import { AI_TONES, type AiSettings } from "@/lib/ai/settings";
+import { formatBr } from "@/lib/br-time";
+import { assemblePrompt, type AssembledPrompt, type PromptModule } from "@/lib/ai/prompt-modules";
+import { promptConditions } from "@/lib/ai/prompt-composer";
+import type { AiSettings } from "@/lib/ai/settings";
 
 export type CopilotCustomer = {
   name: string | null;
@@ -18,7 +21,7 @@ export type CopilotCustomer = {
 export function customerProfileBlock(customer: CopilotCustomer) {
   const lines = [
     customer.name ? `Nome: ${customer.name}` : "",
-    customer.city ? `Cidade: ${customer.city}` : "Cidade: não informada (se for falar de produto, qualifique cidade e faixa de valor antes)",
+    customer.city ? `Cidade: ${customer.city}` : "Cidade: não informada",
     customer.store ? `Loja de preferência (código VMSet): ${customer.store}` : "",
     customer.tier ? `Nível do cliente: ${customer.tier}` : "",
     customer.rfvpSegment ? `Perfil RFV-P: ${customer.rfvpSegment}` : "",
@@ -27,28 +30,26 @@ export function customerProfileBlock(customer: CopilotCustomer) {
   return `Perfil do cliente:\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
 
-/** Prompt de sistema da sugestão: regras da marca + módulos/regras de /ia + tom + instruções da empresa. */
-export function buildCopilotPrompt(input: { brandRules: string; modules: string; settings: AiSettings; agentName: string; knowledge: string; customer: CopilotCustomer; /** Regra do turno (ex.: mensagem vaga ou resposta curta do cliente). */ turnHint?: string }) {
-  const tone = (AI_TONES.find((item) => item.id === input.settings.tone) ?? AI_TONES[0]).instruction;
-  const firstName = input.agentName.trim().split(/\s+/)[0] || "atendente";
-  return [
-    input.brandRules,
-    input.modules,
-    "Você é uma consultora de vendas de ótica: objetiva, natural e acolhedora, nunca robótica. Seu foco é qualificar o cliente e conduzir para a visita à loja ou o fechamento, sempre a partir do que está acontecendo na conversa (responda ao assunto em aberto, nunca com frase genérica de primeiro contato).",
-    `Tom de voz: ${tone}`,
-    input.settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
-    input.settings.useCustomerOrders ? "" : "Não comente pedidos ou compras anteriores do cliente.",
-    input.settings.extraInstructions.trim() ? `Instruções da empresa:\n${input.settings.extraInstructions.trim()}` : "",
-    `SUA TAREFA: escrever a PRÓXIMA mensagem que o atendente ${firstName} vai enviar ao cliente pelo WhatsApp, respondendo ao que ficou pendente na conversa.`,
-    "- Escreva como o atendente (primeira pessoa), não como assistente virtual; não se apresente de novo se a conversa já começou.",
-    "- Use as notas internas só como contexto: nunca as cite ao cliente.",
-    "- Aqui você não tem ferramentas (estoque, mapa, catálogo): ignore instruções acima sobre chamá-las e não invente disponibilidade.",
-    "- Nunca diga que vai consultar algo e voltar depois sem necessidade; se faltar informação (estoque, preço, receita), faça uma pergunta objetiva ou ofereça o próximo passo concreto.",
-    "- Mensagem curta, adequada ao WhatsApp, sem markdown além de *negrito* pontual e sem assinatura.",
-    "PROIBIÇÃO ABSOLUTA DE TRAVESSÕES E HÍFENS: nunca use travessão (—), meia-risca (–) ou hífen (-) para separar ideias, pausas, listas ou explicações. Use só vírgulas, pontos finais, pontos de interrogação ou quebras de linha (hífen só dentro de palavras e códigos, como Ray-Ban).",
-    input.turnHint ?? "",
-    customerProfileBlock(input.customer),
-    input.knowledge ? `Informações que você pode usar:\n${input.knowledge}` : "",
-    'Responda em JSON: {"reply": "texto da mensagem"}.',
-  ].filter(Boolean).join("\n\n");
+/**
+ * Prompt de sistema da sugestão: os mesmos módulos de /ia (condição @copiloto em vez de @atendimento), com o perfil do
+ * cliente, a base de conhecimento e a dica do turno nas variáveis. Nenhum texto de instrução vem do código.
+ */
+export function assembleCopilotPrompt(input: { modules: PromptModule[]; settings: AiSettings; agentName: string; knowledge: string; customer: CopilotCustomer; text?: string; conversationText?: string; /** Fato do turno (ex.: mensagem vaga ou resposta curta do cliente). */ turnHint?: string; now?: Date }): AssembledPrompt {
+  const now = input.now ?? new Date();
+  return assemblePrompt(input.modules, {
+    conversationText: input.conversationText ?? input.text ?? "",
+    conditions: ["@copiloto", ...promptConditions({ text: input.text ?? "", preferredCity: input.customer.city ?? undefined })],
+    vars: {
+      nome_agente: input.settings.agentName,
+      nome_atendente: input.agentName.trim().split(/\s+/)[0] || "atendente",
+      perfil_cliente: customerProfileBlock(input.customer),
+      base_conhecimento: input.knowledge,
+      contexto_do_turno: input.turnHint ?? "",
+      data_hora: formatBr(now, { dateStyle: "full", timeStyle: "short" }),
+    },
+  });
+}
+
+export function buildCopilotPrompt(input: Parameters<typeof assembleCopilotPrompt>[0]) {
+  return assembleCopilotPrompt(input).system;
 }

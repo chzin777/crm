@@ -1,20 +1,14 @@
 import { formatBr } from "@/lib/br-time";
-import { composeSystemPrompt, loadPromptModule, type PromptState } from "@/lib/ai/prompt-composer";
+import { promptConditions, skillConditions, type PromptState } from "@/lib/ai/prompt-composer";
+import { assemblePrompt, type AssembledPrompt, type PromptModule } from "@/lib/ai/prompt-modules";
+import type { AiSkill } from "@/lib/ai/studio";
 import { fillVariables } from "@/lib/chat/text";
-import { AI_TONES, asksForHuman, type AiSettings } from "@/lib/ai/settings";
-import { IMAGE_RULE, PRODUCT_INFO_RULE } from "@/lib/ai/catalog-search";
-import { contactFirstName, defaultHandoffNotice, STAFF_NAME_RULES } from "@/lib/ai/staff-request";
-import { STOCK_RULES } from "@/lib/ai/stock";
-import { BROAD_SEARCH_RULES } from "@/lib/ai/stock-showcase";
-import { BRAND_TYPO_RULES } from "@/lib/ai/brand-resolve";
-import { FORMAT_RULES, joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
-import { CLOSING_RULES, NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
-import { DETAILS_RULES, PRODUCT_CARD_RULES } from "@/lib/ai/product-details";
-import { NATURAL_RULES } from "@/lib/ai/product-names";
-import { LOCATION_RULES } from "@/lib/ai/store-location";
-import { BUSINESS_HARD_RULES } from "@/lib/ai/business-guard";
-import { humanRequestMode, queuedAssistBlock, queueRoutingBlock, ROUTING_RULES, type RoutingQueue } from "@/lib/ai/routing";
-import { MESSAGE_TEXT_LIMIT, SECURITY_REMINDER, SECURITY_RULES, limitText, wrapUntrusted } from "@/lib/ai/guard";
+import { asksForHuman, type AiSettings } from "@/lib/ai/settings";
+import { contactFirstName, defaultHandoffNotice } from "@/lib/ai/staff-request";
+import { joinBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { NO_REPLY_TOKEN, silentClosing } from "@/lib/ai/closing";
+import { humanRequestMode, queueRoutingData, type RoutingQueue } from "@/lib/ai/routing";
+import { MESSAGE_TEXT_LIMIT, limitText, wrapUntrusted } from "@/lib/ai/guard";
 import type { CustomerHistory } from "@/lib/chat/types";
 
 /**
@@ -178,85 +172,67 @@ export function simulatedHistory(profile: SimulatedProfileId, now = new Date()):
   };
 }
 
-export const BRAND_RULES = [
-  "Você trabalha na equipe de atendimento da Óticas Brasil, rede de óticas (óculos de grau, óculos de sol, lentes oftálmicas, lentes de contato e armações). A Óticas Brasil NÃO realiza exame de vista nem consulta oftalmológica ou optométrica.",
-  "Escreva sempre em português do Brasil, tom cordial, próximo e profissional, frases curtas, adequadas ao WhatsApp.",
-  "Nunca invente preços, prazos, estoque, promoções, endereços ou políticas que não estejam no contexto. Estoque só pela ferramenta consultarEstoqueProduto. Se faltar outra informação, oriente a pedir o dado ao cliente ou transfira.",
-  "Nunca peça dados sensíveis como senha ou número de cartão.",
-].join("\n");
-
-/** Regras do agente (WhatsApp e teste da página /ia). A regra de imagens é fixa no código, logo após as da marca. */
-export function agentRules(settings: AiSettings, queues: RoutingQueue[] = [], modules = composeSystemPrompt({ hasGreetedInSession: true })) {
-  const handoff = [
-    "Transfira para uma pessoa (action \"handoff\") quando:",
-    "- o cliente pedir para falar com uma pessoa;",
-    settings.handoffOnComplaint ? "- o cliente reclamar, estiver irritado ou relatar problema com pedido, produto ou atendimento;" : "",
-    settings.handoffOnPurchaseIntent ? "- o cliente quiser fechar uma compra, fazer orçamento com receita ou negociar condições;" : "",
-    settings.handoffWhenUnsure ? "- a resposta não estiver nas informações abaixo ou você não tiver certeza;" : "",
-  ].filter(Boolean);
-  return [
-    // Fixas no código, antes e depois das instruções da tela: segurança, marca e imagens.
-    SECURITY_RULES,
-    BUSINESS_HARD_RULES,
-    // Módulos Markdown (lib/ai/prompts/*.md) escolhidos pelo estado da conversa: núcleo, saudação, vitrine...
-    modules,
-    IMAGE_RULE,
-    PRODUCT_INFO_RULE,
-    STAFF_NAME_RULES,
-    STOCK_RULES,
-    BROAD_SEARCH_RULES,
-    "PROATIVIDADE OBRIGATÓRIA: ao corrigir marca, modelo, tipo ou cidade, peça desculpas brevemente quando necessário, consulte imediatamente consultarEstoqueProduto com os filtros atuais e apresente o resultado nesta resposta. Nunca pergunte se pode buscar, corrigir ou mostrar opções. Nunca peça número ou referência de uma lista que não foi enviada nesta resposta. Reconheça com carinho, brevemente, o contexto de presente, ocasião ou uso informado pelo cliente.",
-    BRAND_TYPO_RULES,
-    PRODUCT_CARD_RULES,
-    DETAILS_RULES,
-    LOCATION_RULES,
-    NATURAL_RULES,
-    FORMAT_RULES,
-    CLOSING_RULES,
-    `Seu nome no atendimento é ${settings.agentName}: use-o só se o cliente perguntar com quem está falando.`,
-    `Tom de voz: ${(AI_TONES.find((tone) => tone.id === settings.tone) ?? AI_TONES[0]).instruction}`,
-    "Responda só com base nas informações abaixo e no histórico do cliente. Não prometa o que não está escrito aqui.",
-    // Ligado: a instrução vem do documento "Pedidos do próprio cliente" da Base de Conhecimento.
-    settings.useCustomerOrders ? "" : "Não comente pedidos ou compras anteriores do cliente.",
-    settings.canQuotePrices ? "" : "Não informe preços nem valores: diga que a loja passa o orçamento.",
-    handoff.join("\n"),
-    // Quando encerrar vem da skill "Encerramento Autônomo" (Markdown editável, bloco de skills); aqui só o formato.
-    settings.closeWhenResolved ? 'Ao encerrar (skill "Encerramento Autônomo"), use action "resolved" com a despedida curta em reply (a mesma mensagem, sem pergunta).' : "",
-    settings.extraInstructions.trim() ? `Instruções da empresa:\n${settings.extraInstructions.trim()}` : "",
-    settings.aiChoosesQueue ? ROUTING_RULES : "",
-    settings.aiChoosesQueue ? queueRoutingBlock(queues, settings.queueHints ?? {}) : "",
-    `Responda SEMPRE em JSON: {"reply": "mensagem ao cliente (vazia só se for transferir sem falar)", "action": "reply" | "handoff" | "resolved" | "no_reply", "reason": "resumo curto para o atendente do que o cliente precisa", "queue_id": "${settings.aiChoosesQueue ? "id da fila de transbordo (só com action handoff) ou vazio" : "vazio"}"}.`,
-  ].filter(Boolean).join("\n\n");
-}
-
-/**
- * Prompt de sistema completo (WhatsApp e teste): regras fixas de segurança no início, instruções da tela no meio,
- * blocos extras do sistema (anexos, resultado do catálogo, alerta de manipulação), informações e o lembrete de
- * segurança por último. Nada vindo do cliente entra aqui: os dados dele vão só na mensagem "user", delimitados.
- */
 /** queued: conversa já transferida e aguardando na fila sem atendente (espera assistida, alreadyQueued = true). */
 export type QueuedState = { queueName: string | null };
 
-export function buildSystemPrompt(input: { settings: AiSettings; queues?: RoutingQueue[]; info: string; extra?: string[]; now?: Date; firstReply?: boolean; queued?: QueuedState | null; /** Estado/intenção da conversa que escolhe os módulos de lib/ai/prompts. */ prompt?: Omit<PromptState, "hasGreetedInSession"> }) {
+/** Condições "@..." deste turno vindas do estado da conversa (os módulos sob demanda usam como gatilho). */
+export function turnConditions(input: { settings: AiSettings; skills?: AiSkill[]; firstReply?: boolean; queued?: QueuedState | null; prompt?: Omit<PromptState, "hasGreetedInSession">; flags?: string[] }): string[] {
+  const hasGreetedInSession = input.firstReply === false || !!input.queued;
+  const skills = input.skills ?? input.prompt?.studio?.skills;
+  const conditions = new Set<string>(["@atendimento", ...promptConditions({ ...input.prompt, studio: { ...input.prompt?.studio, skills }, hasGreetedInSession }), ...(input.flags ?? [])]);
+  if (input.firstReply === true && !input.queued) conditions.add("@primeira_resposta");
+  if (input.firstReply === false && !input.queued) conditions.add("@ja_respondeu");
+  if (input.queued) conditions.add("@fila_espera");
+  if (input.settings.aiChoosesQueue) conditions.add("@escolhe_fila");
+  if (input.settings.closeWhenResolved) conditions.add("@pode_encerrar");
+  for (const condition of skillConditions(skills)) conditions.add(condition);
+  return [...conditions];
+}
+
+/**
+ * Prompt de sistema (WhatsApp e teste de /ia): só os módulos Markdown ativos de /ia, na ordem de prioridade, com as
+ * variáveis do turno preenchidas. Nenhum módulo ativo = system vazio (a chamada vai sem mensagem "system").
+ */
+export function assembleSystemPrompt(input: {
+  modules: PromptModule[];
+  settings: AiSettings;
+  queues?: RoutingQueue[];
+  info: string;
+  /** Trechos do RAG e da memória semântica desta mensagem. */
+  knowledge?: string;
+  /** Fatos calculados pelo motor neste turno ({{contexto_do_turno}}). */
+  extra?: string[];
+  now?: Date;
+  firstReply?: boolean;
+  queued?: QueuedState | null;
+  prompt?: Omit<PromptState, "hasGreetedInSession">;
+  skills?: AiSkill[];
+  flags?: string[];
+}): AssembledPrompt {
   const now = input.now ?? new Date();
   const time = brasiliaGreeting(now);
-  // saudacao.md só entra enquanto a IA ainda não cumprimentou nesta conversa (fila: já houve atendimento).
-  const hasGreetedInSession = input.firstReply === false || !!input.queued;
-  return [
-    agentRules(input.settings, input.queues ?? [], composeSystemPrompt({ ...input.prompt, hasGreetedInSession })),
-    input.queued ? queuedAssistBlock(input.queued.queueName) : "",
-    ...(input.extra ?? []).filter(Boolean),
-    `Agora: ${formatBr(now, { dateStyle: "full", timeStyle: "short" })} (Brasília).`,
-    `Horário atual em Brasília: ${time.time} (período: ${time.period}; saudação do período: ${time.greeting}).`,
-    input.firstReply === undefined || input.queued
-      ? ""
-      : input.firstReply
-        ? `Esta é a sua primeira resposta nesta conversa: cumprimente com a saudação deste período (${time.greeting}), com o primeiro nome do cliente se conhecido, e já responda o que ele pediu, com suas palavras.`
-        : "Você já respondeu nesta conversa: não cumprimente de novo, continue direto do ponto.",
-  ].concat([
-    `Informações que você pode usar:\n${input.info || "(nenhuma informação cadastrada: transfira dúvidas específicas)"}`,
-    SECURITY_REMINDER,
-  ]).filter(Boolean).join("\n\n");
+  const conditions = turnConditions(input);
+  const queueName = input.queued?.queueName?.trim();
+  return assemblePrompt(input.modules, {
+    conversationText: input.prompt?.conversationText ?? input.prompt?.text ?? "",
+    conditions,
+    vars: {
+      nome_agente: input.settings.agentName,
+      data_hora: formatBr(now, { dateStyle: "full", timeStyle: "short" }),
+      hora: time.time,
+      periodo: time.period,
+      saudacao_periodo: time.greeting,
+      base_conhecimento: input.info,
+      trechos_conhecimento: input.knowledge ?? "",
+      contexto_do_turno: (input.extra ?? []).filter(Boolean).join("\n\n"),
+      filas: input.settings.aiChoosesQueue ? queueRoutingData(input.queues ?? [], input.settings.queueHints ?? {}) : "",
+      fila_atual: input.queued ? (queueName ? `na fila ${queueName}` : "na fila de atendimento") : "",
+    },
+  });
+}
+
+export function buildSystemPrompt(input: Parameters<typeof assembleSystemPrompt>[0]): string {
+  return assembleSystemPrompt(input).system;
 }
 
 export type DayPeriod = "manhã" | "tarde" | "noite";
@@ -274,6 +250,3 @@ export function brasiliaGreeting(now: Date = new Date()): { time: string; hour: 
   if (hour >= 12 && hour < 18) return { time, hour, period: "tarde", greeting: "Boa tarde" };
   return { time, hour, period: "noite", greeting: "Boa noite" };
 }
-
-/** Regra fixa (lib/ai/prompts/saudacao.md): saudação natural, sem apresentação robótica; só no primeiro turno. */
-export const GREETING_RULES = loadPromptModule("saudacao");

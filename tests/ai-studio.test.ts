@@ -30,7 +30,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { POST as createRule } from "@/app/api/ai/rules/route";
 import { PUT as updateRule } from "@/app/api/ai/rules/[id]/route";
-import { composeSystemPrompt, selectPromptModules } from "@/lib/ai/prompt-composer";
+import { composeSystemPrompt, selectPromptModules } from "./helpers/prompt-seed";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { applySkillsToSettings, chunkText, fallbackSkills, filterToolsBySkills, knowledgePromptBlock, normalizeRuleInput, rankChunks, selectBusinessRules, shouldSearchKnowledge, skillEnabled, skillsPromptBlock, slugify, type AiSkill, type BusinessRule, type SkillKey } from "@/lib/ai/studio";
 import { searchKnowledge } from "@/lib/ai/studio-db";
@@ -81,7 +81,7 @@ describe("AiBusinessRule: criação e ativação", () => {
     expect(selectBusinessRules(rules, "quero saber da garantia").map((item) => item.id)).toEqual(["3", "2"]);
 
     const prompt = composeSystemPrompt({ hasGreetedInSession: true, text: "como funciona pra indicar?", studio: { rules } });
-    expect(prompt).toContain("REGRAS DA EMPRESA");
+    expect(prompt).toContain("## Programa de Indicação");
     expect(prompt).toContain("Quem indica ganha R$ 50.");
     expect(prompt).toContain("Somos a Óticas Brasil.");
     expect(prompt).not.toContain("Garantia de 1 ano.");

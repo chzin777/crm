@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildSystemPrompt, preAgentOutcome } from "@/lib/ai/agent-core";
 import { aiShouldAttend, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { aiConversationMode } from "@/lib/chat/queue-rules";
+import { SEED_MODULES } from "./helpers/prompt-seed";
 
 const settings = { ...DEFAULT_AI_SETTINGS, autonomousEnabled: true, scheduleMode: "always" as const, aiChoosesQueue: true, handoffKeywords: ["atendente"] };
 const waiting = { status: "waiting", queueId: "q-comercial", assigneeId: null as string | null, closedAt: null as Date | null, menuState: { stopped: true } };
@@ -41,13 +42,13 @@ describe("espera assistida: IA ajuda enquanto o cliente aguarda na fila", () => 
   });
 
   it("prompt com alreadyQueued orienta a seguir ajudando sem re-transferir", () => {
-    const prompt = buildSystemPrompt({ settings, info: "", firstReply: false, queued: { queueName: "Comercial" } });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings, info: "", firstReply: false, queued: { queueName: "Comercial" } });
     expect(prompt).toContain("alreadyQueued = true");
     expect(prompt).toContain("aguardando atendimento na fila Comercial");
     expect(prompt).toContain("NÃO transfira de novo");
     expect(prompt).toContain("Continue respondendo com atenção total");
     expect(prompt).toContain("já está na fila Comercial e logo um atendente assume");
     expect(prompt).not.toContain("primeira resposta nesta conversa");
-    expect(buildSystemPrompt({ settings, info: "" })).not.toContain("alreadyQueued");
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings, info: "" })).not.toContain("alreadyQueued");
   });
 });

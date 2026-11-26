@@ -25,5 +25,3 @@ export function isPureGreeting(text: string | null | undefined) {
   return rest.every((word) => COMPANIONS.has(word));
 }
 
-/** Dica do turno: saudação pura → abertura acolhedora direta, sem interpretar a palavra como nome/loja/setor. */
-export const PURE_GREETING_HINT = "SAUDAÇÃO PURA NESTE TURNO: a mensagem do cliente é só um cumprimento informal (do tipo opa, oi esticado, eaí, salve). Responda com uma abertura acolhedora, curta e com suas palavras; se a loja tinha mandado algo antes (campanha, aviso, pergunta), retome esse assunto em vez de perguntar o que ela procura; se não houver assunto anterior, conduza com uma pergunta aberta sobre o que ela procura na ótica (óculos de sol, armação de grau, lentes de contato ou informações das lojas), nunca uma frase passiva como \"tô por aqui\" e sem travessões. Se ela perguntou como você está, retribua antes. NUNCA trate o cumprimento como nome de pessoa, atendente, loja ou setor e não transfira.";

@@ -40,8 +40,3 @@ export function silentClosing(input: { pendingText: string; lastAiText: string |
   return !input.hasMedia && isCourtesyClosing(input.pendingText.replace(/\n+/g, " ")) && isFarewell(input.lastAiText);
 }
 
-/** Regra fixa do prompt: uma despedida só, sem empurrar perguntas; depois disso, silêncio. */
-export const CLOSING_RULES = [
-  "ENCERRAMENTO (regra fixa): quando o cliente agradecer ou encerrar o assunto, responda UMA única vez, curto e caloroso, com suas palavras, sem fazer nova pergunta nem oferecer mais nada.",
-  `Se você já se despediu na sua última mensagem e o cliente mandar só mais um fechamento de cortesia (\"ok\", \"obrigado\", \"valeu\", \"tá bom\", \"👍\", \"até mais\"), NÃO responda: use action "no_reply" com reply vazio (ou reply ${NO_REPLY_TOKEN}). Nunca mande uma segunda despedida.`,
-].join("\n");

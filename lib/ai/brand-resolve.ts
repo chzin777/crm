@@ -121,11 +121,6 @@ export function hasWholeWord(text: string, word: string) {
   return !!key && text.normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^A-Za-z0-9]+/).some((token) => normalizeSearchToken(token) === key);
 }
 
-/** Regra fixa do prompt: termo original do cliente na busca e confirmação natural da marca encontrada. */
-export const BRAND_TYPO_RULES = [
-  "MARCA COM ERRO DE DIGITAÇÃO (regra fixa): passe para consultarEstoqueProduto o termo como o cliente escreveu (ex.: \"rada\", \"okley\"), sem trocar por outra marca parecida; o sistema reconhece a marca certa.",
-  "Quando o resultado trouxer marcaResolvida (ex.: cliente escreveu \"rada\" e a marca é RADDA), responda naturalmente com a marca encontrada (\"Temos vários modelos *RADDA* disponíveis em estoque! Confira alguns deles:\"), sem corrigir o cliente nem comentar o erro. Se vier semEstoqueDaMarca, diga com clareza que não há modelos dessa marca em estoque no momento e ofereça outras opções ou um atendente; nunca liste produtos de outras marcas como se fossem dela.",
-].join("\n");
 
 /**
  * Produtos da busca ampla: com marca reconhecida, só a família dela (nunca substring em outro nome); sem marca,

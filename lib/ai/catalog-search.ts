@@ -9,9 +9,6 @@ import { formatShowcase, type ShowcaseModel } from "@/lib/ai/stock-showcase";
  * Sem banco nem rede aqui: a busca e a chamada ao modelo entram por parâmetro (mesma lógica no WhatsApp e no teste).
  */
 
-/** Regra fixa no código (não editável na tela): a IA nunca narra a imagem do cliente. */
-export const IMAGE_RULE =
-  'REGRA CRÍTICA SOBRE IMAGENS: NUNCA narre a imagem enviada pelo cliente (proibido dizer "Pela imagem, parece ser...", "Vejo que você mandou um óculos...", "Na foto aparece..." etc.). O cliente já sabe o que enviou. Use a análise visual para identificar marca, linha, modelo, tipo, formato e cor e responda com o resultado da busca no catálogo (modelos encontrados e lojas). Pode nomear o modelo identificado ("Esse modelo é um *Prada Linea Rossa*...") quando o cliente perguntar o nome, a marca ou o tipo, ou quando a referência exata não estiver em estoque e você mostrar os modelos da mesma marca/linha. Nunca diga que a marca toda está sem estoque por causa de uma referência.';
 
 /** Pedido interno de identificação (nunca chega ao cliente). */
 export const VISION_PROMPT = [
@@ -143,9 +140,6 @@ export function analysisAnswer(analysis: ImageAnalysis) {
   return `Esse modelo é um *${name}*${style} 😊${ref}\n---SPLIT---\nQuer que eu te mostre os modelos *${name}* que temos em estoque?`;
 }
 
-/** Regra fixa do prompt: pergunta informativa sobre produto é respondida, nunca transferida. */
-export const PRODUCT_INFO_RULE =
-  'PERGUNTAS INFORMATIVAS SOBRE PRODUTO (regra fixa): se o cliente perguntar o nome, a marca, o modelo, a referência, se é de grau ou sol ou quanto custa o óculos da foto ou de um produto ("Qual o nome desse modelo?", "Que marca é essa?", "É de grau ou sol?", "Quanto custa esse?"), responda DIRETO usando a análise da foto desta sessão e/ou consultarEstoqueProduto. NUNCA transfira para atendente por esse tipo de pergunta. Transbordo por indisponibilidade só quando o cliente pedir explicitamente para encomendar um modelo esgotado ou falar com um vendedor depois de ver as opções.';
 
 /** Resposta quando não há análise de foto nem produto em foco para responder a pergunta informativa. */
 export const PRODUCT_INFO_FALLBACK = "Me conta qual modelo você quer saber? Se puder, me manda uma foto da parte de dentro da haste ou a referência, que eu te digo o nome, o preço e onde tem 😊";
@@ -246,9 +240,6 @@ export function formatCatalogResults(search: CatalogSearch, withPrices: boolean)
 export const CATALOG_MISS_REPLY = "Não localizei esse modelo exato no nosso sistema agora. Vou encaminhar para o atendente responsável verificar a disponibilidade nas lojas e já te retorna, tudo bem?";
 export const PRESCRIPTION_REPLY = "Recebi! Vou encaminhar para o atendente responsável conferir com cuidado e já te retorna, tudo bem?";
 
-/** Instrução da resposta quando a busca achou produtos (a imagem não vai junto: só o resultado). */
-export const CATALOG_FOUND_RULE =
-  "O cliente enviou a foto de um produto e a busca no catálogo encontrou os modelos abaixo. Responda direto, como vendedora: apresente até 3 modelos encontrados e as lojas com estoque agora, seguindo as REGRAS DE ESTOQUE. Se o resultado disser que o estoque não pôde ser verificado, cite as lojas onde o modelo é vendido e ofereça um atendente para confirmar. Não descreva a foto.";
 
 export type ImageFlowResult =
   | { type: "handoff"; reason: string; reply: string; trigger: "catalog_miss" | "prescription"; log: SearchLog }

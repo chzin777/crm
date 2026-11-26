@@ -387,9 +387,3 @@ export async function deliverImageOrText(
   return "image";
 }
 
-/** Regra fixa do prompt quando a foto vai junto. */
-export const IMAGE_CAPTION_RULE = [
-  "FOTO DO PRODUTO (regra fixa): quando o resultado de consultarEstoqueProduto trouxer \"fotoAnexada\": true, o sistema envia a foto do produto junto com a sua resposta.",
-  "- Escreva a resposta limpa e direta, para funcionar como legenda da foto (até ~900 caracteres): modelo, disponibilidade e lojas.",
-  "- Nunca invente, cite ou escreva URLs de imagem; não diga \"segue o link\". Se o cliente pedir foto e não houver \"fotoAnexada\", diga que não tem a foto aqui agora e ofereça as informações.",
-].join("\n");

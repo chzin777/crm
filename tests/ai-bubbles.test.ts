@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { agreeStoreCount, countStores, DEFAULT_STORE_QUESTION, SINGLE_STORE_QUESTION, splitAiResponseMessages, storeQuestion, tidyBubble, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, FORMAT_RULES, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
+import { agreeStoreCount, countStores, DEFAULT_STORE_QUESTION, SINGLE_STORE_QUESTION, splitAiResponseMessages, storeQuestion, tidyBubble, BUBBLE_DELAY_MAX_MS, BUBBLE_DELAY_MIN_MS, BUBBLE_SPLIT, bubbleDelay, joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
 import { buildSystemPrompt, customerMessages, interpretDecision } from "@/lib/ai/agent-core";
 import { deliverImageOrText } from "@/lib/ai/product-image";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { FORMAT_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 const LIST = "Temos o *Ray-Ban Meta* disponível nestas unidades:\n\n📍 *Goiânia*\n• *Setor Bueno* — Av. T-8, 235\n\n📍 *Águas Claras (DF)*\n• *Areal* — QS 1, Rua 210";
 const QUESTION = "Qual dessas lojas fica mais fácil pra você ir experimentar?";
@@ -71,7 +72,7 @@ describe("envio sequencial no WhatsApp", () => {
 
 describe("regras fixas de formatação e cadência no prompt", () => {
   it("agrupamento por cidade/região, negrito do WhatsApp e pergunta final em bolha separada", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain(FORMAT_RULES);
     expect(prompt).toContain("agrupe por cidade/região");
     expect(prompt).toContain("nunca misture DF com Goiás");
@@ -131,7 +132,7 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
   });
 
   it("prompt: pergunta de continuação em 2ª bolha escrita do zero e proibição de linha em branco em mensagem curta", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain("VALE PARA TODA RESPOSTA: quando você der uma informação");
     expect(prompt).not.toContain("Versace");
     expect(prompt).toContain("Proibido usar linha em branco (quebra dupla) para separar frases dentro da mesma mensagem curta");
@@ -162,14 +163,14 @@ describe("segunda bolha garantida (splitAiResponseMessages)", () => {
   });
 
   it("prompt traz a regra de concordância singular/plural", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain("CONCORDÂNCIA DA PERGUNTA (regra fixa)");
     expect(prompt).toContain("Com 1 loja só, a pergunta da 2ª bolha fica no singular");
     expect(prompt).toContain("com 2 ou mais, no plural");
   });
 
   it("prompt traz a regra de listas com ---SPLIT--- sem pergunta forçada nem frase pronta", () => {
-    const prompt = buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" });
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" });
     expect(prompt).toContain("LISTAS E LOJAS");
     expect(prompt).toContain("Não force pergunta quando a pessoa já disse o que vai fazer");
     expect(prompt).not.toContain("Qual dessas lojas fica melhor pra você?");

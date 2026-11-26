@@ -58,7 +58,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { GET as listSkillsRoute, POST as createSkill } from "@/app/api/ai/skills/route";
 import { DELETE as deleteSkill, PUT as updateSkill } from "@/app/api/ai/skills/[id]/route";
-import { composeSystemPrompt } from "@/lib/ai/prompt-composer";
+import { composeSystemPrompt } from "./helpers/prompt-seed";
 import { filterToolsBySkills, selectBusinessRules, topicsToRules, type AiSkill, type BusinessRule } from "@/lib/ai/studio";
 import { listBusinessRules, loadSkills, loadStudioContext } from "@/lib/ai/studio-db";
 

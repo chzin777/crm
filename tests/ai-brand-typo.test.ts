@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildSystemPrompt } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { indexProduct } from "@/lib/ai/catalog-search";
-import { BRAND_TYPO_RULES, broadCatalogMatches, catalogBrands, levenshtein, normalizeSearchToken, resolveBrandQuery, specificSearchScope } from "@/lib/ai/brand-resolve";
+import { broadCatalogMatches, catalogBrands, levenshtein, normalizeSearchToken, resolveBrandQuery, specificSearchScope } from "@/lib/ai/brand-resolve";
 import { buildShowcaseResult } from "@/lib/ai/stock-showcase";
+import { BRAND_TYPO_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 // Marcas reais do catálogo (amostra do ERP).
 const REAL = ["RAY BAN", "VIZZANO", "VOGUE", "NAIROBY", "MARESIA", "SPEEDO", "RADDA", "STEPPER", "ST. PIERRE", "GUESS", "ARMANI EXCHANGE", "CARRERA", "OAKLEY", "PRADA", "MIUMIU", "ANA HICKMANN", "ATITUDE", "HB", "GUCCI", "RADDA LEITURA", "ESTOJO RADDA", "PRADA LINEA ROSSA", "RAY BAN META", "TIFFANY", "TOM FORD", "PERSOL", "JOLIE", "FILA", "BOSS", "HUGO", "LACOSTE", "VERSACE", "CARMIM", "JAGUAR"];
@@ -69,7 +70,7 @@ describe("busca tolerante a erro de digitação de marca", () => {
   });
 
   it("prompt: termo original do cliente e confirmação natural da marca", () => {
-    expect(buildSystemPrompt({ settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(BRAND_TYPO_RULES);
+    expect(buildSystemPrompt({ modules: SEED_MODULES, settings: DEFAULT_AI_SETTINGS, info: "" })).toContain(BRAND_TYPO_RULES);
     expect(BRAND_TYPO_RULES).toContain("passe para consultarEstoqueProduto o termo como o cliente escreveu");
     expect(BRAND_TYPO_RULES).toContain("Temos vários modelos *RADDA* disponíveis em estoque! Confira alguns deles:");
     expect(BRAND_TYPO_RULES).toContain("sem corrigir o cliente");

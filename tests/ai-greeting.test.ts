@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { brasiliaGreeting, buildSystemPrompt, GREETING_RULES } from "@/lib/ai/agent-core";
+import { brasiliaGreeting, buildSystemPrompt } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { GREETING_RULES, SEED_MODULES } from "./helpers/prompt-seed";
 
 /** Horário de Brasília (UTC-3, sem horário de verão) → instante UTC, como num servidor em UTC. */
 const br = (hhmm: string) => new Date(`2026-11-13T${hhmm}:00-03:00`);
@@ -33,8 +34,8 @@ describe("saudação natural no prompt", () => {
   const settings = { ...DEFAULT_AI_SETTINGS, extraInstructions: "" };
 
   it("proíbe apresentação como assistente virtual e manda saudar pelo horário", () => {
-    const prompt = buildSystemPrompt({ settings, info: "", now: br("11:10"), firstReply: true });
-    expect(prompt).toContain(GREETING_RULES);
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings, info: "", now: br("11:10"), firstReply: true });
+    expect(prompt).toContain(GREETING_RULES.split("{{")[0]);
     expect(GREETING_RULES).toContain("Nunca se apresente como assistente virtual, robô ou IA");
     expect(prompt).toContain("Horário atual em Brasília: 11:10 (período: manhã; saudação do período: Bom dia)");
     expect(prompt).toContain("cumprimente com a saudação deste período (Bom dia)");
@@ -43,15 +44,15 @@ describe("saudação natural no prompt", () => {
   });
 
   it("à noite usa Boa noite e, depois da primeira resposta, não cumprimenta de novo", () => {
-    const later = buildSystemPrompt({ settings, info: "", now: br("21:00"), firstReply: false });
+    const later = buildSystemPrompt({ modules: SEED_MODULES, settings, info: "", now: br("21:00"), firstReply: false });
     expect(later).toContain("(período: noite; saudação do período: Boa noite)");
     expect(later).toContain("não cumprimente de novo");
     expect(later).not.toContain("primeira resposta nesta conversa");
   });
 
   it('responde à gentileza ("tudo bem?") antes de conduzir o atendimento', () => {
-    const prompt = buildSystemPrompt({ settings, info: "", now: br("15:00"), firstReply: true });
-    expect(prompt).toContain(GREETING_RULES);
+    const prompt = buildSystemPrompt({ modules: SEED_MODULES, settings, info: "", now: br("15:00"), firstReply: true });
+    expect(prompt).toContain(GREETING_RULES.split("{{")[0]);
     expect(prompt).toContain("Gentileza pede gentileza: se a pessoa perguntar como você está, responda de forma leve antes de seguir.");
     expect(prompt).toContain("Se ela perguntou como você está, responda à gentileza primeiro");
     expect(prompt).toContain("no máximo 1 por resposta inteira");

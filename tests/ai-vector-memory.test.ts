@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { anonymize, catalogDocument, cosineSimilarity, meaningfulEdit, rankByCosine, semanticMemoryBlock, vectorLiteral, type VectorHit } from "@/lib/ai/vector-memory";
-import { composeSystemPrompt } from "@/lib/ai/prompt-composer";
+import { composeSystemPrompt } from "./helpers/prompt-seed";
 
 const hit = (over: Partial<VectorHit>): VectorHit => ({ sourceType: "KNOWLEDGE_BASE", sourceId: "x", title: "Garantia", content: "Garantia de 1 ano na armação.", metadata: {}, score: 0.8, ...over });
 
