@@ -8,6 +8,7 @@ import Stepper, { Step } from "@/components/Stepper";
 import { WhatsAppBubble } from "@/components/WhatsAppBubble";
 import { formatPhone } from "@/lib/chat/phone";
 import { VARIABLE_SOURCES, suggestVariable, templateVariableCount, type TemplateContact } from "@/lib/chat/template-variables";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 
 type Contact = { id: string; nome: string; telefone: string };
 type SearchResult = { term: string; contacts: Contact[]; failed: boolean };
@@ -127,7 +128,7 @@ export function NewConversationDialog({ onClose, onOpened, initialSearch = "" }:
         const data = (await response.json()) as { data?: Template[]; error?: string };
         if (!active) return;
         if (!response.ok) setError(data.error ?? "Não foi possível carregar os modelos.");
-        setTemplates((data.data ?? []).filter((item) => item.status === "APPROVED"));
+        setTemplates(ownTemplates(data.data).filter((item) => item.status === "APPROVED"));
       })
       .catch(() => {
         if (active) setTemplates([]);

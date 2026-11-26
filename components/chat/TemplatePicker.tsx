@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clock, Send } from "lucide-react";
 import { ATTENDANT_FIELDS, attendantValues, fillAttendantTokens } from "@/lib/attendant-variables";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 
 type Template = { name: string; language: string; status: string; body: string };
 
@@ -35,7 +36,7 @@ export function TemplatePicker({ onSend, requireNotice = true, customerName, age
         const data = (await response.json()) as { data?: Template[]; error?: string };
         if (!active) return;
         if (!response.ok) setError(data.error ?? "Não foi possível carregar os modelos.");
-        else setTemplates((data.data ?? []).filter((item) => item.status === "APPROVED"));
+        else setTemplates(ownTemplates(data.data).filter((item) => item.status === "APPROVED"));
       })
       .catch(() => {
         if (active) setError("Não foi possível carregar os modelos.");

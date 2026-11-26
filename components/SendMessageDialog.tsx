@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, Image as ImageIcon, Paperclip, Send, Video, X } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { Bubble, Caption, ChatPreview, formatFileSize } from "@/components/WhatsAppPreview";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -71,7 +72,7 @@ export function SendMessageDialog({ recipientName, recipientPhone, onClose, onSe
     fetch("/api/whatsapp/templates", { cache: "no-store" })
       .then(async (response) => {
         const result = (await response.json().catch(() => ({}))) as { data?: ApiTemplate[] };
-        if (active && response.ok) setTemplates((result.data ?? []).filter((item) => item.status === "APPROVED"));
+        if (active && response.ok) setTemplates(ownTemplates(result.data).filter((item) => item.status === "APPROVED"));
       })
       .catch(() => undefined)
       .finally(() => {

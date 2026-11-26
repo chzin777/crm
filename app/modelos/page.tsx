@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CheckCircle2, Clock3, FileText, Image as ImageIcon, Pencil, Plus, RefreshCw, Search, Send, Star, Trash2, X, XCircle } from "lucide-react";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 import { NPS_SURVEY_LABELS, NPS_SURVEY_TYPES, NPS_TEMPLATE, NPS_TEMPLATES, npsTemplatePreset, type NpsSurveyType } from "@/lib/nps-scale";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { EntityDialog } from "@/components/EntityDialog";
@@ -134,7 +135,7 @@ export default function ModelosPage() {
       const result = (await response.json().catch(() => ({}))) as { data?: Template[]; reservedNames?: ReservedTemplateName[]; error?: string };
       if (!response.ok) setError(result.error ?? "Não foi possível carregar os modelos.");
       else {
-        setTemplates(result.data ?? []);
+        setTemplates(ownTemplates(result.data));
         setReservedNames(result.reservedNames ?? []);
       }
     } finally {

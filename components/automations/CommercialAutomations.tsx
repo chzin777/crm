@@ -6,6 +6,7 @@ import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import type { CommercialAutomationKind, CommercialAutomationsOverview } from "@/lib/commercial/jobs-db";
 import type { CommercialSettings, SendWindow, TemplateRef } from "@/lib/commercial/settings";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 
 type MetaTemplate = { name: string; language: string; status: string };
 
@@ -200,7 +201,7 @@ export function CommercialAutomations() {
       .then(async (response) => {
         if (!response.ok) return;
         const data = (await response.json()) as { data?: MetaTemplate[] };
-        if (active) setTemplates((data.data ?? []).filter((item) => item.status === "APPROVED"));
+        if (active) setTemplates(ownTemplates(data.data).filter((item) => item.status === "APPROVED"));
       })
       .catch(() => undefined);
     return () => { active = false; };

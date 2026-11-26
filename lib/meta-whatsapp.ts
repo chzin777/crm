@@ -9,6 +9,7 @@
  */
 
 import { request } from "node:https";
+import { isMetaSampleTemplate } from "@/lib/meta-sample-templates";
 import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { connect, type TLSSocket } from "node:tls";
 
@@ -441,9 +442,10 @@ function getAccountId() {
 export async function listTemplates(): Promise<WhatsAppTemplate[]> {
   const accountId = getAccountId();
   const data = await graph<{
-    data: { id: string; name: string; status: string; category: string; language: string; rejected_reason?: string; components?: TemplateComponent[] }[];
-  }>(`/${accountId}/message_templates?limit=100&fields=name,status,category,language,components,rejected_reason`);
-  return data.data.filter((item) => item.name !== "hello_world" && !["DELETED", "PENDING_DELETION"].includes(item.status)).map((item) => ({
+    data: { id: string; name: string; status: string; category: string; language: string; rejected_reason?: string; library_template_name?: string; components?: TemplateComponent[] }[];
+  }>(`/${accountId}/message_templates?limit=100&fields=name,status,category,language,components,rejected_reason,library_template_name`);
+  // Amostras da Meta (hello_world, sample_*, biblioteca) nunca chegam às telas: só os modelos da empresa.
+  return data.data.filter((item) => !isMetaSampleTemplate(item) && !["DELETED", "PENDING_DELETION"].includes(item.status)).map((item) => ({
     id: item.id,
     name: item.name,
     status: item.status,

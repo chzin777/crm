@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ChatPreview, formatFileSize } from "@/components/WhatsAppPreview";
 import { BULK_STARTED_EVENT, BulkJobProgress, BulkResultTabs, type BulkJobView, type BulkResultTab } from "@/components/BulkDispatchTracker";
 import { CampaignMetricsPanel } from "@/components/CampaignMetricsPanel";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -115,7 +116,7 @@ export function BulkSendMessageDialog({ stageName, recipients, onClose, onComple
   useEffect(() => {
     if (step !== "message") return;
     let cancelled = false;
-    fetch("/api/whatsapp/templates").then((res) => res.json()).then((data) => { if (!cancelled && Array.isArray(data.data)) setTemplates(data.data); }).catch(() => { if (!cancelled) setTemplates([]); }).finally(() => { if (!cancelled) setTemplatesLoading(false); });
+    fetch("/api/whatsapp/templates").then((res) => res.json()).then((data) => { if (!cancelled && Array.isArray(data.data)) setTemplates(ownTemplates(data.data as ApiTemplate[])); }).catch(() => { if (!cancelled) setTemplates([]); }).finally(() => { if (!cancelled) setTemplatesLoading(false); });
     return () => { cancelled = true; };
   }, [step]);
 

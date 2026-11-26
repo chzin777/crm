@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { FIXED_PREFIX, PARAM_FIELDS, fixedText, isFixedParam } from "@/lib/campaign-wizard";
+import { ownTemplates } from "@/lib/meta-sample-templates";
 
 export type CampaignTemplate = {
   name: string;
@@ -57,7 +58,7 @@ export function CampaignTemplatePicker({ value, onChange, showPreview = true, pa
       .then(async (response) => {
         const result = (await response.json().catch(() => ({}))) as { data?: ApiTemplate[]; error?: string };
         if (!response.ok) throw new Error(result.error ?? "Não foi possível carregar os modelos.");
-        if (active) setTemplates((result.data ?? []).filter((template) => template.status === "APPROVED"));
+        if (active) setTemplates(ownTemplates(result.data).filter((template) => template.status === "APPROVED"));
       })
       .catch((err: unknown) => {
         if (active) setError(err instanceof Error ? err.message : "Não foi possível carregar os modelos.");
