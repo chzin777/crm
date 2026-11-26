@@ -40,7 +40,7 @@ vi.mock("@/lib/meta-whatsapp", () => ({
 
 import { alternateBrazilianPhone, getBrazilianPhoneVariants } from "@/lib/chat/phone";
 import { describeFailure, metaErrorCode, sendWithRetry, withMetaCode } from "@/lib/chat/meta-failure";
-import { confirmPhoneFallback, tryPhoneFallback } from "@/lib/chat/phone-fallback";
+import { BOTH_VARIANTS_TAG, confirmPhoneFallback, tryPhoneFallback, withLateMessage } from "@/lib/chat/phone-fallback";
 
 describe("variantes do 9º dígito (Brasil)", () => {
   it("gera a forma com e sem o 9 para celulares, incluindo DDD 62", () => {
@@ -60,7 +60,9 @@ describe("motivo da falha em português", () => {
   it("traduz o 131026 e guarda o código para o tooltip", () => {
     const reason = withMetaCode(131026, "Message Undeliverable.");
     expect(reason).toBe("(#131026) Message Undeliverable.");
-    expect(describeFailure(reason)).toEqual({ text: "Não entregue pelo WhatsApp (número incompatível ou indisponível no momento)", code: 131026, detail: "Erro 131026 · (#131026) Message Undeliverable." });
+    const described = describeFailure(reason);
+    expect(described).toMatchObject({ text: "Não entregue pelo WhatsApp (número incompatível ou indisponível no momento)", code: 131026 });
+    expect(described.detail).toMatch(/^Erro 131026 · Causas comuns: termos do WhatsApp não aceitos/);
     expect(metaErrorCode("Message Undeliverable.")).toBe(131026);
     expect(describeFailure(null).text).toBe("Falha no envio");
   });
@@ -104,6 +106,46 @@ describe("webhook failed 131026: reenvio pela variante do 9º dígito", () => {
     expect(await tryPhoneFallback("wamid.retry1", 131026)).toBeNull();
     expect(await tryPhoneFallback("wamid.orig", 131026)).toBeNull();
     expect(db.sends).toHaveLength(1);
+  });
+
+  it("as duas formas recusadas ficam marcadas e a bolha explica a restrição no aparelho do cliente", async () => {
+    await tryPhoneFallback("wamid.orig", 131026);
+    // Webhook da variante: o motivo é regravado com o código e depois o fallback marca "testado com e sem o 9º dígito".
+    Object.assign(db.messages[0], { delivery: "failed", failureReason: "(#131026) Message Undeliverable." });
+    await tryPhoneFallback("wamid.retry1", 131026);
+    expect(db.messages[0].failureReason).toBe(`(#131026) Message Undeliverable. ${BOTH_VARIANTS_TAG}`);
+    expect(db.messages[0].metaMedia).toMatchObject({ phoneFallback: { from: "5562984341780", to: "556284341780", failed: true } });
+    const described = describeFailure(db.messages[0].failureReason);
+    expect(described.text).toBe("Não entregue com e sem o 9º dígito: restrição no WhatsApp do cliente");
+    expect(described.detail).toContain("As duas formas do número foram testadas");
+    expect(db.sends).toHaveLength(1);
+  });
+
+  it("webhook failed que chega antes do wamid ser gravado espera a mensagem e dispara o fallback", async () => {
+    const pending = db.messages[0];
+    pending.externalId = null;
+    pending.delivery = "sending";
+    const waits: number[] = [];
+    const markFailed = async () => {
+      const row = db.messages.find((message) => message.externalId === "wamid.orig");
+      if (!row) return { count: 0 };
+      Object.assign(row, { delivery: "failed", failureReason: "(#131026) Message Undeliverable." });
+      return { count: 1 };
+    };
+    // O envio grava o wamid enquanto o webhook espera (300 ms na vida real).
+    const result = await withLateMessage("wamid.orig", markFailed, async (ms) => { waits.push(ms); pending.externalId = "wamid.orig"; });
+    expect(result.count).toBe(1);
+    expect(waits).toEqual([300]);
+    expect(pending.delivery).toBe("failed");
+    await tryPhoneFallback("wamid.orig", 131026);
+    expect(db.sends).toEqual([{ to: "556284341780", text: "Boa tarde, Ana!" }]);
+  });
+
+  it("desiste em 1,5 s quando a mensagem não é do atendimento (status de outro envio)", async () => {
+    const waits: number[] = [];
+    const result = await withLateMessage("wamid.outro", async () => ({ count: 0 }), async (ms) => { waits.push(ms); });
+    expect(result.count).toBe(0);
+    expect(waits.reduce((sum, ms) => sum + ms, 0)).toBe(1500);
   });
 
   it("ignora outros códigos, modelos de campanha e números sem variante", async () => {

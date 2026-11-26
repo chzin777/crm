@@ -15,7 +15,7 @@ import { syncCampaignTemplateStatus } from "@/lib/campaigns";
 import { addEngagement, clearInvalidWhatsApp, ENGAGEMENT_POINTS, INVALID_NUMBER_CODES, markInvalidWhatsApp } from "@/lib/engagement";
 import { distributeWaiting } from "@/lib/chat/distribution";
 import { withMetaCode } from "@/lib/chat/meta-failure";
-import { confirmPhoneFallback, tryPhoneFallback } from "@/lib/chat/phone-fallback";
+import { confirmPhoneFallback, tryPhoneFallback, withLateMessage } from "@/lib/chat/phone-fallback";
 
 /** Descadastro/reativação de campanhas pedido pelo próprio cliente. */
 async function handleOptOutCommand(conversationId: string, phone: string, command: OptOutCommand, text: string) {
@@ -71,11 +71,14 @@ async function updateChatDelivery(event: StatusEvent) {
   if (!event.id) return;
   if (event.status === "failed") {
     const error = event.errors?.[0];
+    const externalId = event.id;
     // Código junto do motivo ("(#131026) Message Undeliverable."): a bolha traduz e o relógio reconhece o 131000.
-    await prisma.chatMessage.updateMany({
-      where: { externalId: event.id, delivery: { not: "read" } },
+    const markFailed = () => prisma.chatMessage.updateMany({
+      where: { externalId, delivery: { not: "read" } },
       data: { delivery: "failed", failureReason: withMetaCode(error?.code, error?.error_data?.details ?? error?.title ?? error?.message ?? "Falha informada pela Meta").slice(0, 500) },
     });
+    // A falha pode chegar antes de o envio gravar o wamid: espera até 1,5 s pela mensagem antes de desistir.
+    await withLateMessage(externalId, markFailed);
     // 131026/131047: uma nova tentativa no mesmo celular com/sem o 9º dígito.
     await tryPhoneFallback(event.id, error?.code).catch((failure) => console.error("[whatsapp/webhook] reenvio com/sem o 9:", failure));
   } else if (event.status === "sent" || event.status === "delivered" || event.status === "read") {

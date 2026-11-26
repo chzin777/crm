@@ -40,12 +40,23 @@ export function metaErrorCode(reason: string | null | undefined): number | null 
   return BY_TEXT.find(([pattern]) => pattern.test(reason))?.[1] ?? null;
 }
 
+const BOTH_VARIANTS = /testado com e sem o 9º dígito/;
+const DEVICE_HINT = "Causas comuns: termos do WhatsApp não aceitos, aplicativo desatualizado ou número indisponível na Meta.";
+
 /** Texto curto em português para a bolha e o detalhe técnico para o tooltip. */
 export function describeFailure(reason: string | null | undefined): { text: string; code: number | null; detail: string } {
   const raw = (reason ?? "").trim();
   const code = metaErrorCode(raw);
-  const text = (code && LABELS[code]) || raw.replace(/^\(#\d+\)\s*/, "") || "Falha no envio";
-  const detail = [code ? `Erro ${code}` : "", raw].filter(Boolean).join(" · ") || "Falha no envio";
+  const both = BOTH_VARIANTS.test(raw);
+  const text = both
+    ? "Não entregue com e sem o 9º dígito: restrição no WhatsApp do cliente"
+    : (code && LABELS[code]) || raw.replace(/^\(#\d+\)\s*/, "") || "Falha no envio";
+  const detail = [
+    code ? `Erro ${code}` : "",
+    both ? "As duas formas do número foram testadas e a Meta recusou ambas." : "",
+    code === 131026 ? DEVICE_HINT : "",
+    raw,
+  ].filter(Boolean).join(" · ") || "Falha no envio";
   return { text, code, detail };
 }
 

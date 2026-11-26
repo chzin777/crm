@@ -11,6 +11,27 @@ type Meta = Record<string, unknown> & { template?: unknown; phoneFallback?: Phon
 
 const metaOf = (value: Prisma.JsonValue | null): Meta => (value && typeof value === "object" && !Array.isArray(value) ? (value as Meta) : {});
 
+const LATE_MESSAGE_WAITS_MS = [300, 500, 700];
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Webhook "failed" que chega antes de o envio gravar o wamid (a Meta responde ao POST e dispara o status quase juntos):
+ * aplica a atualização e, se a mensagem ainda não existe com esse wamid, tenta de novo por até 1,5 s.
+ */
+export async function withLateMessage(externalId: string, update: () => Promise<{ count: number }>, sleep: (ms: number) => Promise<void> = pause) {
+  let result = await update();
+  for (const wait of LATE_MESSAGE_WAITS_MS) {
+    if (result.count > 0 || (await prisma.chatMessage.findUnique({ where: { externalId }, select: { id: true } }))) return result;
+    await sleep(wait);
+    result = await update();
+  }
+  return result;
+}
+
+/** Marca no motivo que os dois formatos do número já foram testados (a bolha explica a restrição no aparelho do cliente). */
+export const BOTH_VARIANTS_TAG = "[testado com e sem o 9º dígito]";
+const withBothTag = (reason: string | null) => (reason?.includes(BOTH_VARIANTS_TAG) ? reason : `${reason ?? "Falha no envio"} ${BOTH_VARIANTS_TAG}`.slice(0, 500));
+
 /**
  * Webhook "failed" com 131026/131047: reenvia o mesmo texto ao celular com/sem o 9º dígito.
  * Uma única tentativa por mensagem (marca na mensagem + trava no banco, segura entre Blue/Green); modelos e mídias ficam de fora.
@@ -21,7 +42,17 @@ export async function tryPhoneFallback(externalId: string, code: number | undefi
   if (!message || message.internal || (message.author !== "bot" && message.author !== "agent")) return null;
   if (message.attachment || !message.text.trim()) return null;
   const meta = metaOf(message.metaMedia);
-  if (meta.template || meta.phoneFallback) return null;
+  if (meta.template) return null;
+  if (meta.phoneFallback) {
+    // A variante também voltou com 131026/131047: os dois formatos foram testados, nada mais a tentar sozinho.
+    if (!meta.phoneFallback.failed) {
+      await prisma.chatMessage.update({
+        where: { id: message.id },
+        data: { failureReason: withBothTag(message.failureReason), metaMedia: { ...meta, phoneFallback: { ...meta.phoneFallback, failed: true } } as unknown as Prisma.InputJsonValue },
+      });
+    }
+    return null;
+  }
   const from = message.conversation.phone.replace(/\D/g, "");
   const to = alternateBrazilianPhone(from);
   if (!to || (await isBlocked(to))) return null;
@@ -37,7 +68,7 @@ export async function tryPhoneFallback(externalId: string, code: number | undefi
     });
   } catch (error) {
     console.error(`[chat] ${message.id}: reenvio para ${to} também falhou:`, error);
-    await prisma.chatMessage.update({ where: { id: message.id }, data: { metaMedia: { ...meta, phoneFallback: { ...fallback, failed: true } } as unknown as Prisma.InputJsonValue } });
+    await prisma.chatMessage.update({ where: { id: message.id }, data: { failureReason: withBothTag(message.failureReason), metaMedia: { ...meta, phoneFallback: { ...fallback, failed: true } } as unknown as Prisma.InputJsonValue } });
     return null;
   }
 }

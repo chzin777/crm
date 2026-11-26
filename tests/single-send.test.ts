@@ -58,6 +58,11 @@ describe("telefone enviado à Meta", () => {
     expect(normalizePhone("(62) 99273-5920")).toBe("5562992735920");
     expect(normalizePhone("5562992735920")).toBe("5562992735920");
     expect(normalizePhone(PHONE)).toBe("5562992735920");
+    // wa_id estrangeiro (Irlanda) vai exatamente como a Meta mandou no inbound, sem "55" na frente.
+    expect(normalizePhone("353830920584")).toBe("353830920584");
+    expect(normalizePhone("+1 (415) 555-2671")).toBe("14155552671");
+    expect(normalizePhone("0 62 99273-5920")).toBe("5562992735920");
+    expect(normalizePhone("6232345678")).toBe("556232345678");
   });
 });
 

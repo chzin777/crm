@@ -196,11 +196,19 @@ export class MetaApiError extends Error {
  * Meta API expects numbers like "5511999999999".
  */
 export function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
+  let digits = phone.replace(/\D/g, "");
+  // "00 353..." (discagem internacional) e "0 62 9..." (DDD com zero) perdem o zero.
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  else if (digits.startsWith("0")) digits = digits.slice(1);
   if (digits.length < 10) throw new Error("Telefone inválido.");
-  // Ensure country code 55 for Brazilian numbers
-  const normalized = digits.startsWith("55") && digits.length >= 12 ? digits : `55${digits}`;
-  return normalized;
+  if (digits.startsWith("55") && digits.length >= 12) return digits;
+  // "+" explícito: o código do país já está no número (ex.: +1 415..., 11 dígitos como um celular brasileiro).
+  if (phone.trim().startsWith("+")) return digits;
+  // DDD + número (10 ou 11 dígitos) é brasileiro: ganha o 55.
+  if (digits.length <= 11) return `55${digits}`;
+  // Já tem código de país (wa_id de outro país, ex.: Irlanda 353...): vai como veio. Antes ganhava "55" na frente
+  // e a Meta respondia 131026 (número brasileiro inexistente) para a IA e para a equipe.
+  return digits;
 }
 
 /**
