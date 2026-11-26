@@ -623,6 +623,8 @@ class Snapshot:
 # ~20% dos pedidos (lentes/serviços ainda sem movimento de estoque). Um registro por item; o valor do pedido é
 # PDSD_VLR_TOTAL (líquido, já com descontos) e vai repetido em "orderTotal" para não somar duas vezes.
 # Fora: cancelados/abertos/inconsistentes, transferências entre lojas (cliente = unidade da rede) e depósitos.
+# "A Liberar" (venda feita aguardando liberação de desconto/crédito) conta como no relatório de vendas do VMSET:
+# só "Faturado" deixava ~R$ 20 mil de fora em 26/11/2026 (R$ 133.871,56 no painel x R$ 153.947,14 no VMSET).
 SALES_SQL = """
 SELECT NVL(TO_CHAR(I.ITEM_PEDIDO_SAIDA_ID), 'P' || PS.PEDIDO_SAIDA_ID), UE.UNEM_CODIGO, PS.PDSD_NR_PEDIDO,
        PS.PDSD_DT_EMISSAO, V.PRCR_NOME, P.PRCR_NOME, P.PRCR_CGC_CPF, P.PRCR_CELULAR, P.PRCR_FONE, M.MARC_DESCRICAO,
@@ -641,7 +643,7 @@ LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
 LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
 LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
 LEFT JOIN CONDICAO_PAGTO CPG ON CPG.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
-WHERE PS.PDSD_STATUS = 'Faturado' AND TRIM(PS.STATUS) = 'Ativo'
+WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
   AND PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b
   AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199
