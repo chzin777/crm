@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
-import { AlertCircle, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, FileText, Loader2, MessageSquare, MessageSquarePlus, Mic, RotateCcw, Smile } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, CircleCheck, Clock, CornerUpLeft, Download, FileIcon, FileText, ImageOff, Loader2, MessageSquare, MessageSquarePlus, Mic, RotateCcw, Smile } from "lucide-react";
 import { sessionBreak, type ChatSession } from "@/lib/chat/session-divider";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { AudioPlayer } from "@/components/chat/AudioPlayer";
@@ -130,17 +130,38 @@ function Transcription({ value }: { value: NonNullable<ChatMessageItem["transcri
   );
 }
 
-function Attachment({ message, onOpen }: { message: ChatMessageItem; onOpen: () => void }) {
-  const attachment = message.attachment!;
-  if (attachment.kind === "sticker") return <Sticker message={message} onOpen={onOpen} />;
-  if (attachment.kind === "image") {
+/** Foto do balão (inclusive o cabeçalho de modelos de campanha): entra suave, clique amplia e, se o arquivo sumir, mostra um aviso no lugar. */
+function BubbleImage({ src, name, onOpen }: { src: string; name: string; onOpen: () => void }) {
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  if (status === "error") {
     return (
-      <button type="button" onClick={onOpen} aria-label={`Abrir ${attachment.name}`} className="mb-1 block cursor-pointer">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={mediaUrl(message)} alt={attachment.name} loading="lazy" className="max-h-64 rounded-lg object-contain" />
-      </button>
+      <div className="mb-1 flex h-28 w-56 max-w-full flex-col items-center justify-center gap-1 rounded-lg bg-black/5 text-[11px] opacity-80 dark:bg-white/10">
+        <ImageOff className="h-5 w-5 opacity-60" />
+        <span>Imagem indisponível</span>
+      </div>
     );
   }
+  return (
+    <button type="button" onClick={onOpen} aria-label={`Ampliar ${name}`} className="relative mb-1 block min-h-24 min-w-40 max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-black/5 dark:bg-white/10">
+      {status === "loading" && <span aria-hidden="true" className="absolute inset-0 animate-pulse bg-black/5 dark:bg-white/10" />}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={name}
+        loading="lazy"
+        onLoad={() => setStatus("ready")}
+        onError={() => setStatus("error")}
+        className={`block max-h-72 w-auto max-w-full rounded-lg object-contain transition-opacity duration-300 ${status === "ready" ? "opacity-100" : "opacity-0"}`}
+      />
+    </button>
+  );
+}
+
+/** Anexo do balão (exportado para os testes de renderização). */
+export function Attachment({ message, onOpen }: { message: ChatMessageItem; onOpen: () => void }) {
+  const attachment = message.attachment!;
+  if (attachment.kind === "sticker") return <Sticker message={message} onOpen={onOpen} />;
+  if (attachment.kind === "image") return <BubbleImage src={mediaUrl(message)} name={attachment.name} onOpen={onOpen} />;
   if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 max-h-64 rounded-lg" />;
   if (attachment.kind === "audio") {
     return <AudioPlayer src={mediaUrl(message)} />;

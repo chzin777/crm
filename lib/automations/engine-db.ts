@@ -15,6 +15,7 @@ import { isOpenAt } from "@/lib/chat/hours";
 import { phoneVariants } from "@/lib/chat/phone";
 import { sendTemplate, sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
+import { downloadMedia, storeDispatchMedia } from "@/lib/chat/dispatch-media";
 import { attachSurveyConversation, releaseAutomationSurvey, reserveAutomationSurvey } from "@/lib/chat/nps";
 import { NPS_SURVEY_LABELS } from "@/lib/nps-scale";
 import { changeScore } from "@/lib/scoring-db";
@@ -70,9 +71,9 @@ async function requireConversation(state: ExecutionState) {
 async function templateHeaderImage(template: ResolvedTemplate) {
   if (!template.hasImage) return undefined;
   if (!template.headerImageUrl) throw new Error("Este modelo exige uma imagem no cabeçalho e a Meta não retornou a do modelo.");
-  const downloaded = await fetch(template.headerImageUrl, { signal: AbortSignal.timeout(20_000) }).catch(() => null);
-  if (!downloaded?.ok) throw new Error("Não foi possível carregar a imagem do modelo.");
-  return { mimetype: downloaded.headers.get("content-type")?.split(";")[0] || "image/jpeg", fileName: "header", base64: Buffer.from(await downloaded.arrayBuffer()).toString("base64") };
+  const downloaded = await downloadMedia(template.headerImageUrl);
+  if (!downloaded) throw new Error("Não foi possível carregar a imagem do modelo.");
+  return { mimetype: downloaded.mime, fileName: "header", base64: downloaded.buffer.toString("base64"), chatAttachment: await storeDispatchMedia(downloaded.buffer, downloaded.mime) };
 }
 
 /** Envia o modelo aprovado ao contato e registra no /chat (conversa aberta ou conversa de envios). */
@@ -80,10 +81,11 @@ async function sendTemplateTo(state: ExecutionState, template: ResolvedTemplate)
   const contact = await prisma.contact.findUnique({ where: { id: state.contactId }, select: { phone: true, invalidWhatsApp: true } });
   const phone = chatPhone(contact?.phone ?? "");
   if (!contact || contact.invalidWhatsApp || phone.length < 12) throw new Error("Contato sem WhatsApp válido.");
-  const sent = await sendTemplate(phone, template.name, template.language, template.values, await templateHeaderImage(template));
+  const header = await templateHeaderImage(template);
+  const sent = await sendTemplate(phone, template.name, template.language, template.values, header);
   const externalId = sent.messages?.[0]?.id ?? null;
   const text = renderTemplateText({ body: template.body, headerFormat: template.headerText ? "TEXT" : null, headerText: template.headerText ?? undefined }, template.name, template.values);
-  const conversationId = await recordDispatchInChat({ contactId: state.contactId, phone, text, externalId, authorName: AUTHOR });
+  const conversationId = await recordDispatchInChat({ contactId: state.contactId, phone, text, externalId, authorName: AUTHOR, attachment: header?.chatAttachment ?? null, template: { name: template.name, language: template.language } });
   notifyChatChange();
   return { externalId, conversationId };
 }

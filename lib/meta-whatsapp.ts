@@ -561,6 +561,35 @@ export async function deleteTemplate(id: string, name: string) {
   }
 }
 
+/**
+ * Componentes do modelo na Cloud API: cabeçalho de mídia (id da mídia enviada à Meta ou link HTTPS público)
+ * ou de texto, corpo com as variáveis e botões de resposta rápida.
+ */
+export function templateSendComponents(input: {
+  params?: string[];
+  header?: { kind: "image" | "video" | "document"; id?: string; link?: string; fileName?: string };
+  headerParams?: string[];
+  quickReplyPayloads?: { index: number; payload: string }[];
+}): Record<string, unknown>[] {
+  const components: Record<string, unknown>[] = [];
+  const { header } = input;
+  if (header) {
+    if (!header.id && !header.link) throw new Error("Mídia do cabeçalho do modelo sem id nem link.");
+    const media: Record<string, string> = header.id ? { id: header.id } : { link: header.link! };
+    if (header.kind === "document" && header.fileName) media.filename = header.fileName;
+    components.push({ type: "header", parameters: [{ type: header.kind, [header.kind]: media }] });
+  } else if (input.headerParams?.length) {
+    components.push({ type: "header", parameters: input.headerParams.map((text) => ({ type: "text", text })) });
+  }
+  if (input.params?.length) {
+    components.push({ type: "body", parameters: input.params.map((text) => ({ type: "text", text })) });
+  }
+  (input.quickReplyPayloads ?? []).forEach(({ index, payload }) => {
+    components.push({ type: "button", sub_type: "quick_reply", index: String(index), parameters: [{ type: "payload", payload }] });
+  });
+  return components;
+}
+
 export async function sendTemplate(
   phone: string,
   name: string,
@@ -571,25 +600,11 @@ export async function sendTemplate(
   quickReplyPayloads: { index: number; payload: string }[] = [],
 ) {
   const { phoneNumberId } = getConfig();
-  const components: Record<string, unknown>[] = [];
-  if (headerImage) {
-    const id = headerImage.mediaId ?? await uploadMedia(headerImage);
-    const kind = headerImage.kind ?? "image";
-    components.push({ type: "header", parameters: [{ type: kind, [kind]: kind === "document" ? { id, filename: headerImage.fileName } : { id } }] });
-  } else if (headerParams.length > 0) {
-    components.push({ type: "header", parameters: headerParams.map((text) => ({ type: "text", text })) });
-  }
-  if (params.length > 0) {
-    components.push({ type: "body", parameters: params.map((text) => ({ type: "text", text })) });
-  }
-  quickReplyPayloads.forEach(({ index, payload }) => {
-    components.push({
-      type: "button",
-      sub_type: "quick_reply",
-      index: String(index),
-      parameters: [{ type: "payload", payload }],
-    });
-  });
+  const header = headerImage
+    ? { id: headerImage.mediaId ?? await uploadMedia(headerImage), kind: headerImage.kind ?? "image", fileName: headerImage.fileName }
+    : undefined;
+  const components = templateSendComponents({ params, header, headerParams, quickReplyPayloads });
+  if (header) console.log(`[whatsapp/template] ${name} para ${normalizePhone(phone).slice(-4)}: cabeçalho ${header.kind} (mídia ${header.id})`);
   return graph<{ messages: { id: string }[] }>(`/${phoneNumberId}/messages`, {
     method: "POST",
     body: JSON.stringify({

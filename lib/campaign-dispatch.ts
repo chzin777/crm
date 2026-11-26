@@ -10,6 +10,7 @@ import { firstDispatch } from "@/lib/chat/conversation";
 import { AUTO_REPLY_AUTHOR } from "@/lib/chat/auto-reply";
 import { coldContactIds, INVALID_NUMBER_CODES, markInvalidWhatsApp } from "@/lib/engagement";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
+import { downloadMedia, storeDispatchMedia } from "@/lib/chat/dispatch-media";
 import { withoutOptedOut } from "@/lib/marketing-opt-out";
 import { dedupeRecipients } from "@/lib/campaign-audience";
 import { loadOptOutKeys } from "@/lib/marketing-opt-out-db";
@@ -197,17 +198,20 @@ async function resolveHeader(campaign: CampaignRecord) {
   if (!template?.hasImage) return undefined;
   const attachment = (campaign.anexos ?? []).find((file) => ["image/jpeg", "image/png"].includes(file.type) && file.url);
   if (attachment?.url) {
-    const mediaId = await uploadMedia({ mimetype: attachment.type, fileName: attachment.name, url: attachment.url });
-    return { mimetype: attachment.type, fileName: attachment.name, mediaId };
+    const downloaded = await downloadMedia(attachment.url);
+    if (!downloaded) throw new MediaError(`Não foi possível baixar a imagem anexada à campanha (${attachment.name}). Confira se o arquivo ainda existe ou anexe de novo.`);
+    // Sobe a imagem uma vez para a Meta e reaproveita o id em todos os envios; a mesma imagem vai para o /chat.
+    const mediaId = await uploadMedia({ mimetype: attachment.type, fileName: attachment.name, base64: downloaded.buffer.toString("base64") });
+    const chatAttachment = await storeDispatchMedia(downloaded.buffer, attachment.type, attachment.name);
+    return { mimetype: attachment.type, fileName: attachment.name, mediaId, chatAttachment };
   }
   const remote = (await listTemplates()).find((item) => item.name === template.name && item.language === template.language);
   if (!remote?.headerImageUrl) throw new MediaError("Este modelo exige uma imagem e a Meta não retornou a do modelo. Anexe uma imagem (JPG ou PNG) à campanha.");
-  const downloaded = await fetch(remote.headerImageUrl);
-  if (!downloaded.ok) throw new MediaError("Não foi possível carregar a imagem do modelo. Anexe uma imagem (JPG ou PNG) à campanha.");
-  const mimetype = downloaded.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-  const base64 = Buffer.from(await downloaded.arrayBuffer()).toString("base64");
-  const mediaId = await uploadMedia({ mimetype, fileName: "header", base64 });
-  return { mimetype, fileName: "header", mediaId };
+  const downloaded = await downloadMedia(remote.headerImageUrl);
+  if (!downloaded) throw new MediaError("Não foi possível carregar a imagem do modelo. Anexe uma imagem (JPG ou PNG) à campanha.");
+  const mediaId = await uploadMedia({ mimetype: downloaded.mime, fileName: "header", base64: downloaded.buffer.toString("base64") });
+  const chatAttachment = await storeDispatchMedia(downloaded.buffer, downloaded.mime);
+  return { mimetype: downloaded.mime, fileName: "header", mediaId, chatAttachment };
 }
 
 class MediaError extends Error {}
@@ -392,6 +396,8 @@ async function runJob(campaignId: string) {
               authorName: `Campanha · ${campaign.nome}`,
               campaignId,
               campaignName: campaign.nome,
+              attachment: campaign.modelo ? header?.chatAttachment ?? null : null,
+              template: campaign.modelo ? { name: campaign.modelo.name, language: campaign.modelo.language } : null,
             });
             for (const key of recipientKeys(recipient)) reached.add(key);
             job.sent += 1;
@@ -728,7 +734,7 @@ export async function runCampaignFollowUps(now: Date = new Date()) {
         const { messageId, text } = await sendToRecipient(followCampaign, recipient, header, templateInfo);
         await recordMessage(followUpCampaignId(campaign.id), recipient, { messageId });
         if (recipient.id) {
-          await recordDispatchInChat({ contactId: recipient.id, phone: chatPhone(recipient.telefone), text, externalId: messageId, authorName: `Campanha · ${campaign.nome} (follow-up)`, campaignId: campaign.id, campaignName: campaign.nome });
+          await recordDispatchInChat({ contactId: recipient.id, phone: chatPhone(recipient.telefone), text, externalId: messageId, authorName: `Campanha · ${campaign.nome} (follow-up)`, campaignId: campaign.id, campaignName: campaign.nome, attachment: header?.chatAttachment ?? null, template: followCampaign.modelo ? { name: followCampaign.modelo.name, language: followCampaign.modelo.language } : null });
         }
         summary.sent += 1;
       } catch (error) {

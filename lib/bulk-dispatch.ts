@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { readFile } from "@/lib/minio";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
+import { downloadMedia, storeDispatchMedia } from "@/lib/chat/dispatch-media";
 import { phoneVariants } from "@/lib/chat/phone";
 import { reportError } from "@/lib/monitoring/error-reporter";
 
@@ -152,13 +153,13 @@ async function resolveTemplateHeader(name: string, language: string) {
   const template = (await listTemplates()).find((item) => item.name === name && item.language === language);
   if (template?.headerFormat !== "IMAGE") return undefined;
   if (!template.headerImageUrl) throw new Error("Este modelo exige uma imagem e a Meta não retornou a do modelo.");
-  const downloaded = await fetch(template.headerImageUrl);
-  if (!downloaded.ok) throw new Error("Não foi possível carregar a imagem do modelo.");
-  const mimetype = downloaded.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-  const base64 = Buffer.from(await downloaded.arrayBuffer()).toString("base64");
-  // Sobe a imagem uma vez e reaproveita o id em todos os envios do lote.
-  const mediaId = await uploadMedia({ mimetype, fileName: "header", base64 });
-  return { mimetype, fileName: "header", mediaId };
+  const downloaded = await downloadMedia(template.headerImageUrl);
+  if (!downloaded) throw new Error("Não foi possível carregar a imagem do modelo.");
+  const mimetype = downloaded.mime;
+  // Sobe a imagem uma vez e reaproveita o id em todos os envios do lote; a mesma imagem vai para o /chat.
+  const mediaId = await uploadMedia({ mimetype, fileName: "header", base64: downloaded.buffer.toString("base64") });
+  const chatAttachment = await storeDispatchMedia(downloaded.buffer, mimetype);
+  return { mimetype, fileName: "header", mediaId, chatAttachment };
 }
 
 type Prepared = {
@@ -325,6 +326,8 @@ async function runJob(id: string) {
         authorName: `Envio em massa · ${job.stageName}`,
         campaignId: bulkCampaignId(job.id),
         campaignName: `Envio em massa · ${job.stageName}`,
+        attachment: job.template ? prepared.header?.chatAttachment ?? null : null,
+        template: job.template ? { name: job.template.name, language: job.template.language } : null,
       });
     } catch (error) {
       console.error(`[bulk-dispatch] falha para ${item.contactId} (${item.telefone}):`, error instanceof MetaApiError ? JSON.stringify(error.details) : error);

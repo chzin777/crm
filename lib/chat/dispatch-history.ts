@@ -1,5 +1,7 @@
 import "server-only";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { ChatAttachment } from "@/lib/chat/media-rules";
 
 /** Marca a conversa encerrada que só guarda envios ativos (campanha/envio em massa) a quem ainda não respondeu. */
 export const DISPATCH_TAG = "disparo";
@@ -35,6 +37,10 @@ export async function recordDispatchInChat(input: {
   campaignId?: string;
   campaignName?: string;
   sentAt?: Date;
+  /** Mídia do cabeçalho do modelo (imagem, vídeo ou documento): aparece no balão, acima do texto. */
+  attachment?: ChatAttachment | null;
+  /** Modelo enviado (nome e idioma), guardado junto da mensagem. */
+  template?: { name: string; language: string } | null;
 }): Promise<string | null> {
   const sentAt = input.sentAt ?? new Date();
   try {
@@ -78,6 +84,8 @@ export async function recordDispatchInChat(input: {
         createdAt: sentAt,
         // O webhook atualiza entregue/lida por este id.
         ...(input.externalId ? { externalId: input.externalId } : {}),
+        ...(input.attachment ? { attachment: input.attachment as unknown as Prisma.InputJsonValue } : {}),
+        ...(input.template ? { metaMedia: { template: { name: input.template.name, language: input.template.language, headerKind: input.attachment?.kind ?? null } } as Prisma.InputJsonValue } : {}),
       },
     });
     await prisma.chatConversation.updateMany({
