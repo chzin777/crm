@@ -396,7 +396,7 @@ export function MenuSettingsPanel({ queues, agents }: { queues: Queues; agents: 
                           <li key={band} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${NPS_BAND_BADGE[band]}`}>{NPS_BANDS[band].range}: {NPS_BANDS[band].label.toLowerCase()}</li>
                         ))}
                       </ul>
-                      <p className="mt-1 text-[10px] text-slate-400">O cliente responde com o número (o WhatsApp não permite lista com 11 opções).</p>
+                      <p className="mt-1 text-[10px] text-slate-400">Sai como lista interativa (botão “Avaliar agora”, notas de 10 a 1); a nota 0 e qualquer número digitado também valem. Use {"{{nome}}"} na pergunta para o primeiro nome.</p>
                     </div>
                   </>
                 )}

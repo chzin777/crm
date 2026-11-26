@@ -16,8 +16,8 @@ import { phoneVariants } from "@/lib/chat/phone";
 import { sendTemplate, sendText, sendTypingIndicator } from "@/lib/meta-whatsapp";
 import { chatPhone, recordDispatchInChat, renderTemplateText } from "@/lib/chat/dispatch-history";
 import { downloadMedia, storeDispatchMedia } from "@/lib/chat/dispatch-media";
-import { attachSurveyConversation, releaseAutomationSurvey, reserveAutomationSurvey } from "@/lib/chat/nps";
-import { NPS_SURVEY_LABELS } from "@/lib/nps-scale";
+import { attachSurveyConversation, releaseAutomationSurvey, reserveAutomationSurvey, sendNpsList } from "@/lib/chat/nps";
+import { NPS_SURVEY_LABELS, buildNpsList, npsDeliveryMode } from "@/lib/nps-scale";
 import { changeScore } from "@/lib/scoring-db";
 import { rfvpVars } from "@/lib/rfvp";
 import { setContactFields } from "@/lib/contact-fields-db";
@@ -191,7 +191,23 @@ export function databasePorts(flowId: string): EnginePorts {
       // Reserva antes do envio: nunca a mesma pesquisa duas vezes no mesmo pedido (nem entre blue/green).
       const survey = await reserveAutomationSurvey({ contactId: state.contactId, phone, surveyType: input.surveyType, orderKey: input.orderKey, store: input.store, seller: input.seller, flowId: state.flowId });
       if (!survey) return `Pesquisa de ${NPS_SURVEY_LABELS[input.surveyType].toLowerCase()} já enviada para o pedido ${input.orderKey}: nada enviado`;
+      const label = `Pesquisa NPS (${NPS_SURVEY_LABELS[input.surveyType].toLowerCase()}) enviada${input.orderKey ? ` para o pedido ${input.orderKey}` : ""}`;
       try {
+        // Envio híbrido: janela de 24 h aberta = lista interativa ("Avaliar agora"); fechada = modelo oficial aprovado.
+        const conversation = await conversationOf(state);
+        const mode = npsDeliveryMode({ windowOpen: !!conversation && isWindowOpen(conversation.lastInboundAt), hasTemplate: !!input.template });
+        if (mode === "list" && conversation) {
+          const name = (await prisma.contact.findUnique({ where: { id: state.contactId }, select: { name: true } }))?.name ?? null;
+          const sent = await sendNpsList(conversation, buildNpsList(input.surveyType, name), AUTHOR);
+          notifyChatChange();
+          if (sent && sent.delivery !== "failed") {
+            await attachSurveyConversation(survey.id, conversation.id);
+            if (state.currentNodeId) await prisma.automationMessageTouch.create({ data: { flowId: state.flowId, nodeId: state.currentNodeId, executionId: state.id, contactId: state.contactId, conversationId: conversation.id, externalId: sent.externalId ?? null } }).catch(() => undefined);
+            return `${label} por lista interativa (janela de 24 h aberta)`;
+          }
+          // Lista recusada (número bloqueado ou falha na Meta): segue pelo modelo oficial.
+        }
+        if (!input.template) throw new Error("Janela de 24 h fechada: vincule o modelo oficial de NPS aprovado pela Meta.");
         const { externalId, conversationId } = await sendTemplateTo(state, input.template);
         await attachSurveyConversation(survey.id, conversationId);
         if (state.currentNodeId) await prisma.automationMessageTouch.create({ data: { flowId: state.flowId, nodeId: state.currentNodeId, executionId: state.id, contactId: state.contactId, conversationId, externalId } }).catch(() => undefined);
@@ -199,7 +215,7 @@ export function databasePorts(flowId: string): EnginePorts {
         await releaseAutomationSurvey(survey.id);
         throw error;
       }
-      return `Pesquisa NPS (${NPS_SURVEY_LABELS[input.surveyType].toLowerCase()}) enviada${input.orderKey ? ` para o pedido ${input.orderKey}` : ""}`;
+      return `${label} pelo modelo oficial`;
     },
     aiAgent: async (state, objective) => {
       const conversation = await requireConversation(state);

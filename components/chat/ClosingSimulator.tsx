@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
 import { PreviewBubble, PreviewFrame, PreviewHint, PreviewNote } from "@/components/chat/ChatPreview";
-import { NPS_SCALE_TEXT, npsCommentPrompt, npsPrompt, type ChatMenuSettings } from "@/lib/chat/settings";
+import { npsCommentPrompt, npsPrompt, type ChatMenuSettings } from "@/lib/chat/settings";
 import { fillVariables } from "@/lib/chat/text";
-import { NPS_BANDS, NPS_BAND_BADGE, npsBand } from "@/lib/nps-scale";
+import { NPS_BANDS, NPS_BAND_BADGE, NPS_LIST_BUTTON, buildNpsList, npsBand, npsListText } from "@/lib/nps-scale";
 
 const SCORES = Array.from({ length: 11 }, (_, index) => index);
 
@@ -57,7 +57,8 @@ export function ClosingSimulator({ settings }: { settings: ChatMenuSettings }) {
       {farewell ? <PreviewBubble from="bot" text={farewell} /> : <PreviewNote text="Despedida desligada" />}
       {settings.npsEnabled && (
         <>
-          <PreviewBubble from="bot" text={`${npsPrompt(settings)}\n${NPS_SCALE_TEXT}`} />
+          <PreviewBubble from="bot" text={npsListText(buildNpsList("ATENDIMENTO", "Maria", npsPrompt(settings)))} />
+          <PreviewNote text={`Botão “${NPS_LIST_BUTTON}”: notas de 10 a 1 na lista; 0 digitado`} />
           {answer !== null && <PreviewBubble from="customer" text={String(answer)} />}
           {waitsComment && <PreviewBubble from="bot" text={askComment} />}
           {commented && <PreviewBubble from="customer" text={answer !== null && answer >= 9 ? "A vendedora foi muito atenciosa, adorei!" : "Demoraram um pouco para me responder."} />}

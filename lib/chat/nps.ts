@@ -6,7 +6,8 @@ import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
 import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsCommentPrompt, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
-import { NPS_SCALE, parseNps10, type NpsSurveyType } from "@/lib/nps-scale";
+import { NPS_LIST_FOOTER, NPS_SCALE, buildNpsList, npsListText, parseNps10, type NpsSurveyType } from "@/lib/nps-scale";
+import type { ChatInteractiveList } from "@/lib/chat/types";
 
 /** Prazo para responder a nota: pesquisa do encerramento (janela aberta) e pesquisa pós-compra por modelo. */
 const SURVEY_HOURS = 24;
@@ -43,7 +44,7 @@ const legacySurveyList = (phone: string, question: string) => () => sendList(pho
 });
 
 /** A pergunta é editável; o que marca a pesquisa no histórico é a escala no fim. */
-const scaleOf = (text: string) => [NPS_SCALE_TEXT, ...NPS_LEGACY_SCALES].find((scale) => text.endsWith(scale));
+const scaleOf = (text: string) => [NPS_LIST_FOOTER, NPS_SCALE_TEXT, ...NPS_LEGACY_SCALES].find((scale) => text.endsWith(scale));
 export const isSurveyMessage = (text: string) => !!scaleOf(text);
 const questionOf = (text: string) => text.slice(0, -(scaleOf(text)?.length ?? 0)).trim();
 export const surveyText = (question: string) => `${question}\n${NPS_SCALE_TEXT}`;
@@ -59,12 +60,26 @@ async function openSurvey(conversation: ChatConversation, attendantId: string | 
   });
 }
 
+type NpsList = ReturnType<typeof buildNpsList>;
+const interactiveOf = (list: NpsList): ChatInteractiveList => ({ type: "list", body: list.body, footer: list.footer, button: list.button, sections: [{ rows: list.rows }] });
+
+/**
+ * Pesquisa dentro da janela de 24 h: lista interativa nativa ("Avaliar agora", notas de 10 a 1; a nota 0 vai digitada).
+ * Gravada no /chat como o cliente vê; o texto termina no rodapé, que marca a mensagem como pesquisa.
+ */
+export async function sendNpsList(conversation: Pick<ChatConversation, "id" | "phone">, list: NpsList, authorName?: string) {
+  return sendAutomaticMessage(conversation, npsListText(list), () => sendList(conversation.phone, list), interactiveOf(list), authorName);
+}
+
+const contactName = async (contactId: string) => (await prisma.contact.findUnique({ where: { id: contactId }, select: { name: true } }))?.name ?? null;
+
 export async function sendSatisfactionSurvey(conversation: ChatConversation, attendantId: string | null) {
   try {
     if (!isWindowOpen(conversation.lastInboundAt)) return;
     const settings = await readChatSettings();
     if (!settings.npsEnabled) return;
-    const sent = await sendAutomaticMessage(conversation, surveyText(npsPrompt(settings)));
+    const list = buildNpsList("ATENDIMENTO", await contactName(conversation.contactId), npsPrompt(settings));
+    const sent = await sendNpsList(conversation, list);
     if (!sent || sent.delivery === "failed") return;
     await openSurvey(conversation, attendantId);
   } catch (error) {
@@ -72,10 +87,13 @@ export async function sendSatisfactionSurvey(conversation: ChatConversation, att
   }
 }
 
-/** Reenvio da pesquisa que caiu por falta de conexão (a antiga volta como lista; a de 0 a 10, como texto). */
+/** Reenvio da pesquisa que caiu por falta de conexão (lista volta como lista; a antiga de 1 a 5, como lista antiga; a de texto, como texto). */
 export async function resendSurvey(message: { id: string; text: string }, conversation: ChatConversation) {
-  const legacy = scaleOf(message.text) !== NPS_SCALE_TEXT;
-  const sent = await resendAutomatic(message.id, legacy ? legacySurveyList(conversation.phone, questionOf(message.text)) : () => sendText(conversation.phone, message.text));
+  const scale = scaleOf(message.text);
+  const send = scale === NPS_LIST_FOOTER
+    ? () => sendList(conversation.phone, buildNpsList("ATENDIMENTO", null, questionOf(message.text)))
+    : scale !== NPS_SCALE_TEXT ? legacySurveyList(conversation.phone, questionOf(message.text)) : () => sendText(conversation.phone, message.text);
+  const sent = await resendAutomatic(message.id, send);
   if (sent?.delivery === "sent") await openSurvey(conversation, conversation.assigneeId);
   return sent;
 }
@@ -157,6 +175,12 @@ async function storeCustomerMessage(conversationId: string | null, reply: { exte
   }
 }
 
+/** Nenhum cliente nem atendente escreveu na conversa depois da pesquisa (ou da nota): a próxima resposta é dela. */
+async function surveyHasTheFloor(conversationId: string, since: Date) {
+  const later = await prisma.chatMessage.findFirst({ where: { conversationId, author: { in: ["customer", "agent"] }, createdAt: { gt: since } }, select: { id: true } });
+  return !later;
+}
+
 /**
  * Comentário opcional: o primeiro texto até 10 minutos depois de qualquer nota (inclusive 9 e 10), quando o convite
  * ao comentário está configurado. Não há flag gravada; passado o prazo, a mensagem segue o fluxo normal.
@@ -171,8 +195,9 @@ async function recordComment(reply: { externalId: string; text: string; received
     orderBy: { answeredAt: "desc" },
   });
   if (!feedback) return false;
-  // Com conversa aberta, o texto é para o atendente.
-  if (await prisma.chatConversation.findFirst({ where: { phone: { in: phones }, closedAt: null }, select: { id: true } })) return false;
+  // Com conversa aberta, o texto é para o atendente (salvo quando a pesquisa saiu nessa conversa e ninguém falou depois da nota).
+  const open = await prisma.chatConversation.findFirst({ where: { phone: { in: phones }, closedAt: null }, select: { id: true } });
+  if (open && !(open.id === feedback.conversationId && feedback.answeredAt && (await surveyHasTheFloor(open.id, feedback.answeredAt)))) return false;
   if (!(await storeCustomerMessage(feedback.conversationId, reply))) return true;
   const saved = await prisma.npsFeedback.updateMany({ where: { id: feedback.id, comment: null }, data: { comment } });
   if (saved.count > 0) await thank(feedback, settings);
@@ -188,11 +213,14 @@ export async function recordSurveyReply(reply: { externalId: string; phone: stri
   const pending = await prisma.npsFeedback.findFirst({ where: { phone: { in: phones }, status: "PENDING" }, orderBy: { createdAt: "desc" } });
   if (!pending) return reply.isText ? recordComment(reply, phones) : false;
 
-  // Com conversa aberta, um "2" responde ao atendente, não à pesquisa.
+  // Com conversa aberta, um "2" responde ao atendente, não à pesquisa. Exceções: o toque na lista da pesquisa
+  // e o número digitado logo depois da lista enviada nessa mesma conversa (janela de 24 h aberta).
   const open = await prisma.chatConversation.findFirst({ where: { phone: { in: phones }, closedAt: null }, select: { id: true } });
   const fresh = reply.receivedAt.getTime() - pending.createdAt.getTime() < surveyHours(pending) * 3_600_000;
   const legacy = pending.scale !== NPS_SCALE;
-  const score = fresh && !open ? (legacy ? parseNpsScore(reply.text, reply.choiceId) : parseNps10(reply.text, reply.choiceId)) : null;
+  const tapped = !!reply.choiceId && /^nps_\d{1,2}$/.test(reply.choiceId);
+  const surveyTurn = !open || tapped || (open.id === pending.conversationId && (await surveyHasTheFloor(open.id, pending.createdAt)));
+  const score = fresh && surveyTurn ? (legacy ? parseNpsScore(reply.text, reply.choiceId) : parseNps10(reply.text, reply.choiceId)) : null;
   if (score === null) {
     await prisma.npsFeedback.update({ where: { id: pending.id }, data: { status: "EXPIRED" } });
     return false;

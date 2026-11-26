@@ -68,9 +68,9 @@ export const DEFAULT_CHAT_SETTINGS: ChatMenuSettings = {
   silenceCloseCustom: false,
   silenceCloseText: "",
   npsEnabled: true,
-  npsPromptText: "De 0 a 10, que nota você dá para o atendimento recebido hoje?",
+  npsPromptText: "Olá, {{nome}}! 😊 Passando rapidinho para saber como foi sua experiência com a nossa equipe hoje na Óticas Brasil. Sua opinião ajuda muito a gente a melhorar cada vez mais! Toque no botão abaixo e escolha uma nota de 0 a 10:",
   npsThanksText: "Agradecemos pela sua avaliação! Ela é muito importante para nós.",
-  npsCommentText: "Obrigado pela nota! Se quiser, conte em poucas palavras o que motivou sua avaliação. O comentário é opcional e nos ajuda muito.",
+  npsCommentText: "Muito obrigado pela sua nota! 💚 Se quiser, conta pra gente em poucas palavras o que motivou sua avaliação. É opcional, mas ajuda demais a Óticas Brasil a melhorar.",
   options: [],
   canvas: { positions: {}, drafts: [] },
 };
@@ -93,13 +93,15 @@ export const NPS_LEGACY_SCALES = [
   NPS_SCORE_LABELS.map((label, index) => `${index + 1} - ${label} ${NPS_SCORE_EMOJIS[index]}`).join("\n"),
 ];
 /** Pergunta salva ainda com "de 1 a 5" passa a falar da escala nova. */
+/** Perguntas padrão antigas (texto seco): passam a usar a pergunta acolhedora nova. */
+const LEGACY_NPS_PROMPTS = ["De 0 a 10, que nota você dá para o atendimento recebido hoje?"];
 export const npsPrompt = (settings: ChatMenuSettings) =>
-  (settings.npsPromptText.trim() || DEFAULT_CHAT_SETTINGS.npsPromptText).replace(/\b(de|entre)\s+1\s+(a|e)\s+5\b/gi, (_match, word: string) => `${word} 0 a 10`);
+  (settings.npsPromptText.trim() && !LEGACY_NPS_PROMPTS.includes(settings.npsPromptText.trim()) ? settings.npsPromptText.trim() : DEFAULT_CHAT_SETTINGS.npsPromptText).replace(/\b(de|entre)\s+1\s+(a|e)\s+5\b/gi, (_match, word: string) => `${word} 0 a 10`);
 const LEGACY_NPS_COMMENT = "Sentimos muito que sua experiência não tenha sido ideal. Poderia nos contar brevemente o que podemos melhorar?";
 /** Convite ao comentário (qualquer nota). O texto antigo, pensado só para nota baixa, vira o convite novo. */
 export const npsCommentPrompt = (settings: ChatMenuSettings) => {
   const text = settings.npsCommentText.trim();
-  return text === LEGACY_NPS_COMMENT ? DEFAULT_CHAT_SETTINGS.npsCommentText : text;
+  return text === LEGACY_NPS_COMMENT || text === "Obrigado pela nota! Se quiser, conte em poucas palavras o que motivou sua avaliação. O comentário é opcional e nos ajuda muito." ? DEFAULT_CHAT_SETTINGS.npsCommentText : text;
 };
 
 /** 30 minutos, 1 hora, 24 horas, 2 dias: o tempo por extenso para a mensagem ao cliente. */

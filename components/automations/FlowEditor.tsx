@@ -40,7 +40,7 @@ import {
   readNodeTemplate, sendsOutsideWindow,
 } from "@/lib/automations/nodes";
 import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/CampaignTemplatePicker";
-import { NPS_TEMPLATE, isNpsSurveyType, npsTemplateParams } from "@/lib/nps-scale";
+import { NPS_SURVEY_LABELS, NPS_TEMPLATES, isNpsSurveyType, npsTemplateParams } from "@/lib/nps-scale";
 
 type FlowStatus = "draft" | "active" | "paused";
 type FlowData = { id: string; name: string; description: string; status: FlowStatus; webhookToken: string; settings?: FlowSettings; nodes: FlowNode[]; edges: FlowEdge[] };
@@ -1125,9 +1125,9 @@ function Editor({ flowId }: { flowId: string }) {
                   {((selected.data.kind === "send_whatsapp" && outsideWindow.has(selected.id)) || selected.data.kind === "send_nps") && !readNodeTemplate(selected.data.config) && (
                     <div role="alert" className="space-y-2 rounded-lg border border-[#F7915E]/50 bg-[#F7915E]/10 p-2.5 text-[11px] text-[#9a3d12] dark:text-[#F7915E]">
                       <p className="flex items-start gap-1.5 font-semibold"><ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />Modelo oficial da Meta obrigatório</p>
-                      <p>{selected.data.kind === "send_nps" ? "A pesquisa é enviada sem o cliente ter escrito antes" : `Este envio pode sair fora da janela de 24 h: ${outsideWindow.get(selected.id)}`}. A Meta bloqueia texto livre nesse caso, então a automação só pode ser ativada com um modelo aprovado vinculado acima.</p>
+                      <p>{selected.data.kind === "send_nps" ? "Com a janela de 24 h aberta, a pesquisa sai como lista interativa (botão “Avaliar agora”); fechada, sai pelo modelo oficial" : `Este envio pode sair fora da janela de 24 h: ${outsideWindow.get(selected.id)}`}. A Meta bloqueia texto livre fora da janela, então a automação só pode ser ativada com um modelo aprovado vinculado acima.</p>
                       <p className="flex flex-wrap gap-x-3 gap-y-1">
-                        <a href={selected.data.kind === "send_nps" ? `/modelos?preset=${NPS_TEMPLATE.name}` : "/modelos"} target="_blank" rel="noopener" className="inline-flex items-center gap-1 font-semibold underline cursor-pointer"><ExternalLink className="h-3 w-3" />{selected.data.kind === "send_nps" ? "Criar o modelo pronto de NPS 0 a 10" : "Criar modelo em Modelos"}</a>
+                        <a href={selected.data.kind === "send_nps" ? `/modelos?preset=${NPS_TEMPLATES[isNpsSurveyType(selected.data.config.surveyType) ? selected.data.config.surveyType : "ATENDIMENTO"].name}` : "/modelos"} target="_blank" rel="noopener" className="inline-flex items-center gap-1 font-semibold underline cursor-pointer"><ExternalLink className="h-3 w-3" />{selected.data.kind === "send_nps" ? `Criar o modelo pronto de NPS (${NPS_SURVEY_LABELS[isNpsSurveyType(selected.data.config.surveyType) ? selected.data.config.surveyType : "ATENDIMENTO"].toLowerCase()})` : "Criar modelo em Modelos"}</a>
                         <span>Depois da aprovação, clique em “Atualizar lista” no seletor.</span>
                       </p>
                     </div>

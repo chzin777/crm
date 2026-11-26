@@ -131,7 +131,95 @@ export function consolidateByCustomer(answers: NpsAnswer[]): CustomerNps[] {
 
 // ---------------------------------------------------------------- Modelo oficial (Meta) da pesquisa
 
-/** Modelo pronto para enviar à análise da Meta (sem travessões ou hífens). */
+/**
+ * Modelos oficiais prontos (fora da janela de 24 h), um por pesquisa, sem travessões ou hífens: {{1}} = primeiro nome.
+ * O cliente responde digitando o número de 0 a 10.
+ */
+export const NPS_TEMPLATES: Record<NpsSurveyType, { name: string; language: string; category: "UTILITY"; body: string; footer: string; examples: string[] }> = {
+  ATENDIMENTO: {
+    name: "nps_atendimento_0_10",
+    language: "pt_BR",
+    category: "UTILITY",
+    body: "Olá, {{1}}! 😊 Obrigado por escolher a Óticas Brasil. Queremos muito saber como foi o seu atendimento hoje! De 0 a 10 (sendo 0 a 6 baixa, 7 e 8 boa e 9 e 10 excelente), qual nota você dá para nossa equipe? É só responder com o número!",
+    footer: "Sua opinião nos ajuda a melhorar",
+    examples: ["Maria"],
+  },
+  PRODUTO_ADAPTACAO: {
+    name: "nps_produto_adaptacao_0_10",
+    language: "pt_BR",
+    category: "UTILITY",
+    body: "Olá, {{1}}! 😊 Já faz 30 dias desde a sua compra na Óticas Brasil e queremos saber como você está se adaptando aos seus óculos! De 0 a 10 (sendo 0 a 6 baixa, 7 e 8 boa e 9 e 10 excelente), que nota você dá para o seu produto e conforto visual? Responda com o número!",
+    footer: "Sua opinião nos ajuda a melhorar",
+    examples: ["Maria"],
+  },
+};
+export const npsTemplatePreset = (name: string | null | undefined) => NPS_SURVEY_TYPES.find((type) => NPS_TEMPLATES[type].name === name) ?? null;
+
+// ---------------------------------------------------------------- Lista interativa (dentro da janela de 24 h)
+
+/** Rodapé da lista: o WhatsApp aceita até 10 linhas, então a nota 0 vai digitada. Também marca a pesquisa no histórico. */
+export const NPS_LIST_FOOTER = "Para dar nota 0, é só responder 0";
+export const NPS_LIST_BUTTON = "Avaliar agora";
+
+const NPS_LIST_BODY: Record<NpsSurveyType, string> = {
+  ATENDIMENTO: "Olá, {{nome}}! 😊 Passando rapidinho para saber como foi sua experiência com a nossa equipe hoje na Óticas Brasil. Sua opinião ajuda muito a gente a melhorar cada vez mais! Toque no botão abaixo e escolha uma nota de 0 a 10:",
+  PRODUTO_ADAPTACAO: "Olá, {{nome}}! 😊 Já faz 30 dias desde a sua compra na Óticas Brasil e queremos saber como você está se adaptando aos seus óculos! Toque no botão abaixo e escolha uma nota de 0 a 10:",
+};
+
+const NPS_ROW_DESCRIPTIONS: Record<number, string> = {
+  10: "Excelente! Nota 10",
+  9: "Muito bom! Quase perfeito",
+  8: "Bom, gostei",
+  7: "Razoável, dá para melhorar",
+  6: "Regular, esperava mais",
+  5: "Fraco, precisa melhorar",
+  4: "Ruim, tive problemas",
+  3: "Ruim, fiquei insatisfeito",
+  2: "Muito ruim",
+  1: "Péssimo",
+};
+
+/** Primeiro nome com inicial maiúscula (vazio quando não há nome). */
+export const npsFirstName = (name: string | null | undefined) => {
+  const first = String(name ?? "").trim().split(/\s+/)[0] ?? "";
+  if (!first || /\d/.test(first)) return "";
+  return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+};
+
+/** {{nome}} vira o primeiro nome; sem nome, "Olá, {{nome}}!" fica "Olá!". */
+export const fillNpsName = (text: string, name?: string | null) => {
+  const first = npsFirstName(name);
+  return first ? text.replace(/\{\{\s*nome\s*\}\}/gi, first) : text.replace(/,?\s*\{\{\s*nome\s*\}\}/gi, "");
+};
+
+/** Pergunta padrão da lista (editável em Configurações do chat). */
+export const npsListBody = (surveyType: NpsSurveyType) => NPS_LIST_BODY[surveyType];
+
+/** Lista interativa da pesquisa: botão "Avaliar agora", notas de 10 a 1 (id nps_N) e a nota 0 digitada. */
+export function buildNpsList(surveyType: NpsSurveyType, name?: string | null, customBody?: string | null) {
+  const descriptions: Record<number, string> = { ...NPS_ROW_DESCRIPTIONS, 10: surveyType === "ATENDIMENTO" ? "Excelente! Atendimento nota 10" : "Excelente! Óculos nota 10", 8: surveyType === "ATENDIMENTO" ? "Bom, gostei do atendimento" : "Bom, estou gostando" };
+  const body = fillNpsName(customBody?.trim() || NPS_LIST_BODY[surveyType], name).slice(0, 1000);
+  return {
+    body,
+    footer: NPS_LIST_FOOTER,
+    button: NPS_LIST_BUTTON,
+    rows: Array.from({ length: 10 }, (_, index) => 10 - index).map((score) => ({ id: `nps_${score}`, title: `Nota ${score}`, description: descriptions[score] })),
+  };
+}
+
+/** Texto da lista gravado no /chat (o rodapé no fim marca a mensagem como pesquisa). */
+export const npsListText = (list: { body: string; footer: string }) => `${list.body}\n${list.footer}`;
+
+/**
+ * Envio híbrido: janela de 24 h aberta = lista interativa (texto livre permitido); fechada = modelo oficial aprovado.
+ * null = janela fechada e nenhum modelo vinculado (a Meta bloquearia o envio).
+ */
+export function npsDeliveryMode(input: { windowOpen: boolean; hasTemplate: boolean }): "list" | "template" | null {
+  if (input.windowOpen) return "list";
+  return input.hasTemplate ? "template" : null;
+}
+
+/** Modelo pronto antigo (3 variáveis): segue válido para quem já o tem aprovado e vinculado. */
 export const NPS_TEMPLATE = {
   name: "nps_avaliacao_0_10",
   language: "pt_BR",

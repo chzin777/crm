@@ -50,23 +50,34 @@ vi.mock("@/lib/prisma", async () => {
         },
       },
       chatConversation: { findFirst: async () => (db.openConversation ? { id: "aberta" } : null) },
-      chatMessage: { create: async ({ data }: { data: Row }) => { db.messages.push(data); return data; } },
+      chatMessage: {
+        create: async ({ data }: { data: Row }) => { db.messages.push(data); return data; },
+        findFirst: async ({ where }: { where: { conversationId: string; createdAt: { gt: Date } } }) =>
+          db.messages.find((row) => row.conversationId === where.conversationId && ["customer", "agent"].includes(String(row.author)) && (row.createdAt as Date) > where.createdAt.gt) ?? null,
+      },
+      contact: { findUnique: async () => ({ name: "MARIA DAS GRAÇAS SILVA" }) },
     },
   };
 });
 
 const sent = vi.hoisted(() => [] as string[]);
+const lists = vi.hoisted(() => [] as { button: string; footer?: string; body: string; rows: { id: string; title: string }[] }[]);
 vi.mock("@/lib/chat/outbound", () => ({
-  sendAutomaticMessage: vi.fn(async (_conversation: unknown, text: string) => { sent.push(text); return { delivery: "sent" }; }),
+  sendAutomaticMessage: vi.fn(async (_conversation: unknown, text: string, send?: () => Promise<unknown>) => { sent.push(text); if (send) await send(); return { delivery: "sent" }; }),
   resendAutomatic: vi.fn(),
 }));
-vi.mock("@/lib/meta-whatsapp", () => ({ sendText: vi.fn(async (_phone: string, text: string) => { sent.push(text); return {}; }), sendList: vi.fn() }));
+vi.mock("@/lib/meta-whatsapp", () => ({
+  sendText: vi.fn(async (_phone: string, text: string) => { sent.push(text); return {}; }),
+  sendList: vi.fn(async (_phone: string, list: (typeof lists)[number]) => { lists.push(list); return { messages: [{ id: "wamid.lista" }] }; }),
+}));
 vi.mock("@/lib/chat/conversation", async () => {
   const { DEFAULT_CHAT_SETTINGS } = await import("@/lib/chat/settings");
   return { isWindowOpen: () => true, readChatSettings: async () => DEFAULT_CHAT_SETTINGS };
 });
 
-import { recordSurveyReply, releaseAutomationSurvey, reserveAutomationSurvey } from "@/lib/chat/nps";
+import { recordSurveyReply, releaseAutomationSurvey, reserveAutomationSurvey, sendSatisfactionSurvey } from "@/lib/chat/nps";
+import { NPS_LIST_BUTTON, NPS_TEMPLATES, npsDeliveryMode } from "@/lib/nps-scale";
+import type { ChatConversation } from "@/generated/prisma/client";
 import { DEFAULT_CHAT_SETTINGS } from "@/lib/chat/settings";
 
 const PHONE = "5562999990001";
@@ -77,6 +88,63 @@ beforeEach(() => {
   db.messages = [];
   db.openConversation = false;
   sent.length = 0;
+  lists.length = 0;
+});
+
+describe("NPS híbrido: lista interativa na janela de 24 h, modelo oficial fora dela", () => {
+  const conversation = { id: "aberta", phone: PHONE, contactId: "c1", lastInboundAt: new Date() } as unknown as ChatConversation;
+
+  it("janela aberta: envia lista interativa com o botão Avaliar agora, notas de 10 a 1 e o 0 digitado", async () => {
+    expect(npsDeliveryMode({ windowOpen: true, hasTemplate: true })).toBe("list");
+    await sendSatisfactionSurvey(conversation, "u1");
+    expect(lists).toHaveLength(1);
+    const [list] = lists;
+    expect(list.button).toBe(NPS_LIST_BUTTON);
+    expect(NPS_LIST_BUTTON).toBe("Avaliar agora");
+    expect(list.rows.map((row) => row.id)).toEqual(["nps_10", "nps_9", "nps_8", "nps_7", "nps_6", "nps_5", "nps_4", "nps_3", "nps_2", "nps_1"]);
+    expect(list.footer).toContain("responder 0");
+    expect(list.body).toMatch(/^Olá, Maria! 😊 Passando rapidinho/);
+    expect(list.body).not.toMatch(/[–—]|\s-\s/);
+    expect(db.feedbacks).toHaveLength(1);
+    expect(db.feedbacks[0]).toMatchObject({ status: "PENDING", surveyType: "ATENDIMENTO", conversationId: "aberta" });
+  });
+
+  it("janela fechada: cai no modelo oficial aprovado (sem modelo, não envia); copy sem travessões nem hífens", () => {
+    expect(npsDeliveryMode({ windowOpen: false, hasTemplate: true })).toBe("template");
+    expect(npsDeliveryMode({ windowOpen: false, hasTemplate: false })).toBeNull();
+    for (const template of Object.values(NPS_TEMPLATES)) {
+      expect(template.body.startsWith("Olá, {{1}}! 😊")).toBe(true);
+      expect(template.body).toContain("0 a 6 baixa, 7 e 8 boa e 9 e 10 excelente");
+      expect(template.body).not.toMatch(/[–—-]/);
+      expect(template.name).toMatch(/^[a-z0-9_]+$/);
+    }
+    expect(NPS_TEMPLATES.PRODUTO_ADAPTACAO.body).toContain("30 dias");
+  });
+
+  it("o mesmo disparo aceita o toque na lista (list_reply) mesmo com a conversa aberta", async () => {
+    db.openConversation = true;
+    await sendSatisfactionSurvey(conversation, "u1");
+    expect(await recordSurveyReply({ ...reply("Nota 9"), choiceId: "nps_9", isText: false })).toBe(true);
+    expect(db.feedbacks[0]).toMatchObject({ status: "ANSWERED", score: 9 });
+    // Agradece a nota e convida ao comentário opcional.
+    expect(sent.at(-1)).toBe(DEFAULT_CHAT_SETTINGS.npsCommentText);
+  });
+
+  it("o mesmo disparo aceita o número digitado (0 a 10) quando o cliente ignora a lista", async () => {
+    db.openConversation = true;
+    await sendSatisfactionSurvey(conversation, "u1");
+    expect(await recordSurveyReply(reply("0"))).toBe(true);
+    expect(db.feedbacks[0]).toMatchObject({ status: "ANSWERED", score: 0 });
+    expect(sent.at(-1)).toBe(DEFAULT_CHAT_SETTINGS.npsCommentText);
+  });
+
+  it("com a conversa aberta e o cliente já falando de outra coisa, um número digitado vai para o atendente", async () => {
+    db.openConversation = true;
+    await sendSatisfactionSurvey(conversation, "u1");
+    db.messages.push({ conversationId: "aberta", author: "customer", text: "quero ver armações", createdAt: new Date(Date.now() + 30_000) });
+    expect(await recordSurveyReply(reply("2", 2))).toBe(false);
+    expect(db.feedbacks[0]).toMatchObject({ status: "EXPIRED" });
+  });
 });
 
 describe("pesquisa NPS no WhatsApp (0 a 10)", () => {
