@@ -26,8 +26,10 @@ GET /orders/credit?days=30  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", 
   - também "uf"/"city" da loja e "attempt" (1 = primeiro envio, 2+ = reenvio);
 GET /orders/credit/history?date=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"at", "items": [{"id", "number", "sentAt", "analysisAt", "answeredAt", "analyst", "store", "storeCode", "uf", "status", "denied", "total"}]}
   - solicitações de crédito enviadas no dia (resumo do painel: tempo de resposta, por analista, por loja);
-GET /sales/today  (cabeçalho x-api-key)  ->  {"at", "day", "items": [{"id", "store", "order", "invoice", "time", "seller", "customer", "cpf", "phone", "brand", "description", "category", "quantity", "amount", "payment", "terms"}]}
-  - itens de venda do dia (painel ao vivo); Oracle no máximo a cada 10 s (novos itens) e 60 s (dia inteiro);
+GET /sales/today  (cabeçalho x-api-key)  ->  {"at", "day", "items": [{"id", "store", "order", "invoice", "date", "time", "seller", "customer", "cpf", "phone", "brand", "description", "category", "quantity", "amount", "payment", "terms", "orderTotal"}]}
+GET /sales/range?from=YYYY-MM-DD&to=YYYY-MM-DD  (cabeçalho x-api-key)  ->  {"at", "from", "to", "items": [...mesmo formato]} (até 93 dias)
+  - itens das vendas faturadas (PEDIDO_SAIDA, emissão em horário de Brasília) para o painel ao vivo e os períodos;
+    Oracle no máximo a cada 10 s (hoje), 60 s (período com hoje) ou 10 min (período fechado);
 GET /sellers/active?days=60  (cabeçalho x-api-key)  ->  {"at", "days", "items": [{"id", "name", "store", "stores", "orders", "amount", "lastSale"}]}
   - vendedores ativos com venda no período (cadastro de vendedores e metas do CRM); loja principal = a que mais vendeu;
 GET /orders/credit/customer?order=PEDIDO_SAIDA_ID  (cabeçalho x-api-key)  ->  {"customer", "order", "receivables", "purchases", "requests"}
@@ -616,10 +618,36 @@ class Snapshot:
         return {"at": int(self.at * 1000), "items": self.data}
 
 
-TODAY_SALES_COLS = (
-    "ITEM_MOVI_ESTOQUE_ID, LOJA, NUM_PEDIDO, NUM_NOTA, HORA_PEDIDO2, VENDEDOR, NOME_CLIENTE, PARCEIRO_CPF, CELULAR, "
-    "TELEFONE, MARCA, DESCRICAO, NOME_CATEGORIA, QTDE_ITEM_VENDA, VALOR_ITEM_VENDA, PAGTO, COND_PAGTO, DATA_PEDIDO"
-)
+# Vendas faturadas (painel ao vivo e períodos do CRM): fonte oficial = PEDIDO_SAIDA faturado e ativo, pela data/hora
+# de emissão do pedido (relógio do Oracle = horário de Brasília). A tabela de BI tab_dados_dinamicos deixava de fora
+# ~20% dos pedidos (lentes/serviços ainda sem movimento de estoque). Um registro por item; o valor do pedido é
+# PDSD_VLR_TOTAL (líquido, já com descontos) e vai repetido em "orderTotal" para não somar duas vezes.
+# Fora: cancelados/abertos/inconsistentes, transferências entre lojas (cliente = unidade da rede) e depósitos.
+SALES_SQL = """
+SELECT NVL(TO_CHAR(I.ITEM_PEDIDO_SAIDA_ID), 'P' || PS.PEDIDO_SAIDA_ID), UE.UNEM_CODIGO, PS.PDSD_NR_PEDIDO,
+       PS.PDSD_DT_EMISSAO, V.PRCR_NOME, P.PRCR_NOME, P.PRCR_CGC_CPF, P.PRCR_CELULAR, P.PRCR_FONE, M.MARC_DESCRICAO,
+       PR.PRDT_DESCRICAO, CP.CATG_DESCRICAO, I.PSIT_QTDE_PEDIDA,
+       I.PSIT_QTDE_PEDIDA * I.PSIT_PRC_UNIT - NVL(I.PSIT_VLR_DESCTO, 0) - NVL(I.PSIT_VLR_DESCTO_ADICIONAL, 0)
+         + NVL(I.PSIT_VLR_DESP, 0) + NVL(I.PSIT_VLR_FRETE, 0) + NVL(I.PSIT_VLR_JURO, 0),
+       D.TPDC_DESCRICAO, CPG.CDPG_DESCRICAO, PS.PDSD_VLR_TOTAL
+FROM PEDIDO_SAIDA PS
+JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PS.UNIDADE_EMPRESARIAL_ID
+LEFT JOIN ITEM_PEDIDO_SAIDA I ON I.PEDIDO_SAIDA_ID = PS.PEDIDO_SAIDA_ID
+LEFT JOIN PRODUTO PR ON PR.PRODUTO_ID = I.PRODUTO_ID
+LEFT JOIN SUBCATEGORIA_PRODUTO SP ON SP.SUBCATEGORIA_PRODUTO_ID = PR.SUBCATEGORIA_PRODUTO_ID
+LEFT JOIN CATEGORIA_PRODUTO CP ON CP.CATEGORIA_PRODUTO_ID = SP.CATEGORIA_PRODUTO_ID
+LEFT JOIN MARCAS M ON M.MARCA_ID = PR.MARCA_ID
+LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
+LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
+LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
+LEFT JOIN CONDICAO_PAGTO CPG ON CPG.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
+WHERE PS.PDSD_STATUS = 'Faturado' AND TRIM(PS.STATUS) = 'Ativo'
+  AND PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b
+  AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
+  AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199
+  AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 1000 AND 2999
+"""
+MAX_SALES_DAYS = 93
 
 
 def digits(value, pad=0):
@@ -633,63 +661,50 @@ def digits(value, pad=0):
 
 
 def sale_item(row):
-    (item_id, store, order, invoice, hour, seller, customer, cpf, mobile, phone, brand, description, category,
-     quantity, amount, payment, terms, _day) = row
+    (item_id, store, order, issued, seller, customer, cpf, mobile, phone, brand, description, category,
+     quantity, amount, payment, terms, total) = row
     return {
-        "id": text(item_id), "store": text(store), "order": text(order), "invoice": text(invoice), "time": text(hour),
+        "id": text(item_id), "store": text(store), "order": text(order), "invoice": None,
+        "date": issued.strftime("%Y-%m-%d") if issued else None, "time": issued.strftime("%H:%M:%S") if issued else None,
         "seller": text(seller), "customer": text(customer), "cpf": digits(cpf, 11),
         "phone": digits(mobile) or digits(phone), "brand": text(brand),
         "description": text(description), "category": text(category), "quantity": float(quantity or 0),
-        "amount": round(float(amount or 0), 2), "payment": text(payment), "terms": text(terms),
+        # Pedido sem item (raro): a linha única leva o total do pedido.
+        "amount": round(float(total if quantity is None else (amount or 0)), 2), "payment": text(payment), "terms": text(terms),
+        "orderTotal": round(float(total or 0), 2),
     }
 
 
-class TodaySales:
-    """Vendas do dia (tab_dados_dinamicos, TIPO = Venda) em memória para o painel ao vivo do CRM.
+def sales_between(start, end):
+    """Itens das vendas faturadas com emissão em [start, end) (datas de Brasília)."""
+    with pool.acquire() as conn:
+        cur = conn.cursor()
+        cur.execute(SALES_SQL, a=datetime.datetime.combine(start, datetime.time()), b=datetime.datetime.combine(end, datetime.time()))
+        return [item for item in (sale_item(row) for row in cur.fetchall()) if item["id"]]
 
-    O Oracle é consultado no máximo uma vez por ciclo, não importa quantos navegadores estejam abertos:
-    novos itens a cada 10 s (ITEM_MOVI_ESTOQUE_ID maior que o último visto, consulta instantânea) e o dia inteiro
-    a cada 60 s (~2 s; pega itens fora de ordem, cancelamentos e a virada do dia).
-    """
 
-    INCREMENTAL_EVERY, FULL_EVERY = 10, 60
+class SalesCache:
+    """Vendas por período em memória: o Oracle é consultado no máximo uma vez por janela (hoje a cada 10 s, períodos
+    que incluem hoje a cada 60 s, períodos fechados a cada 10 min), não importa quantos navegadores estejam abertos."""
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.day, self.items, self.last_full, self.last_inc, self.at = None, {}, 0.0, 0.0, 0.0
+        self.entries = {}
 
-    def _full(self, cur):
-        cur.execute(f"SELECT {TODAY_SALES_COLS} FROM tab_dados_dinamicos WHERE DATA_PEDIDO >= TRUNC(SYSDATE) AND TIPO = 'Venda'")
-        self.items = {item["id"]: item for item in (sale_item(row) for row in cur.fetchall()) if item["id"]}
-        self.day, self.last_full = datetime.date.today(), time.monotonic()
-
-    def _incremental(self, cur):
-        after = max(self.items, default="")
-        cur.execute(f"SELECT {TODAY_SALES_COLS} FROM tab_dados_dinamicos WHERE ITEM_MOVI_ESTOQUE_ID > :a AND TIPO = 'Venda'", a=after)
+    def get(self, start, end):
         today = datetime.date.today()
-        for row in cur.fetchall():
-            sold = row[-1]
-            if isinstance(sold, datetime.datetime) and sold.date() != today:
-                continue
-            item = sale_item(row)
-            if item["id"]:
-                self.items[item["id"]] = item
-
-    def get(self):
+        ttl = 10 if (start, end) == (today, today + datetime.timedelta(days=1)) else 60 if end > today else 600
+        key = (start, end)
         with self.lock:
-            now = time.monotonic()
-            if self.day != datetime.date.today() or now - self.last_full >= self.FULL_EVERY:
-                with pool.acquire() as conn:
-                    self._full(conn.cursor())
-                self.last_inc, self.at = now, time.time()
-            elif now - self.last_inc >= self.INCREMENTAL_EVERY:
-                with pool.acquire() as conn:
-                    self._incremental(conn.cursor())
-                self.last_inc, self.at = now, time.time()
-            return {"at": int(self.at * 1000), "day": self.day.isoformat(), "items": list(self.items.values())}
+            entry = self.entries.get(key)
+            if not entry or time.time() - entry["at"] >= ttl:
+                entry = {"at": time.time(), "items": sales_between(start, end)}
+                self.entries = {k: v for k, v in self.entries.items() if time.time() - v["at"] < 600}
+                self.entries[key] = entry
+            return entry
 
 
-today_sales = TodaySales()
+sales_cache = SalesCache()
 
 # Vendedores ativos com venda no período (cadastro de vendedores e metas do CRM). Exclui a própria loja lançada
 # como vendedor ("LJ 01 UNILENTES...": VENDEDOR_ID que é uma UNIDADE_EMPRESARIAL).
@@ -755,7 +770,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/health":
             return self._send(200, {"ok": True, "service": "vmset-stock"})
         if url.path not in ("/stock", "/installments", "/events", "/punctuality", "/orders/pending", "/orders/credit",
-                            "/orders/credit/history", "/orders/credit/customer", "/sales/today", "/sellers/active", *catalog_cache):
+                            "/orders/credit/history", "/orders/credit/customer", "/sales/today", "/sales/range", "/sellers/active", *catalog_cache):
             return self._send(404, {"error": "not_found"})
         if not TOKEN or not hmac.compare_digest(self.headers.get("x-api-key", ""), TOKEN):
             return self._send(401, {"error": "unauthorized"})
@@ -770,10 +785,27 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"ERRO vendedores ativos: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
         if url.path == "/sales/today":
+            today = datetime.date.today()
             try:
-                return self._send(200, today_sales.get())
+                entry = sales_cache.get(today, today + datetime.timedelta(days=1))
+                return self._send(200, {"at": int(entry["at"] * 1000), "day": today.isoformat(), "items": entry["items"]})
             except Exception as error:
                 log(f"ERRO vendas do dia: {str(error)[:200]}")
+                return self._send(503, {"error": "oracle_unavailable"})
+        if url.path == "/sales/range":
+            query = parse_qs(url.query)
+            try:
+                start = datetime.date.fromisoformat(query.get("from", [""])[0])
+                last = datetime.date.fromisoformat(query.get("to", [""])[0])
+            except ValueError:
+                return self._send(400, {"error": "from e to precisam ser YYYY-MM-DD"})
+            if last < start or (last - start).days >= MAX_SALES_DAYS:
+                return self._send(400, {"error": f"período inválido (até {MAX_SALES_DAYS} dias)"})
+            try:
+                entry = sales_cache.get(start, last + datetime.timedelta(days=1))
+                return self._send(200, {"at": int(entry["at"] * 1000), "from": start.isoformat(), "to": last.isoformat(), "items": entry["items"]})
+            except Exception as error:
+                log(f"ERRO vendas do período: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
         if url.path in catalog_cache:
             refresh = parse_qs(url.query).get("refresh", [""])[0] == "1"

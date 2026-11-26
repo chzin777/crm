@@ -42,6 +42,17 @@ const storeLabel = (store: string) => `Loja ${store.replace(/^0+(?=\d)/, "")}`;
 async function resolveCrmOrders(items: SaleItem[], keys: string[]) {
   const pending = new Set(keys.filter((key) => !state.resolved.has(key)));
   if (!pending.size) return;
+  const matched = await matchCrmOrders(items, pending);
+  for (const [key, conversation] of matched) {
+    state.crmKeys.add(key);
+    if (conversation) state.crmConversations.set(key, conversation);
+  }
+  for (const key of pending) state.resolved.add(key);
+}
+
+/** Pedido (loja-número) → conversa do cliente no CRM (null = cliente do CRM sem conversa localizada). */
+async function matchCrmOrders(items: SaleItem[], pending: Set<string>) {
+  const result = new Map<string, string | null>();
   const byOrder = new Map<string, { phones: Set<string>; cpfs: Set<string> }>();
   for (const item of items) {
     const key = `${item.store}-${item.order}`;
@@ -74,12 +85,32 @@ async function resolveCrmOrders(items: SaleItem[], keys: string[]) {
       const phone = [...entry.phones].find((item) => matchedPhones.has(item));
       const cpf = [...entry.cpfs].find((item) => matchedCpfs.has(item));
       if (!phone && !cpf) continue;
-      state.crmKeys.add(key);
-      const conversation = (phone ? matchedPhones.get(phone) : null) ?? (cpf ? matchedCpfs.get(cpf) : null);
-      if (conversation) state.crmConversations.set(key, conversation);
+      result.set(key, (phone ? matchedPhones.get(phone) : null) ?? (cpf ? matchedCpfs.get(cpf) : null) ?? null);
     }
   }
-  for (const key of pending) state.resolved.add(key);
+  return result;
+}
+
+const storesOf = (orders: LiveSnapshot["orders"]) =>
+  [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel, "pt-BR", { numeric: true }));
+
+/**
+ * Vendas faturadas de um período (Esta semana, Este mês, Personalizado): mesma fonte e mesma regra do ao vivo
+ * (pedido faturado no VMSet, total líquido oficial, dia de Brasília). A API do VMSet guarda cada período em cache.
+ */
+export async function periodSnapshot(from: string, to: string): Promise<LiveSnapshot> {
+  const url = `${API_URL()}/sales/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const response = await fetch(url, { headers: { "x-api-key": API_TOKEN() }, signal: AbortSignal.timeout(30_000), cache: "no-store" });
+  if (!response.ok) throw new Error(`API do VMSet respondeu ${response.status}`);
+  const body = (await response.json()) as { items?: SaleItem[] };
+  const items = Array.isArray(body.items) ? body.items : [];
+  const draft = buildOrders(items, from, { storeLabel });
+  const matched = await matchCrmOrders(items, new Set(draft.map((order) => order.key))).catch((error) => {
+    console.error("[vendas-periodo] cruzamento CRM:", error);
+    return new Map<string, string | null>();
+  });
+  const orders = buildOrders(items, from, { storeLabel, fromCrm: (key) => matched.has(key), conversationOf: (key) => matched.get(key) ?? null });
+  return { day: from, from, to, updatedAt: new Date().toISOString(), seq: 0, orders, kpis: dayKpis(orders), stores: storesOf(orders) };
 }
 
 function emit(event: LiveEvent) {
@@ -111,7 +142,7 @@ async function tick() {
   const orders = buildOrders(items, day, { storeLabel: label, fromCrm: (key) => state.crmKeys.has(key), conversationOf: (key) => state.crmConversations.get(key) ?? null });
   const changed = dayChanged ? orders : changedOrders(previous.orders, orders);
   const removed = !dayChanged && previous.orders.length > 0 && orders.length < previous.orders.length;
-  const stores = [...new Map(orders.map((order) => [order.store, { store: order.store, storeLabel: order.storeLabel }])).values()].sort((a, b) => a.storeLabel.localeCompare(b.storeLabel, "pt-BR", { numeric: true }));
+  const stores = storesOf(orders);
   const seq = (previous?.seq ?? 0) + (changed.length || removed ? 1 : 0);
   const snapshot: LiveSnapshot = { day, updatedAt: new Date().toISOString(), seq, orders, kpis: dayKpis(orders), stores };
   state.snapshot = snapshot;

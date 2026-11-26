@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrders, categoryKind, changedOrders, crmShare, dayKpis, hourlySeries, isNewSale, itemsSummary, mergeOrders, mixByKind, mixByPayment, paymentGroup, phoneKey, relativeTime, saleInstant, topSellers, type SaleItem } from "@/lib/sales-live/feed";
+import { buildOrders, categoryKind, changedOrders, crmShare, dailySeries, dayKpis, dayOfInstant, hourlySeries, isNewSale, itemsSummary, mergeOrders, mixByKind, mixByPayment, paginate, paymentGroup, periodRange, phoneKey, relativeTime, saleInstant, saleWhen, topSellers, validPeriod, type SaleItem } from "@/lib/sales-live/feed";
 import { canAccessModule, moduleForPath } from "@/lib/permissions";
 
 const DAY = "2026-11-27";
@@ -115,5 +115,84 @@ describe("vendas ao vivo: war room (selo, hora a hora, rankings e mix)", () => {
     expect(mixByKind(orders).map((slice) => [slice.key, slice.amount])).toEqual([["grau", 400], ["sol", 200]]);
     expect(mixByPayment(orders)[0]).toMatchObject({ label: "Cartão de crédito", amount: 400 });
     expect(crmShare(orders)).toMatchObject({ orders: 1, revenue: 300, revenuePct: 50 });
+  });
+});
+
+describe("faturamento líquido oficial do VMSet (pedido faturado)", () => {
+  it("usa o total líquido do pedido uma vez só: itens com o total repetido não somam em dobro", () => {
+    const items = [
+      item("g1", "1", "98113", 527, { orderTotal: 1457 }),
+      item("g2", "1", "98113", 930, { orderTotal: 1457, brand: "ZEISS", category: "LENTES" }),
+      item("g3", "1", "98113", 20, { orderTotal: 1457, brand: null, category: "SERVICOS" }),
+    ];
+    const [order] = buildOrders(items, DAY, labels);
+    expect(order.amount).toBe(1457);
+    expect(order.lines).toHaveLength(3);
+    expect(dayKpis(buildOrders(items, DAY, labels)).revenue).toBe(1457);
+  });
+
+  it("desconto no cabeçalho do pedido: vale o líquido (total oficial), não a soma bruta dos itens", () => {
+    const [order] = buildOrders([item("h1", "4", "7", 500, { orderTotal: 450 }), item("h2", "4", "7", 100, { orderTotal: 450 })], DAY, labels);
+    expect(order.amount).toBe(450);
+  });
+
+  it("sem total oficial (retrato antigo), cai na soma dos itens, cada item uma vez", () => {
+    const [order] = buildOrders([item("i1", "4", "8", 100), item("i2", "4", "8", 50), item("i1", "4", "8", 100)], DAY, labels);
+    expect(order.amount).toBe(150);
+  });
+
+  it("dia e hora de Brasília: venda das 23:59 fica no próprio dia e a das 00:00 no seguinte (sem deslocar +3 h)", () => {
+    const orders = buildOrders([
+      item("j1", "1", "1", 100, { date: "2026-11-25", time: "23:59:59", orderTotal: 100 }),
+      item("j2", "1", "2", 200, { date: "2026-11-26", time: "00:00:00", orderTotal: 200 }),
+    ], "2026-11-25", labels);
+    const late = orders.find((order) => order.order === "1")!;
+    const early = orders.find((order) => order.order === "2")!;
+    expect(late.at).toBe("2026-11-26T02:59:59.000Z");
+    expect(late.day).toBe("2026-11-25");
+    expect(dayOfInstant(late.at)).toBe("2026-11-25");
+    expect(early.day).toBe("2026-11-26");
+    expect(dayOfInstant(early.at)).toBe("2026-11-26");
+    const series = dailySeries(orders, "2026-11-25", "2026-11-26");
+    expect(series.map((point) => [point.label, point.revenue, point.orders, point.cumulative])).toEqual([["25/11", 100, 1, 100], ["26/11", 200, 1, 300]]);
+  });
+});
+
+describe("filtros de período", () => {
+  it("Hoje, Esta semana (segunda até hoje), Este mês (dia 1 até hoje) e Personalizado", () => {
+    expect(periodRange("today", "2026-11-26")).toEqual({ from: "2026-11-26", to: "2026-11-26" });
+    expect(periodRange("week", "2026-11-26")).toEqual({ from: "2026-11-23", to: "2026-11-26" });
+    expect(periodRange("week", "2026-11-29")).toEqual({ from: "2026-11-23", to: "2026-11-29" });
+    expect(periodRange("week", "2026-11-23")).toEqual({ from: "2026-11-23", to: "2026-11-23" });
+    expect(periodRange("month", "2026-11-26")).toEqual({ from: "2026-11-01", to: "2026-11-26" });
+    expect(periodRange("custom", "2026-11-26", { from: "2026-10-01", to: "2026-10-31" })).toEqual({ from: "2026-10-01", to: "2026-10-31" });
+    expect(periodRange("custom", "2026-11-26", { from: "2026-10-31", to: "2026-10-01" })).toEqual({ from: "2026-10-01", to: "2026-10-31" });
+  });
+
+  it("período válido: datas reais, início ≤ fim e até 93 dias", () => {
+    expect(validPeriod("2026-11-01", "2026-11-26")).toBe(true);
+    expect(validPeriod("2026-08-26", "2026-11-26")).toBe(true);
+    expect(validPeriod("2026-08-25", "2026-11-26")).toBe(false);
+    expect(validPeriod("2026-11-27", "2026-11-26")).toBe(false);
+    expect(validPeriod("2026-02-30", "2026-03-01")).toBe(false);
+    expect(validPeriod("2026-11-01", null)).toBe(false);
+    expect(validPeriod("ontem", "2026-11-26")).toBe(false);
+  });
+
+  it("série dia a dia cobre todos os dias do período (dias sem venda zerados) e o feed mostra a data fora de hoje", () => {
+    const orders = buildOrders([item("k1", "1", "1", 0, { date: "2026-11-23", time: "10:00:00", orderTotal: 300 })], "2026-11-23", labels);
+    const series = dailySeries(orders, "2026-11-23", "2026-11-26");
+    expect(series).toHaveLength(4);
+    expect(series.map((point) => point.revenue)).toEqual([300, 0, 0, 0]);
+    expect(saleWhen(orders[0], new Date("2026-11-26T15:00:00Z"), "2026-11-26")).toBe("23/11 · 10:00");
+    expect(saleWhen(orders[0], new Date("2026-11-23T13:05:00Z"), "2026-11-23")).toBe("há 5 min · 10:00");
+  });
+
+  it("paginação do feed", () => {
+    const list = Array.from({ length: 65 }, (_, index) => index);
+    expect(paginate(list, 1, 30)).toMatchObject({ page: 1, pages: 3, total: 65 });
+    expect(paginate(list, 3, 30).items).toEqual([60, 61, 62, 63, 64]);
+    expect(paginate(list, 9, 30).page).toBe(3);
+    expect(paginate([], 1, 30)).toMatchObject({ page: 1, pages: 1, items: [] });
   });
 });

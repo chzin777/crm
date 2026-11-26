@@ -20,6 +20,10 @@ export type SaleItem = {
   amount: number;
   payment?: string | null;
   terms?: string | null;
+  /** Dia da emissão (AAAA-MM-DD, Brasília): obrigatório nos períodos de vários dias. */
+  date?: string | null;
+  /** Total líquido oficial do pedido no VMSet (PDSD_VLR_TOTAL), repetido em cada item: vale mais que a soma dos itens. */
+  orderTotal?: number | null;
 };
 
 /** Sol, grau (armação + lentes oftálmicas), lentes de contato ou outros (serviço, acessório). */
@@ -34,6 +38,8 @@ export type LiveOrder = {
   order: string;
   /** Instante da venda (ISO, horário de Brasília convertido). */
   at: string;
+  /** Dia da venda em Brasília (AAAA-MM-DD). Opcional: retratos antigos não trazem. */
+  day?: string;
   time: string;
   amount: number;
   items: number;
@@ -57,7 +63,7 @@ export type LiveOrder = {
 
 export type StoreRank = { store: string; storeLabel: string; amount: number; orders: number };
 export type LiveKpis = { revenue: number; orders: number; ticket: number; topStores: StoreRank[] };
-export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; kpis: LiveKpis; stores: { store: string; storeLabel: string }[] };
+export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; kpis: LiveKpis; stores: { store: string; storeLabel: string }[]; from?: string; to?: string };
 /** Mensagens do canal ao vivo: retrato inteiro (conexão, virada do dia, cancelamento) ou só os pedidos novos/alterados. */
 export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
 
@@ -113,14 +119,18 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
   for (const [key, group] of groups) {
     const sorted = [...group].sort((a, b) => (a.time ?? "").localeCompare(b.time ?? "") || a.id.localeCompare(b.id));
     const first = sorted[0];
-    const amount = money2(sorted.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0));
+    // Total oficial do pedido (líquido, com descontos) quando o VMSet manda; senão a soma dos itens (cada item uma vez).
+    const official = sorted.find((item) => typeof item.orderTotal === "number" && Number.isFinite(item.orderTotal))?.orderTotal;
+    const amount = official != null ? money2(official) : money2(sorted.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0));
     const time = (first.time ?? "").slice(0, 5) || "--:--";
+    const saleDay = first.date && /^\d{4}-\d{2}-\d{2}$/.test(first.date) ? first.date : day;
     orders.push({
       key,
       store: first.store!,
       storeLabel: input.storeLabel(first.store!),
       order: first.order!,
-      at: saleInstant(day, first.time),
+      at: saleInstant(saleDay, first.time),
+      day: saleDay,
       time,
       amount,
       items: sorted.reduce((sum, item) => sum + Math.max(1, Math.round(item.quantity || 1)), 0),
@@ -235,6 +245,70 @@ export function hourlySeries(orders: Pick<LiveOrder, "time" | "amount">[], curre
   let total = 0;
   for (const point of points) point.cumulative = total = money2(total + point.revenue);
   return points;
+}
+
+/** Faturamento e pedidos por dia de `from` a `to` (gráfico de ritmo dos períodos); `hour` = posição do dia. */
+export function dailySeries(orders: Pick<LiveOrder, "day" | "at" | "amount">[], from: string, to: string): (HourPoint & { day: string })[] {
+  const points: (HourPoint & { day: string })[] = [];
+  for (let current = from, index = 0; current <= to && index < 400; current = shiftDay(current, 1), index += 1) {
+    points.push({ hour: index, day: current, label: `${current.slice(8, 10)}/${current.slice(5, 7)}`, revenue: 0, orders: 0, cumulative: 0 });
+  }
+  const byDay = new Map(points.map((point) => [point.day, point]));
+  for (const order of orders) {
+    const point = byDay.get(order.day ?? dayOfInstant(order.at));
+    if (!point) continue;
+    point.revenue = money2(point.revenue + order.amount);
+    point.orders += 1;
+  }
+  let total = 0;
+  for (const point of points) point.cumulative = total = money2(total + point.revenue);
+  return points;
+}
+
+/** Soma dias a um AAAA-MM-DD (calendário puro, sem fuso). */
+export function shiftDay(day: string, days: number) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Dia em Brasília de um instante ISO (UTC−3 fixo, sem horário de verão desde 2019). */
+export const dayOfInstant = (at: string) => new Date(new Date(at).getTime() - 3 * 3_600_000).toISOString().slice(0, 10);
+
+export type PeriodPreset = "today" | "week" | "month" | "custom";
+export const MAX_PERIOD_DAYS = 93;
+
+/** Intervalo (inclusivo, dias de Brasília) de cada filtro: semana de segunda até hoje, mês do dia 1 até hoje. */
+export function periodRange(preset: PeriodPreset, today: string, custom?: { from?: string; to?: string }): { from: string; to: string } {
+  if (preset === "week") {
+    const weekday = new Date(`${today}T12:00:00Z`).getUTCDay();
+    return { from: shiftDay(today, -((weekday + 6) % 7)), to: today };
+  }
+  if (preset === "month") return { from: `${today.slice(0, 8)}01`, to: today };
+  if (preset === "custom" && custom?.from && custom?.to) return custom.from <= custom.to ? { from: custom.from, to: custom.to } : { from: custom.to, to: custom.from };
+  return { from: today, to: today };
+}
+
+/** Período válido para consulta: datas reais, início ≤ fim e no máximo 93 dias. */
+export function validPeriod(from: string | null | undefined, to: string | null | undefined) {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!from || !to || !iso.test(from) || !iso.test(to) || from > to) return false;
+  if (Number.isNaN(new Date(`${from}T12:00:00Z`).getTime()) || Number.isNaN(new Date(`${to}T12:00:00Z`).getTime())) return false;
+  if (shiftDay(from, 0) !== from || shiftDay(to, 0) !== to) return false;
+  return (new Date(`${to}T12:00:00Z`).getTime() - new Date(`${from}T12:00:00Z`).getTime()) / 86_400_000 < MAX_PERIOD_DAYS;
+}
+
+/** Hoje: "há 3 min · 14:20"; outros dias: "25/11 · 14:20". */
+export function saleWhen(order: Pick<LiveOrder, "at" | "time" | "day">, now: Date, today: string) {
+  const day = order.day ?? dayOfInstant(order.at);
+  return day === today ? relativeTime(order.at, now, order.time) : `${day.slice(8, 10)}/${day.slice(5, 7)} · ${order.time}`;
+}
+
+/** Fatia `page` (1..n) da lista, com o total de páginas (página fora do intervalo cai na última válida). */
+export function paginate<T>(items: T[], page: number, size: number) {
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
+  return { items: items.slice((current - 1) * size, current * size), page: current, pages, total: items.length };
 }
 
 export type SellerRank = { key: string; seller: string; storeLabel: string; amount: number; orders: number };

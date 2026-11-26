@@ -4,19 +4,19 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bar, CartesianGrid, Cell, ComposedChart, Area, AreaChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  Activity, BadgeDollarSign, Bell, BellOff, Check, ChevronRight, CreditCard, Expand, Eye, Glasses, Hash, LayoutList, MessageCircle, Minimize, Package, Pencil,
-  Receipt, Search, ShoppingBag, Store, Sun, Target, TrendingUp, Trophy, UserRound, Users, WifiOff, X, Zap,
+  Activity, BadgeDollarSign, Bell, BellOff, CalendarDays, Check, ChevronLeft, ChevronRight, CreditCard, Expand, Eye, Glasses, Hash, LayoutList, Loader2, MessageCircle, Minimize, Package, Pencil,
+  Receipt, RefreshCw, Search, ShoppingBag, Store, Sun, Target, TrendingUp, Trophy, UserRound, Users, WifiOff, X, Zap,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import { Avatar, ChartTooltip, FadeGradient, SegmentedControl, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import {
-  KIND_LABEL, crmShare, dayKpis, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, relativeTime, topSellers,
-  type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot,
+  KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, saleWhen, topSellers, validPeriod,
+  type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset,
 } from "@/lib/sales-live/feed";
 
-type Status = "connecting" | "live" | "polling" | "offline";
+type Status = "connecting" | "live" | "polling" | "offline" | "period";
 type MobileTab = "feed" | "rank" | "chart";
 type Origin = "all" | "crm" | "top";
 
@@ -25,6 +25,17 @@ const POLL_MS = 15_000;
 const SOUND_KEY = "crm_vendas_ao_vivo_alerta";
 const GOAL_KEY = "crm_vendas_ao_vivo_meta";
 const LIME = "#C4D600";
+const PAGE_SIZE = 30;
+const PERIOD_REFRESH_MS = 60_000;
+const PERIOD_OPTIONS: { value: PeriodPreset; label: string; title: string }[] = [
+  { value: "today", label: "Hoje (ao vivo)", title: "Vendas de hoje em tempo real" },
+  { value: "week", label: "Esta semana", title: "De segunda-feira até hoje" },
+  { value: "month", label: "Este mês", title: "Do dia 1º até hoje" },
+  { value: "custom", label: "Personalizado", title: "Escolha início e fim (até 93 dias)" },
+];
+/** "do dia", "da semana", "do mês", "do período" (títulos dos cards). */
+const PERIOD_SUFFIX: Record<PeriodPreset, string> = { today: "do dia", week: "da semana", month: "do mês", custom: "do período" };
+const shortDate = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
 
 const KIND_ICON: Record<CategoryKind, React.ElementType> = { sol: Sun, grau: Glasses, lentes: Eye, outros: Package };
 const KIND_COLOR: Record<CategoryKind, string> = { sol: "#F7915E", grau: "#002187", lentes: "#0ea5e9", outros: "#94a3b8" };
@@ -92,6 +103,7 @@ function LivePulse({ className = "bg-emerald-500" }: { className?: string }) {
 function StatusPill({ status, updatedAt, now }: { status: Status; updatedAt: string | null; now: Date }) {
   const seconds = updatedAt ? Math.max(0, Math.round((now.getTime() - new Date(updatedAt).getTime()) / 1000)) : null;
   const ago = seconds === null ? "" : seconds < 20 ? "agora" : seconds < 60 ? `há ${seconds} seg` : `há ${Math.floor(seconds / 60)} min`;
+  if (status === "period") return <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300"><CalendarDays className="h-3.5 w-3.5" />Histórico{ago ? ` · atualizado ${ago}` : ""}</span>;
   if (status === "offline") return <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-300"><WifiOff className="h-3.5 w-3.5" />Sem conexão{ago ? ` · ${ago}` : ""}</span>;
   if (status === "connecting") return <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300"><span className="h-2 w-2 animate-pulse rounded-full bg-slate-400" />Conectando...</span>;
   return (
@@ -190,7 +202,7 @@ function KindTag({ kind }: { kind: CategoryKind }) {
   return <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: `${KIND_COLOR[kind]}1f`, color: kind === "grau" ? undefined : KIND_COLOR[kind] }}><Icon className={`h-3 w-3 ${kind === "grau" ? "text-[#002187] dark:text-[#8fa6ff]" : ""}`} /><span className={kind === "grau" ? "text-[#002187] dark:text-[#8fa6ff]" : ""}>{KIND_LABEL[kind]}</span></span>;
 }
 
-function SaleCard({ order, now, arrivedAt, onOpen }: { order: LiveOrder; now: Date; arrivedAt?: number; onOpen: () => void }) {
+function SaleCard({ order, now, today, arrivedAt, onOpen }: { order: LiveOrder; now: Date; today: string; arrivedAt?: number; onOpen: () => void }) {
   const isNew = isNewSale(order, now, arrivedAt);
   const flash = arrivedAt !== undefined && now.getTime() - arrivedAt < FLASH_MS;
   return (
@@ -203,7 +215,7 @@ function SaleCard({ order, now, arrivedAt, onOpen }: { order: LiveOrder; now: Da
               <span className="text-xl font-bold tabular-nums tracking-tight text-[#051647] dark:text-white">{formatMoney(order.amount)}</span>
               {isNew && <span className="inline-flex items-center gap-1 rounded-full bg-[#C4D600] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#051647] shadow animate-pulse"><Zap className="h-3 w-3" />Nova venda</span>}
             </span>
-            <span className="shrink-0 pt-1 text-[11px] tabular-nums text-slate-500 dark:text-slate-400">{relativeTime(order.at, now, order.time)}</span>
+            <span className="shrink-0 pt-1 text-[11px] tabular-nums text-slate-500 dark:text-slate-400">{saleWhen(order, now, today)}</span>
           </span>
           <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
             <span className="flex min-w-0 items-center gap-1 font-semibold text-[#002187] dark:text-[#C4D600]"><Store className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{order.storeLabel}</span></span>
@@ -222,7 +234,7 @@ function SaleCard({ order, now, arrivedAt, onOpen }: { order: LiveOrder; now: Da
   );
 }
 
-function OrderDrawer({ order, now, onClose }: { order: LiveOrder; now: Date; onClose: () => void }) {
+function OrderDrawer({ order, now, today, onClose }: { order: LiveOrder; now: Date; today: string; onClose: () => void }) {
   return (
     <EntityDialog
       titleId="venda-detalhe"
@@ -232,7 +244,7 @@ function OrderDrawer({ order, now, onClose }: { order: LiveOrder; now: Date; onC
       size="sheet"
       header={
         <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"><Hash className="h-3.5 w-3.5" />Pedido {order.order} · {relativeTime(order.at, now, order.time)}</p>
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"><Hash className="h-3.5 w-3.5" />Pedido {order.order} · {saleWhen(order, now, today)}</p>
           <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-[#051647] dark:text-white">{formatMoney(order.amount)}</p>
           <p className="mt-0.5 flex min-w-0 items-center gap-1 text-sm font-semibold text-[#002187] dark:text-[#C4D600]"><Store className="h-4 w-4 shrink-0" /><span className="break-words">{order.storeLabel}</span></p>
         </div>
@@ -336,6 +348,16 @@ export default function LiveSalesPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [fullscreen, setFullscreen] = useState(false);
+  const [period, setPeriod] = useState<PeriodPreset>("today");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [loadingPeriod, setLoadingPeriod] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const today = dayOfInstant(now.toISOString());
+  const isLive = period === "today";
+  const range = useMemo(() => periodRange(period, today, { from: customFrom, to: customTo }), [period, today, customFrom, customTo]);
+  const rangeValid = isLive || validPeriod(range.from, range.to);
   const soundRef = useRef(false);
   const loadedRef = useRef(false);
   const ordersRef = useRef<LiveOrder[]>([]);
@@ -364,10 +386,14 @@ export default function LiveSalesPage() {
   }, []);
 
   useEffect(() => {
+    // Ao vivo só em "Hoje": nos períodos históricos o canal fica fechado e a carga é por consulta (efeito abaixo).
+    if (!isLive) return;
     let source: EventSource | null = null;
     let poll: number | null = null;
     let reconnect: number | null = null;
     let closed = false;
+    ordersRef.current = [];
+    loadedRef.current = false;
 
     const apply = (incoming: LiveOrder[], replace: boolean, meta: { updatedAt: string; stores: LiveSnapshot["stores"] }) => {
       const base = replace ? ordersRef.current.filter((order) => incoming.some((item) => item.key === order.key)) : ordersRef.current;
@@ -457,7 +483,60 @@ export default function LiveSalesPage() {
       if (reconnect !== null) window.clearTimeout(reconnect);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, []);
+  }, [isLive]);
+
+  // Esta semana / Este mês / Personalizado: mesma regra de faturamento (pedido faturado no VMSet, total líquido
+  // oficial, dia de Brasília), carregada pelo período; se o período inclui hoje, atualiza a cada 1 min.
+  const { from: rangeFrom, to: rangeTo } = range;
+  useEffect(() => {
+    if (isLive || !rangeValid) return;
+    const controller = new AbortController();
+    let timer: number | null = null;
+    const load = async (first: boolean) => {
+      if (first) setLoadingPeriod(true);
+      try {
+        const response = await fetch(`/api/vendas/ao-vivo?from=${rangeFrom}&to=${rangeTo}`, { cache: "no-store", signal: controller.signal });
+        const body = (await response.json().catch(() => ({}))) as { data?: LiveSnapshot; error?: string };
+        if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível carregar as vendas do período.");
+        ordersRef.current = body.data.orders;
+        setOrders(body.data.orders);
+        setStores(body.data.stores);
+        setUpdatedAt(body.data.updatedAt);
+        setStatus("period");
+        setError("");
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        setStatus("offline");
+        setError(cause instanceof Error ? cause.message : "Sem conexão.");
+      } finally {
+        if (!controller.signal.aborted) setLoadingPeriod(false);
+      }
+    };
+    void load(true);
+    if (rangeTo >= dayOfInstant(new Date().toISOString())) timer = window.setInterval(() => void load(false), PERIOD_REFRESH_MS);
+    return () => {
+      controller.abort();
+      if (timer !== null) window.clearInterval(timer);
+    };
+  }, [isLive, rangeValid, rangeFrom, rangeTo, reloadKey]);
+
+  const choosePeriod = (next: PeriodPreset) => {
+    if (next === period) return;
+    if (next === "custom" && (!customFrom || !customTo)) {
+      // Personalizado começa do intervalo que estava na tela (ou do mês), pronto para ajustar.
+      const base = period === "today" ? periodRange("month", today) : range;
+      setCustomFrom(base.from);
+      setCustomTo(base.to);
+    }
+    ordersRef.current = [];
+    setOrders([]);
+    setStores([]);
+    setArrived({});
+    setSelected(null);
+    setPage(1);
+    if (next === "today") setStatus("connecting");
+    setPeriod(next);
+  };
 
   const currentHour = brHour(now);
   const scoped = useMemo(() => (store ? orders.filter((order) => order.store === store) : orders), [orders, store]);
@@ -474,7 +553,9 @@ export default function LiveSalesPage() {
     return stores.map((item) => ({ ...item, ...(byStore.get(item.store) ?? { amount: 0, orders: 0 }) })).sort((a, b) => b.amount - a.amount || b.orders - a.orders);
   }, [orders, stores]);
   const crm = useMemo(() => crmShare(scoped), [scoped]);
-  const hourly = useMemo(() => hourlySeries(scoped, currentHour), [scoped, currentHour]);
+  // Hoje: hora a hora; períodos: dia a dia (destaque no dia de hoje, se estiver no intervalo).
+  const hourly = useMemo<HourPoint[]>(() => (isLive ? hourlySeries(scoped, currentHour) : dailySeries(scoped, rangeFrom, rangeTo)), [isLive, scoped, currentHour, rangeFrom, rangeTo]);
+  const highlight = isLive ? currentHour : (hourly as (HourPoint & { day?: string })[]).find((point) => point.day === today)?.hour ?? -1;
   const sellers = useMemo(() => topSellers(scoped, 5), [scoped]);
   const kindMix = useMemo(() => mixByKind(scoped), [scoped]);
   const paymentMix = useMemo(() => mixByPayment(scoped), [scoped]);
@@ -488,14 +569,26 @@ export default function LiveSalesPage() {
       return [order.storeLabel, order.seller, order.summary, order.order, order.customer, order.payment].some((value) => value?.toLowerCase().includes(text));
     });
   }, [scoped, origin, query, topStoreKeys]);
+  const paged = useMemo(() => paginate(feed, page, PAGE_SIZE), [feed, page]);
   const revenue = useAnimatedNumber(kpis.revenue);
   const peak = hourly.reduce<HourPoint | null>((best, point) => (point.revenue > (best?.revenue ?? 0) ? point : best), null);
-  const nowPoint = hourly.find((point) => point.hour === currentHour);
-  const prevPoint = hourly.find((point) => point.hour === currentHour - 1);
+  const nowPoint = hourly.find((point) => point.hour === highlight);
+  const prevPoint = hourly.find((point) => point.hour === highlight - 1);
+  const suffix = PERIOD_SUFFIX[period];
+  const rangeLabel = range.from === range.to ? shortDate(range.from) : `${shortDate(range.from)} a ${shortDate(range.to)}`;
+  const rangeDays = rangeValid ? Math.round((new Date(`${range.to}T12:00:00Z`).getTime() - new Date(`${range.from}T12:00:00Z`).getTime()) / 86_400_000) + 1 : 0;
   const selectedOrder = selected ? orders.find((order) => order.key === selected) ?? null : null;
   const storeLabel = store ? stores.find((item) => item.store === store)?.storeLabel ?? "" : "";
   const newCount = scoped.filter((order) => isNewSale(order, now, arrived[order.key])).length;
 
+  const pickStore = (value: string) => {
+    setStore(value);
+    setPage(1);
+  };
+  const pickOrigin = (value: Origin) => {
+    setOrigin(value);
+    setPage(1);
+  };
   const toggleSound = () => {
     const next = !sound;
     setSound(next);
@@ -535,10 +628,38 @@ export default function LiveSalesPage() {
           </div>
         </div>
         <div className="sm:hidden"><StatusPill status={status} updatedAt={updatedAt} now={now} /></div>
+        <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center">
+          <div className="-mx-3 overflow-x-auto px-3 [scrollbar-width:none] md:mx-0 md:px-0">
+            <SegmentedControl<PeriodPreset> label="Período" value={period} onChange={choosePeriod} options={PERIOD_OPTIONS} />
+          </div>
+          {period === "custom" && (
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+              <label className="flex items-center gap-1.5 font-semibold text-slate-500 dark:text-slate-400">
+                Início
+                <input type="date" value={customFrom} max={customTo || today} onChange={(event) => { setCustomFrom(event.target.value); setPage(1); }} aria-label="Data de início" className="h-9 cursor-pointer rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-medium text-slate-800 outline-none focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:[color-scheme:dark]" />
+              </label>
+              <label className="flex items-center gap-1.5 font-semibold text-slate-500 dark:text-slate-400">
+                Fim
+                <input type="date" value={customTo} min={customFrom || undefined} max={today} onChange={(event) => { setCustomTo(event.target.value); setPage(1); }} aria-label="Data de fim" className="h-9 cursor-pointer rounded-xl border border-slate-200 bg-white px-2.5 text-sm font-medium text-slate-800 outline-none focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:[color-scheme:dark]" />
+              </label>
+              {!rangeValid && <span role="alert" className="font-semibold text-red-600 dark:text-red-400">Escolha início e fim (até {MAX_PERIOD_DAYS} dias).</span>}
+            </div>
+          )}
+          {!isLive && rangeValid && (
+            <p className="flex min-w-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <CalendarDays className="h-4 w-4 shrink-0 text-[#F7915E]" />
+              <span className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{rangeLabel}</span>
+              <span>· {rangeDays} {rangeDays === 1 ? "dia" : "dias"}</span>
+              <button type="button" onClick={() => setReloadKey((value) => value + 1)} disabled={loadingPeriod} title="Atualizar agora" className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:cursor-wait dark:hover:bg-white/10 dark:hover:text-white">
+                {loadingPeriod ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </button>
+            </p>
+          )}
+        </div>
         <nav aria-label="Filtrar por loja" className="-mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
-          <button type="button" onClick={() => setStore("")} className={pill(!store)}><Store className="h-3.5 w-3.5" />Todas</button>
+          <button type="button" onClick={() => pickStore("")} className={pill(!store)}><Store className="h-3.5 w-3.5" />Todas</button>
           {allStores.map((item) => (
-            <button key={item.store} type="button" onClick={() => setStore(store === item.store ? "" : item.store)} className={pill(store === item.store)}>
+            <button key={item.store} type="button" onClick={() => pickStore(store === item.store ? "" : item.store)} className={pill(store === item.store)}>
               {item.storeLabel}
               {item.orders > 0 && <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${store === item.store ? "bg-white/20" : "bg-slate-100 dark:bg-white/10"}`}>{item.orders}</span>}
             </button>
@@ -554,12 +675,13 @@ export default function LiveSalesPage() {
           <div className="pointer-events-none absolute -bottom-24 -left-10 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(0,33,135,0.55),transparent_70%)]" aria-hidden />
           <div className="relative">
             <div className="flex items-center justify-between gap-2">
-              <p className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/70"><BadgeDollarSign className="h-4 w-4 shrink-0 text-[#C4D600]" /><span className="truncate">Faturamento {store ? storeLabel : "do dia"}</span></p>
+              <p className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/70"><BadgeDollarSign className="h-4 w-4 shrink-0 text-[#C4D600]" /><span className="truncate">Faturamento {store ? `${storeLabel} · ` : ""}{suffix}</span></p>
               {newCount > 0 && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C4D600] px-2 py-0.5 text-[10px] font-extrabold uppercase text-[#051647]"><Zap className="h-3 w-3" />{newCount} {newCount === 1 ? "nova" : "novas"}</span>}
             </div>
             <p className="mt-1 text-[2.6rem] font-extrabold leading-none tabular-nums tracking-tight text-white sm:text-5xl xl:text-6xl">{formatMoney(revenue)}</p>
             {store && allKpis.revenue > 0 && <p className="mt-1.5 text-xs text-white/70"><span className="font-bold text-[#C4D600]">{percent((kpis.revenue / allKpis.revenue) * 100)}</span> do faturamento total ({formatMoney(allKpis.revenue)})</p>}
-            {!store && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
+            {!store && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
+            {!isLive && rangeValid && <p className="mt-1.5 text-xs tabular-nums text-white/70">{rangeLabel}{loadingPeriod && <Loader2 className="ml-1.5 inline h-3.5 w-3.5 animate-spin" />}</p>}
             <div className="mt-3"><HeroSpark data={hourly} /></div>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <div className="min-w-0 rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 sm:p-3">
@@ -582,25 +704,25 @@ export default function LiveSalesPage() {
         </section>
 
         <section className={`${cardClass} flex min-w-0 flex-col p-4 lg:col-span-7 lg:p-5 ${mobileOnly("chart")}`}>
-          <SectionTitle icon={Activity} title="Ritmo hora a hora" hint="Barras: faturamento por hora · linha: pedidos · hora atual em verde">
+          <SectionTitle icon={Activity} title={isLive ? "Ritmo hora a hora" : "Ritmo dia a dia"} hint={isLive ? "Barras: faturamento por hora · linha: pedidos · hora atual em verde" : "Barras: faturamento por dia · linha: pedidos · hoje em verde"}>
             <div className="flex flex-wrap gap-1.5 text-[11px]">
               {peak && <span className="inline-flex items-center gap-1 rounded-lg bg-[#F7915E]/15 px-2 py-1 font-semibold text-[#c25a26] dark:text-[#F7915E]"><TrendingUp className="h-3.5 w-3.5" />Pico {peak.label} · {compactMoney(peak.revenue)}</span>}
               {nowPoint && (
                 <span className="inline-flex items-center gap-1 rounded-lg bg-[#C4D600]/20 px-2 py-1 font-semibold text-[#051647] dark:text-[#C4D600]">
-                  <LivePulse className="bg-[#9aa800] dark:bg-[#C4D600]" />Agora {nowPoint.label} · {compactMoney(nowPoint.revenue)}
+                  <LivePulse className="bg-[#9aa800] dark:bg-[#C4D600]" />{isLive ? "Agora" : "Hoje"} {nowPoint.label} · {compactMoney(nowPoint.revenue)}
                   {prevPoint && prevPoint.revenue > 0 && <span className="opacity-70">({nowPoint.revenue >= prevPoint.revenue ? "+" : ""}{percent(((nowPoint.revenue - prevPoint.revenue) / prevPoint.revenue) * 100)} vs {prevPoint.label})</span>}
                 </span>
               )}
             </div>
           </SectionTitle>
           <div className="h-[240px] min-w-0 lg:h-auto lg:min-h-[260px] lg:flex-1">
-            <HourlyChart data={hourly} currentHour={currentHour} isDark={isDark} />
+            <HourlyChart data={hourly} currentHour={highlight} isDark={isDark} />
           </div>
         </section>
       </div>
 
       <div className="md:hidden">
-        <SegmentedControl<MobileTab> label="Seções" value={tab} onChange={setTab} options={[{ value: "feed", label: "Feed ao vivo" }, { value: "rank", label: "Lojas & vendedores" }, { value: "chart", label: "Hora a hora" }]} />
+        <SegmentedControl<MobileTab> label="Seções" value={tab} onChange={setTab} options={[{ value: "feed", label: "Feed ao vivo" }, { value: "rank", label: "Lojas & vendedores" }, { value: "chart", label: isLive ? "Hora a hora" : "Dia a dia" }]} />
       </div>
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-12">
@@ -608,29 +730,38 @@ export default function LiveSalesPage() {
           <SectionTitle icon={LayoutList} title={`Feed de vendas${storeLabel ? ` · ${storeLabel}` : ""}`} hint={`${feed.length} ${feed.length === 1 ? "pedido" : "pedidos"} · toque para ver os detalhes`} />
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 [scrollbar-width:none]">
-              <button type="button" onClick={() => setOrigin("all")} className={pill(origin === "all")}>Todas</button>
-              <button type="button" onClick={() => setOrigin("crm")} className={pill(origin === "crm")}><MessageCircle className="h-3.5 w-3.5" />Via WhatsApp/CRM</button>
-              <button type="button" onClick={() => setOrigin("top")} className={pill(origin === "top")}><Trophy className="h-3.5 w-3.5" />Top lojas</button>
+              <button type="button" onClick={() => pickOrigin("all")} className={pill(origin === "all")}>Todas</button>
+              <button type="button" onClick={() => pickOrigin("crm")} className={pill(origin === "crm")}><MessageCircle className="h-3.5 w-3.5" />Via WhatsApp/CRM</button>
+              <button type="button" onClick={() => pickOrigin("top")} className={pill(origin === "top")}><Trophy className="h-3.5 w-3.5" />Top lojas</button>
             </div>
             <label className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar loja, vendedor, marca, pedido..." aria-label="Buscar vendas" className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100" />
+              <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Buscar loja, vendedor, marca, pedido..." aria-label="Buscar vendas" className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-[#002187] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100" />
             </label>
           </div>
-          {status === "connecting" && orders.length === 0 ? (
+          {(status === "connecting" || loadingPeriod) && orders.length === 0 ? (
             <ul className="space-y-2.5">{[0, 1, 2, 3].map((index) => <li key={index} className="h-[104px] animate-pulse rounded-2xl bg-slate-100 dark:bg-white/[0.04]" />)}</ul>
           ) : feed.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400 dark:border-white/10">{scoped.length ? "Nenhuma venda com esse filtro." : `Nenhuma venda faturada hoje${store ? " nesta loja" : ""} ainda.`}</p>
+            <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400 dark:border-white/10">{scoped.length ? "Nenhuma venda com esse filtro." : isLive ? `Nenhuma venda faturada hoje${store ? " nesta loja" : ""} ainda.` : `Nenhuma venda faturada no período${store ? " nesta loja" : ""}.`}</p>
           ) : (
-            <ul className="custom-scrollbar space-y-2.5 lg:max-h-[760px] lg:overflow-y-auto lg:pr-1">
-              {feed.slice(0, 150).map((order) => <SaleCard key={order.key} order={order} now={now} arrivedAt={arrived[order.key]} onOpen={() => setSelected(order.key)} />)}
-            </ul>
+            <>
+              <ul className="custom-scrollbar space-y-2.5 lg:max-h-[760px] lg:overflow-y-auto lg:pr-1">
+                {paged.items.map((order) => <SaleCard key={order.key} order={order} now={now} today={today} arrivedAt={arrived[order.key]} onOpen={() => setSelected(order.key)} />)}
+              </ul>
+              {paged.pages > 1 && (
+                <nav aria-label="Páginas do feed" className="mt-3 flex items-center justify-between gap-2 text-xs">
+                  <button type="button" onClick={() => setPage(paged.page - 1)} disabled={paged.page <= 1} className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-xl border border-slate-200 px-3 font-semibold text-slate-600 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-slate-300"><ChevronLeft className="h-4 w-4" />Anterior</button>
+                  <span className="tabular-nums text-slate-500 dark:text-slate-400">Página <b className="text-slate-800 dark:text-slate-100">{paged.page}</b> de {paged.pages} · {(paged.page - 1) * PAGE_SIZE + 1}–{Math.min(paged.page * PAGE_SIZE, paged.total)} de {paged.total}</span>
+                  <button type="button" onClick={() => setPage(paged.page + 1)} disabled={paged.page >= paged.pages} className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-xl border border-slate-200 px-3 font-semibold text-slate-600 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-slate-300">Próxima<ChevronRight className="h-4 w-4" /></button>
+                </nav>
+              )}
+            </>
           )}
         </section>
 
         <aside className={`min-w-0 space-y-4 lg:col-span-5 ${mobileOnly("rank")}`}>
           <section className={`${cardClass} p-4 lg:p-5`}>
-            <SectionTitle icon={Trophy} title="Top lojas do dia" hint="Toque para filtrar o painel pela loja" />
+            <SectionTitle icon={Trophy} title={`Top lojas ${suffix}`}hint="Toque para filtrar o painel pela loja" />
             {allKpis.topStores.length === 0 ? (
               <p className="text-sm text-slate-400">Sem vendas ainda.</p>
             ) : (
@@ -640,7 +771,7 @@ export default function LiveSalesPage() {
                   const active = store === item.store;
                   return (
                     <li key={item.store}>
-                      <button type="button" onClick={() => setStore(active ? "" : item.store)} className={`w-full cursor-pointer rounded-xl p-2 text-left transition-colors ${active ? "bg-[#C4D600]/15 ring-1 ring-[#C4D600]/50" : "hover:bg-slate-50 dark:hover:bg-white/[0.04]"}`}>
+                      <button type="button" onClick={() => pickStore(active ? "" : item.store)} className={`w-full cursor-pointer rounded-xl p-2 text-left transition-colors ${active ? "bg-[#C4D600]/15 ring-1 ring-[#C4D600]/50" : "hover:bg-slate-50 dark:hover:bg-white/[0.04]"}`}>
                         <span className="flex items-center gap-2.5">
                           <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-extrabold shadow-sm ${MEDALS[index] ?? "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"}`}>{index + 1}</span>
                           <span className="min-w-0 flex-1">
@@ -665,7 +796,7 @@ export default function LiveSalesPage() {
           </section>
 
           <section className={`${cardClass} p-4 lg:p-5`}>
-            <SectionTitle icon={Users} title="Top vendedores do dia" hint={storeLabel || "Todas as lojas"} />
+            <SectionTitle icon={Users} title={`Top vendedores ${suffix}`}hint={storeLabel || "Todas as lojas"} />
             {sellers.length === 0 ? (
               <p className="text-sm text-slate-400">Sem vendas com vendedor ainda.</p>
             ) : (
@@ -688,7 +819,7 @@ export default function LiveSalesPage() {
           </section>
 
           <section className={`${cardClass} p-4 lg:p-5`}>
-            <SectionTitle icon={Package} title="Mix do dia" hint="Participação no faturamento" />
+            <SectionTitle icon={Package} title={`Mix ${suffix}`}hint="Participação no faturamento" />
             {scoped.length === 0 ? (
               <p className="text-sm text-slate-400">Sem vendas ainda.</p>
             ) : (
@@ -707,7 +838,7 @@ export default function LiveSalesPage() {
         </aside>
       </div>
 
-      {selectedOrder && <OrderDrawer order={selectedOrder} now={now} onClose={() => setSelected(null)} />}
+      {selectedOrder && <OrderDrawer order={selectedOrder} now={now} today={today} onClose={() => setSelected(null)} />}
     </main>
   );
 }
