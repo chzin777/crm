@@ -71,19 +71,23 @@ export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders
 export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
 
 /**
- * Lojas encerradas: nunca entram no seletor, no ranking nem nos totais de /vendas/ao-vivo. A 502 fechou, mas ainda
- * registra recebimento de carnê no VMSet (baixa financeira, não é venda).
+ * Lojas encerradas: as vendas reais do período (histórico de quando operavam) contam normalmente nos totais, no
+ * ranking e no feed; o seletor só mostra lojas com venda no período, então sem venda ela não aparece. Recebimento de
+ * carnê/parcela nunca é venda (a consulta do VMSet só lê pedido com movimento Venda). Rótulo leva "(Encerrada)".
  */
 export const CLOSED_STORES: readonly string[] = ["502"];
 export const isClosedStore = (store: string) => CLOSED_STORES.includes(String(Number(store)) === "NaN" ? store.trim() : String(Number(store)));
+export const CLOSED_TAG = "(Encerrada)";
+/** "Loja 502" → "Loja 502 (Encerrada)" para loja encerrada; as demais ficam como estão. */
+export const withClosedTag = (store: string, label: string) => (isClosedStore(store) && !label.includes(CLOSED_TAG) ? `${label} ${CLOSED_TAG}` : label);
 
-/** Devoluções da API do VMSet (valor positivo, dia AAAA-MM-DD); linhas inválidas e lojas encerradas ficam de fora. */
+/** Devoluções da API do VMSet (valor positivo, dia AAAA-MM-DD); linhas inválidas ficam de fora. */
 export function parseReturns(raw: unknown, fallbackDay: string): StoreReturn[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry) => {
     const item = (entry ?? {}) as { store?: unknown; order?: unknown; date?: unknown; amount?: unknown };
     const amount = typeof item.amount === "number" && Number.isFinite(item.amount) ? money2(item.amount) : 0;
-    if (!item.store || amount <= 0 || isClosedStore(String(item.store))) return [];
+    if (!item.store || amount <= 0) return [];
     const day = typeof item.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : fallbackDay;
     return [{ store: String(item.store), order: item.order ? String(item.order) : null, day, amount }];
   });
@@ -140,7 +144,7 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
   for (const item of items) if (item.id && !unique.has(item.id)) unique.set(item.id, item);
   const groups = new Map<string, SaleItem[]>();
   for (const item of unique.values()) {
-    if (!item.store || !item.order || isClosedStore(item.store)) continue;
+    if (!item.store || !item.order) continue;
     const key = `${item.store}-${item.order}`;
     groups.set(key, [...(groups.get(key) ?? []), item]);
   }
@@ -156,7 +160,7 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
     orders.push({
       key,
       store: first.store!,
-      storeLabel: input.storeLabel(first.store!),
+      storeLabel: withClosedTag(first.store!, input.storeLabel(first.store!)),
       order: first.order!,
       at: saleInstant(saleDay, first.time),
       day: saleDay,

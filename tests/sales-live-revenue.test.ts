@@ -39,23 +39,39 @@ describe("faturamento do /vendas/ao-vivo igual ao relatório do VMSET", () => {
     expect(source).toMatch(/"returns": entry\["returns"\]/);
   });
 
-  it("loja 502 (encerrada) fica fora: consulta do VMSet, vendas, devoluções, seletor e ranking", () => {
+  it("loja encerrada sem bloqueio fixo: a consulta do VMSet não exclui a 502", () => {
     const source = readFileSync(join(process.cwd(), "scripts", "vmset-stock-api.py"), "utf8");
-    expect(salesSql()).toContain("TO_NUMBER(UE.UNEM_CODIGO) NOT IN (502)");
-    expect(source).toContain("T.LOJA NOT IN (502)");
+    expect(salesSql()).not.toMatch(/NOT IN \(502\)/);
+    expect(source).not.toContain("T.LOJA NOT IN (502)");
     expect(isClosedStore("502")).toBe(true);
     expect(isClosedStore("0502")).toBe(true);
     expect(isClosedStore("52")).toBe(false);
-    const orders = buildOrders([
-      item({ id: "a", store: "502", order: "1", orderTotal: 5000 }),
-      item({ id: "b", store: "4", order: "2", orderTotal: 1000 }),
-    ], "2026-11-26");
-    expect(orders.map((order) => order.store)).toEqual(["4"]);
-    const returns = parseReturns([{ store: "502", order: "9", date: "2026-11-20", amount: 300 }], "2026-11-01");
-    expect(returns).toEqual([]);
-    const kpis = dayKpis(orders, returns);
+  });
+
+  it("período atual sem venda na 502: painel limpo (fora do seletor e do ranking)", () => {
+    const orders = buildOrders([item({ id: "b", store: "4", order: "2", orderTotal: 1000 })], "2026-11-26");
+    const selector = [...new Set(orders.map((order) => order.store))];
+    expect(selector).toEqual(["4"]);
+    const kpis = dayKpis(orders, []);
     expect(kpis.revenue).toBe(1000);
     expect(kpis.topStores.map((rank) => rank.store)).toEqual(["4"]);
+    expect(orders[0].storeLabel).not.toContain("Encerrada");
+  });
+
+  it("período histórico com venda real na 502: soma no total, aparece no seletor e no ranking com (Encerrada)", () => {
+    const orders = buildOrders([
+      item({ id: "a", store: "502", order: "1", orderTotal: 5000, date: "2026-06-10" }),
+      item({ id: "b", store: "4", order: "2", orderTotal: 1000, date: "2026-06-11" }),
+    ], "2026-06-01");
+    const returns = parseReturns([{ store: "502", order: "9", date: "2026-06-20", amount: 300 }], "2026-06-01");
+    expect(returns).toHaveLength(1);
+    const kpis = dayKpis(orders, returns);
+    expect(kpis.revenue).toBe(5700);
+    expect(kpis.orders).toBe(2);
+    expect(kpis.topStores[0]).toMatchObject({ store: "502", amount: 4700, storeLabel: "Loja 502 (Encerrada)" });
+    const selector = [...new Map(orders.map((order) => [order.store, order.storeLabel])).values()];
+    expect(selector).toContain("Loja 502 (Encerrada)");
+    expect(selector).toContain("Loja 4");
   });
 
   it("recebimento de carnê, baixa de parcela e recebimento de título nunca contam como venda", () => {

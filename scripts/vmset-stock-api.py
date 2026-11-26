@@ -651,10 +651,10 @@ WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
   AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 1000 AND 2999
-  AND TO_NUMBER(UE.UNEM_CODIGO) NOT IN (502)
 """
 # Só pedido de saída com movimento "Venda": recebimento de carnê, baixa de parcela de crediário e recebimento de
-# título são lançamentos financeiros (contas a receber) e nunca entram nesta consulta. Loja 502 encerrada: fora.
+# título são lançamentos financeiros (contas a receber) e nunca entram nesta consulta. Loja encerrada (ex.: 502)
+# entra só com as vendas reais que fez no período (histórico de quando operava); o carnê dela nunca vira venda.
 MAX_SALES_DAYS = 93
 
 # Devoluções de cliente no dia da devolução (BI do VMSet, VALOR_TOTAL negativo por item): abatidas do faturamento
@@ -663,7 +663,7 @@ RETURNS_SQL = """
 SELECT T.LOJA, T.NUM_PEDIDO, T.DATA_PEDIDO, SUM(T.VALOR_TOTAL)
 FROM tab_dados_dinamicos T
 WHERE T.TIPO = 'Devolucao Cliente' AND T.DATA_PEDIDO >= :a AND T.DATA_PEDIDO < :b
-  AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999 AND T.LOJA NOT IN (502)
+  AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999
 GROUP BY T.LOJA, T.NUM_PEDIDO, T.DATA_PEDIDO
 """
 
