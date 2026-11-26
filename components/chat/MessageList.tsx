@@ -149,14 +149,14 @@ function BubbleImage({ src, name, onOpen }: { src: string; name: string; onOpen:
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   if (status === "error") {
     return (
-      <div className="mb-1 flex h-28 w-56 max-w-full flex-col items-center justify-center gap-1 rounded-lg bg-black/5 text-[11px] opacity-80 dark:bg-white/10">
+      <div className="mb-1 flex h-28 w-full flex-col items-center justify-center gap-1 rounded-lg bg-black/5 text-[11px] opacity-80 dark:bg-white/10">
         <ImageOff className="h-5 w-5 opacity-60" />
         <span>Imagem indisponível</span>
       </div>
     );
   }
   return (
-    <button type="button" onClick={onOpen} aria-label={`Ampliar ${name}`} className="relative mb-1 block min-h-24 min-w-40 max-w-full cursor-zoom-in overflow-hidden rounded-lg bg-black/5 dark:bg-white/10">
+    <button type="button" onClick={onOpen} aria-label={`Ampliar ${name}`} className="relative mb-1 block min-h-24 w-full cursor-zoom-in overflow-hidden rounded-lg bg-black/5 dark:bg-white/10">
       {status === "loading" && <span aria-hidden="true" className="absolute inset-0 animate-pulse bg-black/5 dark:bg-white/10" />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -165,7 +165,7 @@ function BubbleImage({ src, name, onOpen }: { src: string; name: string; onOpen:
         loading="lazy"
         onLoad={() => setStatus("ready")}
         onError={() => setStatus("error")}
-        className={`block max-h-72 w-auto max-w-full rounded-lg object-contain transition-opacity duration-300 ${status === "ready" ? "opacity-100" : "opacity-0"}`}
+        className={`block h-auto max-h-[380px] w-full rounded-lg object-cover transition-opacity duration-300 ${status === "ready" ? "opacity-100" : "opacity-0"}`}
       />
     </button>
   );
@@ -176,7 +176,7 @@ export function Attachment({ message, onOpen }: { message: ChatMessageItem; onOp
   const attachment = message.attachment!;
   if (attachment.kind === "sticker") return <Sticker message={message} onOpen={onOpen} />;
   if (attachment.kind === "image") return <BubbleImage src={mediaUrl(message)} name={attachment.name} onOpen={onOpen} />;
-  if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 max-h-64 rounded-lg" />;
+  if (attachment.kind === "video") return <video src={mediaUrl(message)} controls preload="metadata" className="mb-1 block max-h-[380px] w-full rounded-lg bg-black" />;
   if (attachment.kind === "audio") {
     return <AudioPlayer src={mediaUrl(message)} footer={message.transcription ? <Transcription value={message.transcription} /> : undefined} />;
   }
@@ -406,6 +406,10 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
             const voice = message.attachment?.kind === "audio";
             // Áudio sem legenda, citação ou nota interna vira a própria cápsula, sem o balão em volta.
             const pill = voice && !message.text && !message.replyTo && !message.internal;
+            // Foto ou vídeo (campanha, modelo com imagem, foto enviada ou recebida): balão do tamanho da mídia, como no
+            // WhatsApp; legenda, cabeçalho e horário ficam na mesma largura. Balão largo só para texto.
+            const media = message.attachment?.kind === "image" || message.attachment?.kind === "video";
+            const inset = media ? "px-1.5" : "";
             return (
               <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
                 {divider && (
@@ -433,7 +437,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                       </button>
                     )}
                     <div
-                      className={pill ? `flex max-w-full flex-col ${fromUs ? "items-end" : "items-start"}` : sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `max-w-[75%] rounded-2xl px-3 py-1.5 shadow-sm 2xl:px-4 2xl:py-2.5 ${
+                      className={pill ? `flex max-w-full flex-col ${fromUs ? "items-end" : "items-start"}` : sticker ? "relative max-w-[75%] text-slate-900 dark:text-white" : `${media ? "w-[min(320px,85%)] p-1.5 sm:w-[min(360px,85%)]" : "max-w-[75%] px-3 py-1.5 2xl:px-4 2xl:py-2.5"} min-w-0 rounded-2xl shadow-sm ${
                         message.internal
                           ? "rounded-br-sm border border-dashed border-[#F7915E] bg-[#F7915E]/15 text-slate-900 dark:text-white"
                           : message.author === "bot"
@@ -444,7 +448,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                       }`}
                     >
                       {(message.internal || message.author === "bot" || (fromUs && message.authorName)) && (
-                        <p className={`mb-1 text-[10px] font-semibold opacity-80 ${pill ? "px-3 text-slate-500 dark:text-slate-400" : ""}`}>
+                        <p className={`mb-1 break-words text-[10px] font-semibold opacity-80 ${pill ? "px-3 text-slate-500 dark:text-slate-400" : inset}`}>
                           {message.internal ? `Nota interna · ${message.authorName ?? ""}` : message.authorName ?? "Atendimento automático"}
                         </p>
                       )}
@@ -476,12 +480,12 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
                       {missing && <MissingMedia kind={missing} onRetry={message.pendingMedia && onReply ? () => retryMedia(message.id) : undefined} />}
                       {message.interactive ? (
                         <InteractiveListBubble list={message.interactive} messageId={message.id} />
-                      ) : message.text && !(missing && LABEL_KINDS[message.text]) && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>}
-                      {!pill && <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${fromUs || voice ? "justify-end" : "justify-start"}`}>
+                      ) : message.text && !(missing && LABEL_KINDS[message.text]) && <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${inset}`}>{message.text}</p>}
+                      {!pill && <div className={sticker ? "absolute bottom-1 right-1 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] text-white shadow-sm" : `mt-1 flex items-center gap-1 text-[10px] opacity-70 ${inset} ${fromUs || voice || media ? "justify-end" : "justify-start"}`}>
                         <span>{clockTime(message.createdAt)}</span>
                         {fromUs && !message.internal && <Delivery delivery={message.delivery} reason={message.failureReason} onLime={message.author === "agent"} />}
                       </div>}
-                      {message.delivery === "failed" && <p className={`mt-1 text-[10px] font-medium ${pill ? "px-3 text-red-500" : "text-red-300"}`}>{message.failureReason ?? "Falha no envio"}</p>}
+                      {message.delivery === "failed" && <p className={`mt-1 text-[10px] font-medium ${pill ? "px-3 text-red-500" : `text-red-300 ${inset}`}`}>{message.failureReason ?? "Falha no envio"}</p>}
                     </div>
                     {!fromUs && onReply && (
                       <button type="button" title="Responder" aria-label="Responder" onClick={() => onReply(message)} className="cursor-pointer rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-slate-600 group-hover:opacity-100 dark:hover:text-slate-200">

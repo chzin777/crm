@@ -111,5 +111,7 @@ describe("balão do /chat com imagem do modelo", () => {
     expect(html).toContain('src="/api/chat/media/msg-1"');
     expect(html).toContain('aria-label="Ampliar modelo.jpg"');
     expect(html).toContain("cursor-zoom-in");
+    // A foto preenche a largura do balão (que tem o tamanho da mídia), sem distorcer.
+    expect(html).toMatch(/<img[^>]*class="[^"]*\bw-full\b[^"]*\bobject-cover\b/);
   });
 });
