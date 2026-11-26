@@ -15,9 +15,9 @@ const salesSql = () => {
 };
 
 describe("faturamento do /vendas/ao-vivo igual ao relatório do VMSET", () => {
-  it("conta vendas Faturado e A Liberar (venda aguardando liberação) pela data de emissão", () => {
+  it("conta toda venda lançada no dia (Faturado, A Liberar, Reservado e Aberto), só cancelado fora, pela data de emissão", () => {
     const sql = salesSql();
-    expect(sql).toContain("PS.PDSD_STATUS IN ('Faturado', 'A Liberar')");
+    expect(sql).toContain("PS.PDSD_STATUS <> 'Cancelado' AND NVL(TRIM(PS.STATUS), 'Ativo') <> 'Inativo'");
     expect(sql).toContain("PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b");
   });
 

@@ -48,6 +48,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 import oracledb
 
@@ -508,7 +509,7 @@ def credit_customer(order_id):
         plan = [{"n": int(n or 0), "due": day(due), "value": money(value)} for n, due, value in cur.fetchall()]
 
         cur.execute(CUSTOMER_TITLES_SQL, p=partner)
-        today = datetime.date.today()
+        today = br_today()
         open_items, paid, on_time, delays, last_payment = [], 0, 0, [], None
         for numero, parcela, due, value, position, paid_at, paid_value, store in cur.fetchmany(2000):
             position = text(position) or ""
@@ -622,9 +623,12 @@ class Snapshot:
 # de emissão do pedido (relógio do Oracle = horário de Brasília). A tabela de BI tab_dados_dinamicos deixava de fora
 # ~20% dos pedidos (lentes/serviços ainda sem movimento de estoque). Um registro por item; o valor do pedido é
 # PDSD_VLR_TOTAL (líquido, já com descontos) e vai repetido em "orderTotal" para não somar duas vezes.
-# Fora: cancelados/abertos/inconsistentes, transferências entre lojas (cliente = unidade da rede) e depósitos.
-# "A Liberar" (venda feita aguardando liberação de desconto/crédito) conta como no relatório de vendas do VMSET:
-# só "Faturado" deixava ~R$ 20 mil de fora em 26/11/2026 (R$ 133.871,56 no painel x R$ 153.947,14 no VMSET).
+# Fora: só cancelados (PDSD_STATUS 'Cancelado' / STATUS 'Inativo'), transferências entre lojas (cliente = unidade da
+# rede) e depósitos. Como no relatório de vendas do VMSET, toda venda lançada no dia conta: "Faturado", "A Liberar"
+# (aguardando liberação de desconto/crédito), "Reservado" (encomenda/OS com estoque reservado) e "Aberto" gravado como
+# "Inconsistente" (pedido ainda não faturado). Em 26/11/2026 às 17:30: só Faturado/A Liberar = R$ 226,6 mil no painel
+# x R$ 252 mil no VMSET; com Reservado e Aberto = R$ 252,8 mil (diferença de ~R$ 25 mil explicada inteira).
+# Sem ROWNUM/FETCH FIRST: o dia inteiro vem em uma consulta, qualquer que seja o volume.
 # Só movimento do tipo "Venda": "Outras Saídas" (bonificação, livre emissão, devolução de compra, cancelamento fora
 # do dia, transferência para a matriz) somavam ~R$ 103 mil em novembro/2026 sem ser venda.
 SALES_SQL = """
@@ -646,7 +650,7 @@ LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
 LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
 LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
 LEFT JOIN CONDICAO_PAGTO CPG ON CPG.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
-WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
+WHERE PS.PDSD_STATUS <> 'Cancelado' AND NVL(TRIM(PS.STATUS), 'Ativo') <> 'Inativo'
   AND PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b
   AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199
@@ -656,6 +660,14 @@ WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
 # título são lançamentos financeiros (contas a receber) e nunca entram nesta consulta. Loja encerrada (ex.: 502)
 # entra só com as vendas reais que fez no período (histórico de quando operava); o carnê dela nunca vira venda.
 MAX_SALES_DAYS = 93
+
+# "Hoje" é sempre o dia de Brasília (o relógio do Oracle também), nunca o fuso da máquina: com o servidor em UTC, as
+# vendas depois das 21:00 iriam para o dia seguinte.
+BR_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def br_today():
+    return datetime.datetime.now(BR_TZ).date()
 
 # Devoluções de cliente no dia da devolução (BI do VMSet, VALOR_TOTAL negativo por item): abatidas do faturamento
 # para chegar ao líquido do relatório (em novembro/2026: R$ 242.925,75 na rede, R$ 81.762,49 na loja 4).
@@ -723,7 +735,7 @@ class SalesCache:
         self.entries = {}
 
     def get(self, start, end):
-        today = datetime.date.today()
+        today = br_today()
         ttl = 10 if (start, end) == (today, today + datetime.timedelta(days=1)) else 60 if end > today else 600
         key = (start, end)
         with self.lock:
@@ -816,7 +828,7 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"ERRO vendedores ativos: {str(error)[:200]}")
                 return self._send(503, {"error": "oracle_unavailable"})
         if url.path == "/sales/today":
-            today = datetime.date.today()
+            today = br_today()
             try:
                 entry = sales_cache.get(today, today + datetime.timedelta(days=1))
                 return self._send(200, {"at": int(entry["at"] * 1000), "day": today.isoformat(), "items": entry["items"], "returns": entry["returns"]})

@@ -1,0 +1,60 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { buildOrders, dayKpis, dayOfInstant, type SaleItem } from "@/lib/sales-live/feed";
+
+const DAY = "2026-11-26";
+const labels = { storeLabel: (store: string) => `Loja ${store}` };
+const api = readFileSync(join(process.cwd(), "scripts", "vmset-stock-api.py"), "utf8");
+const salesSql = api.match(/SALES_SQL = """([\s\S]*?)"""/)?.[1] ?? "";
+
+describe("vendas do dia: alto volume sem corte", () => {
+  it("6.000 pedidos (18.000 itens) entram todos e o total bate centavo a centavo com a soma oficial", () => {
+    const items: SaleItem[] = [];
+    let expected = 0;
+    for (let order = 1; order <= 6_000; order += 1) {
+      const store = String((order % 40) + 1);
+      const total = 100 + (order % 97) + 0.37;
+      expected += total;
+      for (let line = 0; line < 3; line += 1) {
+        items.push({ id: `${order}-${line}`, store, order: String(order), date: DAY, time: `${String(8 + (order % 14)).padStart(2, "0")}:${String(order % 60).padStart(2, "0")}:00`, seller: "VENDEDOR", brand: "RAY BAN", description: "ARM", category: "ARMACAO", quantity: 1, amount: total / 3, payment: "PIX", orderTotal: total });
+      }
+    }
+    const orders = buildOrders(items, DAY, labels);
+    expect(orders).toHaveLength(6_000);
+    const kpis = dayKpis(orders);
+    expect(kpis.orders).toBe(6_000);
+    expect(kpis.revenue).toBeCloseTo(expected, 2);
+  });
+
+  it("consulta do VMSet traz o dia inteiro em uma vez: sem ROWNUM, FETCH FIRST ou LIMIT", () => {
+    expect(salesSql).toMatch(/PDSD_DT_EMISSAO >= :a AND PS\.PDSD_DT_EMISSAO < :b/);
+    expect(salesSql).not.toMatch(/ROWNUM|FETCH\s+FIRST|\bLIMIT\b|OFFSET/i);
+  });
+
+  it("conta toda venda lançada como no relatório do VMSet (Reservado e Aberto inclusos); só cancelado fica fora", () => {
+    expect(salesSql).toMatch(/PDSD_STATUS <> 'Cancelado'/);
+    expect(salesSql).toMatch(/<> 'Inativo'/);
+    expect(salesSql).not.toMatch(/PDSD_STATUS IN \('Faturado', 'A Liberar'\)/);
+    expect(salesSql).toMatch(/TPME_TIPO = 'Venda'/);
+  });
+});
+
+describe("corte do dia em America/Sao_Paulo", () => {
+  it("venda às 23:59 de Brasília (02:59 UTC do dia seguinte) é do dia 26; 00:00 de Brasília já é 27", () => {
+    expect(dayOfInstant("2026-11-27T02:59:59Z")).toBe("2026-11-26");
+    expect(dayOfInstant("2026-11-26T21:30:00Z")).toBe("2026-11-26");
+    expect(dayOfInstant("2026-11-27T03:00:00Z")).toBe("2026-11-27");
+  });
+
+  it("pedido emitido às 23:58 fica no dia em que foi vendido, mesmo lido depois da virada", () => {
+    const orders = buildOrders([{ id: "x1", store: "4", order: "9", date: DAY, time: "23:58:00", seller: "V", brand: null, description: "LENTE", category: "LENTES", quantity: 1, amount: 500, payment: "PIX", orderTotal: 500 }], "2026-11-27", labels);
+    expect(orders[0].day ?? DAY).toBe(DAY);
+  });
+
+  it("\"hoje\" da API é o dia de Brasília, nunca o fuso da máquina", () => {
+    expect(api).toMatch(/ZoneInfo\("America\/Sao_Paulo"\)/);
+    expect(api).not.toMatch(/datetime\.date\.today\(\)/);
+    expect(api).toMatch(/"\/sales\/today":[\s\S]{0,40}today = br_today\(\)/);
+  });
+});
