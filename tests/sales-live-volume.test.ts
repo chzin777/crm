@@ -57,3 +57,27 @@ describe("corte do dia em America/Sao_Paulo", () => {
     expect(api).toMatch(/"\/sales\/today":[\s\S]{0,40}today = br_today\(\)/);
   });
 });
+
+describe("loja 4 em novembro/2026: cancelamento retroativo, devoluções e operações internas", () => {
+  const returnsSql = api.match(/RETURNS_SQL = """([\s\S]*?)"""/)?.[1] ?? "";
+
+  it("pedido cancelado depois some do total: a consulta relê o status no VMSet a cada atualização (sem cópia local)", () => {
+    // Status é filtrado na própria consulta e o cache do período vive no máximo 10 min (hoje: 10 s; mês corrente: 60 s).
+    expect(salesSql).toMatch(/PDSD_STATUS IN \('Faturado', 'A Liberar'\) AND TRIM\(PS\.STATUS\) = 'Ativo'/);
+    expect(api).toMatch(/ttl = 10 if \(start, end\) == \(today, today \+ datetime\.timedelta\(days=1\)\) else 60 if end > today else 600/);
+  });
+
+  it("Reservado e Aberto/Inconsistente (R$ 21,3 mil na loja 4) não entram: eram o excedente de ~R$ 27 mil", () => {
+    expect(salesSql).not.toMatch(/Reservado|Inconsistente|<> 'Cancelado'/);
+  });
+
+  it("devolução de cliente abatida uma vez por pedido; troca é um pedido de venda novo (não duplica)", () => {
+    expect(returnsSql).toMatch(/T\.TIPO = 'Devolucao Cliente'/);
+    expect(returnsSql).toMatch(/GROUP BY T\.LOJA, T\.NUM_PEDIDO, T\.DATA_PEDIDO/);
+  });
+
+  it("bonificação, livre emissão, devolução de compra e transferência/operação entre filiais ficam fora", () => {
+    expect(salesSql).toMatch(/TM\.TPME_TIPO = 'Venda'/);
+    expect(salesSql).toMatch(/NOT EXISTS \(SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U\.UNIDADE_EMPRESARIAL_ID = PS\.PARCEIRO_ID\)/);
+  });
+});
