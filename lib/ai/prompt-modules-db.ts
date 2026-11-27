@@ -1,8 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readAiSettings } from "@/lib/ai/store";
-import { listBusinessRules, listSkills } from "@/lib/ai/studio-db";
-import { skillModuleRow } from "@/lib/ai/studio";
+import { listBusinessRules, listSkills, syncSkillPromptModule } from "@/lib/ai/studio-db";
+import { LEGACY_PHOTO_MODULES, mergePhotoSkillMarkdown, PHOTO_SKILL, PHOTO_SKILL_MD, skillModuleRow } from "@/lib/ai/studio";
 import { normalizeModuleInput, sortModules, type ModuleCategory, type PromptModule } from "@/lib/ai/prompt-modules";
 import seed from "@/lib/ai/prompt-modules.seed.json";
 
@@ -87,7 +87,33 @@ const PROMPT_UPGRADES: { id: string; run: () => Promise<void> }[] = [
       ]);
     },
   },
+  {
+    // Fotos numa skill só: o texto ativo de legenda-foto, vitrine-estoque, catalogo-encontrado e anexos vai para a
+    // skill "Envio e Leitura de Fotos"; os módulos antigos ficam desligados e marcados como migrados (sem instrução dupla).
+    id: "ai-prompt-upgrade:2026-11-27-skill-fotos",
+    run: migratePhotoModules,
+  },
 ];
+
+export async function migratePhotoModules() {
+  const skill = (await listSkills()).find((item) => item.builtin && item.slug === PHOTO_SKILL);
+  if (!skill) return;
+  const slugs = Object.keys(LEGACY_PHOTO_MODULES);
+  const legacy = await prisma.aiPromptModule.findMany({ where: { slug: { in: slugs } }, select: { id: true, slug: true, title: true, isActive: true, contentMarkdown: true } });
+  // Skill já editada pela equipe: o texto dela manda; só desliga os módulos antigos.
+  if (skill.instructionsMd === PHOTO_SKILL_MD) {
+    const instructionsMd = mergePhotoSkillMarkdown(legacy);
+    if (instructionsMd !== skill.instructionsMd) {
+      const updated = await prisma.aiSkill.update({ where: { id: skill.id }, data: { instructionsMd } });
+      await syncSkillPromptModule(updated);
+    }
+  }
+  for (const row of legacy) {
+    const title = row.title.includes(MIGRATED_SUFFIX) ? row.title : `${row.title}${MIGRATED_SUFFIX}`.slice(0, 120);
+    await prisma.aiPromptModule.update({ where: { id: row.id }, data: { isActive: false, title } });
+  }
+}
+const MIGRATED_SUFFIX = " (migrado: skill Envio e Leitura de Fotos)";
 
 export async function applyPromptUpgrades() {
   for (const upgrade of PROMPT_UPGRADES) {

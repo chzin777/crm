@@ -857,8 +857,11 @@ export function AiSettingsPanel() {
             <p className="text-xs text-slate-500 dark:text-slate-400">A IA não prioriza os mais baratos: só sugere modelos a partir desse valor. Se o cliente pedir algo mais em conta ou disser quanto quer gastar, vale o pedido dele. Use 0 para desligar.</p>
           </Block>
 
-          <Block title="Foto do produto" hint="O ERP não tem fotos: a IA busca a foto do modelo na web (com cache de 30 dias por produto) e envia junto com as informações de estoque.">
-            <Toggle label="Enviar foto do produto encontrada na web junto com as informações" description="Só quando o modelo é confirmado no estoque. Se a foto falhar, a resposta segue em texto." checked={settings.sendProductImage} onChange={(value) => set("sendProductImage", value)} />
+          <Block title="Fotos" hint="Liga/desliga, texto, máximo de fotos por vitrine e busca na web ficam na skill Envio e Leitura de Fotos.">
+            <button type="button" onClick={() => setTab("skills")} className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-[#002187]/20 bg-[#002187]/5 px-3 py-2.5 text-left text-sm font-semibold text-[#002187] hover:bg-[#002187]/10 dark:border-white/10 dark:bg-white/5 dark:text-[#C4D600]">
+              <span className="flex min-w-0 items-center gap-2"><ImageIcon className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">Abrir a skill Envio e Leitura de Fotos</span></span>
+              <ExternalLink className="h-4 w-4 shrink-0" />
+            </button>
             <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Busca de imagens</p>
               <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-emerald-700 dark:text-emerald-400">

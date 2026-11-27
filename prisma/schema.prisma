@@ -910,6 +910,8 @@ model AiSkill {
   isActive           Boolean  @default(true)
   sortOrder          Int      @default(0)
   builtin            Boolean  @default(false)
+  /// Parâmetros técnicos da skill (prisma/ai-skill-config.sql), ex.: { maxPhotos, webSearch } da skill de fotos.
+  config             Json     @default("{}")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

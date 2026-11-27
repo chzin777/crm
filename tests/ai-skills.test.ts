@@ -54,7 +54,9 @@ vi.mock("@/lib/prisma", () => ({
       delete: vi.fn(async ({ where }: { where: { id: string } }) => { db.skills = db.skills.filter((item) => item.id !== where.id); return {}; }),
     },
     knowledgeChunk: { findMany: vi.fn(async () => []) },
+    aiPromptModuleRevision: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: `r${(db.seq += 1)}`, ...data })) },
     aiPromptModule: {
+      findUnique: vi.fn(async ({ where }: { where: { slug: string } }) => helpers.bySlug(db.modules, where.slug) ?? null),
       count: vi.fn(async () => db.modules.length),
       findMany: vi.fn(async () => db.modules),
       createMany: vi.fn(async ({ data }: { data: Record<string, unknown>[] }) => helpers.insertMany("modules", "m", data)),
@@ -138,12 +140,12 @@ describe("Skills em Markdown: seed, CRUD e efeito no motor", () => {
   it("seed idempotente: tabela vazia recebe as nativas (aproveitando a configuração anterior) uma vez só", async () => {
     db.legacySkills = [{ key: "crediario_aprovacao", enabled: false, instructions: "Só em horário comercial" }];
     const first = await loadSkills();
-    expect(first.map((skill) => skill.slug)).toEqual(["consultoria_pos_campanha", "estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo"]);
+    expect(first.map((skill) => skill.slug)).toEqual(["consultoria_pos_campanha", "estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo", "envio_leitura_fotos"]);
     const credit = first.find((skill) => skill.slug === "crediario_aprovacao")!;
     expect(credit).toMatchObject({ isActive: false, builtin: true });
     expect(credit.instructionsMd).toContain("Só em horário comercial");
     await loadSkills();
-    expect(db.skills).toHaveLength(8);
+    expect(db.skills).toHaveLength(9);
   });
 
   it("edita o Markdown, cria skill nova, liga/desliga e exclui só as customizadas", async () => {
@@ -242,7 +244,7 @@ describe("Skills em Markdown: seed, CRUD e efeito no motor", () => {
     const studioDb = await import("@/lib/ai/studio-db");
     vi.mocked(prisma.aiSkill.findMany).mockRejectedValueOnce(new Error("db down"));
     const skills = await studioDb.loadSkills();
-    expect(skills).toHaveLength(8);
+    expect(skills).toHaveLength(9);
     expect(skills.every((skill) => skill.builtin && skill.isActive)).toBe(true);
     expect(await listBusinessRules()).toBeDefined();
   });

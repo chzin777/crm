@@ -1,14 +1,15 @@
 import "server-only";
 import { loadSemanticMemory, syncKnowledgeDocumentVectors } from "@/lib/ai/vector-memory-db";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
 import { readAiSettings } from "@/lib/ai/store";
-import { chunkText, CONSULTORIA_POS_CAMPANHA_MD, DEFAULT_SKILLS, LEGACY_CONSULTORIA_POS_CAMPANHA_MD, LEGACY_ESTOQUE_MD, LEGACY_ESTOQUE_MD_V2, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, skillModuleRow, skillModuleSlug, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
+import { chunkText, CONSULTORIA_POS_CAMPANHA_MD, DEFAULT_SKILLS, LEGACY_CONSULTORIA_POS_CAMPANHA_MD, LEGACY_ESTOQUE_MD, LEGACY_ESTOQUE_MD_V2, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, skillModuleRow, skillModuleSlug, PHOTO_SKILL, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
 
 /** Estúdio de IA no banco: regras, skills e base de conhecimento (RAG). Falha de banco nunca derruba a resposta. */
 
 const RULE_SELECT = { id: true, title: true, slug: true, keywords: true, content: true, order: true, active: true, alwaysInclude: true } as const;
-const SKILL_SELECT = { id: true, name: true, slug: true, triggerDescription: true, instructionsMd: true, isActive: true, sortOrder: true, builtin: true } as const;
+const SKILL_SELECT = { id: true, name: true, slug: true, triggerDescription: true, instructionsMd: true, isActive: true, sortOrder: true, builtin: true, config: true } as const;
 const TOPICS_MIGRATED_KEY = "ai-topics-migrated";
 let topicsMigrated = false;
 
@@ -42,7 +43,7 @@ export async function listBusinessRules(): Promise<BusinessRule[]> {
 export async function seedSkills(): Promise<void> {
   if (await prisma.aiSkill.count()) return;
   const legacy = await prisma.aiSkillConfig.findMany({ select: { key: true, enabled: true, instructions: true } }).catch(() => []);
-  await prisma.aiSkill.createMany({ data: seedSkillRows(legacy), skipDuplicates: true });
+  await prisma.aiSkill.createMany({ data: seedSkillRows(legacy).map((skill) => ({ ...skill, config: (skill.config ?? {}) as Prisma.InputJsonValue })), skipDuplicates: true });
 }
 
 let nativesChecked = false;
@@ -56,8 +57,11 @@ async function addMissingNativeSkills(rows: AiSkill[]): Promise<boolean> {
   const missing = DEFAULT_SKILLS.filter((skill) => !rows.some((row) => row.slug === skill.slug));
   if (missing.length) {
     const settings = await readAiSettings();
-    const data = missing.map((skill) => (skill.slug === "encerramento_autonomo" ? { ...skill, isActive: settings.closeWhenResolved } : skill));
-    await prisma.aiSkill.createMany({ data, skipDuplicates: true });
+    // Ligada/desligada como estava a configuração antiga (encerramento e "Foto do produto" do Motor & Atendimento).
+    const data = missing.map((skill) => (skill.slug === "encerramento_autonomo" ? { ...skill, isActive: settings.closeWhenResolved } : skill.slug === PHOTO_SKILL ? { ...skill, isActive: settings.sendProductImage } : skill));
+    await prisma.aiSkill.createMany({ data: data.map((skill) => ({ ...skill, config: (skill.config ?? {}) as Prisma.InputJsonValue })), skipDuplicates: true });
+    // Skill nativa nova também ganha o módulo de prompt que leva as instruções ao motor.
+    for (const skill of data) await syncSkillPromptModule(skill).catch(() => undefined);
   }
   // Skill de estoque nunca editada: recebe o protocolo novo (3 opções distintas e ticket mínimo).
   const estoque = DEFAULT_SKILLS.find((skill) => skill.slug === "estoque_cidade");
@@ -87,6 +91,11 @@ export async function listSkills(): Promise<AiSkill[]> {
 export async function syncSkillPromptModule(skill: Pick<AiSkill, "name" | "slug" | "triggerDescription" | "instructionsMd" | "sortOrder">): Promise<void> {
   const row = skillModuleRow(skill);
   const { slug, ...content } = row;
+  // Histórico de versões: o texto anterior vira revisão do módulo (restaurável na tela da skill e em Módulos de Prompt).
+  const previous = await prisma.aiPromptModule.findUnique({ where: { slug }, select: { id: true, title: true, contentMarkdown: true } }).catch(() => null);
+  if (previous && (previous.contentMarkdown !== row.contentMarkdown || previous.title !== row.title)) {
+    await prisma.aiPromptModuleRevision.create({ data: { moduleId: previous.id, title: previous.title, contentMarkdown: previous.contentMarkdown, userId: null } }).catch(() => undefined);
+  }
   await prisma.aiPromptModule.upsert({ where: { slug }, create: row, update: content });
 }
 

@@ -98,8 +98,32 @@ export function topicsToRules(topics: { id?: string; title: string; enabled: boo
 // ---------------------------------------------------------------- Skills em Markdown
 
 /** Skills nativas: o slug liga a skill às ferramentas e fluxos do CRM (desligar a skill desliga a ferramenta). */
-export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo", "consultoria_pos_campanha"] as const;
+export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo", "consultoria_pos_campanha", "envio_leitura_fotos"] as const;
 export type SkillKey = (typeof SKILL_KEYS)[number];
+
+/** Skill única de fotos: liga/desliga todo envio de imagem e guarda os parâmetros técnicos (config). */
+export const PHOTO_SKILL = "envio_leitura_fotos" satisfies SkillKey;
+export type PhotoSkillConfig = { maxPhotos: number; webSearch: boolean };
+export const PHOTO_SKILL_DEFAULTS: PhotoSkillConfig = { maxPhotos: 3, webSearch: true };
+export const PHOTO_MAX_LIMIT = 6;
+
+const asRecord = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
+
+/** Parâmetros da skill de fotos vindos do banco/tela: fora do intervalo ou ausente volta ao padrão. */
+export function photoSkillConfig(raw: unknown): PhotoSkillConfig {
+  const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const max = Number(value.maxPhotos);
+  return {
+    maxPhotos: Number.isFinite(max) ? Math.min(PHOTO_MAX_LIMIT, Math.max(1, Math.trunc(max))) : PHOTO_SKILL_DEFAULTS.maxPhotos,
+    webSearch: typeof value.webSearch === "boolean" ? value.webSearch : PHOTO_SKILL_DEFAULTS.webSearch,
+  };
+}
+
+/** Estado efetivo das fotos nesta resposta: skill ligada + parâmetros (sem a skill no banco: padrão ligado). */
+export function photoSkillState(skills: AiSkill[] | undefined): PhotoSkillConfig & { enabled: boolean } {
+  const skill = skills?.find((item) => item.builtin && item.slug === PHOTO_SKILL);
+  return { enabled: skill ? skill.isActive : true, ...photoSkillConfig(skill?.config) };
+}
 
 export type AiSkill = {
   id: string;
@@ -113,6 +137,8 @@ export type AiSkill = {
   sortOrder: number;
   /** Nativa: ligada a ferramentas/fluxos do CRM, não pode ser excluída nem trocar de slug. */
   builtin: boolean;
+  /** Parâmetros técnicos editáveis na tela (ex.: skill de fotos: maxPhotos, webSearch). */
+  config?: unknown;
 };
 export type AiSkillInput = Partial<Omit<AiSkill, "id" | "builtin">>;
 
@@ -126,7 +152,33 @@ export const SKILL_TOOLS: Record<SkillKey, { tools: string[]; flows: string }> =
   transbordo_humano: { tools: [], flows: "Transbordo por reclamação, compra, dúvida ou documento" },
   encerramento_autonomo: { tools: ["encerrarAtendimento"], flows: "Despedida, encerramento oficial e pesquisa de satisfação quando o cliente dá o assunto por resolvido" },
   consultoria_pos_campanha: { tools: [], flows: "Qualificação antes da vitrine na resposta a campanhas (\"Quero aproveitar\", \"Tenho interesse\", \"Oi\") e ticket mínimo das sugestões" },
+  envio_leitura_fotos: { tools: [], flows: "Foto do produto confirmado no estoque, vitrine com fotos, foto de referência do cliente e anexos (desligada: só texto, nenhuma imagem sai)" },
 };
+
+/** Seções do protocolo de fotos (a migração junta aqui os 4 módulos antigos: legenda, vitrine, catálogo e anexos). */
+export const PHOTO_SKILL_SECTIONS = {
+  produto: "## 1. Foto do produto confirmado no estoque\nQuando o resultado de consultarEstoqueProduto trouxer \"fotoAnexada\": true, o sistema envia a foto junto com a sua resposta.\n- Escreva a resposta como legenda curta e natural (modelo, disponibilidade e loja), sem cara de ficha técnica.\n- Nunca invente, cite ou escreva URLs de imagem; não diga \"segue o link\". Se o cliente pedir foto e não houver \"fotoAnexada\", diga com naturalidade que não tem a foto aqui agora e passe as informações.",
+  vitrine: "## 2. Vitrine com várias opções\nCada opção mostrada vira uma foto com legenda curta feita pelo sistema, até o limite de fotos configurado nesta skill.\n- Comente em poucas palavras por que aquelas peças combinam com o que a pessoa pediu (estilo, ocasião, rosto, custo-benefício), sem repetir a lista em texto, sem códigos e sem listar lojas em cada item.\n- Use a quantidade real de modelos: com 1 só, fale no singular.\n- Feche com uma pergunta leve para ela escolher a foto que mais gostou ou combinar a visita à loja mais próxima.",
+  referencia: "## 3. Foto de referência enviada pelo cliente (\"Tem esse?\")\nTrate como uma cliente interessada num modelo, nunca como manual técnico.\n- Se a análise da foto trouxe marca, linha ou estilo e o catálogo achou modelos, responda direto como vendedora: até 3 modelos parecidos e as lojas com estoque agora.\n- Se não deu para ter certeza da marca, fale do estilo como quem entendeu o gosto dela (formato, cor, proposta), diga que vai buscar opções nessa linha e, se precisar, peça de um jeito leve a marca ou a cidade.\n- Nunca narre a foto (\"na foto aparece...\", \"pela imagem parece...\"): o cliente sabe o que mandou.",
+  anexos: "## 4. Anexos recebidos (fotos, áudios e PDFs)\nUse o conteúdo de PDFs, documentos e transcrições de áudio para responder normalmente, sem repetir para o cliente o que ele mesmo enviou. Áudio é uma mensagem como outra qualquer: responda ao que foi dito.\nReceitas, laudos, comprovantes e orçamentos de outra ótica exigem conferência humana: confirme o recebimento com acolhimento e transfira.\n[FALHA_LEITURA_MIDIA: ...] significa que o arquivo não pôde ser lido: avise com naturalidade, sugerindo reenviar ou mandar em outro formato. Nunca invente o conteúdo.",
+} as const;
+export const PHOTO_SKILL_MD = Object.values(PHOTO_SKILL_SECTIONS).join("\n\n");
+
+/** Módulos de prompt antigos que a skill de fotos substitui (seção da skill que cada um vira). */
+export const LEGACY_PHOTO_MODULES = { "legenda-foto": "produto", "vitrine-estoque": "vitrine", "catalogo-encontrado": "referencia", anexos: "anexos" } as const;
+
+/**
+ * Migração: cada seção da skill usa o texto do módulo antigo quando ele estava ATIVO (preserva o que a equipe
+ * customizou e está em produção); módulo desligado ou ausente fica com o texto padrão da seção.
+ */
+export function mergePhotoSkillMarkdown(modules: { slug: string; isActive: boolean; contentMarkdown: string }[]): string {
+  return (Object.keys(PHOTO_SKILL_SECTIONS) as (keyof typeof PHOTO_SKILL_SECTIONS)[]).map((section) => {
+    const slug = (Object.keys(LEGACY_PHOTO_MODULES) as (keyof typeof LEGACY_PHOTO_MODULES)[]).find((key) => LEGACY_PHOTO_MODULES[key] === section);
+    const legacy = modules.find((module) => module.slug === slug && module.isActive && module.contentMarkdown.trim());
+    if (!legacy) return PHOTO_SKILL_SECTIONS[section];
+    return `${PHOTO_SKILL_SECTIONS[section].split("\n")[0]}\n${legacy.contentMarkdown.trim()}`;
+  }).join("\n\n");
+}
 
 /** Texto padrão antigo da skill de estoque: bases que nunca editaram recebem a versão nova (3 opções e ticket mínimo). */
 export const LEGACY_ESTOQUE_MD = "## Protocolo\n1. Confirme a **cidade** do cliente antes de buscar (sem cidade, pergunte a cidade e a faixa de valor).\n2. Busque o estoque **na mesma rodada**, sem pedir permissão para buscar.\n3. Mostre só modelos com saldo em lojas da cidade do cliente; nunca ofereça produto disponível apenas em cidades distantes.\n4. Apresente no máximo 4 opções, com legenda curta (marca, modelo e preço).\n5. Se nada for encontrado, diga isso com clareza e ofereça alternativas próximas (outra marca ou faixa de preço).";
@@ -239,6 +291,16 @@ export const DEFAULT_SKILLS: Omit<AiSkill, "id">[] = [
     sortOrder: 5,
     builtin: true,
   },
+  {
+    name: "Envio e Leitura de Fotos",
+    slug: PHOTO_SKILL,
+    triggerDescription: "Resposta com produto do estoque ou vitrine (foto enviada pelo sistema), cliente manda foto de referência (\"Tem esse?\") ou qualquer anexo (foto, áudio, PDF).",
+    instructionsMd: PHOTO_SKILL_MD,
+    isActive: true,
+    sortOrder: 80,
+    builtin: true,
+    config: { ...PHOTO_SKILL_DEFAULTS },
+  },
 ];
 
 const isSkillKey = (value: string): value is SkillKey => (SKILL_KEYS as readonly string[]).includes(value);
@@ -248,7 +310,7 @@ export function skillSlug(value: string): string {
 }
 
 /** Normaliza o que veio da tela: nome obrigatório, slug derivado, limites de tamanho. */
-export function normalizeSkillInput(input: AiSkillInput, current?: AiSkill): Omit<AiSkill, "id" | "builtin"> | { error: string } {
+export function normalizeSkillInput(input: AiSkillInput, current?: AiSkill): (Omit<AiSkill, "id" | "builtin" | "config"> & { config?: PhotoSkillConfig }) | { error: string } {
   const name = String(input.name ?? current?.name ?? "").trim().slice(0, 120);
   if (!name) return { error: "Informe o nome da skill." };
   // Skill nativa mantém o slug: é ele que liga a skill às ferramentas do motor.
@@ -262,7 +324,14 @@ export function normalizeSkillInput(input: AiSkillInput, current?: AiSkill): Omi
     instructionsMd: String(input.instructionsMd ?? current?.instructionsMd ?? "").replace(/\r\n/g, "\n").slice(0, 20_000),
     isActive: typeof input.isActive === "boolean" ? input.isActive : current?.isActive ?? true,
     sortOrder: Number.isFinite(order) ? Math.trunc(order) : 0,
+    // Parâmetros técnicos só existem na skill de fotos (campo ausente mantém o salvo).
+    ...(slug === PHOTO_SKILL && current?.builtin ? { config: photoSkillConfig({ ...asRecord(current.config), ...asRecord(input.config) }) } : {}),
   };
+}
+
+/** Restaurar padrão da skill de fotos também volta os parâmetros (máximo de fotos e busca na web). */
+export function defaultSkillConfig(slug: string): Record<string, unknown> | undefined {
+  return slug === PHOTO_SKILL ? { ...PHOTO_SKILL_DEFAULTS } : undefined;
 }
 
 /**
@@ -305,10 +374,18 @@ export function skillModuleRow(skill: Pick<AiSkill, "name" | "slug" | "triggerDe
   };
 }
 
+/** Volta o texto do módulo da skill (skillModuleRow) para nome, gatilho e protocolo: base do histórico de versões. */
+export function parseSkillModule(markdown: string): { name?: string; triggerDescription: string; instructionsMd: string } {
+  const match = markdown.match(/^### Skill: ([^\n]*)\nQuando acionar: ([^\n]*)\n?([\s\S]*)$/);
+  if (!match) return { triggerDescription: "", instructionsMd: markdown.trim() };
+  const trigger = match[2].trim() === "quando o assunto da conversa corresponder ao nome da skill" ? "" : match[2].trim();
+  return { name: match[1].trim(), triggerDescription: trigger, instructionsMd: match[3].trim() };
+}
+
 /** Texto padrão de fábrica de uma skill nativa ("Restaurar padrão"); null para skill customizada. */
 export function defaultSkillInput(slug: string): AiSkillInput | null {
   const base = DEFAULT_SKILLS.find((skill) => skill.slug === slug);
-  return base ? { name: base.name, triggerDescription: base.triggerDescription, instructionsMd: base.instructionsMd } : null;
+  return base ? { name: base.name, triggerDescription: base.triggerDescription, instructionsMd: base.instructionsMd, ...(base.config ? { config: { ...base.config } } : {}) } : null;
 }
 
 /** Remove as tools das skills nativas desligadas (tools sem skill dona continuam). */
@@ -320,7 +397,8 @@ export function filterToolsBySkills<T extends { definition: { function: { name: 
 /** Transbordo desligado: só o pedido explícito de pessoa (palavras e limite de respostas) continua transferindo. */
 export function applySkillsToSettings(settings: AiSettings, skills: AiSkill[] | undefined): AiSettings {
   // Encerramento pela IA: vale a skill "Encerramento Autônomo" (antigo "Quando a IA resolve sozinha" de /ia).
-  const closing = { ...settings, closeWhenResolved: skillEnabled(skills, "encerramento_autonomo") };
+  // Fotos: a skill "Envio e Leitura de Fotos" é o único liga/desliga (desligada, nenhuma imagem sai).
+  const closing = { ...settings, closeWhenResolved: skillEnabled(skills, "encerramento_autonomo"), sendProductImage: skills?.some((item) => item.builtin && item.slug === PHOTO_SKILL) ? photoSkillState(skills).enabled : settings.sendProductImage };
   if (skillEnabled(skills, "transbordo_humano")) return closing;
   return { ...closing, handoffOnComplaint: false, handoffOnPurchaseIntent: false, handoffWhenUnsure: false, handoffOnMedia: false };
 }

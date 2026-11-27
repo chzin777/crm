@@ -22,6 +22,12 @@ const calls = vi.hoisted(() => ({ stock: [] as Record<string, unknown>[], prompt
 const photos = vi.hoisted(() => ({ byCode: {} as Record<string, string> }));
 type Tool = { definition: { function: { name: string } }; run: (args: Record<string, unknown>) => Promise<unknown> };
 const model = vi.hoisted(() => ({ script: null as null | ((tools: Record<string, Tool["run"]>) => Promise<Record<string, unknown>>) }));
+// Skills do teste: null = padrão do motor (todas as nativas ligadas, sem banco).
+const skillState = vi.hoisted(() => ({ list: null as null | import("@/lib/ai/studio").AiSkill[] }));
+vi.mock("@/lib/ai/studio-db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ai/studio-db")>();
+  return { ...actual, loadSkills: vi.fn(async () => skillState.list ?? actual.loadSkills()) };
+});
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/minio", () => ({ readFile: vi.fn() }));
@@ -80,6 +86,8 @@ import { extractPreferredCity, updateCatalogContext, EMPTY_CATALOG_CONTEXT } fro
 import { singleEmoji } from "@/lib/ai/response-opening";
 import { resolveListedChoice } from "@/lib/ai/showcase-choice";
 import { loadPromptModule, PROMPT_MODULES } from "./helpers/prompt-seed";
+import { catalogImages } from "@/lib/ai/product-image-db";
+import { applySkillsToSettings, DEFAULT_SKILLS, mergePhotoSkillMarkdown, PHOTO_SKILL, PHOTO_SKILL_SECTIONS, photoSkillConfig, type AiSkill } from "@/lib/ai/studio";
 
 const settings = { ...DEFAULT_AI_SETTINGS, sendProductImage: false, canQuotePrices: true, useStores: false, useOperatingHours: false, topics: [], aiChoosesQueue: false, maxAiReplies: 20, closeWhenResolved: false };
 const GREETING_START = /^\s*(bom dia|boa tarde|boa noite|oi|olá)\b/i;
@@ -89,6 +97,7 @@ beforeEach(() => {
   calls.prompts.length = 0;
   model.script = null;
   photos.byCode = {};
+  skillState.list = null;
 });
 
 describe("higiene dos módulos de prompt (seed do banco, editável em /ia)", () => {
@@ -369,5 +378,75 @@ describe("Testar IA Agora com todos os módulos desligados", () => {
     expect(calls.roles.at(-1)?.[0]).toBe("system");
     expect(calls.prompts.at(-1)).toBe(result.prompt?.system);
     expect(result.prompt?.used.length).toBeGreaterThan(0);
+  });
+});
+
+describe("skill Envio e Leitura de Fotos (liga/desliga, limite da vitrine e texto no prompt)", () => {
+  const photoSettings = { ...settings, sendProductImage: true };
+  const withPhotoSkill = (patch: Partial<AiSkill>) => DEFAULT_SKILLS.map((skill, index) => ({ ...skill, id: `s${index}`, ...(skill.slug === PHOTO_SKILL ? patch : {}) }));
+  const ask = () => simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
+  const skillModule = { id: "m-fotos", slug: "skill-envio_leitura_fotos", title: "Skill: Envio e Leitura de Fotos", category: "fluxo" as const, contentMarkdown: "### Skill: Envio e Leitura de Fotos\nPROTOCOLO DE FOTOS EDITADO PELA EQUIPE", isActive: true, alwaysInclude: false, keywords: ["@skill_envio_leitura_fotos"], priorityOrder: 245 };
+
+  beforeEach(() => {
+    photos.byCode = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`r${n}`, `https://img.test/r${n}.jpg`]));
+    model.script = async () => ({ reply: "Separei umas de sol pra você 👇\n---SPLIT---\nQual curtiu mais?", action: "reply" });
+  });
+
+  it("ligada: vitrine sai com fotos (padrão de 3)", async () => {
+    skillState.list = withPhotoSkill({ isActive: true });
+    const run = await ask();
+    expect(run.visualCatalog?.items).toHaveLength(3);
+  });
+
+  it("desligada: nenhuma imagem sai, nem vitrine nem foto única, mesmo com sendProductImage ligado nas configurações", async () => {
+    skillState.list = withPhotoSkill({ isActive: false });
+    vi.mocked(catalogImages).mockClear();
+    const run = await ask();
+    expect(run.visualCatalog).toBeUndefined();
+    expect(run.image).toBeFalsy();
+    expect(catalogImages).not.toHaveBeenCalled();
+    expect(run.messages.join("\n")).toMatch(/R\$ 999,00/);
+  });
+
+  it("respeita o máximo de fotos por vitrine configurado na skill", async () => {
+    skillState.list = withPhotoSkill({ isActive: true, config: { maxPhotos: 2, webSearch: true } });
+    const run = await ask();
+    expect(run.visualCatalog?.items).toHaveLength(2);
+    expect(vi.mocked(catalogImages).mock.calls.at(-1)?.[1]).toMatchObject({ want: 2 });
+  });
+
+  it("busca na web desligada na skill: só fotos do cache (catalogImages com web: false)", async () => {
+    skillState.list = withPhotoSkill({ isActive: true, config: { maxPhotos: 3, webSearch: false } });
+    await ask();
+    expect(vi.mocked(catalogImages).mock.calls.at(-1)?.[1]).toMatchObject({ web: false });
+  });
+
+  it("o Markdown editado da skill entra no prompt quando ligada e sai quando desligada", async () => {
+    skillState.list = withPhotoSkill({ isActive: true });
+    vi.mocked(loadPromptModules).mockResolvedValueOnce([...SEED_MODULES, skillModule]);
+    await ask();
+    expect(calls.prompts.at(-1)).toContain("PROTOCOLO DE FOTOS EDITADO PELA EQUIPE");
+    skillState.list = withPhotoSkill({ isActive: false });
+    vi.mocked(loadPromptModules).mockResolvedValueOnce([...SEED_MODULES, skillModule]);
+    await ask();
+    expect(calls.prompts.at(-1)).not.toContain("PROTOCOLO DE FOTOS EDITADO PELA EQUIPE");
+  });
+
+  it("parâmetros fora do intervalo voltam ao limite; migração preserva o texto ativo dos módulos antigos", () => {
+    expect(photoSkillConfig({ maxPhotos: 50 })).toEqual({ maxPhotos: 6, webSearch: true });
+    expect(photoSkillConfig({ maxPhotos: 0, webSearch: false })).toEqual({ maxPhotos: 1, webSearch: false });
+    expect(photoSkillConfig(null)).toEqual({ maxPhotos: 3, webSearch: true });
+    const merged = mergePhotoSkillMarkdown([
+      { slug: "legenda-foto", isActive: true, contentMarkdown: "LEGENDA CUSTOM DA EQUIPE" },
+      { slug: "anexos", isActive: true, contentMarkdown: "ANEXOS CUSTOM" },
+      { slug: "vitrine-estoque", isActive: false, contentMarkdown: "VITRINE DESLIGADA" },
+    ]);
+    expect(merged).toContain("## 1. Foto do produto confirmado no estoque\nLEGENDA CUSTOM DA EQUIPE");
+    expect(merged).toContain("## 4. Anexos recebidos (fotos, áudios e PDFs)\nANEXOS CUSTOM");
+    expect(merged).not.toContain("VITRINE DESLIGADA");
+    expect(merged).toContain(PHOTO_SKILL_SECTIONS.vitrine);
+    expect(merged).toContain(PHOTO_SKILL_SECTIONS.referencia);
+    expect(applySkillsToSettings(photoSettings, withPhotoSkill({ isActive: false })).sendProductImage).toBe(false);
+    expect(applySkillsToSettings({ ...settings, sendProductImage: false }, withPhotoSkill({ isActive: true })).sendProductImage).toBe(true);
   });
 });

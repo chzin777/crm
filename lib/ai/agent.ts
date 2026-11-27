@@ -61,7 +61,7 @@ import { anchoredStoreMatch, deliverLocation, findStores, resolveStoreMatch, res
 import { isCourtesyClosing } from "@/lib/ai/closing";
 import { AI_FAREWELL, aiCloseDecision, CLOSE_BLOCK_LABELS, CLOSE_TOOL, runAiClose, type CloseDecision } from "@/lib/ai/ai-close";
 import { sendSatisfactionSurvey } from "@/lib/chat/nps";
-import { applySkillsToSettings, filterToolsBySkills, skillEnabled } from "@/lib/ai/studio";
+import { applySkillsToSettings, filterToolsBySkills, photoSkillState, skillEnabled } from "@/lib/ai/studio";
 import { loadSkills, loadStudioContext } from "@/lib/ai/studio-db";
 import { createMessageBuffer } from "@/lib/ai/message-debounce";
 import { joinBubbles, sendBubbles, splitBubbles } from "@/lib/ai/bubbles";
@@ -517,6 +517,8 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   // Estúdio de IA: skills desligadas tiram tools, fluxos e gatilhos de transbordo desta resposta.
   const skills = await loadSkills();
   const settings = applySkillsToSettings(rawInput.settings, skills);
+  // Skill "Envio e Leitura de Fotos": liga/desliga (settings.sendProductImage), máximo por vitrine e busca na web.
+  const photoSkill = photoSkillState(skills);
   const input: AgentRunInput = { ...rawInput, settings };
   // Pedido de pessoa pelo nome ("Preciso falar com <ATENDENTE>"): a transferência para ela é decidida aqui, mas a
   // confirmação ao cliente é escrita pelo modelo, com as próprias palavras (sem frase pronta).
@@ -713,14 +715,19 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   // com ou sem fila (alreadyQueued não bloqueia a foto).
   let image: ProductImage | null = null;
   const photoFor = async (product: { codigo: string; produto: string; marca?: string | null }): Promise<ProductImage | null | "sent"> => {
-    if (image || !settings.sendProductImage || !imageSearchStatus()) return null;
+    if (image || !settings.sendProductImage || (photoSkill.webSearch && !imageSearchStatus())) return null;
     if (anchoredProduct) {
       // Follow-up do produto fixado: nunca foto de outro modelo; a foto dele já enviada não se repete.
       if (product.codigo !== anchoredProduct.sku && !sameModel(product.produto)) return null;
       if (anchoredProduct.sku && (input.sentImageSkus ?? []).includes(anchoredProduct.sku) && !asksForPhoto(input.pendingText)) return "sent";
     }
     if (!shouldSendProductPhoto({ sku: product.codigo, sentSkus: input.sentImageSkus ?? [], pendingText: input.pendingText })) return "sent";
-    image = await searchAndCacheProductImage(product);
+    // Busca na web desligada na skill de fotos: só foto já guardada no cache.
+    image = photoSkill.webSearch
+      ? await searchAndCacheProductImage(product)
+      : await catalogImages([{ codigos: [product.codigo], nomeComercial: product.produto }], { want: 1, web: false })
+        .then((found) => (found[product.codigo] ? { sku: product.codigo, url: found[product.codigo], source: "cache" as const, query: "" } : null))
+        .catch(() => null);
     return image;
   };
   // Marca x modelo: sem referência/SKU, código ou nome de modelo explícito (nem item escolhido na vitrine), a busca da
@@ -744,11 +751,11 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   const catalogPhotosFor = async (models: ShowcaseModel[]) => {
     if (!settings.sendProductImage || !models.length) return 0;
     try {
-      Object.assign(catalogPhotos, await catalogImages(models, { want: VISUAL_CATALOG_MAX, web: !!imageSearchStatus() }));
+      Object.assign(catalogPhotos, await catalogImages(models, { want: photoSkill.maxPhotos, web: photoSkill.webSearch && !!imageSearchStatus() }));
     } catch (error) {
       console.warn(`[ai][catalogo] fotos indisponíveis (${error instanceof Error ? error.message : error})`);
     }
-    return Math.min(VISUAL_CATALOG_MAX, models.filter((model) => model.codigos.some((code) => !!catalogPhotos[code])).length);
+    return Math.min(photoSkill.maxPhotos, models.filter((model) => model.codigos.some((code) => !!catalogPhotos[code])).length);
   };
   // Marca sem saldo na cidade: mesma marca nas outras praças + até 3 marcas parecidas com saldo na cidade.
   const localBrandFallback = (brand: string, city: string) => brandStockFallback({
@@ -1203,7 +1210,7 @@ Este modelo já foi mostrado nesta conversa (foto/ficha): responda só em texto,
     if (!ordered.some((model) => model.codigos.some((code) => !!catalogPhotos[code]))) await catalogPhotosFor([...ordered, ...reserves]);
     // Nova vitrine na mesma conversa continua a numeração dos cards (1, 2, 3 → 4, 5, 6): "gostei do 2" nunca fica ambíguo.
     const startIndex = nextShowcaseIndex(shown);
-    visualCatalog = buildVisualCatalog({ models: ordered, reserves, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after, startIndex });
+    visualCatalog = buildVisualCatalog({ models: ordered, reserves, images: catalogPhotos, city: catalogState.preferredCity, opening: before, closing: after, startIndex, max: photoSkill.maxPhotos });
     if (visualCatalog) {
       outcome = { ...outcome, reply: [before, ...visualCatalog.items.map((item) => item.caption), after].filter(Boolean).join("\n---SPLIT---\n") };
       catalogState.lastShownProducts = [...shown, ...shownProductsOf(visualCatalog.items.map((item) => ({ ...item, sku: item.sku })))].slice(-12);

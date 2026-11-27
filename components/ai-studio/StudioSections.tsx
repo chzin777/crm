@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
+import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, History, Images, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { skillSlug, slugify, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type SkillKey } from "@/lib/ai/studio";
+import { PHOTO_MAX_LIMIT, PHOTO_SKILL, photoSkillConfig, skillSlug, slugify, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type SkillKey } from "@/lib/ai/studio";
 
 const input = "h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
 const area = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-900 outline-none focus:border-[#002187] dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-[#C4D600]";
@@ -306,7 +306,49 @@ export function RulesSection() {
 
 // ---------------------------------------------------------------- Skills
 
-const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck, consultoria_pos_campanha: Sparkles };
+const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck, consultoria_pos_campanha: Sparkles, envio_leitura_fotos: Images };
+type SkillRevision = { id: string; createdAt: string; name?: string; triggerDescription: string; instructionsMd: string };
+
+/** Histórico de versões da skill: cada salvamento guarda o texto anterior; restaurar vale na próxima resposta da IA. */
+function SkillHistory({ skillId, onRestored }: { skillId: string; onRestored: (skill: AiSkill) => void }) {
+  const toast = useToast();
+  const [revisions, setRevisions] = useState<SkillRevision[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    api<{ revisions: SkillRevision[] }>(`/api/ai/skills/${skillId}/revisions`)
+      .then((data) => { if (active) setRevisions(data.revisions); })
+      .catch(() => { if (active) setRevisions([]); });
+    return () => { active = false; };
+  }, [skillId]);
+  const restore = async (revision: SkillRevision) => {
+    setBusy(revision.id);
+    try {
+      const data = await api<{ skill: AiSkill }>(`/api/ai/skills/${skillId}/revisions`, json("POST", { revisionId: revision.id }));
+      onRestored(data.skill);
+      toast.success("Versão restaurada", "A IA já usa este texto na próxima resposta.");
+    } catch (cause) {
+      toast.error("Erro ao restaurar", cause instanceof Error ? cause.message : "Tente de novo.");
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (!revisions) return <p className="flex items-center gap-2 text-[11px] text-slate-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />Carregando versões...</p>;
+  if (!revisions.length) return <p className="text-[11px] text-slate-500 dark:text-slate-400">Nenhuma versão anterior ainda. Cada vez que você salvar, o texto anterior fica guardado aqui.</p>;
+  return (
+    <ul className="max-h-64 space-y-1.5 overflow-y-auto">
+      {revisions.map((revision) => (
+        <li key={revision.id} className="flex min-w-0 items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{new Date(revision.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}{revision.name ? ` · ${revision.name}` : ""}</p>
+            <p className="line-clamp-2 break-words text-[11px] text-slate-500 dark:text-slate-400">{revision.instructionsMd}</p>
+          </div>
+          <button type="button" disabled={busy === revision.id} onClick={() => void restore(revision)} className={`${ghost} h-8 shrink-0`}>{busy === revision.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}Restaurar</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 type SkillDraft = AiSkill & { dirty?: boolean; isNew?: boolean };
 type ToolMap = Record<SkillKey, { tools: string[]; flows: string }>;
 
@@ -342,7 +384,7 @@ export function SkillsSection() {
   const save = async (skill: SkillDraft) => {
     setBusy(skill.id);
     try {
-      const body = { name: skill.name, slug: skill.slug, triggerDescription: skill.triggerDescription, instructionsMd: skill.instructionsMd, isActive: skill.isActive, sortOrder: skill.sortOrder };
+      const body = { name: skill.name, slug: skill.slug, triggerDescription: skill.triggerDescription, instructionsMd: skill.instructionsMd, isActive: skill.isActive, sortOrder: skill.sortOrder, ...(skill.builtin && skill.slug === PHOTO_SKILL ? { config: photoSkillConfig(skill.config) } : {}) };
       const data = skill.isNew ? await api<{ skill: AiSkill }>("/api/ai/skills", json("POST", body)) : await api<{ skill: AiSkill }>(`/api/ai/skills/${skill.id}`, json("PUT", body));
       setSkills((current) => current?.map((item) => (item.id === skill.id ? data.skill : item)) ?? current);
       if (open === skill.id) setOpen(data.skill.id);
@@ -353,6 +395,8 @@ export function SkillsSection() {
       setBusy(null);
     }
   };
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const restored = (skill: AiSkill) => setSkills((current) => current?.map((item) => (item.id === skill.id ? skill : item)) ?? current);
   const restore = async (skill: SkillDraft) => {
     setBusy(skill.id);
     try {
@@ -450,8 +494,26 @@ export function SkillsSection() {
                     <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Protocolo (Markdown)
                       <textarea rows={10} value={skill.instructionsMd} onChange={(event) => patch(skill.id, { instructionsMd: event.target.value })} className={`${area} resize-y font-mono`} maxLength={20_000} />
                     </label>
+                    {skill.builtin && skill.slug === PHOTO_SKILL && (() => {
+                      const config = photoSkillConfig(skill.config);
+                      return (
+                        <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-900">
+                          <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Máximo de fotos por vitrine
+                            <input type="number" min={1} max={PHOTO_MAX_LIMIT} value={config.maxPhotos} onChange={(event) => patch(skill.id, { config: { ...config, maxPhotos: Number(event.target.value) } })} className={input} />
+                            <span className="block text-[10px] font-normal text-slate-400">De 1 a {PHOTO_MAX_LIMIT}. Cada opção da vitrine vira uma foto no WhatsApp.</span>
+                          </label>
+                          <div className="min-w-0 space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            <span className="block">Buscar foto na web</span>
+                            <span className="flex items-center gap-2"><Switch label="Buscar foto do produto na web" checked={config.webSearch} onChange={(value) => patch(skill.id, { config: { ...config, webSearch: value } })} /><span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">{config.webSearch ? "Ligada (cache de 30 dias por produto)" : "Desligada: só fotos já guardadas no cache"}</span></span>
+                          </div>
+                          <p className="text-[11px] font-normal text-slate-500 sm:col-span-2 dark:text-slate-400">Desligar a skill no botão ao lado do nome bloqueia qualquer foto: a IA responde só em texto.</p>
+                        </div>
+                      );
+                    })()}
                     <p className="min-w-0 break-words text-[11px] text-slate-500 dark:text-slate-400">Ao salvar, o texto vai para o módulo <strong>Skill: {skill.name}</strong> (condição <code>@skill_{skill.slug}</code>) e a IA já usa na próxima resposta.</p>
+                    {historyFor === skill.id && !skill.isNew && <SkillHistory skillId={skill.id} onRestored={restored} />}
                     <div className="flex flex-wrap justify-end gap-2">
+                      {!skill.isNew && <button type="button" onClick={() => setHistoryFor(historyFor === skill.id ? null : skill.id)} className={ghost}><History className="h-3.5 w-3.5" />{historyFor === skill.id ? "Fechar histórico" : "Histórico de versões"}</button>}
                       {skill.builtin && <button type="button" disabled={busy === skill.id} onClick={() => void restore(skill)} className={ghost}><RotateCcw className="h-3.5 w-3.5" />Restaurar padrão</button>}
                       <button type="button" disabled={busy === skill.id || !skill.dirty} onClick={() => void save(skill)} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
                         {busy === skill.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Salvar skill
