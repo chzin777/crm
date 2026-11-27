@@ -623,11 +623,10 @@ class Snapshot:
 # de emissão do pedido (relógio do Oracle = horário de Brasília). A tabela de BI tab_dados_dinamicos deixava de fora
 # ~20% dos pedidos (lentes/serviços ainda sem movimento de estoque). Um registro por item; o valor do pedido é
 # PDSD_VLR_TOTAL (líquido, já com descontos) e vai repetido em "orderTotal" para não somar duas vezes.
-# Fora: só cancelados (PDSD_STATUS 'Cancelado' / STATUS 'Inativo'), transferências entre lojas (cliente = unidade da
-# rede) e depósitos. Como no relatório de vendas do VMSET, toda venda lançada no dia conta: "Faturado", "A Liberar"
-# (aguardando liberação de desconto/crédito), "Reservado" (encomenda/OS com estoque reservado) e "Aberto" gravado como
-# "Inconsistente" (pedido ainda não faturado). Em 26/11/2026 às 17:30: só Faturado/A Liberar = R$ 226,6 mil no painel
-# x R$ 252 mil no VMSET; com Reservado e Aberto = R$ 252,8 mil (diferença de ~R$ 25 mil explicada inteira).
+# Regra oficial de venda comercial: só "Faturado" e "A Liberar" (venda feita aguardando liberação de desconto/crédito),
+# pedido ativo. Fora: cancelados, "Reservado" (encomenda/OS só com estoque reservado), "Aberto"/"Inconsistente"
+# (pedido não concluído), transferências entre lojas (cliente = unidade da rede) e depósitos.
+# (A v1.135.1 chegou a incluir Reservado e Aberto para bater com um relatório externo lido errado; revertido.)
 # Sem ROWNUM/FETCH FIRST: o dia inteiro vem em uma consulta, qualquer que seja o volume.
 # Só movimento do tipo "Venda": "Outras Saídas" (bonificação, livre emissão, devolução de compra, cancelamento fora
 # do dia, transferência para a matriz) somavam ~R$ 103 mil em novembro/2026 sem ser venda.
@@ -650,7 +649,7 @@ LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
 LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
 LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
 LEFT JOIN CONDICAO_PAGTO CPG ON CPG.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
-WHERE PS.PDSD_STATUS <> 'Cancelado' AND NVL(TRIM(PS.STATUS), 'Ativo') <> 'Inativo'
+WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
   AND PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b
   AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199

@@ -32,10 +32,9 @@ describe("vendas do dia: alto volume sem corte", () => {
     expect(salesSql).not.toMatch(/ROWNUM|FETCH\s+FIRST|\bLIMIT\b|OFFSET/i);
   });
 
-  it("conta toda venda lançada como no relatório do VMSet (Reservado e Aberto inclusos); só cancelado fica fora", () => {
-    expect(salesSql).toMatch(/PDSD_STATUS <> 'Cancelado'/);
-    expect(salesSql).toMatch(/<> 'Inativo'/);
-    expect(salesSql).not.toMatch(/PDSD_STATUS IN \('Faturado', 'A Liberar'\)/);
+  it("regra oficial de venda: só Faturado e A Liberar ativos (Reservado, Aberto e cancelado fora)", () => {
+    expect(salesSql).toMatch(/PDSD_STATUS IN \('Faturado', 'A Liberar'\) AND TRIM\(PS\.STATUS\) = 'Ativo'/);
+    expect(salesSql).not.toMatch(/PDSD_STATUS <> 'Cancelado'/);
     expect(salesSql).toMatch(/TPME_TIPO = 'Venda'/);
   });
 });
