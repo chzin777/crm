@@ -882,8 +882,8 @@ export function AiSettingsPanel() {
                   </div>
                   <label className={labelCls}>Modelo
                     <input value={settings.model} list="ai-models" onChange={(event) => changeModel(event.target.value)} className={input} />
-                    <datalist id="ai-models">{["gpt-5.4-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"].map((model) => <option key={model} value={model} />)}</datalist>
-                    <span className="block text-[10px] font-normal text-slate-400">Nome exato na OpenAI. Modelos da lista já preenchem os preços.</span>
+                    <datalist id="ai-models">{["gpt-5.4", "gpt-5", "gpt-4.1", "gpt-4o"].map((model) => <option key={model} value={model} />)}</datalist>
+                    <span className="block text-[10px] font-normal text-slate-400">Nome exato na OpenAI. Padrão: gpt-5.4 (principal, com raciocínio). Variantes mini e nano viram o principal.</span>
                   </label>
                   <div className="min-w-0 md:col-span-2 xl:col-span-1">
                     <Toggle label="Criatividade padrão do modelo" description="Recomendado. Alguns modelos só aceitam o padrão." checked={settings.temperature === null} onChange={(value) => set("temperature", value ? null : 0.4)} />

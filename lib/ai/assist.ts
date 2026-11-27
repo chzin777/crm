@@ -37,19 +37,44 @@ export async function sessionStartedAt(conversationId: string): Promise<Date | n
   return reopen?.createdAt ?? null;
 }
 
+const TRANSCRIPT_SELECT = { author: true, authorName: true, text: true, internal: true, attachment: true, createdAt: true } as const;
+type TranscriptDbRow = { author: TranscriptRow["author"]; authorName: string | null; text: string; internal: boolean; attachment: unknown; createdAt: Date };
+const lines = (rows: TranscriptDbRow[], now: Date) =>
+  rows
+    .map((row) => transcriptLine({ ...row, attachment: row.attachment as TranscriptRow["attachment"] }, now))
+    .filter(Boolean)
+    .join("\n");
+
+/** Mínimo de mensagens que a IA lê: sessão curta é completada com o fim do atendimento anterior (até 7 dias). */
+export const AI_CONTEXT_MESSAGES = 30;
+const PREVIOUS_DAYS = 7;
+
 async function transcript(conversationId: string, sessionOnly: boolean) {
   const since = sessionOnly ? await sessionStartedAt(conversationId) : null;
   const rows = await prisma.chatMessage.findMany({
     where: { conversationId, ...(since ? { createdAt: { gt: since } } : {}) },
     orderBy: { createdAt: "desc" },
     take: MESSAGES_LIMIT,
-    select: { author: true, authorName: true, text: true, internal: true, attachment: true, createdAt: true },
+    select: TRANSCRIPT_SELECT,
   });
-  return sessionRows(rows, since)
-    .reverse()
-    .map((row) => transcriptLine({ ...row, attachment: row.attachment as TranscriptRow["attachment"] }))
-    .filter(Boolean)
-    .join("\n");
+  const session = sessionRows(rows, since).reverse();
+  return { text: lines(session, new Date()), count: session.length, startedAt: since ?? session[0]?.createdAt ?? new Date() };
+}
+
+/**
+ * Fim do atendimento anterior do mesmo cliente (conversa encerrada ou antes da reabertura), para a IA entender
+ * retomadas como "Achou?" no dia seguinte. Só mensagens visíveis ao cliente; nunca notas internas.
+ */
+export async function previousSessionText(contactId: string, before: Date, currentCount: number, now: Date = new Date()) {
+  const take = AI_CONTEXT_MESSAGES - currentCount;
+  if (take <= 0) return "";
+  const rows = await prisma.chatMessage.findMany({
+    where: { conversation: { contactId }, internal: false, createdAt: { lt: before, gte: new Date(before.getTime() - PREVIOUS_DAYS * 24 * 60 * 60 * 1000) } },
+    orderBy: { createdAt: "desc" },
+    take,
+    select: TRANSCRIPT_SELECT,
+  });
+  return lines([...rows].reverse(), now);
 }
 
 /** Contexto do cliente (mesmo formato do teste da página /ia, ver formatContext). */
@@ -62,9 +87,11 @@ export async function conversationContext(conversation: ConversationRef, options
     transcript(conversation.id, !!options.sessionOnly),
     includeHistory ? loadCustomerHistory(conversation) : null,
   ]);
+  // Agente autônomo: sessão curta ganha o fim do atendimento anterior (resumo/sugestão já veem a conversa inteira).
+  const previous = options.sessionOnly ? await previousSessionText(conversation.contactId, messages.startedAt, messages.count).catch(() => "") : "";
   return {
     contactName: contact?.name ?? "Cliente",
-    text: formatContext({ contactName: contact?.name ?? null, queueName: queue?.name ?? null, subject: conversation.subject, includeHistory, history, conversation: messages, registered: { city: contact?.city, store: contact?.store } }),
+    text: formatContext({ contactName: contact?.name ?? null, queueName: queue?.name ?? null, subject: conversation.subject, includeHistory, history, conversation: messages.text, registered: { city: contact?.city, store: contact?.store }, previous }),
   };
 }
 

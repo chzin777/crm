@@ -54,7 +54,47 @@ export async function ensurePromptModulesSeeded() {
     }
     await prisma.crmWorkspaceData.upsert({ where: { key: SEEDED_KEY }, create: { key: SEEDED_KEY, value: { at: new Date().toISOString() } }, update: {} });
   }
+  await applyPromptUpgrades().catch((error) => console.error("[ai] atualização dos módulos de prompt:", error));
   seeded = true;
+}
+
+/** Frase pronta antiga da regra "cidade sem loja" (seed e versão editada pela equipe). */
+const ROBOTIC_NO_STORE = /diga(?:\s+explicitamente)?:?\s*[“"]Ainda não possuímos unidade em\s*[[<][^\]>]+[\]>]\.?[”"]\.?/;
+export const NATURAL_NO_STORE = "diga com naturalidade e em poucas palavras que ainda não temos loja nessa cidade (sem frase pronta) e indique só as 1 a 3 cidades com loja realmente mais próximas (campo cidades_com_loja_detalhe), nunca a lista inteira da rede.";
+
+/**
+ * Atualizações pontuais do prompt em bases já semeadas, cada uma uma única vez (marcador no banco): depois disso a
+ * equipe edita ou apaga à vontade e nada volta. Texto alterado guarda a versão anterior no histórico do módulo.
+ */
+const PROMPT_UPGRADES: { id: string; run: () => Promise<void> }[] = [
+  {
+    // Conversa humana: sem URA, retomadas ("Achou?"), cidades mais próximas de verdade e foto de referência.
+    id: "ai-prompt-upgrade:2026-11-27-conversa-humana",
+    run: async () => {
+      const row = (seed as SeedRow[]).find((item) => item.slug === "conversa-humana");
+      if (row) await prisma.aiPromptModule.createMany({ data: [{ ...row, isActive: true }], skipDuplicates: true });
+    },
+  },
+  {
+    // Regra crítica "cidade sem loja": sai a frase pronta obrigatória, entra a indicação das cidades mais próximas.
+    id: "ai-prompt-upgrade:2026-11-27-cidade-sem-loja",
+    run: async () => {
+      const current = await prisma.aiPromptModule.findUnique({ where: { slug: "regras-criticas" }, select: { id: true, title: true, contentMarkdown: true } });
+      if (!current || !ROBOTIC_NO_STORE.test(current.contentMarkdown)) return;
+      await prisma.$transaction([
+        prisma.aiPromptModuleRevision.create({ data: { moduleId: current.id, title: current.title, contentMarkdown: current.contentMarkdown, userId: null } }),
+        prisma.aiPromptModule.update({ where: { id: current.id }, data: { contentMarkdown: current.contentMarkdown.replace(ROBOTIC_NO_STORE, NATURAL_NO_STORE) } }),
+      ]);
+    },
+  },
+];
+
+export async function applyPromptUpgrades() {
+  for (const upgrade of PROMPT_UPGRADES) {
+    if (await prisma.crmWorkspaceData.findUnique({ where: { key: upgrade.id }, select: { key: true } })) continue;
+    await upgrade.run();
+    await prisma.crmWorkspaceData.upsert({ where: { key: upgrade.id }, create: { key: upgrade.id, value: { at: new Date().toISOString() } }, update: {} });
+  }
 }
 
 export async function listPromptModules(): Promise<PromptModule[]> {

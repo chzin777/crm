@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { customerMessages, formatContext, historyText, interpretDecision, preAgentOutcome, simulatedHistory, transcriptLine } from "@/lib/ai/agent-core";
+import { customerMessages, formatContext, historyText, interpretDecision, preAgentOutcome, relativeStamp, simulatedHistory, transcriptLine } from "@/lib/ai/agent-core";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 
 const settings = { ...DEFAULT_AI_SETTINGS, aiChoosesQueue: false, handoffKeywords: ["atendente"], handoffOnMedia: true, maxAiReplies: 3, handoffMessage: "Oi {cliente}, vou te passar para a equipe." };
@@ -41,12 +41,33 @@ describe("resposta do modelo virando ação", () => {
 describe("contexto do cliente", () => {
   it("mesmo formato de linha e de contexto; IA aparece como Robô", () => {
     const at = new Date("2026-11-13T13:05:00Z");
-    expect(transcriptLine({ author: "bot", authorName: "Assistente IA", text: "Olá!", internal: false, attachment: null, createdAt: at })).toBe("[13/11, 10:05] Robô: Olá!");
-    expect(transcriptLine({ author: "customer", authorName: null, text: "", internal: false, attachment: { kind: "image", name: "r.jpg" }, createdAt: at })).toBe("[13/11, 10:05] Cliente: [image: r.jpg]");
+    const later = new Date("2026-11-20T12:00:00Z");
+    expect(transcriptLine({ author: "bot", authorName: "Assistente IA", text: "Olá!", internal: false, attachment: null, createdAt: at }, later)).toBe("[13/11 às 10:05] Robô: Olá!");
+    expect(transcriptLine({ author: "customer", authorName: null, text: "", internal: false, attachment: { kind: "image", name: "r.jpg" }, createdAt: at }, later)).toBe("[13/11 às 10:05] Cliente: [image: r.jpg]");
     const text = formatContext({ contactName: "Maria Teste", queueName: null, subject: "", includeHistory: false, history: null, conversation: "" });
     expect(text).toContain('Cliente: <dados_cliente_nao_confiaveis origem="nome do contato">\nMaria Teste\n</dados_cliente_nao_confiaveis>');
     expect(text).toContain("(não disponível para a IA)");
     expect(text).toContain("(sem mensagens)");
+  });
+
+  it("horário relativo em Brasília: hoje, ontem (virada às 00:00 de Brasília) e data", () => {
+    const now = new Date("2026-11-27T10:57:00Z"); // 07:57 em Brasília
+    expect(relativeStamp(new Date("2026-11-27T10:57:00Z"), now)).toBe("hoje às 07:57");
+    expect(relativeStamp(new Date("2026-11-27T00:08:00Z"), now)).toBe("ontem às 21:08");
+    expect(relativeStamp(new Date("2026-11-27T03:01:00Z"), now)).toBe("hoje às 00:01");
+    expect(relativeStamp(new Date("2026-11-25T15:00:00Z"), now)).toBe("25/11 às 12:00");
+  });
+
+  it("atendimento anterior entra no contexto, marcado, para a IA entender \"Achou?\" no dia seguinte", () => {
+    const now = new Date("2026-11-27T10:57:00Z");
+    const previous = transcriptLine({ author: "customer", authorName: null, text: "Vocês têm a armação Armani AR7212?", internal: false, attachment: null, createdAt: new Date("2026-11-27T00:08:00Z") }, now);
+    const current = transcriptLine({ author: "customer", authorName: null, text: "Achou ?", internal: false, attachment: null, createdAt: now }, now);
+    const text = formatContext({ contactName: "Maria", queueName: null, subject: "", includeHistory: false, history: null, conversation: current!, previous: previous! });
+    expect(text).toContain("Atendimento anterior com este cliente (já encerrado");
+    expect(text).toContain("nunca de um nome de pessoa");
+    expect(text).toContain("[ontem às 21:08] Cliente: Vocês têm a armação Armani AR7212?");
+    expect(text.indexOf("Armani")).toBeLessThan(text.indexOf("[hoje às 07:57] Cliente: Achou ?"));
+    expect(formatContext({ contactName: null, queueName: null, subject: "", includeHistory: false, history: null, conversation: current! })).not.toContain("Atendimento anterior");
   });
 
   it("perfis simulados: novo sem cadastro, recorrente com pedidos e receita vencida", () => {

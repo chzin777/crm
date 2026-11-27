@@ -93,6 +93,16 @@ export const DEFAULT_AI_TOPICS: AiKnowledgeTopic[] = [
   { id: "produtos", title: "Produtos", enabled: true, content: "Trabalhamos com óculos de grau, óculos de sol, lentes oftálmicas (visão simples, multifocais/progressivas, filtro de luz azul, fotossensíveis), lentes de contato e acessórios de limpeza." },
 ];
 
+/** Modelo principal (flagship) do atendimento: conversa, visão de fotos, copiloto e teste em /ia. */
+export const FLAGSHIP_MODEL = "gpt-5.4";
+
+/** Variantes pequenas (mini, nano, haiku) nunca atendem: viram o modelo principal. */
+export function flagshipModel(model: string | null | undefined): string {
+  const value = (model ?? "").trim();
+  if (!value || /(?:^|[-_.])(mini|nano|haiku)(?:$|[-_.])/i.test(value)) return FLAGSHIP_MODEL;
+  return value;
+}
+
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   autonomousEnabled: false,
   triageEnabled: true,
@@ -126,10 +136,10 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   queueHints: {},
   handoffMessage: "",
   closeWhenResolved: true,
-  model: "gpt-5.4-mini",
+  model: FLAGSHIP_MODEL,
   temperature: null,
-  priceInputPerMillionUsd: 0.25,
-  priceOutputPerMillionUsd: 2,
+  priceInputPerMillionUsd: 2.5,
+  priceOutputPerMillionUsd: 15,
   usdToBrl: 5.5,
   creditLoadedUsd: 0,
   creditLoadedAt: "",
@@ -153,6 +163,9 @@ const bool = (value: unknown, fallback: boolean) => (typeof value === "boolean" 
 export function sanitizeAiSettings(input: unknown): AiSettings {
   const raw = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   const d = DEFAULT_AI_SETTINGS;
+  const savedModel = str(raw.model, d.model, 60).trim() || d.model;
+  const model = flagshipModel(savedModel);
+  const promoted = model !== savedModel;
   const topics = Array.isArray(raw.topics)
     ? raw.topics
         .map((item, index) => {
@@ -200,10 +213,11 @@ export function sanitizeAiSettings(input: unknown): AiSettings {
     queueHints: hints(raw.queueHints),
     handoffMessage: "",
     closeWhenResolved: bool(raw.closeWhenResolved, d.closeWhenResolved),
-    model: str(raw.model, d.model, 60).trim() || d.model,
+    model,
     temperature: raw.temperature === null || raw.temperature === undefined || raw.temperature === "" ? null : num(raw.temperature, 0.7, 0, 1),
-    priceInputPerMillionUsd: num(raw.priceInputPerMillionUsd, d.priceInputPerMillionUsd, 0, 1000),
-    priceOutputPerMillionUsd: num(raw.priceOutputPerMillionUsd, d.priceOutputPerMillionUsd, 0, 1000),
+    // Modelo pequeno promovido ao principal: o preço salvo era o do mini, passa a ser o da tabela do principal.
+    priceInputPerMillionUsd: promoted ? modelPrice(model)?.input ?? d.priceInputPerMillionUsd : num(raw.priceInputPerMillionUsd, d.priceInputPerMillionUsd, 0, 1000),
+    priceOutputPerMillionUsd: promoted ? modelPrice(model)?.output ?? d.priceOutputPerMillionUsd : num(raw.priceOutputPerMillionUsd, d.priceOutputPerMillionUsd, 0, 1000),
     usdToBrl: num(raw.usdToBrl, d.usdToBrl, 0.01, 100),
     creditLoadedUsd: num(raw.creditLoadedUsd, d.creditLoadedUsd, 0, 1_000_000),
     creditLoadedAt: typeof raw.creditLoadedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.creditLoadedAt) ? raw.creditLoadedAt : "",
@@ -287,6 +301,7 @@ export function asksForHuman(settings: Pick<AiSettings, "handoffKeywords">, text
  * os preços são preenchidos por aqui; o administrador pode ajustar se a OpenAI mudar a tabela.
  */
 export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
+  "gpt-5.4": { input: 2.5, output: 15 },
   "gpt-5.4-mini": { input: 0.25, output: 2 },
   "gpt-5-mini": { input: 0.25, output: 2 },
   "gpt-5-nano": { input: 0.05, output: 0.4 },

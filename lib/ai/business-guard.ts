@@ -42,7 +42,28 @@ export type StoreLookupArgs = { cidade?: string; bairro?: string; termo?: string
 export type StoreLookupStore = { nome: string; cidade: string; bairro: string | null; endereco: string; horario: string | null; link_maps: string };
 export type StoreLookupResult =
   | { encontrada: true; lojas: StoreLookupStore[] }
-  | { encontrada: false; cidade_consultada: string; cidades_com_loja: string[] };
+  | { encontrada: false; cidade_consultada: string; cidades_com_loja: string[]; cidades_com_loja_detalhe: StoreCityPoint[] };
+
+/** Cidade com loja, UF e o ponto médio das lojas dela: base para indicar só as 1 a 3 cidades mais próximas. */
+export type StoreCityPoint = { cidade: string; uf: string | null; lat: number | null; lng: number | null };
+
+export function storeCityPoints(directory: Map<string, StoreInfo>): StoreCityPoint[] {
+  const groups = new Map<string, { cidade: string; uf: string | null; lats: number[]; lngs: number[] }>();
+  for (const { store } of activeEntries(directory)) {
+    const city = store.city?.trim();
+    if (!city) continue;
+    const key = normalizePlace(city);
+    const group = groups.get(key) ?? { cidade: city, uf: store.state?.trim().toUpperCase() || null, lats: [], lngs: [] };
+    if (typeof store.lat === "number" && typeof store.lng === "number" && Number.isFinite(store.lat) && Number.isFinite(store.lng)) {
+      group.lats.push(store.lat);
+      group.lngs.push(store.lng);
+    }
+    group.uf ??= store.state?.trim().toUpperCase() || null;
+    groups.set(key, group);
+  }
+  const mean = (values: number[]) => (values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 1000) / 1000 : null);
+  return [...groups.values()].map((group) => ({ cidade: group.cidade, uf: group.uf, lat: mean(group.lats), lng: mean(group.lngs) }));
+}
 
 const activeEntries = (directory: Map<string, StoreInfo>) => dedupeStores([...directory].filter(([code]) => !isClosedStore(code)).map(([code, store]) => ({ code, store })));
 
@@ -79,6 +100,7 @@ export function consultarLojas(directory: Map<string, StoreInfo>, args: StoreLoo
       encontrada: false,
       cidade_consultada: askedCity,
       cidades_com_loja: cities,
+      cidades_com_loja_detalhe: storeCityPoints(directory),
     };
   }
   const place = ` ${normalizePlace(bairro || termo)} `.replace(cityKey ? ` ${cityKey} ` : "\u0000", " ").replace(/\b(loja|lojas|unidade|unidades|oticas|brasil|de|da|do|em|no|na|setor|st)\b/g, " ").replace(/\s+/g, " ").trim();
@@ -89,7 +111,7 @@ export function consultarLojas(directory: Map<string, StoreInfo>, args: StoreLoo
     });
     if (byPlace.length) pool = byPlace;
     else if (!cityKey) {
-      return { encontrada: false, cidade_consultada: bairro || termo, cidades_com_loja: cities };
+      return { encontrada: false, cidade_consultada: bairro || termo, cidades_com_loja: cities, cidades_com_loja_detalhe: storeCityPoints(directory) };
     }
   }
   return {

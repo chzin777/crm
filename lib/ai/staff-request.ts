@@ -26,6 +26,8 @@ const NOT_NAMES = new Set([
   "consultor", "consultora", "otica", "oticas", "brasil", "comercial", "vendas", "sac", "ouvidoria", "medico", "medica", "doutor", "doutora", "dr", "dra", "voces", "vcs", "mesmo", "mesma", "ja", "agora",
   "isso", "esse", "essa", "sobre", "meu", "minha", "receita", "pedido", "oculos", "lente", "lentes", "armacao", "urgente", "rapido", "hoje", "amanha", "aqui", "la", "quem", "nao", "sim",
   "sua", "seu", "teu", "tua", "nosso", "nossa", "todos", "ninguem", "algum", "alguma", "comigo", "atendimento", "ate", "mais", "outro", "outra", "certo", "cliente", "voceis",
+  // Retomadas curtas de assunto ("Achou?", "Conseguiu?", "Tem?") nunca são nome de pessoa.
+  "achou", "achei", "acharam", "conseguiu", "conseguiram", "encontrou", "encontraram", "viu", "tem", "teve", "chegou", "qual", "quanto", "valor", "preco", "entao", "e",
 ]);
 
 /** Colaborador pelo nome: nome completo primeiro, depois o primeiro nome (só se for único). */

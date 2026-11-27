@@ -1,6 +1,6 @@
 import "server-only";
 import { readAiSettings, recordAiUsage } from "@/lib/ai/store";
-import type { AiSettings } from "@/lib/ai/settings";
+import { FLAGSHIP_MODEL, flagshipModel, type AiSettings } from "@/lib/ai/settings";
 import { estimateTokens, TRANSCRIPTION_MODEL, transcriptionCostUsd } from "@/lib/ai/attachments";
 import { audioFileName, type AiContentPart } from "@/lib/ai/multimodal";
 
@@ -43,6 +43,17 @@ export type AiCallTrace = { toolCalls: string[] };
 const MAX_TOOL_ROUNDS = 2;
 
 const NO_TEMPERATURE_MODELS = new Set<string>();
+const NO_REASONING_MODELS = new Set<string>();
+/** Tokens extras de raciocínio (contam dentro de max_completion_tokens nos modelos com reasoning). */
+const REASONING_BUDGET = 2000;
+
+/**
+ * Raciocínio dos modelos GPT-5.1+ (inclui o principal gpt-5.4): "low" = rápido para WhatsApp, mas pensando no
+ * contexto antes de responder (retomadas como "Achou?", geografia das lojas). Outros modelos: sem o parâmetro.
+ */
+export function reasoningEffortFor(model: string): "low" | null {
+  return /^gpt-5\.[1-9]/i.test(model) && !/-pro\b/i.test(model) ? "low" : null;
+}
 
 /** Erros da OpenAI traduzidos para a equipe: nunca expõe a chave nem o corpo bruto. */
 function friendlyError(status: number, code: string | undefined, type: string | undefined) {
@@ -60,7 +71,8 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   if (!key) throw new AiError("IA não configurada: defina OPENAI_API_KEY no servidor.", 503);
   // O teste da página /ia usa os parâmetros ainda não salvos.
   const settings = meta.settings ?? (await readAiSettings());
-  const model = meta.model || settings.model || process.env.OPENAI_MODEL?.trim() || "gpt-5.4-mini";
+  // Sempre o modelo principal: variante mini/nano (no banco, na tela ou no OPENAI_MODEL do servidor) é promovida.
+  const model = flagshipModel(meta.model || settings.model || process.env.OPENAI_MODEL?.trim() || FLAGSHIP_MODEL);
   const base = { feature: meta.feature, model, conversationId: meta.conversationId, userId: meta.userId };
 
   type Body = {
@@ -70,6 +82,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   };
   const history: ChatMessage[] = [...messages];
   const tools = meta.tools ?? [];
+  let reasoning = NO_REASONING_MODELS.has(model) ? null : reasoningEffortFor(model);
   const call = async (temperature: number | null, withTools: boolean) => {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -77,8 +90,9 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
       body: JSON.stringify({
         model, messages: history,
         ...(meta.plainText ? {} : { response_format: meta.jsonSchema ? { type: "json_schema", json_schema: { name: meta.jsonSchema.name, strict: true, schema: meta.jsonSchema.schema } } : { type: "json_object" } }),
-        max_completion_tokens: meta.maxTokens ?? 1200,
-        ...(temperature === null ? {} : { temperature }),
+        max_completion_tokens: (meta.maxTokens ?? 1200) + (reasoning ? REASONING_BUDGET : 0),
+        // Com raciocínio ligado os modelos GPT-5.x só aceitam a temperatura padrão.
+        ...(reasoning ? { reasoning_effort: reasoning } : temperature === null ? {} : { temperature }),
         // Na última rodada as ferramentas seguem declaradas (o histórico tem chamadas), mas o modelo precisa responder.
         ...(tools.length ? { tools: tools.map((tool) => tool.definition), tool_choice: withTools ? "auto" : "none" } : {}),
       }),
@@ -95,8 +109,14 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
     const withTools = round < MAX_TOOL_ROUNDS;
     try {
       ({ response, body } = await call(temperature, withTools));
+      // Modelo sem suporte a reasoning_effort: repete sem o parâmetro (e não tenta mais neste processo).
+      if (response.status === 400 && reasoning && body.error?.param === "reasoning_effort") {
+        reasoning = null;
+        NO_REASONING_MODELS.add(model);
+        ({ response, body } = await call(temperature, withTools));
+      }
       // Modelo que só aceita a temperatura padrão: repete sem ela em vez de falhar.
-      if (response.status === 400 && temperature !== null && body.error?.param === "temperature") {
+      if (response.status === 400 && !reasoning && temperature !== null && body.error?.param === "temperature") {
         temperature = null;
         NO_TEMPERATURE_MODELS.add(model);
         ({ response, body } = await call(null, withTools));

@@ -1,4 +1,4 @@
-import { formatBr } from "@/lib/br-time";
+import { addDays, brDay, formatBr } from "@/lib/br-time";
 import { promptConditions, skillConditions, type PromptState } from "@/lib/ai/prompt-composer";
 import { assemblePrompt, type AssembledPrompt, type PromptModule } from "@/lib/ai/prompt-modules";
 import type { AiSkill } from "@/lib/ai/studio";
@@ -42,11 +42,23 @@ export function speakerLabel(row: Pick<TranscriptRow, "author" | "authorName">) 
   return AUTHOR_LABEL[row.author];
 }
 
-export function transcriptLine(row: TranscriptRow) {
+/**
+ * Quando a mensagem foi enviada, relativo a agora e em Brasília: "hoje às 07:57", "ontem às 21:08", "13/11 às 10:05".
+ * É o que deixa a IA perceber uma retomada ("Achou?" no dia seguinte fala da busca de ontem).
+ */
+export function relativeStamp(at: Date, now: Date = new Date()) {
+  const clock = formatBr(at, { hour: "2-digit", minute: "2-digit" });
+  const day = brDay(at);
+  if (day === brDay(now)) return `hoje às ${clock}`;
+  if (day === addDays(brDay(now), -1)) return `ontem às ${clock}`;
+  return `${formatBr(at, { day: "2-digit", month: "2-digit" })} às ${clock}`;
+}
+
+export function transcriptLine(row: TranscriptRow, now: Date = new Date()) {
   const body = limitText(row.text.trim(), MESSAGE_TEXT_LIMIT) || (row.attachment ? `[${row.attachment.kind ?? "arquivo"}${row.attachment.name ? `: ${row.attachment.name}` : ""}]` : "");
   if (!body) return null;
   const who = speakerLabel(row);
-  return `[${formatBr(row.createdAt, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}] ${who}${row.internal ? " (nota interna, o cliente não vê)" : ""}: ${body}`;
+  return `[${relativeStamp(row.createdAt, now)}] ${who}${row.internal ? " (nota interna, o cliente não vê)" : ""}: ${body}`;
 }
 
 export function historyText(history: CustomerHistory | null) {
@@ -72,7 +84,7 @@ export function greetingName(contactName: string | null | undefined) {
   return first.length >= 3 ? first : "";
 }
 
-export function formatContext(input: { contactName: string | null; queueName: string | null; subject: string; includeHistory: boolean; history: CustomerHistory | null; conversation: string; /** Cidade e loja do cadastro (não pergunte de novo). */ registered?: { city?: string | null; store?: string | null } }) {
+export function formatContext(input: { contactName: string | null; queueName: string | null; subject: string; includeHistory: boolean; history: CustomerHistory | null; conversation: string; /** Cidade e loja do cadastro (não pergunte de novo). */ registered?: { city?: string | null; store?: string | null }; /** Fim do atendimento anterior (já encerrado) do mesmo cliente: entender retomadas. */ previous?: string }) {
   const registered = [input.registered?.city?.trim() && `cidade ${input.registered.city.trim()}`, input.registered?.store?.trim() && `loja ${input.registered.store.trim()}`].filter(Boolean).join(" · ");
   return [
     // O nome do contato é escolhido pelo cliente no WhatsApp: também é dado não confiável.
@@ -84,6 +96,13 @@ export function formatContext(input: { contactName: string | null; queueName: st
     "Histórico do cliente no ERP:",
     input.includeHistory ? historyText(input.history) : "(não disponível para a IA)",
     "",
+    ...(input.previous
+      ? [
+          "Atendimento anterior com este cliente (já encerrado, mais antigas primeiro). Use para entender retomadas curtas como \"Achou?\", \"Tem?\", \"E aquele outro?\" ou \"Ficou quanto?\": elas falam do último assunto daqui, nunca de um nome de pessoa.",
+          wrapUntrusted(input.previous, "atendimento anterior"),
+          "",
+        ]
+      : []),
     "Conversa (mais antigas primeiro):",
     input.conversation ? wrapUntrusted(input.conversation, "conversa") : "(sem mensagens)",
   ].join("\n");
