@@ -30,7 +30,8 @@ export type SaleItem = {
 
 /** Sol, grau (armação + lentes oftálmicas), lentes de contato ou outros (serviço, acessório). */
 export type CategoryKind = "sol" | "grau" | "lentes" | "outros";
-export type OrderLine = { label: string; description: string | null; kind: CategoryKind; quantity: number; amount: number };
+/** brand/category: marca e categoria normalizadas (filtros de /vendas/ao-vivo). Opcionais: retratos antigos não trazem. */
+export type OrderLine = { label: string; brand?: string; category?: string; description: string | null; kind: CategoryKind; quantity: number; amount: number };
 
 export type LiveOrder = {
   /** Loja + número do pedido: identidade estável (o mesmo pedido nunca entra duas vezes no feed). */
@@ -69,7 +70,8 @@ export type StoreRank = { store: string; storeLabel: string; amount: number; ord
 /** revenue = vendas − devoluções (líquido do relatório do VMSET); returns = total devolvido abatido. */
 export type LiveKpis = { revenue: number; orders: number; ticket: number; topStores: StoreRank[]; returns: number };
 /** Devolução de cliente no dia em que aconteceu (abate o faturamento da loja). */
-export type StoreReturn = { store: string; order: string | null; day: string; amount: number };
+/** Devolução (por item quando o VMSet manda marca/categoria/descrição/quantidade: abate do recorte filtrado). */
+export type StoreReturn = { store: string; order: string | null; day: string; amount: number; brand?: string; category?: string; description?: string | null; quantity?: number };
 export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; stores: { store: string; storeLabel: string; search?: string }[]; from?: string; to?: string };
 /** Mensagens do canal ao vivo: retrato inteiro (conexão, virada do dia, cancelamento) ou só os pedidos novos/alterados. */
 export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
@@ -89,11 +91,21 @@ export const withClosedTag = (store: string, label: string) => (isClosedStore(st
 export function parseReturns(raw: unknown, fallbackDay: string): StoreReturn[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry) => {
-    const item = (entry ?? {}) as { store?: unknown; order?: unknown; date?: unknown; amount?: unknown };
+    const item = (entry ?? {}) as { store?: unknown; order?: unknown; date?: unknown; amount?: unknown; brand?: unknown; category?: unknown; description?: unknown; quantity?: unknown };
     const amount = typeof item.amount === "number" && Number.isFinite(item.amount) ? money2(item.amount) : 0;
     if (!item.store || amount <= 0) return [];
     const day = typeof item.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : fallbackDay;
-    return [{ store: String(item.store), order: item.order ? String(item.order) : null, day, amount }];
+    const base = { store: String(item.store), order: item.order ? String(item.order) : null, day, amount };
+    // Devolução por item (marca, categoria, produto e quantidade): o filtro de itens abate só o que é do recorte.
+    if (!("brand" in item) && !("category" in item) && !("description" in item)) return [base];
+    const quantity = typeof item.quantity === "number" && Number.isFinite(item.quantity) ? Math.abs(Math.round(item.quantity)) : 1;
+    return [{
+      ...base,
+      brand: brandName(typeof item.brand === "string" ? item.brand : null),
+      category: categoryName(typeof item.category === "string" ? item.category : null),
+      description: typeof item.description === "string" && item.description.trim() ? titleCase(item.description.trim()) : null,
+      quantity: Math.max(1, quantity),
+    }];
   });
 }
 
@@ -114,6 +126,20 @@ export function brandLabel(item: Pick<SaleItem, "brand" | "category">) {
   if (brand && BRAND_WORDS[brand]) return BRAND_WORDS[brand];
   if (brand && !/^(SEM MARCA|DIVERSOS|GENERICO|GENERICA|NULL)$/.test(brand)) return titleCase(brand);
   return item.category ? titleCase(item.category.trim()) : "Item";
+}
+
+/** Marca normalizada para filtro ("RAY BAN" → "Ray-Ban"; sem marca/diversos → "Sem marca"). */
+export function brandName(raw: string | null | undefined) {
+  const brand = (raw ?? "").trim().toUpperCase();
+  if (brand && BRAND_WORDS[brand]) return BRAND_WORDS[brand];
+  if (brand && !/^(SEM MARCA|DIVERSOS|GENERICO|GENERICA|NULL)$/.test(brand)) return titleCase(brand);
+  return "Sem marca";
+}
+
+/** Categoria do VMSet normalizada para filtro ("OCULOS DE SOL" → "Oculos De Sol"; vazia → "Sem categoria"). */
+export function categoryName(raw: string | null | undefined) {
+  const category = (raw ?? "").trim().replace(/\s+/g, " ");
+  return category ? titleCase(category) : "Sem categoria";
 }
 
 /** "Ray-Ban, Zeiss + 2": até duas marcas distintas e o restante contado. */
@@ -179,7 +205,7 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
       payment: first.payment ? titleCase(first.payment.trim()) : null,
       fromCrm: input.fromCrm?.(key) ?? false,
       version: `${sorted.map((item) => item.id).join(",")}:${amount}`,
-      lines: sorted.map((item) => ({ label: brandLabel(item), description: item.description ? titleCase(item.description.trim()) : null, kind: categoryKind(item.category, item.description), quantity: Math.max(1, Math.round(item.quantity || 1)), amount: money2(Number.isFinite(item.amount) ? item.amount : 0) })),
+      lines: sorted.map((item) => ({ label: brandLabel(item), brand: brandName(item.brand), category: categoryName(item.category), description: item.description ? titleCase(item.description.trim()) : null, kind: categoryKind(item.category, item.description), quantity: Math.max(1, Math.round(item.quantity || 1)), amount: money2(Number.isFinite(item.amount) ? item.amount : 0) })),
       kinds: [...new Set(sorted.map((item) => categoryKind(item.category, item.description)))],
       customer: shortName(first.customer),
       conversationId: input.conversationOf?.(key) ?? null,

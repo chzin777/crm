@@ -648,12 +648,14 @@ def br_today():
 # Devoluções de cliente pela DATA_NOTA (BI do VMSet, VALOR_TOTAL negativo por item): abatidas do faturamento para
 # chegar ao líquido do BI (loja 4, 01-27/11/2026: R$ 91.708,57).
 RETURNS_SQL = """
-SELECT T.LOJA, T.NUM_PEDIDO, T.DATA_NOTA, SUM(T.VALOR_TOTAL)
+SELECT T.LOJA, T.NUM_PEDIDO, T.DATA_NOTA, SUM(T.VALOR_TOTAL), T.MARCA, T.NOME_CATEGORIA, T.DESCRICAO, SUM(T.QTDE_ITEM_VENDA)
 FROM tab_dados_dinamicos T
 WHERE T.TIPO = 'Devolucao Cliente' AND T.DATA_NOTA >= :a AND T.DATA_NOTA < :b
   AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999
-GROUP BY T.LOJA, T.NUM_PEDIDO, T.DATA_NOTA
+GROUP BY T.LOJA, T.NUM_PEDIDO, T.DATA_NOTA, T.MARCA, T.NOME_CATEGORIA, T.DESCRICAO
 """
+# Por item (marca, categoria, produto e quantidade): o total segue igual ao do BI; os filtros de produto/marca/
+# categoria do painel abatem só a devolução do recorte.
 
 
 def digits(value, pad=0):
@@ -700,8 +702,9 @@ def returns_between(start, end):
         cur.execute(RETURNS_SQL, a=datetime.datetime.combine(start, datetime.time()), b=datetime.datetime.combine(end, datetime.time()))
         rows = cur.fetchall()
     return [
-        {"store": text(store), "order": text(order), "date": day.strftime("%Y-%m-%d") if day else None, "amount": round(-float(total or 0), 2)}
-        for store, order, day, total in rows
+        {"store": text(store), "order": text(order), "date": day.strftime("%Y-%m-%d") if day else None, "amount": round(-float(total or 0), 2),
+         "brand": text(brand), "category": text(category), "description": text(description), "quantity": abs(float(quantity or 0))}
+        for store, order, day, total, brand, category, description, quantity in rows
         if store is not None and total
     ]
 

@@ -4,14 +4,16 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bar, CartesianGrid, Cell, ComposedChart, Area, AreaChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  Activity, BadgeDollarSign, Bell, BellOff, CalendarDays, Check, ChevronLeft, ChevronRight, CreditCard, Expand, Eye, Glasses, Hash, LayoutList, Loader2, MessageCircle, Minimize, Package, Pencil,
-  Receipt, RefreshCw, Search, ShoppingBag, Store, Sun, Target, TrendingUp, Trophy, UserRound, Users, WifiOff, X, Zap,
+  Activity, BadgeCheck, BadgeDollarSign, Bell, BellOff, CalendarDays, Check, ChevronLeft, ChevronRight, CreditCard, Expand, Eye, Glasses, Hash, LayoutList, Loader2, MessageCircle, Minimize, Package, Pencil,
+  Receipt, RefreshCw, Search, ShoppingBag, Store, Sun, Tags, Target, TrendingUp, Trophy, UserRound, Users, WifiOff, X, Zap,
 } from "lucide-react";
 import { EntityDialog } from "@/components/EntityDialog";
 import { useToast } from "@/components/ToastProvider";
 import { ChartTooltip, FadeGradient, SegmentedControl, cardClass, chartTheme } from "@/components/dashboard/DashboardKit";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { StoreMultiSelect } from "@/components/sales-live/StoreMultiSelect";
+import { ItemMultiSelect } from "@/components/sales-live/ItemMultiSelect";
+import { EMPTY_ITEM_FILTER, filterOrdersByItems, filterReturnsByItems, hasItemFilter, itemFilterOptions, itemTotals, type ItemFilter } from "@/lib/sales-live/item-filter";
 import { ordersInStores, searchOrders, storeSelectionLabel } from "@/lib/sales-live/filters";
 import { LeaderboardCard } from "@/components/sales-live/LeaderboardCard";
 import { sellerKey, sellerLeaders, storeLeaders } from "@/lib/sales-live/leaderboard";
@@ -345,6 +347,7 @@ export default function LiveSalesPage() {
   const [selectedStores, setSelectedStores] = useState<string[]>([]);
   // Vendedor escolhido no ranking (loja|nome): filtra o feed; clicar de novo limpa.
   const [seller, setSeller] = useState<string | null>(null);
+  const [itemFilter, setItemFilter] = useState<ItemFilter>(EMPTY_ITEM_FILTER);
   const [origin, setOrigin] = useState<Origin>("all");
   // Busca global: o campo responde na hora, o filtro do feed espera 200 ms depois da última tecla.
   const [search, setSearch] = useState("");
@@ -554,26 +557,33 @@ export default function LiveSalesPage() {
   };
 
   const currentHour = brHour(now);
-  const scoped = useMemo(() => ordersInStores(orders, selectedStores), [orders, selectedStores]);
+  // Recorte de Produto/Marca/Categoria: cada pedido fica só com os itens filtrados (valor e unidades desses itens).
+  const itemFiltered = hasItemFilter(itemFilter);
+  const itemOrders = useMemo(() => filterOrdersByItems(orders, itemFilter), [orders, itemFilter]);
+  const itemReturns = useMemo(() => filterReturnsByItems(returns, itemFilter), [returns, itemFilter]);
+  const storeOrders = useMemo(() => ordersInStores(orders, selectedStores), [orders, selectedStores]);
+  const scoped = useMemo(() => ordersInStores(itemOrders, selectedStores), [itemOrders, selectedStores]);
   const store = selectedStores.length > 0;
-  const scopedReturns = useMemo(() => (selectedStores.length ? returns.filter((item) => selectedStores.includes(item.store)) : returns), [returns, selectedStores]);
+  const scopedReturns = useMemo(() => (selectedStores.length ? itemReturns.filter((item) => selectedStores.includes(item.store)) : itemReturns), [itemReturns, selectedStores]);
   const kpis = useMemo(() => dayKpis(scoped, scopedReturns), [scoped, scopedReturns]);
-  const allKpis = useMemo(() => dayKpis(orders, returns), [orders, returns]);
+  const allKpis = useMemo(() => dayKpis(itemOrders, itemReturns), [itemOrders, itemReturns]);
+  const itemTotal = useMemo(() => itemTotals(scoped, scopedReturns), [scoped, scopedReturns]);
+  const itemOptions = useMemo(() => itemFilterOptions(storeOrders, itemFilter), [storeOrders, itemFilter]);
   const allStores = useMemo(() => {
     const byStore = new Map<string, { amount: number; orders: number }>();
-    for (const order of orders) {
+    for (const order of itemOrders) {
       const entry = byStore.get(order.store) ?? { amount: 0, orders: 0 };
       entry.amount += order.amount;
       entry.orders += 1;
       byStore.set(order.store, entry);
     }
     // Faturamento líquido por loja: vendas − devoluções da própria loja.
-    for (const [storeKey, amount] of returnsByStore(returns)) {
+    for (const [storeKey, amount] of returnsByStore(itemReturns)) {
       const entry = byStore.get(storeKey);
       if (entry) entry.amount -= amount;
     }
     return stores.map((item) => ({ ...item, ...(byStore.get(item.store) ?? { amount: 0, orders: 0 }) })).sort((a, b) => b.amount - a.amount || b.orders - a.orders);
-  }, [orders, returns, stores]);
+  }, [itemOrders, itemReturns, stores]);
   const crm = useMemo(() => crmShare(scoped), [scoped]);
   // Hoje: hora a hora; períodos: dia a dia (destaque no dia de hoje, se estiver no intervalo).
   const hourly = useMemo<HourPoint[]>(() => (isLive ? hourlySeries(scoped, currentHour) : dailySeries(scoped, rangeFrom, rangeTo)), [isLive, scoped, currentHour, rangeFrom, rangeTo]);
@@ -607,6 +617,19 @@ export default function LiveSalesPage() {
     setSelectedStores(next);
     setPage(1);
   };
+  const pickItems = (key: keyof ItemFilter, next: string[]) => {
+    setItemFilter((current) => ({ ...current, [key]: next }));
+    setPage(1);
+  };
+  const clearFilters = () => {
+    setSelectedStores([]);
+    setItemFilter(EMPTY_ITEM_FILTER);
+    setPage(1);
+  };
+  const activeChips: { key: string; label: string; remove: () => void }[] = [
+    ...selectedStores.map((code) => ({ key: `s-${code}`, label: stores.find((item) => item.store === code)?.storeLabel ?? `Loja ${code}`, remove: () => pickStores(selectedStores.filter((item) => item !== code)) })),
+    ...(["categories", "brands", "products"] as const).flatMap((key) => itemFilter[key].map((value) => ({ key: `${key}-${value}`, label: value, remove: () => pickItems(key, itemFilter[key].filter((item) => item !== value)) }))),
+  ];
   const pickSeller = (next: string | null) => {
     setSeller(next);
     setPage(1);
@@ -682,6 +705,22 @@ export default function LiveSalesPage() {
             </label>
           </div>
         </div>
+        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+          <ItemMultiSelect icon={Tags} noun="categoria" plural="categorias" options={itemOptions.categories} selected={itemFilter.categories} onChange={(next) => pickItems("categories", next)} />
+          <ItemMultiSelect icon={BadgeCheck} noun="marca" plural="marcas" options={itemOptions.brands} selected={itemFilter.brands} onChange={(next) => pickItems("brands", next)} />
+          <ItemMultiSelect icon={Package} noun="produto, modelo ou referência" plural="produtos" options={itemOptions.products} selected={itemFilter.products} onChange={(next) => pickItems("products", next)} />
+        </div>
+        {activeChips.length > 0 && (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {activeChips.map((chip) => (
+              <span key={chip.key} className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-lg bg-[#002187]/10 py-1 pl-2 pr-1 text-xs font-semibold text-[#002187] dark:bg-[#C4D600]/15 dark:text-[#C4D600]">
+                <span className="min-w-0 truncate">{chip.label}</span>
+                <button type="button" onClick={chip.remove} aria-label={`Remover filtro ${chip.label}`} className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/10"><X className="h-3 w-3" /></button>
+              </span>
+            ))}
+            <button type="button" onClick={clearFilters} className="cursor-pointer rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white">Limpar filtros</button>
+          </div>
+        )}
         <div className={`flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center ${period === "custom" || (!isLive && rangeValid) ? "" : "hidden"}`}>
           {period === "custom" && (
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
@@ -724,7 +763,21 @@ export default function LiveSalesPage() {
             <p className="mt-1 whitespace-nowrap text-[length:clamp(1.5rem,10.5cqw,3.75rem)] font-extrabold leading-none tabular-nums tracking-tight text-white">{formatMoney(revenue)}</p>
             {kpis.returns > 0 && <p className="mt-1 text-[11px] text-white/60" title="Faturamento líquido, como no relatório do VMSET: vendas menos devoluções de clientes do período.">Líquido de {formatMoney(kpis.returns)} em devoluções</p>}
             {store && allKpis.revenue > 0 && <p className="mt-1.5 text-xs text-white/70"><span className="font-bold text-[#C4D600]">{percent((kpis.revenue / allKpis.revenue) * 100)}</span> do faturamento total ({formatMoney(allKpis.revenue)})</p>}
-            {!store && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
+            {itemFiltered && (
+              <div className="mt-2 grid grid-cols-2 gap-2" title="Só os itens do filtro (produto, marca, categoria), sem o resto do pedido, já descontadas as devoluções desses itens.">
+                <div className="min-w-0 rounded-xl bg-[#C4D600]/15 px-2.5 py-1.5 ring-1 ring-[#C4D600]/30">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-[#C4D600]">Quantidade vendida</p>
+                  <p className="whitespace-nowrap text-base font-bold tabular-nums sm:text-lg">{itemTotal.units.toLocaleString("pt-BR")} un.</p>
+                  {itemTotal.returnedUnits > 0 && <p className="truncate text-[10px] tabular-nums text-white/60">{itemTotal.soldUnits} vendidas − {itemTotal.returnedUnits} devolvidas</p>}
+                </div>
+                <div className="min-w-0 rounded-xl bg-white/[0.07] px-2.5 py-1.5 ring-1 ring-white/10">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-white/60">Valor vendido</p>
+                  <p className="whitespace-nowrap text-base font-bold tabular-nums sm:text-lg">{compactMoney(itemTotal.amount)}</p>
+                  <p className="truncate text-[10px] text-white/60">só dos itens filtrados</p>
+                </div>
+              </div>
+            )}
+            {!store && !itemFiltered && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
             {!isLive && rangeValid && <p className="mt-1.5 text-xs tabular-nums text-white/70">{rangeLabel}{loadingPeriod && <Loader2 className="ml-1.5 inline h-3.5 w-3.5 animate-spin" />}</p>}
             <div className="mt-3"><HeroSpark data={hourly} /></div>
             <div className="mt-3 grid grid-cols-3 gap-2">
