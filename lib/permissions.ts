@@ -14,6 +14,7 @@ export const MODULES = [
   { key: "lojas", label: "Lojas", href: "/lojas", group: "Gestão" },
   { key: "metas", label: "Metas de vendedores", href: "/vendas/metas", group: "Gestão" },
   { key: "premiacoes", label: "Campanhas e premiações", href: "/vendas/campanhas", group: "Gestão" },
+  { key: "brasil_points", label: "Brasil Points", href: "/brasil-points", group: "Gestão" },
   { key: "usuarios", label: "Usuários", href: "/usuarios", group: "Gestão" },
   { key: "permissoes", label: "Permissões", href: "/permissoes", group: "Gestão" },
   { key: "chat", label: "Atendimento", href: "/chat", group: "Vendas" },
@@ -68,6 +69,8 @@ export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAc
   if (key === "metas") return modules?.lojas === true || modules?.usuarios === true;
   // Campanhas com premiação: mesma gestão das metas.
   if (key === "premiacoes") return modules?.metas === true || modules?.lojas === true || modules?.usuarios === true;
+  // Brasil Points: mesma gestão das metas de vendedores.
+  if (key === "brasil_points") return modules?.metas === true || modules?.usuarios === true;
   return key === "campanhas" && modules?.disparos === true;
 }
 

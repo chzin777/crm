@@ -1339,3 +1339,77 @@ model GoalCelebration {
   @@unique([achievementId, userId])
   @@index([userId, seenAt])
 }
+
+/// Brasil Points: regra de pontuação (ganho ou perda), automática ou manual. SQL: prisma/brasil-points.sql
+model BrasilPointsRule {
+  id             String    @id @default(cuid())
+  title          String
+  description    String    @default("")
+  /// "earn" | "penalty"
+  type           String
+  /// "automatic" | "manual"
+  triggerType    String    @map("trigger_type")
+  eventKey       String    @map("event_key")
+  pointsAmount   Int       @map("points_amount")
+  conditionsJson Json      @default("{}") @map("conditions_json")
+  isActive       Boolean   @default(false) @map("is_active")
+  activeSince    DateTime? @map("active_since") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("brasil_points_rules")
+}
+
+/// Extrato imutável do vendedor; saldo = soma de points. Único (reference_type, reference_id, event_key).
+model BrasilPointsLedger {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  ruleId        String?  @map("rule_id")
+  /// "earn" | "penalty" | "redeem" | "adjustment"
+  type          String
+  points        Int
+  balanceAfter  Int      @map("balance_after")
+  reason        String
+  /// "order" | "nps" | "attendance" | "redemption" | "manual"
+  referenceType String   @map("reference_type")
+  referenceId   String?  @map("reference_id")
+  eventKey      String   @map("event_key")
+  store         String?
+  createdBy     String   @default("system") @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([referenceType, referenceId])
+  @@map("brasil_points_ledger")
+}
+
+model BrasilPointsReward {
+  id            String   @id @default(cuid())
+  title         String
+  description   String   @default("")
+  imageUrl      String?  @map("image_url")
+  pointsCost    Int      @map("points_cost")
+  stockQuantity Int?     @map("stock_quantity")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("brasil_points_rewards")
+}
+
+model BrasilPointsRedemption {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  rewardId    String    @map("reward_id")
+  pointsSpent Int       @map("points_spent")
+  /// "pending" | "approved" | "delivered" | "rejected"
+  status      String    @default("pending")
+  adminNotes  String?   @map("admin_notes")
+  reviewedBy  String?   @map("reviewed_by")
+  reviewedAt  DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("brasil_points_redemptions")
+}

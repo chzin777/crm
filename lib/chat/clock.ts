@@ -30,6 +30,7 @@ import { backfillDispatchMedia } from "@/lib/chat/dispatch-media-backfill";
 import { attributeSales } from "@/lib/automations/attribution";
 import { scheduleDailyRfvp } from "@/lib/rfvp-db";
 import { runBudgetRecovery, runRecurrenceReminders, runWeeklyObjections } from "@/lib/commercial/jobs-db";
+import { scheduleBrasilPoints } from "@/lib/brasil-points/engine";
 import { scheduleCatalogSync } from "@/lib/catalog/vmset-catalog";
 
 const MINUTE = 60_000;
@@ -351,6 +352,10 @@ export async function runClock() {
   await block("recuperação de orçamento", async () => {
     await runBudgetRecovery(new Date(now));
   });
+
+  // Brasil Points: vendas faturadas, devoluções/cancelamentos e NPS viram pontos (a cada 10 min, em segundo plano,
+  // idempotente: re-sync nunca duplica nem estorna duas vezes).
+  void scheduleBrasilPoints(now)?.catch((error: unknown) => void reportError("cron.brasil-points", error));
 
   // Catálogo do VMSET (/produtos): sincronização incremental em segundo plano (produtos 15 min, saldo 5 min).
   void scheduleCatalogSync(now).catch((error: unknown) => void reportError("cron.catálogo", error));

@@ -93,6 +93,11 @@ Assistente IA dos atendimentos humanos. A coluna e o backfill conservador são
 aplicados pelo SQL aditivo `prisma/nps-ai-attribution.sql`; avaliações sem evidência
 suficiente permanecem sem classificação. O painel NPS permite filtrar a autoria.
 
+O Brasil Points usa o SQL aditivo `prisma/brasil-points.sql` para criar regras,
+extrato idempotente, prêmios e resgates. Aplique esse arquivo no PostgreSQL antes
+de publicar a funcionalidade; o deploy blue/green não executa automaticamente
+arquivos SQL fora de `prisma/migrations`.
+
 Limitações atuais: campanhas e configurações de WhatsApp são registradas no CRM, mas
 não enviam mensagens nem coletam respostas sem integração com um provedor. O cadastro
 de usuário não envia convite nem define uma senha; o administrador precisa configurar
