@@ -87,7 +87,7 @@ import { singleEmoji } from "@/lib/ai/response-opening";
 import { resolveListedChoice } from "@/lib/ai/showcase-choice";
 import { loadPromptModule, PROMPT_MODULES } from "./helpers/prompt-seed";
 import { catalogImages } from "@/lib/ai/product-image-db";
-import { applySkillsToSettings, DEFAULT_SKILLS, mergePhotoSkillMarkdown, PHOTO_SKILL, PHOTO_SKILL_SECTIONS, photoSkillConfig, type AiSkill } from "@/lib/ai/studio";
+import { applySkillsToSettings, DEFAULT_SKILLS, mergePhotoSkillMarkdown, PHOTO_SKILL, PHOTO_SKILL_MD, PHOTO_SKILL_PARTS, PHOTO_SKILL_SECTIONS, photoSkillConfig, READ_PHOTO_SKILL_MD, skillEnabled, splitCombinedPhotoMarkdown, type AiSkill } from "@/lib/ai/studio";
 
 const settings = { ...DEFAULT_AI_SETTINGS, sendProductImage: false, canQuotePrices: true, useStores: false, useOperatingHours: false, topics: [], aiChoosesQueue: false, maxAiReplies: 20, closeWhenResolved: false };
 const GREETING_START = /^\s*(bom dia|boa tarde|boa noite|oi|olá)\b/i;
@@ -381,11 +381,11 @@ describe("Testar IA Agora com todos os módulos desligados", () => {
   });
 });
 
-describe("skill Envio e Leitura de Fotos (liga/desliga, limite da vitrine e texto no prompt)", () => {
+describe("skill Envio de Fotos (liga/desliga, limite da vitrine e texto no prompt)", () => {
   const photoSettings = { ...settings, sendProductImage: true };
   const withPhotoSkill = (patch: Partial<AiSkill>) => DEFAULT_SKILLS.map((skill, index) => ({ ...skill, id: `s${index}`, ...(skill.slug === PHOTO_SKILL ? patch : {}) }));
   const ask = () => simulateAgent(photoSettings, [{ from: "customer", text: "quero óculos de sol ray-ban" }], "user-1", undefined, { contactName: "5562999998888", knownCity: "Goiânia" });
-  const skillModule = { id: "m-fotos", slug: "skill-envio_leitura_fotos", title: "Skill: Envio e Leitura de Fotos", category: "fluxo" as const, contentMarkdown: "### Skill: Envio e Leitura de Fotos\nPROTOCOLO DE FOTOS EDITADO PELA EQUIPE", isActive: true, alwaysInclude: false, keywords: ["@skill_envio_leitura_fotos"], priorityOrder: 245 };
+  const skillModule = { id: "m-fotos", slug: "skill-envio_fotos", title: "Skill: Envio de Fotos", category: "fluxo" as const, contentMarkdown: "### Skill: Envio de Fotos\nPROTOCOLO DE FOTOS EDITADO PELA EQUIPE", isActive: true, alwaysInclude: false, keywords: ["@skill_envio_fotos"], priorityOrder: 245 };
 
   beforeEach(() => {
     photos.byCode = Object.fromEntries([1, 2, 3, 4, 5].map((n) => [`r${n}`, `https://img.test/r${n}.jpg`]));
@@ -448,5 +448,44 @@ describe("skill Envio e Leitura de Fotos (liga/desliga, limite da vitrine e text
     expect(merged).toContain(PHOTO_SKILL_SECTIONS.referencia);
     expect(applySkillsToSettings(photoSettings, withPhotoSkill({ isActive: false })).sendProductImage).toBe(false);
     expect(applySkillsToSettings({ ...settings, sendProductImage: false }, withPhotoSkill({ isActive: true })).sendProductImage).toBe(true);
+    // Envio e leitura são skills separadas: cada uma com as suas seções.
+    expect(mergePhotoSkillMarkdown([], PHOTO_SKILL_PARTS.envio_fotos)).toBe(PHOTO_SKILL_MD);
+    expect(mergePhotoSkillMarkdown([], PHOTO_SKILL_PARTS.leitura_fotos)).toBe(READ_PHOTO_SKILL_MD);
+    expect(PHOTO_SKILL_MD).not.toContain("## 3.");
+    expect(READ_PHOTO_SKILL_MD).not.toContain("## 1.");
+  });
+
+  it("skill combinada antiga se divide: até a seção 3 é envio, dali em diante é leitura (texto editado preservado)", () => {
+    const parts = splitCombinedPhotoMarkdown("## 1. Foto\nENVIO EDITADO\n\n## 2. Vitrine\nVITRINE\n\n## 3. Referência\nLEITURA EDITADA\n\n## 4. Anexos\nANEXOS");
+    expect(parts.send).toBe("## 1. Foto\nENVIO EDITADO\n\n## 2. Vitrine\nVITRINE");
+    expect(parts.read).toBe("## 3. Referência\nLEITURA EDITADA\n\n## 4. Anexos\nANEXOS");
+  });
+});
+
+describe("skill Leitura de Fotos (separada do envio)", () => {
+  const photo = { name: "foto.jpg", mime: "image/jpeg", data: new Uint8Array([255, 216, 255, 224, 0, 16]) };
+  const withSkills = (patch: Record<string, Partial<AiSkill>>) => DEFAULT_SKILLS.map((skill, index) => ({ ...skill, id: `s${index}`, ...(patch[skill.slug] ?? {}) }));
+  const send = () => simulateAgent(settings, [{ from: "customer", text: "tem esse?" }], "user-1", photo, { contactName: "5562999998888", knownCity: "Goiânia" });
+  const visionCalls = () => calls.prompts.filter((prompt) => prompt.startsWith("Você classifica a imagem")).length;
+
+  it("ligada: a foto do cliente é analisada", async () => {
+    skillState.list = withSkills({});
+    await send();
+    expect(visionCalls()).toBe(1);
+    expect(calls.prompts.at(-1)).not.toContain("FOTO DO CLIENTE NÃO ANALISADA");
+  });
+
+  it("desligada (e receita desligada): a foto não é analisada nem vai ao modelo; a IA pede a descrição em texto", async () => {
+    skillState.list = withSkills({ leitura_fotos: { isActive: false }, leitura_receita: { isActive: false } });
+    calls.roles.length = 0;
+    await send();
+    expect(visionCalls()).toBe(0);
+    expect(calls.prompts.at(-1)).toContain("FOTO DO CLIENTE NÃO ANALISADA");
+  });
+
+  it("desligar a leitura não desliga o envio (e vice-versa)", () => {
+    const readOff = withSkills({ leitura_fotos: { isActive: false } });
+    expect(applySkillsToSettings({ ...settings, sendProductImage: true }, readOff).sendProductImage).toBe(true);
+    expect(skillEnabled(withSkills({ envio_fotos: { isActive: false } }), "leitura_fotos")).toBe(true);
   });
 });

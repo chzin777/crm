@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, History, Images, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
+import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, History, Images, RefreshCw, ScanEye, RotateCcw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -306,7 +306,7 @@ export function RulesSection() {
 
 // ---------------------------------------------------------------- Skills
 
-const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck, consultoria_pos_campanha: Sparkles, envio_leitura_fotos: Images };
+const SKILL_ICONS: Record<SkillKey, typeof Boxes> = { estoque_cidade: PackageSearch, leitura_receita: FileText, calculo_lentes: Calculator, crediario_aprovacao: CreditCard, pipeline_automatico: GitBranch, transbordo_humano: Headset, encerramento_autonomo: CircleCheck, consultoria_pos_campanha: Sparkles, envio_fotos: Images, leitura_fotos: ScanEye };
 type SkillRevision = { id: string; createdAt: string; name?: string; triggerDescription: string; instructionsMd: string };
 
 /** Histórico de versões da skill: cada salvamento guarda o texto anterior; restaurar vale na próxima resposta da IA. */

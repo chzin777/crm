@@ -857,9 +857,9 @@ export function AiSettingsPanel() {
             <p className="text-xs text-slate-500 dark:text-slate-400">A IA não prioriza os mais baratos: só sugere modelos a partir desse valor. Se o cliente pedir algo mais em conta ou disser quanto quer gastar, vale o pedido dele. Use 0 para desligar.</p>
           </Block>
 
-          <Block title="Fotos" hint="Liga/desliga, texto, máximo de fotos por vitrine e busca na web ficam na skill Envio e Leitura de Fotos.">
+          <Block title="Fotos" hint="Liga/desliga, texto, máximo de fotos por vitrine e busca na web ficam na skill Envio de Fotos; a análise das fotos que o cliente manda fica na skill Leitura de Fotos.">
             <button type="button" onClick={() => setTab("skills")} className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-[#002187]/20 bg-[#002187]/5 px-3 py-2.5 text-left text-sm font-semibold text-[#002187] hover:bg-[#002187]/10 dark:border-white/10 dark:bg-white/5 dark:text-[#C4D600]">
-              <span className="flex min-w-0 items-center gap-2"><ImageIcon className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">Abrir a skill Envio e Leitura de Fotos</span></span>
+              <span className="flex min-w-0 items-center gap-2"><ImageIcon className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">Abrir as skills Envio de Fotos e Leitura de Fotos</span></span>
               <ExternalLink className="h-4 w-4 shrink-0" />
             </button>
             <div className="rounded-lg bg-slate-50 p-3 dark:bg-white/5">

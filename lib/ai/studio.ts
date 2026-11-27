@@ -98,11 +98,15 @@ export function topicsToRules(topics: { id?: string; title: string; enabled: boo
 // ---------------------------------------------------------------- Skills em Markdown
 
 /** Skills nativas: o slug liga a skill às ferramentas e fluxos do CRM (desligar a skill desliga a ferramenta). */
-export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo", "consultoria_pos_campanha", "envio_leitura_fotos"] as const;
+export const SKILL_KEYS = ["estoque_cidade", "leitura_receita", "calculo_lentes", "crediario_aprovacao", "pipeline_automatico", "transbordo_humano", "encerramento_autonomo", "consultoria_pos_campanha", "envio_fotos", "leitura_fotos"] as const;
 export type SkillKey = (typeof SKILL_KEYS)[number];
 
-/** Skill única de fotos: liga/desliga todo envio de imagem e guarda os parâmetros técnicos (config). */
-export const PHOTO_SKILL = "envio_leitura_fotos" satisfies SkillKey;
+/** Envio de Fotos: liga/desliga todo envio de imagem ao cliente e guarda os parâmetros técnicos (config). */
+export const PHOTO_SKILL = "envio_fotos" satisfies SkillKey;
+/** Leitura de Fotos: liga/desliga a análise das fotos que o cliente manda (foto de referência). */
+export const READ_PHOTO_SKILL = "leitura_fotos" satisfies SkillKey;
+/** Skill antiga que juntava envio e leitura (v1.139.0): migrada para as duas acima. */
+export const LEGACY_COMBINED_PHOTO_SKILL = "envio_leitura_fotos";
 export type PhotoSkillConfig = { maxPhotos: number; webSearch: boolean };
 export const PHOTO_SKILL_DEFAULTS: PhotoSkillConfig = { maxPhotos: 3, webSearch: true };
 export const PHOTO_MAX_LIMIT = 6;
@@ -152,27 +156,41 @@ export const SKILL_TOOLS: Record<SkillKey, { tools: string[]; flows: string }> =
   transbordo_humano: { tools: [], flows: "Transbordo por reclamação, compra, dúvida ou documento" },
   encerramento_autonomo: { tools: ["encerrarAtendimento"], flows: "Despedida, encerramento oficial e pesquisa de satisfação quando o cliente dá o assunto por resolvido" },
   consultoria_pos_campanha: { tools: [], flows: "Qualificação antes da vitrine na resposta a campanhas (\"Quero aproveitar\", \"Tenho interesse\", \"Oi\") e ticket mínimo das sugestões" },
-  envio_leitura_fotos: { tools: [], flows: "Foto do produto confirmado no estoque, vitrine com fotos, foto de referência do cliente e anexos (desligada: só texto, nenhuma imagem sai)" },
+  envio_fotos: { tools: [], flows: "Foto do produto confirmado no estoque e vitrine com fotos (desligada: só texto, nenhuma imagem sai)" },
+  leitura_fotos: { tools: [], flows: "Análise da foto que o cliente manda (\"Tem esse?\") e leitura de anexos (desligada: a IA não analisa a foto e pede que descreva o modelo em texto; receita em foto segue na skill de receita)" },
 };
 
-/** Seções do protocolo de fotos (a migração junta aqui os 4 módulos antigos: legenda, vitrine, catálogo e anexos). */
+/** Seções dos protocolos de fotos (a migração junta aqui os 4 módulos antigos: legenda, vitrine, catálogo e anexos). */
 export const PHOTO_SKILL_SECTIONS = {
   produto: "## 1. Foto do produto confirmado no estoque\nQuando o resultado de consultarEstoqueProduto trouxer \"fotoAnexada\": true, o sistema envia a foto junto com a sua resposta.\n- Escreva a resposta como legenda curta e natural (modelo, disponibilidade e loja), sem cara de ficha técnica.\n- Nunca invente, cite ou escreva URLs de imagem; não diga \"segue o link\". Se o cliente pedir foto e não houver \"fotoAnexada\", diga com naturalidade que não tem a foto aqui agora e passe as informações.",
   vitrine: "## 2. Vitrine com várias opções\nCada opção mostrada vira uma foto com legenda curta feita pelo sistema, até o limite de fotos configurado nesta skill.\n- Comente em poucas palavras por que aquelas peças combinam com o que a pessoa pediu (estilo, ocasião, rosto, custo-benefício), sem repetir a lista em texto, sem códigos e sem listar lojas em cada item.\n- Use a quantidade real de modelos: com 1 só, fale no singular.\n- Feche com uma pergunta leve para ela escolher a foto que mais gostou ou combinar a visita à loja mais próxima.",
   referencia: "## 3. Foto de referência enviada pelo cliente (\"Tem esse?\")\nTrate como uma cliente interessada num modelo, nunca como manual técnico.\n- Se a análise da foto trouxe marca, linha ou estilo e o catálogo achou modelos, responda direto como vendedora: até 3 modelos parecidos e as lojas com estoque agora.\n- Se não deu para ter certeza da marca, fale do estilo como quem entendeu o gosto dela (formato, cor, proposta), diga que vai buscar opções nessa linha e, se precisar, peça de um jeito leve a marca ou a cidade.\n- Nunca narre a foto (\"na foto aparece...\", \"pela imagem parece...\"): o cliente sabe o que mandou.",
   anexos: "## 4. Anexos recebidos (fotos, áudios e PDFs)\nUse o conteúdo de PDFs, documentos e transcrições de áudio para responder normalmente, sem repetir para o cliente o que ele mesmo enviou. Áudio é uma mensagem como outra qualquer: responda ao que foi dito.\nReceitas, laudos, comprovantes e orçamentos de outra ótica exigem conferência humana: confirme o recebimento com acolhimento e transfira.\n[FALHA_LEITURA_MIDIA: ...] significa que o arquivo não pôde ser lido: avise com naturalidade, sugerindo reenviar ou mandar em outro formato. Nunca invente o conteúdo.",
 } as const;
-export const PHOTO_SKILL_MD = Object.values(PHOTO_SKILL_SECTIONS).join("\n\n");
+type PhotoSection = keyof typeof PHOTO_SKILL_SECTIONS;
+/** Seções de cada skill: envio (produto e vitrine) e leitura (foto de referência e anexos). */
+export const PHOTO_SKILL_PARTS: Record<typeof PHOTO_SKILL | typeof READ_PHOTO_SKILL, PhotoSection[]> = { envio_fotos: ["produto", "vitrine"], leitura_fotos: ["referencia", "anexos"] };
+export const PHOTO_SKILL_MD = PHOTO_SKILL_PARTS.envio_fotos.map((key) => PHOTO_SKILL_SECTIONS[key]).join("\n\n");
+export const READ_PHOTO_SKILL_MD = PHOTO_SKILL_PARTS.leitura_fotos.map((key) => PHOTO_SKILL_SECTIONS[key]).join("\n\n");
+/** Texto padrão da skill antiga combinada (v1.139.0): reconhece se a equipe já tinha editado. */
+export const LEGACY_COMBINED_PHOTO_MD = Object.values(PHOTO_SKILL_SECTIONS).join("\n\n");
 
-/** Módulos de prompt antigos que a skill de fotos substitui (seção da skill que cada um vira). */
+/** Separa o protocolo da skill antiga combinada: até a seção "## 3." é envio; dali em diante, leitura. */
+export function splitCombinedPhotoMarkdown(markdown: string): { send: string; read: string } {
+  const at = markdown.search(/^## 3\./m);
+  if (at < 0) return { send: markdown.trim(), read: READ_PHOTO_SKILL_MD };
+  return { send: markdown.slice(0, at).trim(), read: markdown.slice(at).trim() };
+}
+
+/** Módulos de prompt antigos que as skills de fotos substituem (seção que cada um vira). */
 export const LEGACY_PHOTO_MODULES = { "legenda-foto": "produto", "vitrine-estoque": "vitrine", "catalogo-encontrado": "referencia", anexos: "anexos" } as const;
 
 /**
  * Migração: cada seção da skill usa o texto do módulo antigo quando ele estava ATIVO (preserva o que a equipe
  * customizou e está em produção); módulo desligado ou ausente fica com o texto padrão da seção.
  */
-export function mergePhotoSkillMarkdown(modules: { slug: string; isActive: boolean; contentMarkdown: string }[]): string {
-  return (Object.keys(PHOTO_SKILL_SECTIONS) as (keyof typeof PHOTO_SKILL_SECTIONS)[]).map((section) => {
+export function mergePhotoSkillMarkdown(modules: { slug: string; isActive: boolean; contentMarkdown: string }[], sections: PhotoSection[] = Object.keys(PHOTO_SKILL_SECTIONS) as PhotoSection[]): string {
+  return sections.map((section) => {
     const slug = (Object.keys(LEGACY_PHOTO_MODULES) as (keyof typeof LEGACY_PHOTO_MODULES)[]).find((key) => LEGACY_PHOTO_MODULES[key] === section);
     const legacy = modules.find((module) => module.slug === slug && module.isActive && module.contentMarkdown.trim());
     if (!legacy) return PHOTO_SKILL_SECTIONS[section];
@@ -292,14 +310,23 @@ export const DEFAULT_SKILLS: Omit<AiSkill, "id">[] = [
     builtin: true,
   },
   {
-    name: "Envio e Leitura de Fotos",
+    name: "Envio de Fotos",
     slug: PHOTO_SKILL,
-    triggerDescription: "Resposta com produto do estoque ou vitrine (foto enviada pelo sistema), cliente manda foto de referência (\"Tem esse?\") ou qualquer anexo (foto, áudio, PDF).",
+    triggerDescription: "Resposta com produto confirmado no estoque ou vitrine de opções (a foto é enviada pelo sistema junto com a resposta).",
     instructionsMd: PHOTO_SKILL_MD,
     isActive: true,
     sortOrder: 80,
     builtin: true,
     config: { ...PHOTO_SKILL_DEFAULTS },
+  },
+  {
+    name: "Leitura de Fotos",
+    slug: READ_PHOTO_SKILL,
+    triggerDescription: "Cliente manda foto de um modelo (\"Tem esse?\") ou outro anexo (foto, áudio, PDF).",
+    instructionsMd: READ_PHOTO_SKILL_MD,
+    isActive: true,
+    sortOrder: 85,
+    builtin: true,
   },
 ];
 

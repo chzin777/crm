@@ -24,7 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     aiPromptModule: {
       count: vi.fn(async () => db.modules.length),
-      findMany: vi.fn(async () => db.modules),
+      findMany: vi.fn(async (args?: { where?: { slug?: { in?: string[] } } }) => (args?.where?.slug?.in ? db.modules.filter((row) => args.where!.slug!.in!.includes(String(row.slug))) : db.modules)),
       findUnique: vi.fn(async ({ where }: { where: { slug: string } }) => db.modules.find((row) => row.slug === where.slug) ?? null),
       createMany: vi.fn(async ({ data }: { data: Record<string, unknown>[] }) => {
         let count = 0;

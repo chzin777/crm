@@ -574,15 +574,25 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
   // Foto de produto desta mensagem: análise (marca, linha, referência provável) e o que a cascata achou em estoque.
   let imageAnalysis: ImageAnalysis | null = null;
   const photoQueries: CatalogQuery[] = [];
+  // Skill "Leitura de Fotos" desligada: a foto do cliente não é analisada nem vai ao modelo (receita em foto segue
+  // pela skill de receita).
+  const readPhotos = skillEnabled(skills, "leitura_fotos");
+  let unreadPhotos = 0;
   for (const item of mediaList) {
     if (item.failed || item.sticker) continue;
-    if (item.kind === "image") {
+    if (item.kind === "image" && !readPhotos && !skillEnabled(skills, "leitura_receita")) {
+      consumed.add(item);
+      unreadPhotos += 1;
+    } else if (item.kind === "image") {
       const vision = await aiJson<VisionResult>([{ role: "system", content: VISION_PROMPT }, { role: "user", content: item.parts.filter((part) => part.type === "image_url") }], { ...input.meta, maxTokens: 4096 });
       const { kind, query } = readVision(vision);
       const docKind = (kind === "receita" || kind === "documento") && skillEnabled(skills, "leitura_receita") ? documentKind(kind, vision.documento) : null;
       if (docKind) {
         documents.push({ kind: docKind, summary: formatExtraction(docKind, vision.documento), extraction: vision.documento, source: item.source });
         consumed.add(item);
+      } else if (!readPhotos) {
+        consumed.add(item);
+        unreadPhotos += 1;
       } else if (kind === "produto") {
         imageAnalysis = makeImageAnalysis(query);
         photoQueries.push(query);
@@ -708,7 +718,7 @@ async function runAiAgentInternal(rawInput: AgentRunInput): Promise<AgentRun> {
     skills,
     flags: promptFlags,
   };
-  const turnExtra = [cityFirst ? cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", nearbyBlock, budgetBlock(budget, cheap), anchorPromptBlock(anchor), listedPromptBlock(listed, choice), analysisPromptBlock(analysis), catalogContext, documentContext, isPureGreeting(input.pendingText) || input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))];
+  const turnExtra = [unreadPhotos ? "FOTO DO CLIENTE NÃO ANALISADA (leitura de fotos desligada): não comente nem adivinhe o que tem na foto; peça com naturalidade que a pessoa diga em texto o modelo, a marca ou o estilo que procura." : "", cityFirst ?cityFirstBlock(askBudget, typeFirst) : typeFirst ? typeFirstBlock(askBudget) : qualifyFirst ? qualifyFirstBlock() : "", catalogState.preferredCity ? `CIDADE DO CLIENTE: ${catalogState.preferredCity} (a busca de estoque já usa só lojas dessa cidade).` : "", nearbyBlock, budgetBlock(budget, cheap), anchorPromptBlock(anchor), listedPromptBlock(listed, choice), analysisPromptBlock(analysis), catalogContext, documentContext, isPureGreeting(input.pendingText) || input.queued ? "" : (vagueMessageBlock(classifyVague(input.pendingText)) || bareNameHint(input.pendingText, input.contactName))];
   // Tool somente leitura de estoque: busca local (top 5) + saldo por loja na API do VMSet (cache 3 min, limite 3 s).
   const stock: StockLog[] = [];
   // Foto do produto (web + cache por código): 1ª consulta do modelo na etapa ou pedido do cliente; mesmo pipeline

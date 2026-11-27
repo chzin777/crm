@@ -2,7 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readAiSettings } from "@/lib/ai/store";
 import { listBusinessRules, listSkills, syncSkillPromptModule } from "@/lib/ai/studio-db";
-import { LEGACY_PHOTO_MODULES, mergePhotoSkillMarkdown, PHOTO_SKILL, PHOTO_SKILL_MD, skillModuleRow } from "@/lib/ai/studio";
+import { Prisma } from "@/generated/prisma/client";
+import { LEGACY_COMBINED_PHOTO_SKILL, LEGACY_PHOTO_MODULES, mergePhotoSkillMarkdown, PHOTO_SKILL, PHOTO_SKILL_MD, PHOTO_SKILL_PARTS, READ_PHOTO_SKILL, READ_PHOTO_SKILL_MD, skillModuleRow, skillModuleSlug, splitCombinedPhotoMarkdown } from "@/lib/ai/studio";
 import { normalizeModuleInput, sortModules, type ModuleCategory, type PromptModule } from "@/lib/ai/prompt-modules";
 import seed from "@/lib/ai/prompt-modules.seed.json";
 
@@ -93,27 +94,52 @@ const PROMPT_UPGRADES: { id: string; run: () => Promise<void> }[] = [
     id: "ai-prompt-upgrade:2026-11-27-skill-fotos",
     run: migratePhotoModules,
   },
+  {
+    // Envio e leitura de fotos são coisas diferentes: a skill combinada vira "Envio de Fotos" + "Leitura de Fotos".
+    id: "ai-prompt-upgrade:2026-11-27-fotos-envio-leitura",
+    run: splitCombinedPhotoSkill,
+  },
 ];
 
 export async function migratePhotoModules() {
-  const skill = (await listSkills()).find((item) => item.builtin && item.slug === PHOTO_SKILL);
-  if (!skill) return;
+  const skills = await listSkills();
   const slugs = Object.keys(LEGACY_PHOTO_MODULES);
   const legacy = await prisma.aiPromptModule.findMany({ where: { slug: { in: slugs } }, select: { id: true, slug: true, title: true, isActive: true, contentMarkdown: true } });
   // Skill já editada pela equipe: o texto dela manda; só desliga os módulos antigos.
-  if (skill.instructionsMd === PHOTO_SKILL_MD) {
-    const instructionsMd = mergePhotoSkillMarkdown(legacy);
-    if (instructionsMd !== skill.instructionsMd) {
-      const updated = await prisma.aiSkill.update({ where: { id: skill.id }, data: { instructionsMd } });
-      await syncSkillPromptModule(updated);
-    }
+  for (const [slug, base] of [[PHOTO_SKILL, PHOTO_SKILL_MD], [READ_PHOTO_SKILL, READ_PHOTO_SKILL_MD]] as const) {
+    const skill = skills.find((item) => item.builtin && item.slug === slug);
+    if (!skill || skill.instructionsMd !== base) continue;
+    const instructionsMd = mergePhotoSkillMarkdown(legacy, PHOTO_SKILL_PARTS[slug]);
+    if (instructionsMd === skill.instructionsMd) continue;
+    const updated = await prisma.aiSkill.update({ where: { id: skill.id }, data: { instructionsMd } });
+    await syncSkillPromptModule(updated);
   }
   for (const row of legacy) {
-    const title = row.title.includes(MIGRATED_SUFFIX) ? row.title : `${row.title}${MIGRATED_SUFFIX}`.slice(0, 120);
+    const title = row.title.includes(" (migrado") ? row.title : `${row.title}${MIGRATED_SUFFIX}`.slice(0, 120);
     await prisma.aiPromptModule.update({ where: { id: row.id }, data: { isActive: false, title } });
   }
 }
-const MIGRATED_SUFFIX = " (migrado: skill Envio e Leitura de Fotos)";
+const MIGRATED_SUFFIX = " (migrado: skills Envio de Fotos e Leitura de Fotos)";
+
+/** Base que já tinha a skill combinada (v1.139.0): o texto, o liga/desliga e os parâmetros vão para as duas novas. */
+export async function splitCombinedPhotoSkill() {
+  const skills = await listSkills();
+  const old = skills.find((item) => item.slug === LEGACY_COMBINED_PHOTO_SKILL);
+  if (!old) return;
+  const send = skills.find((item) => item.slug === PHOTO_SKILL);
+  const read = skills.find((item) => item.slug === READ_PHOTO_SKILL);
+  const parts = splitCombinedPhotoMarkdown(old.instructionsMd);
+  if (send) await syncSkillPromptModule(await prisma.aiSkill.update({ where: { id: send.id }, data: { instructionsMd: parts.send, isActive: old.isActive, config: (old.config ?? {}) as Prisma.InputJsonValue } }));
+  if (read) await syncSkillPromptModule(await prisma.aiSkill.update({ where: { id: read.id }, data: { instructionsMd: parts.read } }));
+  // A combinada sai (já sem uso no motor); o módulo dela também, para não haver instrução dupla.
+  await prisma.aiPromptModule.deleteMany({ where: { slug: skillModuleSlug(LEGACY_COMBINED_PHOTO_SKILL) } });
+  await prisma.aiSkill.delete({ where: { id: old.id } });
+  const renamed = await prisma.aiPromptModule.findMany({ where: { slug: { in: Object.keys(LEGACY_PHOTO_MODULES) } }, select: { id: true, title: true } });
+  for (const row of renamed) {
+    if (row.title.includes(OLD_SUFFIX)) await prisma.aiPromptModule.update({ where: { id: row.id }, data: { title: row.title.replace(OLD_SUFFIX, MIGRATED_SUFFIX) } });
+  }
+}
+const OLD_SUFFIX = " (migrado: skill Envio e Leitura de Fotos)";
 
 export async function applyPromptUpgrades() {
   for (const upgrade of PROMPT_UPGRADES) {
