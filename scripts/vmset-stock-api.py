@@ -619,45 +619,22 @@ class Snapshot:
         return {"at": int(self.at * 1000), "items": self.data}
 
 
-# Vendas faturadas (painel ao vivo e períodos do CRM): fonte oficial = PEDIDO_SAIDA faturado e ativo, pela data/hora
-# de emissão do pedido (relógio do Oracle = horário de Brasília). A tabela de BI tab_dados_dinamicos deixava de fora
-# ~20% dos pedidos (lentes/serviços ainda sem movimento de estoque). Um registro por item; o valor do pedido é
-# PDSD_VLR_TOTAL (líquido, já com descontos) e vai repetido em "orderTotal" para não somar duas vezes.
-# Regra do BI do VMSET: só pedido "Faturado" e ativo. Fora: "A Liberar" (aguardando liberação de desconto/crédito:
-# entra quando for faturado), cancelados, "Reservado" (encomenda/OS só com estoque reservado), "Aberto"/"Inconsistente"
-# (pedido não concluído), transferências entre lojas (cliente = unidade da rede) e depósitos.
-# (A v1.135.1 chegou a incluir Reservado e Aberto para bater com um relatório externo lido errado; revertido.)
-# Sem ROWNUM/FETCH FIRST: o dia inteiro vem em uma consulta, qualquer que seja o volume.
-# Só movimento do tipo "Venda": "Outras Saídas" (bonificação, livre emissão, devolução de compra, cancelamento fora
-# do dia, transferência para a matriz) somavam ~R$ 103 mil em novembro/2026 sem ser venda.
+# Vendas (painel ao vivo e períodos do CRM): fonte ÚNICA = tab_dados_dinamicos, a mesma tabela do BI do VMSET, pela
+# DATA_NOTA (dia da nota fiscal). Nenhuma leitura de PEDIDO_SAIDA: o total bate com
+# "select * from tab_dados_dinamicos where data_nota between ... and loja = X" (loja 4, 01-27/11/2026: R$ 918.145,59).
+# Um registro por item (VALOR_TOTAL líquido); o total do pedido no período vai repetido em "orderTotal".
+# Sem ROWNUM/FETCH FIRST: o período inteiro vem em uma consulta, qualquer que seja o volume.
 SALES_SQL = """
-SELECT NVL(TO_CHAR(I.ITEM_PEDIDO_SAIDA_ID), 'P' || PS.PEDIDO_SAIDA_ID), UE.UNEM_CODIGO, PS.PDSD_NR_PEDIDO,
-       PS.PDSD_DT_EMISSAO, V.PRCR_NOME, P.PRCR_NOME, P.PRCR_CGC_CPF, P.PRCR_CELULAR, P.PRCR_FONE, M.MARC_DESCRICAO,
-       PR.PRDT_DESCRICAO, CP.CATG_DESCRICAO, I.PSIT_QTDE_PEDIDA,
-       I.PSIT_QTDE_PEDIDA * I.PSIT_PRC_UNIT - NVL(I.PSIT_VLR_DESCTO, 0) - NVL(I.PSIT_VLR_DESCTO_ADICIONAL, 0)
-         + NVL(I.PSIT_VLR_DESP, 0) + NVL(I.PSIT_VLR_FRETE, 0) + NVL(I.PSIT_VLR_JURO, 0),
-       D.TPDC_DESCRICAO, CPG.CDPG_DESCRICAO, PS.PDSD_VLR_TOTAL
-FROM PEDIDO_SAIDA PS
-JOIN UNIDADE_EMPRESARIAL UE ON UE.UNIDADE_EMPRESARIAL_ID = PS.UNIDADE_EMPRESARIAL_ID
-JOIN TIPO_MOV_ESTOQUE TM ON TM.TIPO_MOV_ESTOQUE_ID = PS.TIPO_MOV_ESTOQUE_ID AND TM.TPME_TIPO = 'Venda'
-LEFT JOIN ITEM_PEDIDO_SAIDA I ON I.PEDIDO_SAIDA_ID = PS.PEDIDO_SAIDA_ID
-LEFT JOIN PRODUTO PR ON PR.PRODUTO_ID = I.PRODUTO_ID
-LEFT JOIN SUBCATEGORIA_PRODUTO SP ON SP.SUBCATEGORIA_PRODUTO_ID = PR.SUBCATEGORIA_PRODUTO_ID
-LEFT JOIN CATEGORIA_PRODUTO CP ON CP.CATEGORIA_PRODUTO_ID = SP.CATEGORIA_PRODUTO_ID
-LEFT JOIN MARCAS M ON M.MARCA_ID = PR.MARCA_ID
-LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
-LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
-LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
-LEFT JOIN CONDICAO_PAGTO CPG ON CPG.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
-WHERE PS.PDSD_STATUS = 'Faturado' AND TRIM(PS.STATUS) = 'Ativo'
-  AND PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b
-  AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
-  AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199
-  AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 1000 AND 2999
+SELECT NVL(T.ITEM_MOVI_ESTOQUE_ID, T.LOJA || '-' || T.NUM_PEDIDO || '-' || T.CODIGO), T.LOJA, T.NUM_PEDIDO, T.NUM_NOTA,
+       T.DATA_NOTA, T.HORA_PEDIDO2, T.VENDEDOR, T.NOME_CLIENTE, T.PARCEIRO_CPF, T.CELULAR, T.TELEFONE, T.MARCA,
+       T.DESCRICAO, T.NOME_CATEGORIA, T.QTDE_ITEM_VENDA, T.VALOR_TOTAL, T.PAGTO, T.COND_PAGTO,
+       SUM(T.VALOR_TOTAL) OVER (PARTITION BY T.LOJA, T.NUM_PEDIDO)
+FROM tab_dados_dinamicos T
+WHERE T.TIPO = 'Venda' AND T.DATA_NOTA >= :a AND T.DATA_NOTA < :b
+  AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999
 """
-# Só pedido de saída com movimento "Venda": recebimento de carnê, baixa de parcela de crediário e recebimento de
-# título são lançamentos financeiros (contas a receber) e nunca entram nesta consulta. Loja encerrada (ex.: 502)
-# entra só com as vendas reais que fez no período (histórico de quando operava); o carnê dela nunca vira venda.
+# Só linha TIPO = 'Venda' da tab_dados_dinamicos: bonificação e devolução de cliente nunca somam como venda (a
+# devolução é abatida pela RETURNS_SQL). Loja encerrada (ex.: 502) entra só com as vendas reais que fez no período.
 MAX_SALES_DAYS = 93
 
 # "Hoje" é sempre o dia de Brasília (o relógio do Oracle também), nunca o fuso da máquina: com o servidor em UTC, as
@@ -668,14 +645,14 @@ BR_TZ = ZoneInfo("America/Sao_Paulo")
 def br_today():
     return datetime.datetime.now(BR_TZ).date()
 
-# Devoluções de cliente no dia da devolução (BI do VMSet, VALOR_TOTAL negativo por item): abatidas do faturamento
-# para chegar ao líquido do relatório (em novembro/2026: R$ 242.925,75 na rede, R$ 81.762,49 na loja 4).
+# Devoluções de cliente pela DATA_NOTA (BI do VMSet, VALOR_TOTAL negativo por item): abatidas do faturamento para
+# chegar ao líquido do BI (loja 4, 01-27/11/2026: R$ 91.708,57).
 RETURNS_SQL = """
-SELECT T.LOJA, T.NUM_PEDIDO, T.DATA_PEDIDO, SUM(T.VALOR_TOTAL)
+SELECT T.LOJA, T.NUM_PEDIDO, T.DATA_NOTA, SUM(T.VALOR_TOTAL)
 FROM tab_dados_dinamicos T
-WHERE T.TIPO = 'Devolucao Cliente' AND T.DATA_PEDIDO >= :a AND T.DATA_PEDIDO < :b
+WHERE T.TIPO = 'Devolucao Cliente' AND T.DATA_NOTA >= :a AND T.DATA_NOTA < :b
   AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999
-GROUP BY T.LOJA, T.NUM_PEDIDO, T.DATA_PEDIDO
+GROUP BY T.LOJA, T.NUM_PEDIDO, T.DATA_NOTA
 """
 
 
@@ -690,22 +667,23 @@ def digits(value, pad=0):
 
 
 def sale_item(row):
-    (item_id, store, order, issued, seller, customer, cpf, mobile, phone, brand, description, category,
+    (item_id, store, order, invoice, issued, hour, seller, customer, cpf, mobile, phone, brand, description, category,
      quantity, amount, payment, terms, total) = row
+    hour = text(hour)
     return {
-        "id": text(item_id), "store": text(store), "order": text(order), "invoice": None,
-        "date": issued.strftime("%Y-%m-%d") if issued else None, "time": issued.strftime("%H:%M:%S") if issued else None,
+        "id": text(item_id), "store": text(store), "order": text(order), "invoice": text(invoice),
+        "date": issued.strftime("%Y-%m-%d") if issued else None,
+        "time": hour if hour and re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", hour) else "00:00:00",
         "seller": text(seller), "customer": text(customer), "cpf": digits(cpf, 11),
         "phone": digits(mobile) or digits(phone), "brand": text(brand),
         "description": text(description), "category": text(category), "quantity": float(quantity or 0),
-        # Pedido sem item (raro): a linha única leva o total do pedido.
-        "amount": round(float(total if quantity is None else (amount or 0)), 2), "payment": text(payment), "terms": text(terms),
+        "amount": round(float(amount or 0), 2), "payment": text(payment), "terms": text(terms),
         "orderTotal": round(float(total or 0), 2),
     }
 
 
 def sales_between(start, end):
-    """Itens das vendas faturadas com emissão em [start, end) (datas de Brasília)."""
+    """Itens de venda da tab_dados_dinamicos com DATA_NOTA em [start, end) (datas de Brasília)."""
     with pool.acquire() as conn:
         cur = conn.cursor()
         cur.execute(SALES_SQL, a=datetime.datetime.combine(start, datetime.time()), b=datetime.datetime.combine(end, datetime.time()))

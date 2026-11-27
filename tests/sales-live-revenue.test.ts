@@ -15,28 +15,22 @@ const salesSql = () => {
 };
 
 describe("faturamento do /vendas/ao-vivo igual ao relatório do VMSET", () => {
-  it("conta só vendas Faturado (A Liberar entra quando faturar) pela data de emissão", () => {
+  it("vendas só da tab_dados_dinamicos (mesma tabela do BI), pela DATA_NOTA", () => {
     const sql = salesSql();
-    expect(sql).toContain("PS.PDSD_STATUS = 'Faturado' AND TRIM(PS.STATUS) = 'Ativo'");
-    expect(sql).not.toContain("A Liberar");
-    expect(sql).toContain("PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b");
+    expect(sql).toContain("FROM tab_dados_dinamicos T");
+    expect(sql).toContain("T.TIPO = 'Venda' AND T.DATA_NOTA >= :a AND T.DATA_NOTA < :b");
+    expect(sql).not.toMatch(/PEDIDO_SAIDA|PDSD_|\bJOIN\b/);
   });
 
-  it("vendedor, cliente, produto e pagamento entram por LEFT JOIN (nenhuma venda some sem cadastro)", () => {
-    const sql = salesSql();
-    for (const join of ["PARCEIRO V ON", "PARCEIRO P ON", "ITEM_PEDIDO_SAIDA I ON", "PRODUTO PR ON", "TIPO_DOCUMENTO D ON", "CONDICAO_PAGTO CPG ON"]) {
-      expect(sql).toContain(`LEFT JOIN ${join}`);
-    }
-    // JOINs obrigatórios: a unidade que emitiu o pedido e o tipo de movimento "Venda".
-    expect(sql.match(/(^|\n)JOIN /g)).toHaveLength(2);
+  it("total do pedido no período repetido em orderTotal (não soma duas vezes)", () => {
+    expect(salesSql()).toContain("SUM(T.VALOR_TOTAL) OVER (PARTITION BY T.LOJA, T.NUM_PEDIDO)");
   });
 
-  it("só movimento de venda: bonificação, livre emissão, devolução de compra, cancelamento fora do dia e transferência ficam de fora", () => {
+  it("bonificação fora da venda; devolução de cliente abatida pela DATA_NOTA", () => {
     const sql = salesSql();
-    expect(sql).toContain("JOIN TIPO_MOV_ESTOQUE TM ON TM.TIPO_MOV_ESTOQUE_ID = PS.TIPO_MOV_ESTOQUE_ID AND TM.TPME_TIPO = 'Venda'");
-    expect(sql).toContain("NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)");
+    expect(sql).not.toMatch(/Bonificacao|Devolucao/);
     const source = readFileSync(join(process.cwd(), "scripts", "vmset-stock-api.py"), "utf8");
-    expect(source).toContain("T.TIPO = 'Devolucao Cliente' AND T.DATA_PEDIDO >= :a AND T.DATA_PEDIDO < :b");
+    expect(source).toContain("T.TIPO = 'Devolucao Cliente' AND T.DATA_NOTA >= :a AND T.DATA_NOTA < :b");
     expect(source).toMatch(/"returns": entry\["returns"\]/);
   });
 
@@ -77,9 +71,9 @@ describe("faturamento do /vendas/ao-vivo igual ao relatório do VMSET", () => {
 
   it("recebimento de carnê, baixa de parcela e recebimento de título nunca contam como venda", () => {
     const sql = salesSql();
-    // Fonte única: pedido de saída com movimento "Venda"; nenhuma tabela financeira (contas a receber, títulos, parcelas).
-    expect(sql).toContain("FROM PEDIDO_SAIDA PS");
-    expect(sql).toContain("TM.TPME_TIPO = 'Venda'");
+    // Fonte única: linhas TIPO = 'Venda' da tab_dados_dinamicos; nenhuma tabela financeira (contas a receber, títulos, parcelas).
+    expect(sql).toContain("FROM tab_dados_dinamicos T");
+    expect(sql).toContain("T.TIPO = 'Venda'");
     expect(sql).not.toMatch(/TITULO|RECEB|PARCELA|CARNE|CONTAS?_RECEBER|BAIXA/i);
   });
 

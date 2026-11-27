@@ -28,15 +28,13 @@ describe("vendas do dia: alto volume sem corte", () => {
   });
 
   it("consulta do VMSet traz o dia inteiro em uma vez: sem ROWNUM, FETCH FIRST ou LIMIT", () => {
-    expect(salesSql).toMatch(/PDSD_DT_EMISSAO >= :a AND PS\.PDSD_DT_EMISSAO < :b/);
+    expect(salesSql).toMatch(/T\.DATA_NOTA >= :a AND T\.DATA_NOTA < :b/);
     expect(salesSql).not.toMatch(/ROWNUM|FETCH\s+FIRST|\bLIMIT\b|OFFSET/i);
   });
 
-  it("regra oficial de venda: só Faturado ativo (A Liberar, Reservado, Aberto e cancelado fora)", () => {
-    expect(salesSql).toMatch(/PDSD_STATUS = 'Faturado' AND TRIM\(PS\.STATUS\) = 'Ativo'/);
-    expect(salesSql).not.toMatch(/A Liberar/);
-    expect(salesSql).not.toMatch(/PDSD_STATUS <> 'Cancelado'/);
-    expect(salesSql).toMatch(/TPME_TIPO = 'Venda'/);
+  it("regra do BI: só linhas TIPO = 'Venda' da tab_dados_dinamicos, sem PEDIDO_SAIDA", () => {
+    expect(salesSql).toMatch(/T\.TIPO = 'Venda'/);
+    expect(salesSql).not.toMatch(/PEDIDO_SAIDA|PDSD_/);
   });
 });
 
@@ -62,23 +60,19 @@ describe("corte do dia em America/Sao_Paulo", () => {
 describe("loja 4 em novembro/2026: cancelamento retroativo, devoluções e operações internas", () => {
   const returnsSql = api.match(/RETURNS_SQL = """([\s\S]*?)"""/)?.[1] ?? "";
 
-  it("pedido cancelado depois some do total: a consulta relê o status no VMSet a cada atualização (sem cópia local)", () => {
-    // Status é filtrado na própria consulta e o cache do período vive no máximo 10 min (hoje: 10 s; mês corrente: 60 s).
-    expect(salesSql).toMatch(/PDSD_STATUS = 'Faturado' AND TRIM\(PS\.STATUS\) = 'Ativo'/);
+  it("a tab_dados_dinamicos é relida no VMSet a cada atualização (sem cópia local)", () => {
+    // Cache do período vive no máximo 10 min (hoje: 10 s; mês corrente: 60 s).
+    expect(salesSql).toMatch(/FROM tab_dados_dinamicos T/);
     expect(api).toMatch(/ttl = 10 if \(start, end\) == \(today, today \+ datetime\.timedelta\(days=1\)\) else 60 if end > today else 600/);
   });
 
-  it("Reservado e Aberto/Inconsistente (R$ 21,3 mil na loja 4) não entram: eram o excedente de ~R$ 27 mil", () => {
-    expect(salesSql).not.toMatch(/Reservado|Inconsistente|<> 'Cancelado'/);
+  it("devolução de cliente abatida uma vez por pedido, pela DATA_NOTA (igual ao BI)", () => {
+    expect(returnsSql).toMatch(/T\.TIPO = 'Devolucao Cliente' AND T\.DATA_NOTA >= :a AND T\.DATA_NOTA < :b/);
+    expect(returnsSql).toMatch(/GROUP BY T\.LOJA, T\.NUM_PEDIDO, T\.DATA_NOTA/);
   });
 
-  it("devolução de cliente abatida uma vez por pedido; troca é um pedido de venda novo (não duplica)", () => {
-    expect(returnsSql).toMatch(/T\.TIPO = 'Devolucao Cliente'/);
-    expect(returnsSql).toMatch(/GROUP BY T\.LOJA, T\.NUM_PEDIDO, T\.DATA_PEDIDO/);
-  });
-
-  it("bonificação, livre emissão, devolução de compra e transferência/operação entre filiais ficam fora", () => {
-    expect(salesSql).toMatch(/TM\.TPME_TIPO = 'Venda'/);
-    expect(salesSql).toMatch(/NOT EXISTS \(SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U\.UNIDADE_EMPRESARIAL_ID = PS\.PARCEIRO_ID\)/);
+  it("bonificação e depósitos/filiais internas ficam fora", () => {
+    expect(salesSql).not.toMatch(/Bonificacao/);
+    expect(salesSql).toMatch(/T\.LOJA NOT BETWEEN 100 AND 199 AND T\.LOJA NOT BETWEEN 1000 AND 2999/);
   });
 });
