@@ -247,7 +247,7 @@ function OrderDrawer({ order, now, today, onClose }: { order: LiveOrder; now: Da
       header={
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400"><Hash className="h-3.5 w-3.5" />Pedido {order.order} · {saleWhen(order, now, today)}</p>
-          <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight text-[#051647] dark:text-white">{formatMoney(order.amount)}</p>
+          <p className="mt-1 whitespace-nowrap text-2xl font-bold tabular-nums tracking-tight text-[#051647] sm:text-3xl dark:text-white">{formatMoney(order.amount)}</p>
           <p className="mt-0.5 flex min-w-0 items-center gap-1 text-sm font-semibold text-[#002187] dark:text-[#C4D600]"><Store className="h-4 w-4 shrink-0" /><span className="break-words">{order.storeLabel}</span></p>
         </div>
       }
@@ -711,15 +711,16 @@ export default function LiveSalesPage() {
       {error && status === "offline" && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-12">
-        <section className="relative min-w-0 overflow-hidden rounded-3xl bg-gradient-to-br from-[#07163B] via-[#0a1d4d] to-[#0D255E] p-5 text-white shadow-xl lg:col-span-5 lg:p-6">
+        <section className="relative min-w-0 overflow-hidden rounded-3xl bg-gradient-to-br from-[#07163B] via-[#0a1d4d] to-[#0D255E] p-4 text-white shadow-xl sm:p-5 lg:col-span-5 lg:p-6">
           <div className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(196,214,0,0.28),transparent_65%)]" aria-hidden />
           <div className="pointer-events-none absolute -bottom-24 -left-10 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(0,33,135,0.55),transparent_70%)]" aria-hidden />
-          <div className="relative">
+          <div className="@container relative min-w-0">
             <div className="flex items-center justify-between gap-2">
               <p className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/70"><BadgeDollarSign className="h-4 w-4 shrink-0 text-[#C4D600]" /><span className="truncate">Faturamento {store ? `${storeLabel} · ` : ""}{suffix}</span></p>
               {newCount > 0 && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C4D600] px-2 py-0.5 text-[10px] font-extrabold uppercase text-[#051647]"><Zap className="h-3 w-3" />{newCount} {newCount === 1 ? "nova" : "novas"}</span>}
             </div>
-            <p className="mt-1 text-[2.6rem] font-extrabold leading-none tabular-nums tracking-tight text-white sm:text-5xl xl:text-6xl">{formatMoney(revenue)}</p>
+            {/* Fonte pela largura do card (cqw): "R$ 1.500.000,00" cabe numa linha do celular de 360px ao desktop. */}
+            <p className="mt-1 whitespace-nowrap text-[length:clamp(1.5rem,10.5cqw,3.75rem)] font-extrabold leading-none tabular-nums tracking-tight text-white">{formatMoney(revenue)}</p>
             {kpis.returns > 0 && <p className="mt-1 text-[11px] text-white/60" title="Faturamento líquido, como no relatório do VMSET: vendas menos devoluções de clientes do período.">Líquido de {formatMoney(kpis.returns)} em devoluções</p>}
             {store && allKpis.revenue > 0 && <p className="mt-1.5 text-xs text-white/70"><span className="font-bold text-[#C4D600]">{percent((kpis.revenue / allKpis.revenue) * 100)}</span> do faturamento total ({formatMoney(allKpis.revenue)})</p>}
             {!store && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}

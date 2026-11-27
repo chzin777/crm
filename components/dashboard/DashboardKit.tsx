@@ -180,13 +180,14 @@ export function CompareBars({ current, previous, tone, format }: { current: numb
 
 export function KpiCard({ icon, label, value, hint, tone, delta, meta, children }: { icon: React.ElementType; label: string; value: string; hint: string; tone: Tone; delta?: React.ReactNode; meta?: React.ReactNode; children?: React.ReactNode }) {
   return (
-    <section className={`${cardClass} group flex flex-col overflow-hidden p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_32px_-16px_rgba(15,23,42,0.18)] dark:hover:border-white/[0.12]`} aria-label={label} title={hint}>
+    <section className={`${cardClass} @container group flex min-w-0 flex-col overflow-hidden p-3 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgba(15,23,42,0.04),0_16px_32px_-16px_rgba(15,23,42,0.18)] dark:hover:border-white/[0.12]`} aria-label={label} title={hint}>
       <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${TONES[tone].glow} to-transparent to-60% opacity-80 transition-opacity group-hover:opacity-100`} />
       <div className="relative flex items-start justify-between gap-3">
         <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">{label}</p>
         <IconBadge icon={icon} tone={tone} size="sm" />
       </div>
-      <p className="relative mt-1 text-[30px] font-semibold leading-tight tabular-nums tracking-tight text-slate-900 dark:text-white">{value}</p>
+      {/* Fonte pela largura do card (cqw): valor monetário alto numa linha só, sem quebrar entre "R$" e os dígitos. */}
+      <p className="relative mt-1 whitespace-nowrap text-[length:clamp(1.125rem,10.5cqw,1.875rem)] font-semibold leading-tight tabular-nums tracking-tight text-slate-900 dark:text-white">{value}</p>
       <div className="relative mt-1.5 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1">{delta}</div>
       {meta && <div className="relative mt-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">{meta}</div>}
       <div className="relative mt-auto pt-4">{children}</div>
