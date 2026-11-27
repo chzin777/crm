@@ -39,7 +39,8 @@ export async function GET(request: Request) {
   const page = Math.max(1, Number.parseInt(params.get("page") ?? "1", 10) || 1);
 
   try {
-    const sold = await soldItems(from, to);
+    // Primeira consulta de um período novo pode cair enquanto o VMSet monta o cache dele: tenta de novo uma vez.
+    const sold = await soldItems(from, to).catch(() => soldItems(from, to));
     const orders = buildOrders(sold.items.filter(scope.keep), sold.day, { storeLabel: sold.storeLabel });
     const options = itemFilterOptions(orders, filter);
     const matched = filterOrdersByItems(orders, filter).filter((order) => !words.length || words.every((word) => orderText(order).includes(word)));
