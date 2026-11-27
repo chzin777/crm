@@ -11,3 +11,7 @@ VALUES (
   now()
 )
 ON CONFLICT (name) DO NOTHING;
+
+-- Visão do app por cargo: Gerente abre em Minha loja; Diretor no painel geral.
+UPDATE "Role" SET permissions = permissions || '{"app.visaoGerente": true}'::jsonb WHERE name = 'Gerente' AND NOT permissions ? 'app.visaoGerente';
+UPDATE "Role" SET permissions = permissions || '{"app.visaoGeral": true}'::jsonb WHERE name = 'Diretor' AND NOT permissions ? 'app.visaoGeral';
