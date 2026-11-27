@@ -6,6 +6,7 @@ import { pickSeller, AUDIO_STORAGE_PREFIX, readFlowSettings, type ConversionKind
 import { addedTags, stageChanges } from "@/lib/automations/events";
 import { addSystemMessage, firstDispatch, isWindowOpen, openConversationFor } from "@/lib/chat/conversation";
 import { sendAutomaticAudio, sendAutomaticImage, sendAutomaticMessage } from "@/lib/chat/outbound";
+import { humanAttending } from "@/lib/chat/ai-guard";
 import { presenceDurationMs, simulatePresence, type PresenceKind } from "@/lib/chat/presence";
 import { readFile } from "@/lib/minio";
 import { readMenuState, saveMenuState } from "@/lib/chat/menu";
@@ -145,6 +146,8 @@ export function databasePorts(flowId: string): EnginePorts {
         return `Modelo "${input.template.name}" enviado no WhatsApp`;
       }
       const conversation = await requireConversation(state);
+      // Atendente humano com a conversa aberta (assumida ou em atendimento): a automação não escreve por cima dele.
+      if (!conversation.closedAt && humanAttending(conversation)) return "Não enviado: atendente humano está com a conversa";
       if (!isWindowOpen(conversation.lastInboundAt)) throw new Error("Janela de 24 h do WhatsApp fechada: o cliente precisa ter escrito nas últimas 24 h (fora dela, use um modelo em Campanhas).");
       if (!input.text.trim() && !input.mediaUrl && !input.audio) throw new Error("Mensagem vazia.");
       // Links rastreados: cada URL do texto vira /r/<slug> do contato (clique dispara o gatilho e soma no histórico).

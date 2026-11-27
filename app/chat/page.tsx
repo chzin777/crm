@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, Award, Ban, Bell, BellOff, CalendarClock, CheckCircle2, Database, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, Award, Ban, Bell, Bot, BellOff, CalendarClock, CheckCircle2, Database, Hand, Mail, MessageSquare, MessageSquarePlus, MoreVertical, PanelRight, RotateCcw, ShoppingBag, Sparkles, Target, Trash2, UserRound } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useToast } from "@/components/ToastProvider";
 
@@ -516,6 +516,7 @@ function ChatWorkspace() {
       { label: "Salvar como atendimento padrão ouro", icon: <Award className="h-4 w-4" />, onSelect: () => void saveGoldConversation(conversation.id), hidden: !capabilities["chat.queues"] },
       { label: "Agendar retorno", icon: <CalendarClock className="h-4 w-4" />, onSelect: () => setShowFollowUp(true), hidden: !canWrite },
       { label: "Criar oportunidade", icon: <Target className="h-4 w-4" />, href: `/?oportunidade=${encodeURIComponent(conversation.contactId)}&contato=${encodeURIComponent(conversation.name)}`, hidden: !canWrite },
+      { label: "Devolver para a IA", icon: <Bot className="h-4 w-4" />, onSelect: () => run("/ai-resume", "Conversa devolvida para a IA"), hidden: !canWrite || !!conversation.closedAt || (!conversation.assignee && conversation.status !== "in_progress" && conversation.status !== "waiting") },
       { label: "Transferir conversa", icon: <ArrowRightLeft className="h-4 w-4" />, onSelect: () => setShowTransfer(true), hidden: !capabilities["chat.transfer"] || !!conversation.closedAt },
       { label: "Marcar como não lida", icon: <Mail className="h-4 w-4" />, onSelect: () => run("/read", "Marcada como não lida", { body: JSON.stringify({ unread: true }) }), hidden: !!conversation.closedAt },
       { label: "Finalizar atendimento", icon: <CheckCircle2 className="h-4 w-4" />, onSelect: () => run("/close", "Atendimento finalizado"), hidden: !capabilities["chat.close"] || !!conversation.closedAt },

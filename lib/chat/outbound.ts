@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { listTemplates, sendMedia, sendTemplate, sendText } from "@/lib/meta-whatsapp";
 import { readFile, uploadFile } from "@/lib/minio";
 import type { ChatActor } from "@/lib/chat/access";
-import { addAudit, addSystemMessage, isBlocked, isWindowOpen } from "@/lib/chat/conversation";
+import { addAudit, addSystemMessage, firstDispatch, isBlocked, isWindowOpen } from "@/lib/chat/conversation";
 import { convertToOggOpus } from "@/lib/chat/audio";
 import { estimateVoiceSeconds } from "@/lib/chat/presence";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
@@ -142,6 +142,8 @@ export async function assumeFor(actor: ChatActor, conversation: Pick<ChatConvers
   }
   await addSystemMessage(conversation.id, `${actor.name} assumiu a conversa`);
   await addAudit({ userId: actor.id, action: "conversation.assume", targetId: conversation.id, before: { assigneeId: null }, after: { assigneeId: actor.id } });
+  // Cancela o Acompanhamento automático pendente desta conversa (a trava fica ocupada: nunca dispara depois).
+  await firstDispatch(`budget-recovery:${conversation.id}`).catch(() => undefined);
 }
 
 async function templateText(template: OutgoingTemplate) {

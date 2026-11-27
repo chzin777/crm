@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { brClock, brDay } from "@/lib/br-time";
 import { addSystemMessage, firstDispatch, isWindowOpen } from "@/lib/chat/conversation";
 import { sendAutomaticMessage } from "@/lib/chat/outbound";
+import { canAiRespondToConversation } from "@/lib/chat/ai-guard";
 import { listTemplates, sendTemplate } from "@/lib/meta-whatsapp";
 import { sanitizeCatalogContext, type CatalogContext } from "@/lib/ai/catalog-context";
 import { contactOpportunity } from "@/lib/sales-pipeline-db";
@@ -285,6 +286,9 @@ export async function runBudgetRecovery(now = new Date()) {
   const rows = await prisma.chatConversation.findMany({
     where: {
       closedAt: null,
+      // Atendente humano na conversa: o acompanhamento automático nunca entra.
+      assigneeId: null,
+      status: { not: "in_progress" },
       lastMessageAt: { gte: new Date(now.getTime() - rule.maxHours * 60 * 60 * 1000), lte: new Date(now.getTime() - rule.minHours * 60 * 60 * 1000) },
       lastInboundAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
     },
@@ -303,6 +307,8 @@ export async function runBudgetRecovery(now = new Date()) {
     // Filtros baratos primeiro (quem falou por último, tempo, janela) e só então o contexto comercial.
     if (!shouldRecoverBudget({ ...base, hasIntent: true }, rule)) continue;
     if (await prisma.chatDispatch.findUnique({ where: { key: `budget-recovery:${row.id}` }, select: { key: true } })) continue;
+    // Relido do banco agora (não do início da varredura): atendente assumiu, transbordo ou IA pausada = silêncio.
+    if (!(await canAiRespondToConversation(row.id))) continue;
     const context = await conversationCommercialContext(row.id);
     if (!context) continue;
     const sentPrescription = !!context.prescription && context.prescription.conversationId === row.id;
@@ -312,6 +318,11 @@ export async function runBudgetRecovery(now = new Date()) {
     const text = rule.message
       ? customRecoveryMessage(rule.message, { name: row.contact.name, item: context.mainItem })
       : budgetRecoveryMessage({ name: row.contact.name, item: context.mainItem, prescription: sentPrescription, variant: row.id.length });
+    // Double-check imediatamente antes da Meta (o contexto comercial pode ter demorado).
+    if (!(await canAiRespondToConversation(row.id))) {
+      console.log(`[acompanhamento] ${row.id}: não enviado (atendente humano assumiu)`);
+      continue;
+    }
     await sendAutomaticMessage(row, text, undefined, undefined, "Acompanhamento automático");
     sent += 1;
     await sleep(SEND_GAP_MS);

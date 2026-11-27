@@ -13,6 +13,7 @@ import { awaitingIdentity, extractCpf, extractFullName, financialStep, FINANCIAL
 import { buildApprovalDraft, createFinancialApproval, linkedCpfForPhone, lookupInstallments, pendingApproval, type FinancialApprovalDraft } from "@/lib/ai/installments-db";
 import { readMenuState } from "@/lib/chat/menu";
 import { aiConversationMode, aiTakeoverPatch, handoffPatch, isAiHandling } from "@/lib/chat/queue-rules";
+import { AI_HANDOFF_MARK, handoffFlags, humanAttending } from "@/lib/chat/ai-guard";
 import { withTyping } from "@/lib/chat/typing";
 import { sendLocation, sendText, sendTypingIndicator, sendWhatsAppInteractiveList } from "@/lib/meta-whatsapp";
 import { buildShowcaseList, toChatInteractive, type InteractiveShowcase } from "@/lib/ai/interactive-showcase";
@@ -103,8 +104,8 @@ export async function releaseFromAi(conversation: ChatConversation) {
 
 /** Nome gravado nas mensagens da IA (o atendimento vê quem respondeu). */
 export const AI_AUTHOR = AI_AUTHOR_NAME;
-/** Marca da mensagem de sistema da transferência: depois dela a IA só ajuda na espera (fila sem atendente). */
-export const AI_HANDOFF_MARK = "IA transferiu o atendimento";
+/** Marca da mensagem de sistema da transferência (guarda única em lib/chat/ai-guard). */
+export { AI_HANDOFF_MARK };
 /** Categoria da sessão (aiContext.category) → argumento "tipo" da tool de estoque. */
 const CATEGORY_TIPO: Record<string, string> = { SOLAR: "sol", ARMACAO: "grau", LENTE_CONTATO: "lente_contato" };
 /**
@@ -139,15 +140,6 @@ async function runBatch(conversationId: string, messageId: string): Promise<void
 }
 const CREDIT_RETRY_MS = 10 * 60 * 1000;
 
-/** Transbordo já feito e se algum atendente escreveu ao cliente depois dele (assumiu o controle). */
-async function handoffFlags(conversationId: string) {
-  // Só o transbordo do atendimento atual: conversa reaberta depois volta para a IA.
-  const sessionStart = await sessionStartedAt(conversationId);
-  const mark = await prisma.chatMessage.findFirst({ where: { conversationId, author: "system", text: { startsWith: AI_HANDOFF_MARK }, ...(sessionStart ? { createdAt: { gt: sessionStart } } : {}) }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
-  if (!mark) return { handedOff: false, humanReplied: false, since: null };
-  const human = await prisma.chatMessage.findFirst({ where: { conversationId, author: "agent", internal: false, createdAt: { gt: mark.createdAt } }, select: { id: true } });
-  return { handedOff: true, humanReplied: !!human, since: mark.createdAt };
-}
 
 /** Modo da IA nesta conversa agora (exclusiva, espera assistida na fila ou pausada). */
 async function conversationMode(conversation: ChatConversation) {
@@ -1499,6 +1491,12 @@ async function respond(conversationId: string, messageId: string) {
  */
 /** Resposta da IA ao cliente: com foto do produto (legenda) quando houver; se a foto falhar, segue em texto. */
 async function sendAiReply(conversation: ChatConversation, text: string, image?: ProductImage | null, typingMessageId?: string | null, location?: StoreLocation | null, list?: InteractiveShowcase | null, singleReply?: boolean, catalog?: VisualCatalog | null) {
+  // Última conferência antes da Meta: atendente pode ter assumido enquanto a IA escrevia.
+  const now = await prisma.chatConversation.findUnique({ where: { id: conversation.id }, select: { status: true, assigneeId: true, closedAt: true } });
+  if (!now || humanAttending(now)) {
+    console.log(`[ai] ${conversation.id}: resposta da IA descartada (atendente humano na conversa)`);
+    return null;
+  }
   if (catalog?.items.length) {
     const sent = await sendVisualCatalog(conversation, catalog, typingMessageId);
     if (location) await sendStoreLocation(conversation, location);

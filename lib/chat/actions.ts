@@ -6,6 +6,8 @@ import type { ChatActor } from "@/lib/chat/access";
 import { addAudit, addSystemMessage, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { ChatRuleError, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { fillVariables } from "@/lib/chat/text";
+import { AI_RESUME_ACTION } from "@/lib/chat/ai-guard";
+import { aiTakeoverPatch } from "@/lib/chat/queue-rules";
 
 export const openCount = (userId: string) => prisma.chatConversation.count({ where: { assigneeId: userId, closedAt: null } });
 
@@ -125,4 +127,19 @@ export async function reopenConversation(actor: ChatActor, conversation: ChatCon
   }
   await addSystemMessage(conversation.id, `${actor.name} reabriu a conversa`);
   await addAudit({ userId: actor.id, action: "conversation.reopen", targetId: conversation.id });
+}
+
+/**
+ * "Devolver para a IA": o atendente tira a conversa de si e da fila e a IA volta a atender. O transbordo e as
+ * mensagens humanas anteriores deixam de valer para a guarda (lib/chat/ai-guard conta a partir desta auditoria).
+ */
+export async function resumeAi(actor: ChatActor, conversation: ChatConversation) {
+  if (conversation.closedAt) throw new ChatRuleError("Conversa encerrada. Reabra para devolver para a IA.", 409);
+  const state = conversation.menuState && typeof conversation.menuState === "object" ? (conversation.menuState as Record<string, unknown>) : {};
+  await prisma.chatConversation.update({
+    where: { id: conversation.id },
+    data: { assigneeId: null, ...aiTakeoverPatch(), menuState: { ...state, aiActive: true, aiPaused: false } as Prisma.InputJsonValue },
+  });
+  await addSystemMessage(conversation.id, `${actor.name} devolveu a conversa para a IA`);
+  await addAudit({ userId: actor.id, action: AI_RESUME_ACTION, targetId: conversation.id, before: { assigneeId: conversation.assigneeId, status: conversation.status }, after: { assigneeId: null, status: "bot" } });
 }
