@@ -146,6 +146,11 @@ export async function periodSnapshot(from: string, to: string): Promise<LiveSnap
   return { day: from, from, to, updatedAt: new Date().toISOString(), seq: 0, orders, returns, kpis: dayKpis(orders, returns), stores: storesOf(orders, rows) };
 }
 
+/** Meta alterada: todas as telas abertas no canal ao vivo recebem na hora (sem esperar o ciclo do VMSet). */
+export function broadcastGoal(store: string | null, goal: Extract<LiveEvent, { type: "goal" }>["goal"]) {
+  emit({ type: "goal", store, goal });
+}
+
 function emit(event: LiveEvent) {
   for (const listener of state.listeners) {
     try {

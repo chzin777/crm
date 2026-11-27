@@ -74,7 +74,12 @@ export type LiveKpis = { revenue: number; orders: number; ticket: number; topSto
 export type StoreReturn = { store: string; order: string | null; day: string; amount: number; brand?: string; category?: string; description?: string | null; quantity?: number };
 export type LiveSnapshot = { day: string; updatedAt: string; seq: number; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; stores: { store: string; storeLabel: string; search?: string }[]; from?: string; to?: string };
 /** Mensagens do canal ao vivo: retrato inteiro (conexão, virada do dia, cancelamento) ou só os pedidos novos/alterados. */
-export type LiveEvent = { type: "snapshot"; snapshot: LiveSnapshot } | { type: "orders"; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] };
+/** Meta diária global do /vendas/ao-vivo (todos veem a mesma); store null = meta geral de todas as lojas. */
+export type SalesGoal = { amount: number; store: string | null; updatedBy: string | null; updatedAt: string };
+export type LiveEvent =
+  | { type: "snapshot"; snapshot: LiveSnapshot }
+  | { type: "orders"; orders: LiveOrder[]; returns: StoreReturn[]; kpis: LiveKpis; seq: number; updatedAt: string; stores: LiveSnapshot["stores"] }
+  | { type: "goal"; store: string | null; goal: SalesGoal | null };
 
 /**
  * Lojas encerradas: as vendas reais do período (histórico de quando operavam) contam normalmente nos totais, no

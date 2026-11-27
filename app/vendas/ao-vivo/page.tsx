@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Bar, CartesianGrid, Cell, ComposedChart, Area, AreaChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
@@ -19,7 +19,7 @@ import { LeaderboardCard } from "@/components/sales-live/LeaderboardCard";
 import { sellerKey, sellerLeaders, storeLeaders } from "@/lib/sales-live/leaderboard";
 import {
   KIND_LABEL, MAX_PERIOD_DAYS, crmShare, dailySeries, dayKpis, dayOfInstant, formatMoney, hourlySeries, isNewSale, mergeOrders, mixByKind, mixByPayment, paginate, periodRange, returnsByStore, saleWhen, validPeriod,
-  type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset, type StoreReturn,
+  type CategoryKind, type HourPoint, type LiveEvent, type LiveOrder, type LiveSnapshot, type PeriodPreset, type SalesGoal, type StoreReturn,
 } from "@/lib/sales-live/feed";
 
 type Status = "connecting" | "live" | "polling" | "offline" | "period";
@@ -117,8 +117,8 @@ function StatusPill({ status, updatedAt, now }: { status: Status; updatedAt: str
   );
 }
 
-/** Meta diária (salva neste navegador) com edição em 1 clique no lápis. */
-function GoalBar({ revenue, goal, onChange }: { revenue: number; goal: number | null; onChange: (value: number | null) => void }) {
+/** Meta diária global (a mesma para todos, gravada no banco); só gestores veem o lápis. */
+function GoalBar({ revenue, goal, canEdit, updatedBy, onChange }: { revenue: number; goal: number | null; canEdit: boolean; updatedBy?: string | null; onChange: (value: number | null) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const pct = goal ? Math.min(100, (revenue / goal) * 100) : 0;
@@ -137,10 +137,12 @@ function GoalBar({ revenue, goal, onChange }: { revenue: number; goal: number | 
             <button type="submit" aria-label="Salvar meta" className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg bg-[#C4D600] text-[#051647]"><Check className="h-4 w-4" /></button>
             <button type="button" onClick={() => setEditing(false)} aria-label="Cancelar" className="grid h-7 w-7 cursor-pointer place-items-center rounded-lg bg-white/10 text-white"><X className="h-4 w-4" /></button>
           </form>
-        ) : (
-          <button type="button" onClick={() => { setDraft(goal ? String(goal) : ""); setEditing(true); }} title="Editar meta diária" className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-0.5 font-semibold tabular-nums text-white hover:bg-white/10">
+        ) : canEdit ? (
+          <button type="button" onClick={() => { setDraft(goal ? String(goal) : ""); setEditing(true); }} title={`Editar meta diária (vale para todos)${updatedBy ? ` · definida por ${updatedBy}` : ""}`} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-0.5 font-semibold tabular-nums text-white hover:bg-white/10">
             {goal ? formatMoney(goal) : "Definir meta"}<Pencil className="h-3.5 w-3.5 text-white/60" />
           </button>
+        ) : (
+          <span title={updatedBy ? `Definida por ${updatedBy}` : undefined} className="px-1.5 py-0.5 font-semibold tabular-nums text-white">{goal ? formatMoney(goal) : "Sem meta definida"}</span>
         )}
       </div>
       <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/10">
@@ -352,7 +354,38 @@ export default function LiveSalesPage() {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<MobileTab>("feed");
   const [sound, setSound] = useState(false);
+  // Meta do Dia global (banco): a mesma para todos; chega ao vivo pelo canal (evento "goal") quando alguém altera.
   const [goal, setGoal] = useState<number | null>(null);
+  const [goalInfo, setGoalInfo] = useState<{ canEdit: boolean; updatedBy: string | null }>({ canEdit: false, updatedBy: null });
+  const applyGoal = useCallback((value: SalesGoal | null) => {
+    setGoal(value?.amount ?? null);
+    setGoalInfo((current) => ({ ...current, updatedBy: value?.updatedBy ?? null }));
+  }, []);
+  const putGoal = useCallback(async (amount: number | null) => {
+    const response = await fetch("/api/vendas/ao-vivo/meta", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }) });
+    const body = (await response.json().catch(() => ({}))) as { data?: { goal: SalesGoal | null }; error?: string };
+    if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível salvar a meta.");
+    return body.data.goal;
+  }, []);
+  const loadGoal = useCallback(async (first = false) => {
+    const response = await fetch("/api/vendas/ao-vivo/meta", { cache: "no-store" }).catch(() => null);
+    if (!response?.ok) return;
+    const { data } = (await response.json()) as { data: { goal: SalesGoal | null; canEdit: boolean } };
+    setGoalInfo({ canEdit: data.canEdit, updatedBy: data.goal?.updatedBy ?? null });
+    let current = data.goal;
+    // Migração única: a meta antiga ficava só neste navegador; um gestor que ainda a tem leva para o banco (vale para todos).
+    const legacy = first ? Number(window.localStorage.getItem(GOAL_KEY) ?? "") : 0;
+    if (legacy > 0 && !current && data.canEdit) current = await putGoal(Math.round(legacy)).catch(() => null);
+    if (first) window.localStorage.removeItem(GOAL_KEY);
+    applyGoal(current);
+  }, [applyGoal, putGoal]);
+  const loadGoalRef = useRef(loadGoal);
+  const applyGoalRef = useRef(applyGoal);
+  const loadedGoalOnce = useRef(false);
+  useEffect(() => {
+    loadGoalRef.current = loadGoal;
+    applyGoalRef.current = applyGoal;
+  }, [loadGoal, applyGoal]);
   const [arrived, setArrived] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
@@ -382,11 +415,10 @@ export default function LiveSalesPage() {
 
   useEffect(() => {
     const stored = window.localStorage.getItem(SOUND_KEY) === "1";
-    const storedGoal = Number(window.localStorage.getItem(GOAL_KEY) ?? "");
     soundRef.current = stored;
     const timer = window.setTimeout(() => {
       setSound(stored);
-      setGoal(Number.isFinite(storedGoal) && storedGoal > 0 ? storedGoal : null);
+      void loadGoalRef.current(true);
     }, 0);
     const clock = window.setInterval(() => setNow(new Date()), 1000);
     const onFullscreen = () => setFullscreen(!!document.fullscreenElement);
@@ -444,6 +476,8 @@ export default function LiveSalesPage() {
         if (!response.ok || !body.data) throw new Error(body.error ?? "Não foi possível carregar as vendas.");
         apply(body.data.orders, true, body.data);
         setStatus((current) => (current === "live" ? current : "polling"));
+        // Sem canal ao vivo (rede móvel): a meta acompanha a consulta leve.
+        void loadGoalRef.current();
       } catch (cause) {
         setStatus("offline");
         setError(cause instanceof Error ? cause.message : "Sem conexão.");
@@ -469,12 +503,20 @@ export default function LiveSalesPage() {
         stopPolling();
         setStatus("live");
         apply(data.snapshot.orders, true, data.snapshot);
+        // Reconectou: pode ter perdido uma troca de meta enquanto estava fora.
+        if (loadedGoalOnce.current) void loadGoalRef.current();
+        loadedGoalOnce.current = true;
       });
       source.addEventListener("orders", (event) => {
         const data = JSON.parse((event as MessageEvent<string>).data) as Extract<LiveEvent, { type: "orders" }>;
         stopPolling();
         setStatus("live");
         apply(data.orders, false, data);
+      });
+      // Meta alterada por qualquer gestor: todas as telas abertas atualizam a barra na hora.
+      source.addEventListener("goal", (event) => {
+        const data = JSON.parse((event as MessageEvent<string>).data) as Extract<LiveEvent, { type: "goal" }>;
+        if (!data.store) applyGoalRef.current(data.goal);
       });
       source.onerror = () => {
         // Rede móvel instável: segue por consulta leve a cada 15 s e tenta o canal ao vivo de novo em 30 s.
@@ -649,9 +691,17 @@ export default function LiveSalesPage() {
     else void document.documentElement.requestFullscreen?.().catch(() => undefined);
   };
   const saveGoal = (value: number | null) => {
+    const previous = goal;
     setGoal(value);
-    if (value) window.localStorage.setItem(GOAL_KEY, String(value));
-    else window.localStorage.removeItem(GOAL_KEY);
+    putGoal(value)
+      .then((saved) => {
+        applyGoal(saved);
+        toast.success("Meta do dia salva", "Vale para todos que acompanham o painel.");
+      })
+      .catch((cause) => {
+        setGoal(previous);
+        toast.error("Meta não salva", cause instanceof Error ? cause.message : "Tente de novo.");
+      });
   };
   const mobileOnly = (value: MobileTab) => (tab === value ? "" : "max-md:hidden");
   const iconButton = "grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl border transition-colors";
@@ -775,7 +825,7 @@ export default function LiveSalesPage() {
                 </div>
               </div>
             )}
-            {!store && !itemFiltered && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
+            {!store && !itemFiltered && isLive && <GoalBar revenue={kpis.revenue} goal={goal} canEdit={goalInfo.canEdit} updatedBy={goalInfo.updatedBy} onChange={saveGoal} />}
             {!isLive && rangeValid && <p className="mt-1.5 text-xs tabular-nums text-white/70">{rangeLabel}{loadingPeriod && <Loader2 className="ml-1.5 inline h-3.5 w-3.5 animate-spin" />}</p>}
             <div className="mt-3"><HeroSpark data={hourly} /></div>
             {/* Pela largura do próprio card (@container), não da tela: estreito (celular 360–390px ou coluna 5/12 do
