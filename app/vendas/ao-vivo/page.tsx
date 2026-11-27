@@ -48,8 +48,6 @@ const KIND_COLOR: Record<CategoryKind, string> = { sol: "#F7915E", grau: "#00218
 const PAYMENT_COLORS = ["#002187", LIME, "#F7915E", "#0ea5e9", "#8b5cf6", "#94a3b8", "#64748b"];
 
 const compactMoney = (value: number) => (value >= 1000 ? `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : formatMoney(value));
-/** Valor curto sem centavos: "R$ 988", "R$ 1,2 mil". */
-const shortMoney = (value: number) => (value >= 1000 ? `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : `R$ ${Math.round(value).toLocaleString("pt-BR")}`);
 const percent = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: value < 10 ? 1 : 0 })}%`;
 const brHour = (now: Date) => Number(new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", hour12: false, timeZone: "America/Sao_Paulo" }).format(now)) % 24;
 
@@ -708,7 +706,7 @@ export default function LiveSalesPage() {
         <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
           <ItemMultiSelect icon={Tags} noun="categoria" plural="categorias" options={itemOptions.categories} selected={itemFilter.categories} onChange={(next) => pickItems("categories", next)} />
           <ItemMultiSelect icon={BadgeCheck} noun="marca" plural="marcas" options={itemOptions.brands} selected={itemFilter.brands} onChange={(next) => pickItems("brands", next)} />
-          <ItemMultiSelect icon={Package} noun="produto, modelo ou referência" plural="produtos" options={itemOptions.products} selected={itemFilter.products} onChange={(next) => pickItems("products", next)} />
+          <ItemMultiSelect icon={Package} noun="produto, modelo ou referência" plural="produtos" allLabel="Todos os produtos" options={itemOptions.products} selected={itemFilter.products} onChange={(next) => pickItems("products", next)} />
         </div>
         {activeChips.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -780,21 +778,23 @@ export default function LiveSalesPage() {
             {!store && !itemFiltered && isLive && <GoalBar revenue={kpis.revenue} goal={goal} onChange={saveGoal} />}
             {!isLive && rangeValid && <p className="mt-1.5 text-xs tabular-nums text-white/70">{rangeLabel}{loadingPeriod && <Loader2 className="ml-1.5 inline h-3.5 w-3.5 animate-spin" />}</p>}
             <div className="mt-3"><HeroSpark data={hourly} /></div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="min-w-0 rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 sm:p-3">
-                <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-white/60"><ShoppingBag className="h-3.5 w-3.5 shrink-0" />Pedidos</p>
-                <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:text-2xl">{kpis.orders}</p>
+            {/* Pela largura do próprio card (@container), não da tela: estreito (celular 360–390px ou coluna 5/12 do
+                desktop) = 2 + 1 (Pedidos e Ticket lado a lado, WhatsApp na linha inteira); 3 colunas só com ≥ 28rem. */}
+            <div className="mt-3 grid grid-cols-2 gap-2 @md:grid-cols-3">
+              <div className="min-w-0 overflow-hidden rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 @xl:p-3">
+                <p className="flex min-w-0 items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-white/60"><ShoppingBag className="h-3.5 w-3.5 shrink-0" /><span className="truncate">Pedidos</span></p>
+                <p className="mt-0.5 truncate whitespace-nowrap text-base font-bold tabular-nums @xl:text-xl @3xl:text-2xl">{kpis.orders}</p>
               </div>
-              <div className="min-w-0 rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 sm:p-3">
-                <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-white/60"><Receipt className="h-3.5 w-3.5 shrink-0" />Ticket</p>
-                {/* Celular: sem centavos ("R$ 988") e fonte menor, para caber inteiro na coluna estreita. */}
-                <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:hidden">{kpis.orders ? shortMoney(kpis.ticket) : "—"}</p>
-                <p className="mt-0.5 hidden whitespace-nowrap text-2xl font-bold tabular-nums sm:block">{kpis.orders ? compactMoney(kpis.ticket) : "—"}</p>
+              <div className="min-w-0 overflow-hidden rounded-2xl bg-white/[0.07] p-2.5 ring-1 ring-white/10 @xl:p-3">
+                <p className="flex min-w-0 items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-white/60"><Receipt className="h-3.5 w-3.5 shrink-0" /><span className="truncate">Ticket médio</span></p>
+                <p className="mt-0.5 truncate whitespace-nowrap text-base font-bold tabular-nums @xl:text-xl @3xl:text-2xl" title={kpis.orders ? formatMoney(kpis.ticket) : undefined}>{kpis.orders ? compactMoney(kpis.ticket) : "—"}</p>
               </div>
-              <div className="min-w-0 rounded-2xl bg-[#C4D600]/15 p-2.5 ring-1 ring-[#C4D600]/30 sm:p-3">
-                <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#C4D600]"><MessageCircle className="h-3.5 w-3.5 shrink-0" />WhatsApp</p>
-                <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:text-2xl">{percent(crm.revenuePct)}</p>
-                <p className="truncate text-[10px] tabular-nums text-white/60">{compactMoney(crm.revenue)} · {crm.orders} ped.</p>
+              <div className="col-span-2 flex min-w-0 items-center justify-between gap-2 overflow-hidden rounded-2xl bg-[#C4D600]/15 p-2.5 ring-1 ring-[#C4D600]/30 @md:col-span-1 @md:block @xl:p-3">
+                <div className="min-w-0">
+                  <p className="flex min-w-0 items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#C4D600]"><MessageCircle className="h-3.5 w-3.5 shrink-0" /><span className="truncate">WhatsApp</span></p>
+                  <p className="mt-0.5 truncate whitespace-nowrap text-base font-bold tabular-nums @xl:text-xl @3xl:text-2xl">{percent(crm.revenuePct)}</p>
+                </div>
+                <p className="min-w-0 truncate text-[10px] tabular-nums text-white/60">{compactMoney(crm.revenue)} · {crm.orders} ped.</p>
               </div>
             </div>
           </div>

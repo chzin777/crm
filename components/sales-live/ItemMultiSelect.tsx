@@ -10,10 +10,12 @@ const money = (value: number) => value.toLocaleString("pt-BR", { style: "currenc
  * Seletor de Categoria, Marca ou Produto do /vendas/ao-vivo (mesmo padrão do seletor de lojas): busca instantânea,
  * seleção múltipla e, em cada opção, unidades vendidas e R$ do período.
  */
-export function ItemMultiSelect({ icon: Icon, noun, plural, options, selected, onChange }: {
+export function ItemMultiSelect({ icon: Icon, noun, plural, allLabel, options, selected, onChange }: {
   icon: ComponentType<{ className?: string }>;
   noun: string;
   plural: string;
+  /** Texto sem seleção (concordância): padrão "Todas as {plural}"; produtos usam "Todos os produtos". */
+  allLabel?: string;
   options: FilterOption[];
   selected: string[];
   onChange: (next: string[]) => void;
@@ -45,7 +47,8 @@ export function ItemMultiSelect({ icon: Icon, noun, plural, options, selected, o
     return [...missing, ...found];
   }, [options, term, selected]);
   const toggle = (value: string) => onChange(chosen.has(value) ? selected.filter((item) => item !== value) : [...selected, value]);
-  const label = selected.length === 0 ? `Todas as ${plural}` : selected.length === 1 ? selected[0] : `${selected.length} ${plural}`;
+  const everything = allLabel ?? `Todas as ${plural}`;
+  const label = selected.length === 0 ? everything : selected.length === 1 ? selected[0] : `${selected.length} ${plural}`;
 
   return (
     <div ref={rootRef} className="relative min-w-0">
@@ -56,7 +59,7 @@ export function ItemMultiSelect({ icon: Icon, noun, plural, options, selected, o
           <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
         {selected.length > 0 && (
-          <button type="button" onClick={() => onChange([])} aria-label={`Limpar ${plural}`} title={`Mostrar todas as ${plural}`} className="mr-1 grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
+          <button type="button" onClick={() => onChange([])} aria-label={`Limpar ${plural}`} title={`Mostrar ${everything.charAt(0).toLowerCase()}${everything.slice(1)}`} className="mr-1 grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white">
             <X className="h-4 w-4" />
           </button>
         )}
