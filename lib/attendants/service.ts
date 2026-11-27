@@ -56,23 +56,10 @@ async function loadAttendanceConversations(fromDay: string, toDay: string): Prom
   const from = dayStart(fromDay);
   const to = dayStart(addDays(toDay, 1));
   return prisma.$queryRaw<ConversationRow[]>`
-    WITH contact_keys AS (
-      SELECT c.id, c."sourceKey", c.name,
+    WITH base AS (
+      SELECT cv.id, c."sourceKey", c.name AS "contactName", hm."attendanceAt", hm."attendantId", hm."attendantName",
         CASE WHEN length(p.digits) >= 12 AND p.digits LIKE '55%' THEN substr(p.digits, 3) ELSE p.digits END AS local_phone,
-        NULLIF(regexp_replace(COALESCE(c.cpf, ''), '[^0-9]', '', 'g'), '') AS cpf_digits
-      FROM "Contact" c
-      CROSS JOIN LATERAL (
-        SELECT regexp_replace(COALESCE(c.phone, ''), '[^0-9]', '', 'g') AS digits
-      ) p
-    ), contact_match AS (
-      SELECT ck.*,
-        CASE WHEN length(local_phone) >= 10 THEN substr(local_phone, 1, 2) || right(local_phone, 8) END AS phone_key
-      FROM contact_keys ck
-    ), base AS (
-      SELECT cv.id, cv."contactId", cv."phone" AS wa_phone, c."sourceKey", c.name AS "contactName",
-        c.phone AS "contactPhone", c.cpf AS "contactCpf", hm."attendanceAt", hm."attendantId", hm."attendantName",
-        CASE WHEN length(p.digits) >= 12 AND p.digits LIKE '55%' THEN substr(p.digits, 3) ELSE p.digits END AS local_phone,
-        NULLIF(regexp_replace(COALESCE(c.cpf, ''), '[^0-9]', '', 'g'), '') AS cpf_digits
+        c."cpfDigits" AS cpf_digits
       FROM "ChatConversation" cv
       JOIN "Contact" c ON c.id = cv."contactId"
       CROSS JOIN LATERAL (
@@ -91,18 +78,33 @@ async function loadAttendanceConversations(fromDay: string, toDay: string): Prom
         LIMIT 1
       ) hm ON true
       WHERE hm."attendanceAt" >= ${from} AND hm."attendanceAt" < ${to}
+    ), conversation_phone_keys AS (
+      SELECT b.id, b."sourceKey", b."contactName", b."attendanceAt", b."attendantId", b."attendantName", b.cpf_digits,
+        CASE WHEN length(b.local_phone) >= 10 THEN substr(b.local_phone, 1, 2) || '%' || right(b.local_phone, 8) END AS local_phone_pattern,
+        CASE WHEN length(b.local_phone) >= 10 THEN '55' || substr(b.local_phone, 1, 2) || '%' || right(b.local_phone, 8) END AS intl_phone_pattern
+      FROM base b
+    ), contact_links AS (
+      SELECT b.id AS conversation_id, peers."sourceKey"
+      FROM conversation_phone_keys b
+      JOIN "Contact" peers ON peers."sourceKey" = b."sourceKey"
+      UNION
+      SELECT b.id AS conversation_id, peers."sourceKey"
+      FROM conversation_phone_keys b
+      JOIN "Contact" peers ON peers."phoneDigits" LIKE b.local_phone_pattern
+      UNION
+      SELECT b.id AS conversation_id, peers."sourceKey"
+      FROM conversation_phone_keys b
+      JOIN "Contact" peers ON peers."phoneDigits" LIKE b.intl_phone_pattern
+      UNION
+      SELECT b.id AS conversation_id, peers."sourceKey"
+      FROM conversation_phone_keys b
+      JOIN "Contact" peers ON peers."cpfDigits" = b.cpf_digits
     )
     SELECT b.id, b."attendanceAt", to_char(b."attendanceAt" AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS "attendanceDay",
       b."contactName", b."sourceKey", b."attendantId", b."attendantName",
       array_remove(array_agg(DISTINCT peers."sourceKey"), NULL) AS "contactKeys"
-    FROM base b
-    LEFT JOIN LATERAL (
-      SELECT CASE WHEN length(b.local_phone) >= 10 THEN substr(b.local_phone, 1, 2) || right(b.local_phone, 8) END AS phone_key
-    ) bp ON true
-    LEFT JOIN contact_match peers
-      ON peers."sourceKey" = b."sourceKey"
-      OR (bp.phone_key IS NOT NULL AND peers.phone_key = bp.phone_key)
-      OR (b.cpf_digits IS NOT NULL AND peers.cpf_digits = b.cpf_digits)
+    FROM conversation_phone_keys b
+    LEFT JOIN contact_links peers ON peers.conversation_id = b.id
     GROUP BY b.id, b."attendanceAt", b."contactName", b."sourceKey", b."attendantId", b."attendantName"
   `;
 }
