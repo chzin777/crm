@@ -128,12 +128,33 @@ const storesOf = (orders: LiveSnapshot["orders"], rows: StoreRow[]) =>
  * Vendas faturadas de um período (Esta semana, Este mês, Personalizado): mesma fonte e mesma regra do ao vivo
  * (pedido faturado no VMSet, total líquido oficial, dia de Brasília). A API do VMSet guarda cada período em cache.
  */
-export async function periodSnapshot(from: string, to: string): Promise<LiveSnapshot> {
+async function fetchPeriod(from: string, to: string) {
   const url = `${API_URL()}/sales/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const response = await fetch(url, { headers: { "x-api-key": API_TOKEN() }, signal: AbortSignal.timeout(30_000), cache: "no-store" });
   if (!response.ok) throw new Error(`API do VMSet respondeu ${response.status}`);
   const body = (await response.json()) as { items?: SaleItem[]; returns?: unknown };
-  const items = Array.isArray(body.items) ? body.items : [];
+  return { items: Array.isArray(body.items) ? body.items : [], returns: body.returns };
+}
+
+/**
+ * Itens faturados crus (mesma fonte e regra do /vendas/ao-vivo) para recortes por vendedor/loja no app:
+ * hoje vem do poller ao vivo; outro período, da API do VMSet.
+ */
+export async function soldItems(from: string, to: string): Promise<{ day: string; items: SaleItem[]; updatedAt: string; storeLabel: (store: string) => string }> {
+  const storeLabel = labelerFor(await storeRows());
+  const today = brDay();
+  if (from === today && to === today) {
+    const { snapshot, error } = await liveSnapshot();
+    if (!snapshot) throw new Error(error ?? "Carregando as vendas do dia...");
+    return { day: snapshot.day, items: state.items, updatedAt: snapshot.updatedAt, storeLabel };
+  }
+  const { items } = await fetchPeriod(from, to);
+  return { day: from, items, updatedAt: new Date().toISOString(), storeLabel };
+}
+
+export async function periodSnapshot(from: string, to: string): Promise<LiveSnapshot> {
+  const body = await fetchPeriod(from, to);
+  const items = body.items;
   const returns = parseReturns(body.returns, from);
   const rows = await storeRows();
   const storeLabel = labelerFor(rows);

@@ -70,6 +70,23 @@ async function viewerScope(viewer: Viewer, storeInput: string | null): Promise<S
   return { linked: true, requested, stores, sellerNames, sellerVariants, mySellerId, filter: Prisma.sql`type = 'Venda' ${storeFilter} ${sellerFilter}` };
 }
 
+/** Filtro dos itens faturados do VMSet (feed ao vivo) pelo recorte do usuário: vendedor só as dele, gerente as lojas dele. */
+export async function soldItemScope(viewer: Viewer): Promise<{ linked: false; reason: string } | { linked: true; keep: (item: { store: string | null; seller: string | null }) => boolean }> {
+  const scope = await viewerScope(viewer, null);
+  if (!scope.linked) return scope;
+  const { stores, sellerNames } = scope;
+  return {
+    linked: true,
+    keep: (item) => {
+      if (stores) {
+        const store = toStore(item.store);
+        if (store === null || !stores.includes(store)) return false;
+      }
+      return !sellerNames || sellerNames.includes(nameKey(item.seller));
+    },
+  };
+}
+
 export const RECENT_PAGE_SIZE = 10;
 
 export async function salesForViewer(viewer: Viewer, monthInput: string | null, storeInput: string | null, pageInput?: string | null) {
