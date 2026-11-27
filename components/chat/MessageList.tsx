@@ -9,15 +9,28 @@ import { InteractiveListBubble } from "@/components/chat/InteractiveListBubble";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
 import { mergeMessages, replaceMessage } from "@/lib/chat/reconcile";
 import { cachedMessages, loadLatestMessages, rememberMessages } from "@/lib/chat/message-cache";
+import { createActiveConversation, scopeToTimeline, type ConversationTicket } from "@/lib/chat/timeline-guard";
+
+/** Resposta de uma conversa que já não está aberta: descartada sem erro. */
+class StaleConversation extends Error {
+  constructor() {
+    super("conversa trocada");
+    this.name = "StaleConversation";
+  }
+}
+const reportLoadError = (error: unknown) => {
+  if (!(error instanceof StaleConversation)) console.error("[chat]", error);
+};
 
 const CACHED_MESSAGES = 40;
 import type { ChatDelivery, ChatMessageItem, ScheduledMessageItem } from "@/lib/chat/types";
 import { describeFailure } from "@/lib/chat/meta-failure";
 
+/** add/replace/remove levam a conversa de origem: se a tela já trocou de conversa, a chamada é ignorada. */
 export type MessageListHandle = {
-  add: (message: ChatMessageItem) => void;
-  replace: (id: string, message: ChatMessageItem) => void;
-  remove: (id: string) => void;
+  add: (message: ChatMessageItem, conversationId: string | null) => void;
+  replace: (id: string, message: ChatMessageItem, conversationId: string | null) => void;
+  remove: (id: string, conversationId: string | null) => void;
   refresh: () => void;
   holdRefresh: () => void;
   releaseRefresh: () => void;
@@ -284,9 +297,28 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     return !box || box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   };
 
+  // Bilhete da conversa aberta: resposta que chega depois de trocar de conversa (ou após desmontar) é descartada.
+  const active = useRef(createActiveConversation());
+  const ticket = useRef<ConversationTicket | null>(null);
+  if (!ticket.current) ticket.current = active.current.open(conversationId);
+  const sessionIdsRef = useRef<string[]>([]);
+  sessionIdsRef.current = [...sessions.keys()];
+  const olderRequest = useRef<AbortController | null>(null);
+  // Trocar de conversa/desmontar: invalida o bilhete e cancela a página antiga em voo.
+  useEffect(() => {
+    ticket.current = active.current.open(conversationId);
+    const guard = active.current;
+    return () => {
+      guard.close();
+      olderRequest.current?.abort();
+    };
+  }, [conversationId]);
+
   const merge = useCallback((incoming: ChatMessageItem[]) => {
-    setMessages((current) => mergeMessages(current, incoming));
-  }, []);
+    const scoped = scopeToTimeline(incoming, conversationId, sessionIdsRef.current);
+    if (!scoped.length) return;
+    setMessages((current) => mergeMessages(current, scoped));
+  }, [conversationId]);
 
   const retryMedia = async (messageId: string) => {
     const response = await fetch(`/api/chat/media/${messageId}/retry`, { method: "POST" }).catch(() => null);
@@ -315,8 +347,12 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     });
   }, []);
 
+  // Rejeita (StaleConversation) quando a conversa mudou enquanto a resposta vinha: nada dela toca a tela.
   const fetchLatest = useCallback(async () => {
+    const issued = ticket.current!;
     const data = await loadLatestMessages(conversationId);
+    if (!issued.isCurrent() || issued.id !== conversationId) throw new StaleConversation();
+    for (const session of data.sessions ?? []) if (!sessionIdsRef.current.includes(session.id)) sessionIdsRef.current.push(session.id);
     rememberSessions(data.sessions);
     return data;
   }, [conversationId, rememberSessions]);
@@ -342,7 +378,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
         setMessages(data.items);
         setCursor(data.nextCursor);
       })
-      .catch((error) => console.error("[chat]", error))
+      .catch(reportLoadError)
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -354,8 +390,10 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
   // Mantém no cache a ponta mais recente da conversa (até 40), para reabrir na hora; o cursor aponta para a mais
   // antiga guardada, e a rolagem para cima continua dali.
   useEffect(() => {
-    if (loading || !messages.length) return;
-    const recent = messages.slice(-CACHED_MESSAGES);
+    if (loading || !messages.length || !ticket.current?.isCurrent()) return;
+    // Temporárias (envio em andamento) e qualquer mensagem fora do contato não vão para o cache desta conversa.
+    const recent = scopeToTimeline(messages.filter((item) => !item.id.startsWith("temp-")), conversationId, sessions.keys()).slice(-CACHED_MESSAGES);
+    if (!recent.length) return;
     rememberMessages(conversationId, { items: recent, nextCursor: messages.length > CACHED_MESSAGES ? recent[0].id : cursor, sessions: [...sessions.values()] });
   }, [conversationId, loading, messages, cursor, sessions]);
 
@@ -369,7 +407,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
         if (isNearBottom()) pendingScroll.current = "smooth";
         merge(data.items);
       })
-      .catch((error) => console.error("[chat]", error));
+      .catch(reportLoadError);
   }, [fetchLatest, merge]);
 
   const firstTick = useRef(tick);
@@ -391,13 +429,23 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     pendingScroll.current = null;
   }, [messages]);
 
+  // Envio que começou em outra conversa (troca durante o upload/POST) nunca entra nesta timeline.
+  const mine = (origin: string | null) => origin === conversationId && ticket.current?.isCurrent();
   useImperativeHandle(listRef, () => ({
-    add: (message) => {
+    add: (message, origin) => {
+      if (!mine(origin)) return;
       pendingScroll.current = "smooth";
       setMessages((current) => [...current, message]);
     },
-    replace: (id, message) => setMessages((current) => replaceMessage(current, id, message)),
-    remove: (id) => setMessages((current) => current.filter((item) => item.id !== id)),
+    replace: (id, message, origin) => {
+      if (!mine(origin)) return;
+      if (!scopeToTimeline([message], conversationId, sessionIdsRef.current).length) return;
+      setMessages((current) => replaceMessage(current, id, message));
+    },
+    remove: (id, origin) => {
+      if (!mine(origin)) return;
+      setMessages((current) => current.filter((item) => item.id !== id));
+    },
     refresh,
     holdRefresh: () => {
       refreshHolds.current += 1;
@@ -408,21 +456,30 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
       refreshDeferred.current = false;
       refresh();
     },
-  }), [refresh]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mine lê o bilhete atual (ref) e a conversa da prop.
+  }), [refresh, conversationId]);
 
   const loadOlder = async () => {
     if (!cursor || loadingOlder) return;
     setLoadingOlder(true);
+    const issued = ticket.current!;
+    const controller = new AbortController();
+    olderRequest.current?.abort();
+    olderRequest.current = controller;
     try {
-      const response = await fetch(`/api/chat/conversations/${conversationId}/messages?cursor=${cursor}`, { cache: "no-store" });
-      if (!response.ok) return;
+      const response = await fetch(`/api/chat/conversations/${conversationId}/messages?cursor=${cursor}`, { cache: "no-store", signal: controller.signal });
+      if (!response.ok || !issued.isCurrent()) return;
       const data = (await response.json()) as { items: ChatMessageItem[]; nextCursor: string | null; sessions?: ChatSession[] };
+      if (!issued.isCurrent()) return;
       rememberSessions(data.sessions);
       restoreFrom.current = scroller.current?.scrollHeight ?? null;
       merge(data.items);
       setCursor(data.nextCursor);
+    } catch (error) {
+      if ((error as { name?: string })?.name !== "AbortError") console.error("[chat]", error);
     } finally {
-      setLoadingOlder(false);
+      if (olderRequest.current === controller) olderRequest.current = null;
+      if (issued.isCurrent()) setLoadingOlder(false);
     }
   };
 

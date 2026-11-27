@@ -1,5 +1,6 @@
 import type { ChatSession } from "@/lib/chat/session-divider";
 import type { ChatMessageItem } from "@/lib/chat/types";
+import { scopeToTimeline } from "@/lib/chat/timeline-guard";
 
 /**
  * Cache em memória (navegador) da última página de mensagens por conversa: reabrir uma conversa já vista ou
@@ -30,7 +31,9 @@ export function loadLatestMessages(conversationId: string, fetcher: typeof fetch
   const request = fetcher(`/api/chat/conversations/${conversationId}/messages`, { cache: "no-store" })
     .then(async (response) => {
       if (!response.ok) throw new Error("Falha ao carregar mensagens.");
-      const page = (await response.json()) as MessagePage;
+      const raw = (await response.json()) as MessagePage;
+      // Só mensagens desta conversa ou de atendimentos do mesmo contato (sessões que o servidor devolveu).
+      const page = { ...raw, items: scopeToTimeline(raw.items ?? [], conversationId, (raw.sessions ?? []).map((session) => session.id)) };
       rememberMessages(conversationId, page);
       return page;
     })

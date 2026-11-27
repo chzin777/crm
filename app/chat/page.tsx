@@ -223,9 +223,14 @@ function ChatWorkspace() {
     void loadList();
   }, [loadList, tick]);
 
+  // Detalhe que chega depois de trocar de conversa é descartado (nunca mostra dados do cliente anterior).
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
   const loadDetail = useCallback(async (id: string) => {
     const response = await fetch(`/api/chat/conversations/${id}`, { cache: "no-store" });
-    setDetail(response.ok ? ((await response.json()) as ConversationDetail) : null);
+    const data = response.ok ? ((await response.json()) as ConversationDetail) : null;
+    if (selectedRef.current !== id) return;
+    setDetail(data);
   }, []);
 
   useEffect(() => {
@@ -247,12 +252,12 @@ function ChatWorkspace() {
     }
   };
 
-  const postMessage = async (body: Record<string, unknown>) => {
+  const postMessage = async (body: Record<string, unknown>, target = selectedId) => {
     // A sincronização espera o envio terminar para não trazer a mensagem antes da resposta do POST.
     const list = messageList.current;
     list?.holdRefresh();
     try {
-      const response = await fetch(`/api/chat/conversations/${selectedId}/messages`, {
+      const response = await fetch(`/api/chat/conversations/${target}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -275,6 +280,8 @@ function ChatWorkspace() {
 
   const handleSend = async ({ text, internal, replyTo: quoted }: ComposerSend) => {
     const temporaryId = `temp-${Date.now()}`;
+    // Conversa de origem: se a tela trocar durante o envio, a resposta não entra na timeline de outro cliente.
+    const origin = selectedId;
     setSendError("");
     messageList.current?.add({
       id: temporaryId,
@@ -287,21 +294,21 @@ function ChatWorkspace() {
       replyTo: quoted && !internal ? { author: quoted.authorName ?? "Cliente", text: quoted.text, messageId: quoted.id } : null,
       createdAt: new Date().toISOString(),
       attachment: null,
-    });
-    if (!internal && selectedId) bumpToTop(selectedId, new Date().toISOString());
+    }, origin);
+    if (!internal && origin) bumpToTop(origin, new Date().toISOString());
     try {
-      const saved = await postMessage({ text, internal, replyToId: internal ? undefined : quoted?.id });
-      messageList.current?.replace(temporaryId, saved);
+      const saved = await postMessage({ text, internal, replyToId: internal ? undefined : quoted?.id }, origin);
+      messageList.current?.replace(temporaryId, saved, origin);
       setReplyTo(null);
       void loadList();
-      if (selectedId) void loadDetail(selectedId);
+      if (origin) void loadDetail(origin);
       if (saved.delivery === "failed") {
         setSendError(saved.failureReason ?? "Falha no envio.");
         return false;
       }
       return true;
     } catch (error) {
-      messageList.current?.remove(temporaryId);
+      messageList.current?.remove(temporaryId, origin);
       setSendError(error instanceof Error ? error.message : "Não foi possível enviar a mensagem.");
       return false;
     }
@@ -335,6 +342,7 @@ function ChatWorkspace() {
     const temporaryId = `temp-${Date.now()}`;
     const localUrl = URL.createObjectURL(file);
     const kind = file.type.startsWith("audio/") ? "audio" : file.type === "video/mp4" ? "video" : file.type === "image/jpeg" || file.type === "image/png" ? "image" : "document";
+    const origin = selectedId;
     setSendError("");
     setUploadProgress(0);
     messageList.current?.add({
@@ -348,21 +356,21 @@ function ChatWorkspace() {
       replyTo: null,
       createdAt: new Date().toISOString(),
       attachment: { kind, name: file.name, mime: file.type, size: file.size, localUrl },
-    });
+    }, origin);
     try {
       const attachment = await uploadAttachment(file);
-      const saved = await postMessage({ text: caption, attachment, replyToId: replyTo?.id });
-      messageList.current?.replace(temporaryId, saved);
+      const saved = await postMessage({ text: caption, attachment, replyToId: replyTo?.id }, origin);
+      messageList.current?.replace(temporaryId, saved, origin);
       setReplyTo(null);
       void loadList();
-      if (selectedId) void loadDetail(selectedId);
+      if (origin) void loadDetail(origin);
       if (saved.delivery === "failed") {
         setSendError(saved.failureReason ?? "Falha no envio.");
         return false;
       }
       return true;
     } catch (error) {
-      messageList.current?.remove(temporaryId);
+      messageList.current?.remove(temporaryId, origin);
       setSendError(error instanceof Error ? error.message : "Não foi possível enviar o arquivo.");
       return false;
     } finally {
