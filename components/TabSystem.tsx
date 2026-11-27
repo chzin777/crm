@@ -26,6 +26,7 @@ import {
   Zap,
   Target,
   Trophy,
+  Coins,
 } from "lucide-react";
 
 interface TabDef {
@@ -56,6 +57,7 @@ const TABS: TabDef[] = [
   { id: "vendas-ao-vivo", label: "Vendas ao vivo", href: "/vendas/ao-vivo", icon: Zap },
   { id: "vendas-metas", label: "Metas de vendedores", href: "/vendas/metas", icon: Target },
   { id: "vendas-campanhas", label: "Campanhas e premiações", href: "/vendas/campanhas", icon: Trophy },
+  { id: "brasil-points", label: "Brasil Points", href: "/brasil-points", icon: Coins },
   { id: "ia", label: "Inteligência Artificial", href: "/ia", icon: Sparkles },
   { id: "configuracoes", label: "Configurações", href: "/configuracoes", icon: Settings },
   { id: "manual", label: "Manual", href: "/manual", icon: BookOpen },
