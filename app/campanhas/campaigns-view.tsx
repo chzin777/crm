@@ -124,7 +124,8 @@ interface DispatchJobView {
   duplicatesRemoved?: number;
   coldRemoved?: number;
   errors: string[];
-  pause?: { kind: string; code?: number; message: string };
+  pause?: { kind: string; code?: number; message: string; detail?: string };
+  retryQueue?: number[];
   scheduledAt?: string;
   startedAt?: string;
 }
@@ -2243,6 +2244,10 @@ export function CampaignsView() {
                         {(selectedJob.coldRemoved ?? 0) > 0 && ` · ${int(selectedJob.coldRemoved ?? 0)} leads frios fora do envio`}
                       </p>
                       {selectedJob.status === "paused" && selectedJob.pause && <p role="alert" className="text-xs font-medium text-[#9a3d12] dark:text-[#F7915E]">{selectedJob.pause.message}</p>}
+                      {selectedJob.status === "paused" && selectedJob.pause?.detail && (
+                        <p className="break-words rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] text-slate-600 dark:bg-white/5 dark:text-slate-300">Detalhe técnico{selectedJob.pause.code ? ` (código ${selectedJob.pause.code})` : ""}: {selectedJob.pause.detail}</p>
+                      )}
+                      {(selectedJob.retryQueue?.length ?? 0) > 0 && <p className="text-[11px] text-slate-500 dark:text-slate-400">{int(selectedJob.retryQueue?.length ?? 0)} contatos sem conexão com a Meta serão tentados de novo no fim do disparo.</p>}
                       {selectedJob.errors.length > 0 && (
                         <details className="text-[11px] text-slate-500 dark:text-slate-400">
                           <summary className="cursor-pointer">Ver últimas falhas ({selectedJob.failed})</summary>

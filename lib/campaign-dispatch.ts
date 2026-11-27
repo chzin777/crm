@@ -1,7 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { invalidateCache } from "@/lib/cache";
-import { findTemplate, getMessagingInfo, listTemplates, MetaApiError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
+import { findTemplate, getMessagingInfo, InvalidPhoneError, listTemplates, MetaApiError, MetaNetworkError, sendMedia, sendTemplate, sendText, uploadMedia } from "@/lib/meta-whatsapp";
 import { phoneVariants } from "@/lib/chat/phone";
 import { assignedAttendantValues } from "@/lib/attendant-db";
 import { hasAttendantToken, isAttendantField } from "@/lib/attendant-variables";
@@ -38,7 +38,7 @@ type CampaignRecord = {
 };
 
 /** `schedule`: fora da janela de horário da campanha; o relógio retoma sozinho em `resumeAt`. */
-export type PauseReason = { kind: "payment" | "rate_limit" | "auth" | "account" | "template" | "network" | "consecutive" | "manual" | "media" | "schedule"; code?: number; message: string; resumeAt?: string };
+export type PauseReason = { kind: "payment" | "rate_limit" | "auth" | "account" | "template" | "network" | "consecutive" | "manual" | "media" | "schedule"; code?: number; message: string; resumeAt?: string; /** Resposta técnica real (HTTP, código e mensagem da Meta ou erro de rede). */ detail?: string };
 
 export type DispatchJob = {
   campaignId: string;
@@ -58,16 +58,29 @@ export type DispatchJob = {
   coldRemoved?: number;
   errors: string[];
   pause?: PauseReason;
+  /** Posições de contatos que não saíram por falha de conexão/instabilidade da Meta: nova tentativa no fim do disparo. */
+  retryQueue?: number[];
   /** Disparo agendado: fica pausado (kind "schedule") até esta hora e o relógio do chat inicia sozinho. */
   scheduledAt?: string;
   startedAt: string;
   finishedAt?: string;
 };
 
-const SEND_DELAY_MS = 300;
-const RATE_LIMIT_WAITS_MS = [30_000, 60_000, 120_000];
-const NETWORK_RETRY_MS = [5_000, 15_000, 30_000];
-const MAX_CONSECUTIVE_API_FAILURES = 8;
+/**
+ * Ritmo e novas tentativas do disparo (os testes zeram as esperas). Rede caída e instabilidade da Meta (5xx, 131000,
+ * código 2): 4 novas tentativas em 2 s, 5 s, 15 s e 30 s. Limite de velocidade (429, 130429, 80007): espera mais longa.
+ * Ainda falhando, o contato vai para o fim da fila e o disparo segue; só pausa com 10 falhas de infraestrutura seguidas.
+ */
+export const DISPATCH_TIMING = {
+  sendDelayMs: 300,
+  transientRetryMs: [2_000, 5_000, 15_000, 30_000],
+  rateLimitWaitsMs: [30_000, 60_000, 120_000],
+};
+export const MAX_CONSECUTIVE_INFRA_FAILURES = 10;
+const MAX_CONSECUTIVE_API_FAILURES = 10;
+const TRANSIENT_HTTP = new Set([500, 502, 503, 504]);
+const TRANSIENT_CODES = new Set([131000, 2]);
+const NETWORK_ERROR = /ECONNRESET|ETIMEDOUT|TIMEOUT|UND_ERR|fetch failed|socket hang up|EPIPE|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH/i;
 const MAX_STORED_ERRORS = 20;
 // Descanso entre campanhas por contato. CAMPAIGN_COOLDOWN_DAYS=0 desliga a trava para todos os disparos.
 const parsedCooldownDays = Number(process.env.CAMPAIGN_COOLDOWN_DAYS);
@@ -155,11 +168,48 @@ function describePause(error: unknown): PauseReason | null {
   if (!kind) return null;
   const messages: Record<string, string> = {
     payment: "A conta do WhatsApp Business está sem forma de pagamento válida (erro 131042). Cadastre um cartão no Meta Business e retome o disparo.",
-    auth: `O acesso à API do WhatsApp foi recusado (erro ${code}). Revise o token de acesso da integração e retome o disparo.`,
+    auth: `O acesso à API do WhatsApp foi recusado (erro ${code}): ${detail}. Revise o token de acesso da integração e retome o disparo.`,
     account: `A conta do WhatsApp está impedida de enviar mensagens (erro ${code}): ${detail}`,
     template: `O modelo da campanha não está disponível para envio (erro ${code}): ${detail}`,
   };
-  return { kind, code, message: messages[kind] ?? detail };
+  return { kind, code, message: messages[kind] ?? detail, detail: technicalDetail(error) };
+}
+
+/** O erro como ele veio (HTTP, código/subcódigo e mensagem da Meta, ou o código do erro de rede), para o operador. */
+export function technicalDetail(error: unknown): string {
+  if (error instanceof MetaApiError) {
+    const sub = (error.details as { error_subcode?: number } | undefined)?.error_subcode;
+    return `HTTP ${error.httpStatus ?? "?"} · código Meta ${error.code ?? "?"}${sub ? `/${sub}` : ""}: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}`;
+  }
+  if (error instanceof MetaNetworkError) return `rede (${error.cause}): ${error.message}`;
+  if (error instanceof Error) {
+    const cause = (error.cause as { code?: string } | undefined)?.code;
+    return `${error.name}${cause ? ` (${cause})` : ""}: ${error.message}`;
+  }
+  return String(error);
+}
+
+export type SendFailure =
+  | { type: "fatal"; pause: PauseReason }
+  | { type: "rate_limit" | "transient"; code?: number; detail: string }
+  /** Só deste contato (número inválido, recusa da Meta para ele): conta como falha e o disparo segue. */
+  | { type: "recipient"; code?: number; detail: string; api: boolean };
+
+/** Decide o que fazer com a falha de um envio: pausar (token, pagamento, conta), esperar e repetir, ou seguir. */
+export function classifySendError(error: unknown): SendFailure {
+  const detail = technicalDetail(error);
+  if (error instanceof MetaApiError) {
+    const code = error.code;
+    if ((code !== undefined && RATE_LIMIT_CODES.has(code)) || error.httpStatus === 429) return { type: "rate_limit", code, detail };
+    const fatal = describePause(error);
+    if (fatal) return { type: "fatal", pause: fatal };
+    if ((error.httpStatus !== undefined && TRANSIENT_HTTP.has(error.httpStatus)) || (code !== undefined && TRANSIENT_CODES.has(code))) return { type: "transient", code, detail };
+    return { type: "recipient", code, detail, api: true };
+  }
+  if (error instanceof MetaNetworkError) return { type: "transient", detail };
+  if (error instanceof InvalidPhoneError) return { type: "recipient", detail: error.message, api: false };
+  if (error instanceof Error && NETWORK_ERROR.test(`${error.name} ${error.message} ${(error.cause as { code?: string } | undefined)?.code ?? ""}`)) return { type: "transient", detail };
+  return { type: "recipient", detail, api: false };
 }
 
 /** Agendada e ainda esperando a hora (nenhum contato processado). */
@@ -314,9 +364,17 @@ function addError(job: DispatchJob, message: string) {
   if (job.errors.length < MAX_STORED_ERRORS) job.errors.push(message);
 }
 
+/** Resultado de um envio depois das novas tentativas. */
+type Delivery =
+  | { kind: "sent" }
+  | { kind: "failed"; detail: string; code?: number; api: boolean }
+  | { kind: "infra"; detail: string; code?: number }
+  | { kind: "pause"; pause: PauseReason };
+
 async function runJob(campaignId: string) {
-  let job = await readJob(campaignId);
-  if (!job || job.status !== "running") return;
+  const initial = await readJob(campaignId);
+  if (!initial || initial.status !== "running") return;
+  let job: DispatchJob = initial;
   try {
     const campaign = await readCampaign(campaignId);
     if (!campaign) throw new Error("Campanha não encontrada.");
@@ -341,10 +399,13 @@ async function runJob(campaignId: string) {
     // Opt-out (SAIR/PARAR): relido a cada execução, inclusive na retomada; quem saiu durante o disparo é pulado.
     const optedOut = await loadOptOutKeys();
     let consecutiveApiFailures = 0;
+    let consecutiveInfraFailures = 0;
     // Ritmo e janela de horário configurados na campanha (opcionais).
     const cadence = normalizeCadence(campaign.cadence);
     const sendWindow = normalizeWindow(campaign.sendWindow);
-    while (job.cursor < job.total) {
+
+    /** Pausa/cancelamento pedidos ou janela de horário fechada: grava e encerra esta execução. */
+    const stopRequested = async () => {
       const requested = control.get(campaignId);
       if (requested) {
         control.delete(campaignId);
@@ -353,9 +414,8 @@ async function runJob(campaignId: string) {
           : { ...job, status: "cancelled", finishedAt: new Date().toISOString() };
         await writeJob(job);
         await syncCampaign(job);
-        return;
+        return true;
       }
-
       // Fora da janela: pausa e o relógio do chat retoma sozinho no próximo início de janela.
       if (sendWindow && !insideWindow(sendWindow)) {
         const resumeAt = nextWindowStart(sendWindow);
@@ -366,11 +426,102 @@ async function runJob(campaignId: string) {
         };
         await writeJob(job);
         await syncCampaign(job);
-        return;
+        return true;
       }
+      return false;
+    };
 
+    /** Espera antes de nova tentativa gravando o progresso (outra instância do blue/green não assume o disparo). */
+    const backoff = async (ms: number) => {
+      await writeJob(job);
+      await waitWithHeartbeat(campaignId, job, ms);
+    };
+
+    /** Um envio com as novas tentativas: rede/instabilidade em 2, 5, 15 e 30 s; limite de velocidade com espera longa. */
+    const deliver = async (recipient: DispatchRecipient): Promise<Delivery> => {
+      let transient = 0;
+      let limited = 0;
+      for (;;) {
+        let sent: Awaited<ReturnType<typeof sendToRecipient>>;
+        try {
+          sent = await sendToRecipient(campaign, recipient, header, templateInfo);
+        } catch (error) {
+          const failure = classifySendError(error);
+          if (failure.type === "fatal") return { kind: "pause", pause: failure.pause };
+          if (failure.type === "recipient") return { kind: "failed", detail: failure.detail, code: failure.code, api: failure.api };
+          const waits = failure.type === "rate_limit" ? DISPATCH_TIMING.rateLimitWaitsMs : DISPATCH_TIMING.transientRetryMs;
+          const attempt = failure.type === "rate_limit" ? limited++ : transient++;
+          if (attempt < waits.length) {
+            console.warn(`[campaign-dispatch] ${campaign.nome}: ${failure.detail} — nova tentativa ${attempt + 1} de ${waits.length}`);
+            await backoff(waits[attempt]);
+            if (control.has(campaignId)) return { kind: "infra", detail: failure.detail, code: failure.code };
+            continue;
+          }
+          return { kind: "infra", detail: failure.detail, code: failure.code };
+        }
+        await recordMessage(campaignId, recipient, { messageId: sent.messageId });
+        // Fica no /chat do contato: quando ele responder, o atendente vê a campanha que originou o contato.
+        // A mensagem já saiu: falha ao registrar no chat nunca reenvia nem para o disparo.
+        await recordDispatchInChat({
+          contactId: recipient.id,
+          phone: chatPhone(recipient.telefone),
+          text: sent.text,
+          externalId: sent.messageId,
+          authorName: `Campanha · ${campaign.nome}`,
+          campaignId,
+          campaignName: campaign.nome,
+          attachment: campaign.modelo ? header?.chatAttachment ?? null : null,
+          template: campaign.modelo ? { name: campaign.modelo.name, language: campaign.modelo.language } : null,
+        }).catch((error) => console.error("[campaign-dispatch] registrar no chat:", error));
+        for (const key of recipientKeys(recipient)) reached.add(key);
+        return { kind: "sent" };
+      }
+    };
+
+    const markFailed = async (recipient: DispatchRecipient, detail: string, code?: number) => {
+      job.failed += 1;
+      addError(job, `${recipient.nome}: ${detail}`);
+      await recordMessage(campaignId, recipient, { failure: detail });
+      if (code && INVALID_NUMBER_CODES.has(code)) await markInvalidWhatsApp(recipient.telefone, `${code}: ${detail}`).catch(() => undefined);
+    };
+
+    /** Resultado de um contato; devolve a pausa quando o disparo deve parar. `final`: já é a nova tentativa do fim. */
+    const settle = async (index: number, recipient: DispatchRecipient, result: Delivery, final: boolean): Promise<PauseReason | null> => {
+      if (result.kind === "pause") return result.pause;
+      if (result.kind === "sent") {
+        job.sent += 1;
+        consecutiveApiFailures = 0;
+        consecutiveInfraFailures = 0;
+        return null;
+      }
+      if (result.kind === "failed") {
+        await markFailed(recipient, result.detail, result.code);
+        if (!result.api) return null;
+        consecutiveApiFailures += 1;
+        return consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES
+          ? { kind: "consecutive", code: result.code, message: `${MAX_CONSECUTIVE_API_FAILURES} envios seguidos recusados pela Meta. Último erro: ${result.detail}`, detail: result.detail }
+          : null;
+      }
+      // Sem conexão/instável mesmo após as novas tentativas: o contato volta no fim do disparo (ou falha de vez).
+      if (final) await markFailed(recipient, result.detail, result.code);
+      else job.retryQueue = [...new Set([...(job.retryQueue ?? []), index])];
+      consecutiveInfraFailures += 1;
+      return consecutiveInfraFailures >= MAX_CONSECUTIVE_INFRA_FAILURES
+        ? { kind: "network", code: result.code, message: `${MAX_CONSECUTIVE_INFRA_FAILURES} envios seguidos sem conseguir falar com a Meta, mesmo com novas tentativas. Último erro: ${result.detail}`, detail: result.detail }
+        : null;
+    };
+
+    const pauseWith = async (pause: PauseReason) => {
+      job = { ...job, status: "paused", pause };
+      await writeJob(job);
+      await syncCampaign(job);
+    };
+
+    while (job.cursor < job.total) {
+      if (await stopRequested()) return;
       const sentBefore = job.sent;
-      const recipient = recipients[job.cursor];
+      const index = job.cursor;
+      const recipient = recipients[index];
       if (recipient?.telefone?.trim() && recipientKeys(recipient).some((key) => reached.has(key) || optedOut.has(key))) {
         job.skipped += 1;
         job.cursor += 1;
@@ -382,86 +533,58 @@ async function runJob(campaignId: string) {
         job.failed += 1;
         addError(job, `${recipient?.nome ?? "Contato"}: telefone não cadastrado.`);
       } else {
-        let attempt = 0;
-        for (;;) {
-          try {
-            const { messageId, text } = await sendToRecipient(campaign, recipient, header, templateInfo);
-            await recordMessage(campaignId, recipient, { messageId });
-            // Fica no /chat do contato: quando ele responder, o atendente vê a campanha que originou o contato.
-            await recordDispatchInChat({
-              contactId: recipient.id,
-              phone: chatPhone(recipient.telefone),
-              text,
-              externalId: messageId,
-              authorName: `Campanha · ${campaign.nome}`,
-              campaignId,
-              campaignName: campaign.nome,
-              attachment: campaign.modelo ? header?.chatAttachment ?? null : null,
-              template: campaign.modelo ? { name: campaign.modelo.name, language: campaign.modelo.language } : null,
-            });
-            for (const key of recipientKeys(recipient)) reached.add(key);
-            job.sent += 1;
-            consecutiveApiFailures = 0;
-            break;
-          } catch (error) {
-            const fatal = describePause(error);
-            if (fatal?.kind === "rate_limit" && attempt < RATE_LIMIT_WAITS_MS.length) {
-              await sleep(RATE_LIMIT_WAITS_MS[attempt++]);
-              continue;
-            }
-            if (fatal) {
-              pause = fatal;
-              break;
-            }
-            if (!(error instanceof MetaApiError) && attempt < NETWORK_RETRY_MS.length) {
-              await sleep(NETWORK_RETRY_MS[attempt++]);
-              continue;
-            }
-            if (!(error instanceof MetaApiError)) {
-              pause = { kind: "network", message: "Não foi possível conectar à Meta. Verifique a conexão do servidor e retome o disparo." };
-              break;
-            }
-            job.failed += 1;
-            consecutiveApiFailures += 1;
-            addError(job, `${recipient.nome}: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}`);
-            await recordMessage(campaignId, recipient, { failure: error.message });
-            if (error.code && INVALID_NUMBER_CODES.has(error.code)) await markInvalidWhatsApp(recipient.telefone, `${error.code}: ${error.message}`).catch(() => undefined);
-            if (consecutiveApiFailures >= MAX_CONSECUTIVE_API_FAILURES) {
-              pause = { kind: "consecutive", code: error.code, message: `${MAX_CONSECUTIVE_API_FAILURES} envios seguidos falharam. Último erro: ${error.message.replace(/^Meta WhatsApp API:\s*/, "")}` };
-            }
-            break;
-          }
+        const result = await deliver(recipient);
+        pause = await settle(index, recipient, result, false);
+        // Token, pagamento ou conta: o contato não foi processado e volta primeiro na retomada.
+        if (pause && result.kind === "pause") {
+          await pauseWith(pause);
+          return;
         }
       }
-
+      job.cursor += 1;
       if (pause) {
-        // O contato que causou a pausa não foi processado: será tentado de novo na retomada.
-        if (pause.kind !== "consecutive") {
-          job = { ...job, status: "paused", pause };
-        } else {
-          job = { ...job, cursor: job.cursor + 1, status: "paused", pause };
-        }
-        await writeJob(job);
-        await syncCampaign(job);
+        await pauseWith(pause);
         return;
       }
-
-      job.cursor += 1;
       await writeJob(job);
       if (job.cursor < job.total) {
-        const wait = job.sent > sentBefore ? cadenceWaitMs(cadence, job.sent, SEND_DELAY_MS) : SEND_DELAY_MS;
+        const wait = job.sent > sentBefore ? cadenceWaitMs(cadence, job.sent, DISPATCH_TIMING.sendDelayMs) : DISPATCH_TIMING.sendDelayMs;
         await waitWithHeartbeat(campaignId, job, wait);
       }
     }
 
-    job = { ...job, status: "completed", finishedAt: new Date().toISOString(), pause: undefined };
+    // Nova tentativa de quem não saiu por falha de conexão/instabilidade (inclusive depois de retomar).
+    while (job.retryQueue?.length) {
+      if (await stopRequested()) return;
+      const index = job.retryQueue[0];
+      const recipient = recipients[index];
+      const keys = recipient ? recipientKeys(recipient) : [];
+      let pause: PauseReason | null = null;
+      if (recipient?.telefone?.trim() && !keys.some((key) => reached.has(key) || optedOut.has(key))) {
+        const result = await deliver(recipient);
+        if (result.kind === "pause") {
+          await pauseWith(result.pause);
+          return;
+        }
+        pause = await settle(index, recipient, result, true);
+      }
+      job.retryQueue = job.retryQueue.slice(1);
+      if (pause) {
+        await pauseWith(pause);
+        return;
+      }
+      await writeJob(job);
+      if (job.retryQueue.length) await waitWithHeartbeat(campaignId, job, DISPATCH_TIMING.sendDelayMs);
+    }
+
+    job = { ...job, status: "completed", finishedAt: new Date().toISOString(), pause: undefined, retryQueue: undefined };
     await writeJob(job);
     await syncCampaign(job);
   } catch (error) {
     console.error("[campaign-dispatch] falha inesperada:", error);
     void reportError("campaign.dispatch", error, { campaignId });
     const current = (await readJob(campaignId)) ?? job;
-    const paused: DispatchJob = { ...current, status: "paused", pause: { kind: "network", message: error instanceof Error ? error.message : "Erro inesperado no disparo." } };
+    const paused: DispatchJob = { ...current, status: "paused", pause: { kind: "network", message: `Erro inesperado no disparo: ${error instanceof Error ? error.message : String(error)}`, detail: technicalDetail(error) } };
     await writeJob(paused).catch(() => undefined);
     await syncCampaign(paused).catch(() => undefined);
   }
@@ -743,7 +866,7 @@ export async function runCampaignFollowUps(now: Date = new Date()) {
         // Limite, pagamento, conta ou template: para tudo neste minuto e tenta de novo no próximo com os demais.
         if (describePause(error)) return summary;
       }
-      await sleep(SEND_DELAY_MS);
+      await sleep(DISPATCH_TIMING.sendDelayMs);
     }
   }
   return summary;

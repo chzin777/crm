@@ -138,8 +138,30 @@ export const isConnectFailure = (reason: string | null) => !!reason && [...CONNE
 
 /** O fetch do Node esconde o motivo em `cause`; sem ele o log não diz se foi DNS, firewall ou tempo esgotado. */
 function networkCause(error: unknown) {
+  // Tempo esgotado pelo AbortSignal.timeout: o fetch lança TimeoutError sem `cause`.
+  // A Meta pode ter recebido o pedido: não é falha de conexão (graph não repete sozinho).
+  if (error instanceof Error && error.name === "TimeoutError") return "TIMEOUT";
   const cause = error instanceof Error ? (error.cause as { code?: string; message?: string } | undefined) : undefined;
   return cause?.code ?? cause?.message ?? (error instanceof Error ? error.message : "erro desconhecido");
+}
+
+/** Tempo máximo de cada chamada à Graph API: sem ele, uma conexão presa travava o disparo inteiro. */
+export const GRAPH_TIMEOUT_MS = 15_000;
+
+/** A Graph API não respondeu (DNS, conexão recusada/derrubada, tempo esgotado): `cause` = código do erro de rede. */
+export class MetaNetworkError extends Error {
+  constructor(message: string, public cause: string) {
+    super(message);
+    this.name = "MetaNetworkError";
+  }
+}
+
+/** Número que nem chega à Meta (menos de 10 dígitos): falha só daquele contato, nunca de conexão. */
+export class InvalidPhoneError extends Error {
+  constructor(message = "Telefone inválido.") {
+    super(message);
+    this.name = "InvalidPhoneError";
+  }
 }
 
 async function graph<T>(path: string, init?: RequestInit): Promise<T> {
@@ -151,6 +173,7 @@ async function graph<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       response = await fetch(url, {
         ...init,
+        signal: init?.signal ?? AbortSignal.timeout(GRAPH_TIMEOUT_MS),
         cache: "no-store",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -167,7 +190,7 @@ async function graph<T>(path: string, init?: RequestInit): Promise<T> {
         continue;
       }
       console.error(`[meta] falha de rede na Graph API (${cause}) após ${attempt + 1} tentativa(s): ${path}`);
-      throw new Error(`Não foi possível conectar à Meta WhatsApp API (${cause}). Verifique sua conexão.`);
+      throw new MetaNetworkError(`Não foi possível conectar à Meta WhatsApp API (${cause}). Verifique sua conexão.`, cause);
     }
   }
 
@@ -201,7 +224,7 @@ export function normalizePhone(phone: string): string {
   // "00 353..." (discagem internacional) e "0 62 9..." (DDD com zero) perdem o zero.
   if (digits.startsWith("00")) digits = digits.slice(2);
   else if (digits.startsWith("0")) digits = digits.slice(1);
-  if (digits.length < 10) throw new Error("Telefone inválido.");
+  if (digits.length < 10) throw new InvalidPhoneError();
   if (digits.startsWith("55") && digits.length >= 12) return digits;
   // "+" explícito: o código do país já está no número (ex.: +1 415..., 11 dígitos como um celular brasileiro).
   if (phone.trim().startsWith("+")) return digits;
