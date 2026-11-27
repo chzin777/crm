@@ -623,8 +623,8 @@ class Snapshot:
 # de emissão do pedido (relógio do Oracle = horário de Brasília). A tabela de BI tab_dados_dinamicos deixava de fora
 # ~20% dos pedidos (lentes/serviços ainda sem movimento de estoque). Um registro por item; o valor do pedido é
 # PDSD_VLR_TOTAL (líquido, já com descontos) e vai repetido em "orderTotal" para não somar duas vezes.
-# Regra oficial de venda comercial: só "Faturado" e "A Liberar" (venda feita aguardando liberação de desconto/crédito),
-# pedido ativo. Fora: cancelados, "Reservado" (encomenda/OS só com estoque reservado), "Aberto"/"Inconsistente"
+# Regra do BI do VMSET: só pedido "Faturado" e ativo. Fora: "A Liberar" (aguardando liberação de desconto/crédito:
+# entra quando for faturado), cancelados, "Reservado" (encomenda/OS só com estoque reservado), "Aberto"/"Inconsistente"
 # (pedido não concluído), transferências entre lojas (cliente = unidade da rede) e depósitos.
 # (A v1.135.1 chegou a incluir Reservado e Aberto para bater com um relatório externo lido errado; revertido.)
 # Sem ROWNUM/FETCH FIRST: o dia inteiro vem em uma consulta, qualquer que seja o volume.
@@ -649,7 +649,7 @@ LEFT JOIN PARCEIRO P ON P.PARCEIRO_ID = PS.PARCEIRO_ID
 LEFT JOIN PARCEIRO V ON V.PARCEIRO_ID = PS.VENDEDOR_COMPRADOR_ID
 LEFT JOIN TIPO_DOCUMENTO D ON D.TIPO_DOCUMENTO_ID = PS.TIPO_DOCTO_PAGO1_ID
 LEFT JOIN CONDICAO_PAGTO CPG ON CPG.CONDICAO_PAGTO_ID = PS.CONDICAO_PAGTO_ID
-WHERE PS.PDSD_STATUS IN ('Faturado', 'A Liberar') AND TRIM(PS.STATUS) = 'Ativo'
+WHERE PS.PDSD_STATUS = 'Faturado' AND TRIM(PS.STATUS) = 'Ativo'
   AND PS.PDSD_DT_EMISSAO >= :a AND PS.PDSD_DT_EMISSAO < :b
   AND NOT EXISTS (SELECT 1 FROM UNIDADE_EMPRESARIAL U WHERE U.UNIDADE_EMPRESARIAL_ID = PS.PARCEIRO_ID)
   AND TO_NUMBER(UE.UNEM_CODIGO) NOT BETWEEN 100 AND 199

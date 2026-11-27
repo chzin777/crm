@@ -32,8 +32,9 @@ describe("vendas do dia: alto volume sem corte", () => {
     expect(salesSql).not.toMatch(/ROWNUM|FETCH\s+FIRST|\bLIMIT\b|OFFSET/i);
   });
 
-  it("regra oficial de venda: só Faturado e A Liberar ativos (Reservado, Aberto e cancelado fora)", () => {
-    expect(salesSql).toMatch(/PDSD_STATUS IN \('Faturado', 'A Liberar'\) AND TRIM\(PS\.STATUS\) = 'Ativo'/);
+  it("regra oficial de venda: só Faturado ativo (A Liberar, Reservado, Aberto e cancelado fora)", () => {
+    expect(salesSql).toMatch(/PDSD_STATUS = 'Faturado' AND TRIM\(PS\.STATUS\) = 'Ativo'/);
+    expect(salesSql).not.toMatch(/A Liberar/);
     expect(salesSql).not.toMatch(/PDSD_STATUS <> 'Cancelado'/);
     expect(salesSql).toMatch(/TPME_TIPO = 'Venda'/);
   });
@@ -63,7 +64,7 @@ describe("loja 4 em novembro/2026: cancelamento retroativo, devoluções e opera
 
   it("pedido cancelado depois some do total: a consulta relê o status no VMSet a cada atualização (sem cópia local)", () => {
     // Status é filtrado na própria consulta e o cache do período vive no máximo 10 min (hoje: 10 s; mês corrente: 60 s).
-    expect(salesSql).toMatch(/PDSD_STATUS IN \('Faturado', 'A Liberar'\) AND TRIM\(PS\.STATUS\) = 'Ativo'/);
+    expect(salesSql).toMatch(/PDSD_STATUS = 'Faturado' AND TRIM\(PS\.STATUS\) = 'Ativo'/);
     expect(api).toMatch(/ttl = 10 if \(start, end\) == \(today, today \+ datetime\.timedelta\(days=1\)\) else 60 if end > today else 600/);
   });
 
