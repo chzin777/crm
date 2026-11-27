@@ -88,6 +88,11 @@ de outra sessão é rejeitada com conflito para evitar sobrescrever dados mais r
 O painel e as atividades recentes são agregados a partir de contatos, vendas
 importadas, pipeline e respostas NPS.
 
+As pesquisas de encerramento do WhatsApp distinguem atendimentos exclusivos da
+Assistente IA dos atendimentos humanos. A coluna e o backfill conservador são
+aplicados pelo SQL aditivo `prisma/nps-ai-attribution.sql`; avaliações sem evidência
+suficiente permanecem sem classificação. O painel NPS permite filtrar a autoria.
+
 Limitações atuais: campanhas e configurações de WhatsApp são registradas no CRM, mas
 não enviam mensagens nem coletam respostas sem integração com um provedor. O cadastro
 de usuário não envia convite nem define uma senha; o administrador precisa configurar

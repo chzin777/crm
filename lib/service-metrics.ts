@@ -163,7 +163,7 @@ async function loadServiceMetrics(filters: ServiceMetricsFilters) {
     GROUP BY ROLLUP (r."authorUserId")`;
 
   const npsWhere = (start: Date, end: Date) => Prisma.sql`
-    n.score IS NOT NULL AND n."answeredAt" >= ${start} AND n."answeredAt" < ${end}
+    n.scale = 10 AND n.score BETWEEN 0 AND 10 AND n."answeredAt" >= ${start} AND n."answeredAt" < ${end}
     ${filters.queueId ? Prisma.sql`AND n."queueId" = ${filters.queueId}` : Prisma.empty}
     ${filters.assigneeId ? Prisma.sql`AND n."attendantId" = ${filters.assigneeId}` : Prisma.empty}`;
 
@@ -180,10 +180,12 @@ async function loadServiceMetrics(filters: ServiceMetricsFilters) {
     responseQuery(from, to),
     responseQuery(prevFrom, prevTo),
     prisma.$queryRaw<{ score: number; total: bigint }[]>`SELECT n.score, COUNT(*) AS total FROM "NpsFeedback" n WHERE ${npsWhere(from, to)} GROUP BY n.score`,
-    prisma.$queryRaw<{ avg: number | null }[]>`SELECT AVG(n.score)::float AS avg FROM "NpsFeedback" n WHERE ${npsWhere(prevFrom, prevTo)}`,
+    prisma.$queryRaw<{ avg: number | null }[]>`SELECT (100.0 * (COUNT(*) FILTER (WHERE n.score >= 9) - COUNT(*) FILTER (WHERE n.score <= 6)) / NULLIF(COUNT(*), 0))::float AS avg FROM "NpsFeedback" n WHERE ${npsWhere(prevFrom, prevTo)}`,
     prisma.$queryRaw<{ attendantId: string; avg: number; total: bigint }[]>`
-      SELECT n."attendantId", AVG(n.score)::float AS avg, COUNT(*) AS total FROM "NpsFeedback" n
-      WHERE ${npsWhere(from, to)} AND n."attendantId" IS NOT NULL GROUP BY n."attendantId"`,
+      SELECT CASE WHEN n."responderType" = 'ai' THEN 'ai-assistant' ELSE n."attendantId" END AS "attendantId",
+        (100.0 * (COUNT(*) FILTER (WHERE n.score >= 9) - COUNT(*) FILTER (WHERE n.score <= 6)) / COUNT(*))::float AS avg, COUNT(*) AS total
+      FROM "NpsFeedback" n WHERE ${npsWhere(from, to)} AND (n."attendantId" IS NOT NULL OR n."responderType" = 'ai')
+      GROUP BY 1`,
     prisma.$queryRaw<{ day: string; started: bigint; closed: bigint }[]>`
       WITH events AS (
         SELECT to_char(c."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS day, 1 AS started, 0 AS closed
@@ -216,14 +218,14 @@ async function loadServiceMetrics(filters: ServiceMetricsFilters) {
   const names = new Map(users.map((user) => [user.id, user.name]));
 
   const npsTotal = npsDist.reduce((sum, row) => sum + Number(row.total), 0);
-  const npsAvg = npsTotal ? npsDist.reduce((sum, row) => sum + row.score * Number(row.total), 0) / npsTotal : null;
+  const npsAvg = npsTotal ? 100 * npsDist.reduce((sum, row) => sum + (row.score >= 9 ? 1 : row.score <= 6 ? -1 : 0) * Number(row.total), 0) / npsTotal : null;
 
   // Ranking: todo atendente com conversa encerrada, resposta ou nota no período.
-  const ranking = new Map<string, { userId: string; name: string; closed: number; tma: Num; tmr: Num; responses: number; nps: Num; npsCount: number }>();
+  const ranking = new Map<string, { userId: string; name: string; closed: Num; tma: Num; tmr: Num; responses: number; nps: Num; npsCount: number }>();
   const row = (userId: string) => {
     let entry = ranking.get(userId);
     if (!entry) {
-      entry = { userId, name: names.get(userId) ?? "Usuário removido", closed: 0, tma: null, tmr: null, responses: 0, nps: null, npsCount: 0 };
+      entry = { userId, name: userId === "ai-assistant" ? "Assistente IA" : names.get(userId) ?? "Usuário removido", closed: userId === "ai-assistant" ? null : 0, tma: null, tmr: null, responses: 0, nps: null, npsCount: 0 };
       ranking.set(userId, entry);
     }
     return entry;
@@ -264,11 +266,11 @@ async function loadServiceMetrics(filters: ServiceMetricsFilters) {
         value: npsAvg,
         previous: num(prevNps[0]?.avg),
         total: npsTotal,
-        distribution: [1, 2, 3, 4, 5].map((score) => ({ score, total: Number(npsDist.find((item) => item.score === score)?.total ?? 0) })),
+        distribution: Array.from({ length: 11 }, (_, score) => ({ score, total: Number(npsDist.find((item) => item.score === score)?.total ?? 0) })),
       },
     },
     timeline: timelineDays,
-    ranking: [...ranking.values()].sort((a, b) => b.closed - a.closed || a.name.localeCompare(b.name)),
+    ranking: [...ranking.values()].sort((a, b) => (b.closed ?? 0) - (a.closed ?? 0) || a.name.localeCompare(b.name)),
     words: words.map((item) => ({ word: item.word, total: Number(item.total) })),
     regions: {
       states: [...byState.entries()].map(([uf, count]) => ({ uf, total: count })).sort((a, b) => b.total - a.total),

@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowRightLeft, Bot, BookOpenText, Check, CheckCircle2, 
 import { useToast } from "@/components/ToastProvider";
 import { Collapse, KnowledgeSection, SkillsSection } from "@/components/ai-studio/StudioSections";
 import { PromptModulesStudio } from "@/components/ai-studio/PromptModulesStudio";
+import { AiNpsSummary } from "@/components/ai-studio/AiNpsSummary";
 import { DEFAULT_AI_SETTINGS, modelPrice, type AiSettings } from "@/lib/ai/settings";
 import { AI_ATTACHMENT_ACCEPT, validateAiAttachment, type AiAttachmentKind } from "@/lib/ai/attachments";
 import { useRecorder } from "@/lib/chat/use-recorder";
@@ -726,6 +727,7 @@ export function AiSettingsPanel() {
         )}
       </div>
 
+      <AiNpsSummary />
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
       {/* Menu lateral interno do Estúdio (vertical, sem barra de abas horizontal). */}
       {/* Fixa na rolagem só no desktop: o topo desconta a faixa de abas fixa do CRM (92px, 56px no modo compacto) + 24px. */}

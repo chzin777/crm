@@ -27,14 +27,14 @@ export async function GET(request: Request) {
   const since = periodStart(params.get("period"));
   const attendantId = params.get("attendantId") || undefined;
   const surveyType = isNpsSurveyType(params.get("type")) ? params.get("type")! : undefined;
-  const where = { createdAt: { gte: since }, scale: NPS_SCALE, ...(attendantId ? { attendantId } : {}), ...(surveyType ? { surveyType } : {}) };
+  const attribution = attendantId === "ai" ? { responderType: "ai" } : attendantId === "human" ? { OR: [{ responderType: "human" }, { attendantId: { not: null } }] } : attendantId ? { attendantId } : {};
+  const where = { createdAt: { gte: since }, scale: NPS_SCALE, ...attribution, ...(surveyType ? { surveyType } : {}) };
 
   const [sent, answeredRows, attendants] = await Promise.all([
     prisma.npsFeedback.count({ where }),
     prisma.npsFeedback.findMany({
       where: { ...where, status: "ANSWERED", score: { not: null } },
       orderBy: { answeredAt: "desc" },
-      take: 5000,
       select: {
         id: true,
         contactId: true,
@@ -43,6 +43,7 @@ export async function GET(request: Request) {
         answeredAt: true,
         surveyType: true,
         source: true,
+        responderType: true,
         orderKey: true,
         store: true,
         seller: true,
@@ -75,7 +76,7 @@ export async function GET(request: Request) {
   // Soma e média por cliente usam todo o histórico da escala nova (não só o período).
   const contactIds = [...new Set(answers.map((row) => row.contactId))].slice(0, CUSTOMER_LIMIT);
   const history = contactIds.length
-    ? await prisma.npsFeedback.findMany({ where: { contactId: { in: contactIds }, scale: NPS_SCALE, status: "ANSWERED", score: { not: null } }, select: { contactId: true, surveyType: true, score: true, answeredAt: true } })
+    ? await prisma.npsFeedback.findMany({ where: { contactId: { in: contactIds }, scale: NPS_SCALE, status: "ANSWERED", score: { not: null }, ...attribution }, select: { contactId: true, surveyType: true, score: true, answeredAt: true } })
     : [];
   const names = new Map(answers.map((row) => [row.contactId, row.contact.name]));
   const customers = consolidateByCustomer(history.map((row) => ({ contactId: row.contactId, surveyType: row.surveyType, score: row.score ?? 0, answeredAt: row.answeredAt ?? new Date() })))
@@ -108,11 +109,11 @@ export async function GET(request: Request) {
       store: row.store,
       seller: row.seller,
       contact: row.contact,
-      attendant: row.attendant ? { name: row.attendant.name } : null,
+      attendant: row.responderType === "ai" ? { name: "Assistente IA", isAi: true } : row.attendant ? { name: row.attendant.name, isAi: false } : null,
       queue: row.queue,
     })),
     stores: groupBy((row) => row.store),
-    people: groupBy((row) => row.attendant?.name ?? row.seller),
+    people: groupBy((row) => row.responderType === "ai" ? "Assistente IA" : row.attendant?.name ?? row.seller),
     customers,
     attendants,
   });

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const attribution = vi.hoisted(() => ({ value: null as { responderType: "ai" | "human" | null; attendantId: string | null } | null }));
+vi.mock("@/lib/chat/nps-attribution", () => ({ npsAttribution: async (_conversation: unknown, attendantId: string | null) => attribution.value ?? ({ responderType: attendantId ? "human" : null, attendantId }) }));
 
 type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({ feedbacks: [] as Record<string, unknown>[], messages: [] as Record<string, unknown>[], openConversation: false, seq: 0 }));
@@ -89,10 +91,20 @@ beforeEach(() => {
   db.openConversation = false;
   sent.length = 0;
   lists.length = 0;
+  attribution.value = null;
 });
 
 describe("NPS híbrido: lista interativa na janela de 24 h, modelo oficial fora dela", () => {
   const conversation = { id: "aberta", phone: PHONE, contactId: "c1", lastInboundAt: new Date() } as unknown as ChatConversation;
+
+  it("mantém a autoria da IA ou do humano ao gravar a pesquisa e a resposta", async () => {
+    for (const owner of [{ responderType: "ai" as const, attendantId: null }, { responderType: "human" as const, attendantId: "u1" }]) {
+      attribution.value = owner;
+      await sendSatisfactionSurvey(conversation, null);
+      expect(await recordSurveyReply(reply("10"))).toBe(true);
+      expect(db.feedbacks.at(-1)).toMatchObject({ ...owner, status: "ANSWERED", score: 10 });
+    }
+  });
 
   it("janela aberta: envia lista interativa com o botão Avaliar agora, notas de 10 a 1 e o 0 digitado", async () => {
     expect(npsDeliveryMode({ windowOpen: true, hasTemplate: true })).toBe("list");

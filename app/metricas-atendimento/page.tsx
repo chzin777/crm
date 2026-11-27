@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Clock, Headphones, Hourglass, Inbox, ListFilter, MapPin, MessageCircleReply, MessagesSquare, Star, Tags, UserRound, Users } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Bot, Clock, Headphones, Hourglass, Inbox, ListFilter, MapPin, MessageCircleReply, MessagesSquare, Star, Tags, UserRound, Users } from "lucide-react";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { Avatar, ChartTooltip, CompareBars, DateRange, DeltaPill, EmptyState, FadeGradient, FilterSelect, KpiCard, KpiSkeleton, Legend, LoadingBar, PanelHeader, RefreshButton, SegmentedControl, Skel, Sparkline, TONES, cardClass, chartTheme, type Tone } from "@/components/dashboard/DashboardKit";
 import { ConversionInsights } from "@/components/metrics/ConversionInsights";
@@ -141,8 +141,8 @@ export default function ServiceMetricsPage() {
   const maxState = Math.max(1, ...(data?.regions.states ?? []).map((item) => item.total));
   const regionTotal = (data?.regions.states ?? []).reduce((sum, item) => sum + item.total, 0);
   const npsMax = Math.max(1, ...(data?.kpis.nps.distribution ?? []).map((item) => item.total));
-  const maxClosed = Math.max(1, ...ranking.map((row) => row.closed));
-  const npsTone: Tone = data?.kpis.nps.value == null ? "slate" : data.kpis.nps.value >= 4 ? "emerald" : data.kpis.nps.value >= 3 ? "amber" : "rose";
+  const maxClosed = Math.max(1, ...ranking.map((row) => row.closed ?? 0));
+  const npsTone: Tone = data?.kpis.nps.value == null ? "slate" : data.kpis.nps.value >= 50 ? "emerald" : data.kpis.nps.value >= 0 ? "amber" : "rose";
 
   const sortButton = (label: string, column: SortKey, align: "left" | "right" = "right") => (
     <SortButton label={label} column={column} align={align} sort={sort} onSort={toggleSort} />
@@ -190,11 +190,11 @@ export default function ServiceMetricsPage() {
             <KpiCard icon={MessagesSquare} tone="emerald" label="Volume" value={String(data.kpis.volume.started)} hint="Atendimentos iniciados e encerrados no período." delta={<DeltaPill value={data.kpis.volume.started} previous={data.kpis.volume.prevStarted} suffix="iniciados" />} meta={<span className="inline-flex flex-wrap items-center gap-1.5"><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.volume.closed}</b> encerrados <DeltaPill value={data.kpis.volume.closed} previous={data.kpis.volume.prevClosed} /></span>}>
               {startedSeries.length > 1 ? <Sparkline data={startedSeries} tone="emerald" isDark={isDark} /> : <CompareBars current={data.kpis.volume.started} previous={data.kpis.volume.prevStarted} tone="emerald" format={(value) => String(value ?? "—")} />}
             </KpiCard>
-            <KpiCard icon={Star} tone={npsTone} label="NPS · Satisfação" value={data.kpis.nps.value === null ? "—" : data.kpis.nps.value.toFixed(1)} hint={`${data.kpis.nps.total} avaliação(ões) respondida(s), notas de 1 a 5.`} delta={<DeltaPill value={data.kpis.nps.value} previous={data.kpis.nps.previous} suffix="vs anterior" />} meta={<><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.nps.total}</b> avaliações</>}>
+            <KpiCard icon={Star} tone={npsTone} label="NPS · Satisfação" value={data.kpis.nps.value === null ? "—" : data.kpis.nps.value.toFixed(1)} hint={`${data.kpis.nps.total} avaliação(ões) respondida(s), notas de 0 a 10.`} delta={<DeltaPill value={data.kpis.nps.value} previous={data.kpis.nps.previous} suffix="vs anterior" />} meta={<><b className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{data.kpis.nps.total}</b> avaliações</>}>
               <div className="flex h-11 items-end gap-1.5" aria-label="Distribuição das notas">
                 {data.kpis.nps.distribution.map((item) => (
                   <div key={item.score} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={`Nota ${item.score}: ${item.total}`}>
-                    <div className={`w-full rounded-md bg-gradient-to-t ${item.score >= 4 ? "from-emerald-500/40 to-emerald-500" : item.score === 3 ? "from-amber-400/40 to-amber-400" : "from-rose-400/40 to-rose-400"}`} style={{ height: `${Math.max(3, (item.total / npsMax) * 28)}px` }} />
+                    <div className={`w-full rounded-md bg-gradient-to-t ${item.score >= 9 ? "from-emerald-500/40 to-emerald-500" : item.score >= 7 ? "from-amber-400/40 to-amber-400" : "from-rose-400/40 to-rose-400"}`} style={{ height: `${Math.max(3, (item.total / npsMax) * 28)}px` }} />
                     <span className="text-[9px] font-semibold text-slate-400">{item.score}</span>
                   </div>
                 ))}
@@ -260,11 +260,11 @@ export default function ServiceMetricsPage() {
                         <span className={`grid h-6 w-6 place-items-center rounded-lg text-[11px] font-bold tabular-nums ${index === 0 ? "bg-amber-400/15 text-amber-600 dark:text-amber-300" : index === 1 ? "bg-slate-400/15 text-slate-500 dark:text-slate-300" : index === 2 ? "bg-orange-400/15 text-orange-600 dark:text-orange-300" : "text-slate-400"}`}>{index + 1}</span>
                         <div className="flex min-w-0 items-center gap-3">
                           <Avatar name={row.name} tone={AVATAR_TONES[index % AVATAR_TONES.length]} />
-                          <span className="truncate font-medium text-slate-900 dark:text-white">{row.name}</span>
+                          {row.userId === "ai-assistant" && <Bot aria-label="Inteligência artificial" className="h-4 w-4 shrink-0" />}<span className="truncate font-medium text-slate-900 dark:text-white">{row.name}</span>
                         </div>
                         <div className="text-right">
-                          <p className="font-semibold tabular-nums text-slate-900 dark:text-white">{row.closed}</p>
-                          <div className="ml-auto mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5"><div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-indigo-600 dark:from-indigo-400/70 dark:to-indigo-300" style={{ width: `${(row.closed / maxClosed) * 100}%` }} /></div>
+                          <p className="font-semibold tabular-nums text-slate-900 dark:text-white">{row.closed ?? "—"}</p>
+                          {row.closed !== null && <div className="ml-auto mt-1.5 h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5"><div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-indigo-600 dark:from-indigo-400/70 dark:to-indigo-300" style={{ width: `${(row.closed / maxClosed) * 100}%` }} /></div>}
                         </div>
                         <span className="text-right tabular-nums text-slate-700 dark:text-slate-200">{formatDuration(row.tma)}</span>
                         <span className="text-right tabular-nums text-slate-700 dark:text-slate-200">{formatDuration(row.tmr)}{row.responses > 0 && <span className="ml-1 text-[10px] text-slate-400">({row.responses})</span>}</span>

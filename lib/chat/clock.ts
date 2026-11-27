@@ -9,7 +9,8 @@ import { resolveChatCapabilities } from "@/lib/permissions";
 import { closeConversation } from "@/lib/chat/actions";
 import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { readMenuState, saveMenuState, sendMenu } from "@/lib/chat/menu";
-import { expireSurveys, isSurveyMessage, resendSurvey } from "@/lib/chat/nps";
+import { expireSurveys, isSurveyMessage, resendSurvey, sendSatisfactionSurvey } from "@/lib/chat/nps";
+import { npsAttribution } from "@/lib/chat/nps-attribution";
 import { isConnectFailure, sendText } from "@/lib/meta-whatsapp";
 import { silenceAskMessage, silenceFarewell } from "@/lib/chat/settings";
 import { ChatRuleError, resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
@@ -221,9 +222,9 @@ export async function runClock() {
       if (!(await firstDispatch(`silence-close:${row.id}:${state.warnedAt}`))) continue;
       state.warnedAt = null;
       await saveMenuState(row.id, state);
-      // Sem pesquisa: o cliente parou de responder.
       try {
         await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings));
+        if ((await npsAttribution(row, null)).responderType === "ai") await sendSatisfactionSurvey(row, null);
         summary.silenceClosed += 1;
         await sleep(SILENCE_SEND_GAP_MS);
       } catch (error) {

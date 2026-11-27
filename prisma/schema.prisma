@@ -350,6 +350,8 @@ model NpsFeedback {
   conversationId String?
   contactId      String
   attendantId    String?
+  /// "ai" ou "human"; nulo quando a autoria não pôde ser determinada.
+  responderType  String?
   queueId        String?
   phone          String
   score          Int?

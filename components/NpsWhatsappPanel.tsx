@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Award, MessageCircleHeart, MessageSquareText, Send, Star, Store, UserRound, Users, type LucideIcon } from "lucide-react";
+import { Award, Bot, MessageCircleHeart, MessageSquareText, Send, Star, Store, UserRound, Users, type LucideIcon } from "lucide-react";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { NPS_BANDS, NPS_BAND_BADGE, NPS_SURVEY_LABELS, NPS_SURVEY_TYPES, isNpsSurveyType, npsBand, type NpsMetrics, type NpsSurveyType } from "@/lib/nps-scale";
 
@@ -13,7 +13,7 @@ type Report = {
   summary: { sent: number; answered: number; responseRate: number; average: number | null; sum: number; nps: number | null; promoters: number; neutral: number; detractors: number; withComment: number };
   byType: (NpsMetrics & { type: NpsSurveyType })[];
   distribution: { score: number; count: number }[];
-  latest: { id: string; score: number; comment: string | null; answeredAt: string; surveyType: string; source: string; orderKey: string | null; store: string | null; seller: string | null; contact: { name: string }; attendant: { name: string } | null; queue: { name: string } | null }[];
+  latest: { id: string; score: number; comment: string | null; answeredAt: string; surveyType: string; source: string; orderKey: string | null; store: string | null; seller: string | null; contact: { name: string }; attendant: { name: string; isAi: boolean } | null; queue: { name: string } | null }[];
   stores: Ranked[];
   people: Ranked[];
   customers: { contactId: string; name: string; count: number; sum: number; average: number; latest: Partial<Record<NpsSurveyType, number>>; lastAnsweredAt: string }[];
@@ -62,7 +62,7 @@ function Ranking({ icon: Icon, title, rows, empty }: { icon: LucideIcon; title: 
         <ul className="space-y-2">
           {rows.map((row) => (
             <li key={row.name} className="flex items-center justify-between gap-3 text-xs">
-              <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={row.name}>{row.name}</span>
+              <span className="flex min-w-0 items-center gap-1 truncate text-slate-700 dark:text-slate-200" title={row.name}>{row.name === "Assistente IA" && <Bot className="h-3.5 w-3.5 shrink-0" />}{row.name}</span>
               <span className="flex shrink-0 items-center gap-2 tabular-nums text-slate-500 dark:text-slate-400">
                 <span>{row.count} resp. · média {number(row.average)}</span>
                 <span className={`rounded-md px-1.5 py-0.5 font-bold ${row.nps === null ? "" : row.nps >= 50 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" : row.nps >= 0 ? "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"}`}>NPS {number(row.nps, 0)}</span>
@@ -117,6 +117,8 @@ export function NpsWhatsappPanel() {
           </div>
           <select aria-label="Atendente" value={attendantId} onChange={(event) => setAttendantId(event.target.value)} className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
             <option value="">Todos os atendentes</option>
+            <option value="ai">Somente IA</option>
+            <option value="human">Atendentes humanos</option>
             {report?.attendants.map((attendant) => <option key={attendant.id} value={attendant.id}>{attendant.name}</option>)}
           </select>
         </div>
@@ -190,7 +192,7 @@ export function NpsWhatsappPanel() {
                           <td className="px-4 py-2">{surveyLabel(item.surveyType)}{item.orderKey ? <span className="block text-[10px] text-slate-400">Pedido {item.orderKey}</span> : null}</td>
                           <td className="px-4 py-2"><NpsScoreBadge score={item.score} /></td>
                           <td className="max-w-xs break-words px-4 py-2">{item.comment ?? "—"}</td>
-                          <td className="px-4 py-2">{[item.store, item.attendant?.name ?? item.seller ?? item.queue?.name].filter(Boolean).join(" · ") || "—"}</td>
+                          <td className="px-4 py-2">{item.attendant?.isAi && <Bot aria-label="Inteligência artificial" className="mr-1 inline h-3.5 w-3.5" />}{[item.store, item.attendant?.name ?? item.seller ?? item.queue?.name].filter(Boolean).join(" · ") || "—"}</td>
                         </tr>
                       ))}
                     </tbody>

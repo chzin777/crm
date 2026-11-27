@@ -8,6 +8,7 @@ import { phoneVariants } from "@/lib/chat/phone";
 import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsCommentPrompt, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
 import { NPS_LIST_FOOTER, NPS_SCALE, buildNpsList, npsListText, parseNps10, type NpsSurveyType } from "@/lib/nps-scale";
 import type { ChatInteractiveList } from "@/lib/chat/types";
+import { npsAttribution } from "@/lib/chat/nps-attribution";
 
 /** Prazo para responder a nota: pesquisa do encerramento (janela aberta) e pesquisa pós-compra por modelo. */
 const SURVEY_HOURS = 24;
@@ -54,9 +55,10 @@ const expirePending = (phone: string) =>
 
 /** Só a pesquisa que chegou ao cliente fica aguardando nota; vale a mais recente do número. */
 async function openSurvey(conversation: ChatConversation, attendantId: string | null) {
+  const attribution = await npsAttribution(conversation, attendantId);
   await expirePending(conversation.phone);
   await prisma.npsFeedback.create({
-    data: { conversationId: conversation.id, contactId: conversation.contactId, attendantId, queueId: conversation.queueId, phone: conversation.phone, scale: NPS_SCALE, surveyType: "ATENDIMENTO", source: "chat" },
+    data: { conversationId: conversation.id, contactId: conversation.contactId, ...attribution, queueId: conversation.queueId, phone: conversation.phone, scale: NPS_SCALE, surveyType: "ATENDIMENTO", source: "chat" },
   });
 }
 
