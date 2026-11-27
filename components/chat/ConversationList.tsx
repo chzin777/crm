@@ -1,5 +1,6 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { prefetchMessages } from "@/lib/chat/message-cache";
 import { AlertCircle, CalendarClock, Check, CheckCheck, ChevronDown, Clock, Crown, Hourglass, Megaphone, Timer, MessageSquare, Mic, Search, SearchX, ShieldCheck, ShoppingBag, SlidersHorizontal, Smile, Trash2, X } from "lucide-react";
 import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { AttendantFilter, type Attendant } from "@/components/chat/AttendantFilter";
@@ -237,6 +238,7 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) onEndReached();
   };
   const [showFilters, setShowFilters] = useState(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeFilters = (queueId ? 1 : 0) + (priority ? 1 : 0) + (assigneeId && tab !== "mine" ? 1 : 0);
   const moreActive = MORE_TABS.find((item) => item.id === tab);
   const clearFilters = () => {
@@ -422,6 +424,15 @@ export function ConversationList({ items, counts, tab, onTab, search, onSearch, 
               >
                 <button
                   type="button"
+                  onMouseEnter={() => {
+                    // Pré-carrega as mensagens no hover (~80 ms parado em cima): o clique já abre com elas.
+                    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+                    hoverTimer.current = setTimeout(() => prefetchMessages(item.id), 80);
+                  }}
+                  onMouseLeave={() => {
+                    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+                  }}
+                  onPointerDown={() => prefetchMessages(item.id)}
                   onClick={() => onSelect(item.id)}
                   aria-current={selected ? "true" : undefined}
                   className={`relative flex w-full cursor-pointer items-center gap-3 overflow-hidden rounded-xl border px-2.5 py-2 text-left transition-colors duration-150 ${

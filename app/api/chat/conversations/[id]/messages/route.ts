@@ -4,10 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { chatError, conversationNotFound, findScopedConversation, requireChatActor, scopeWhere } from "@/lib/chat/access";
 import { ChatRuleError, sendAgentMessage } from "@/lib/chat/outbound";
 import { serializeMessage } from "@/lib/chat/serialize";
+import { latestMessagesPage } from "@/lib/chat/message-page";
 
 type Context = { params: Promise<{ id: string }> };
-
-const PAGE_SIZE = 50;
 
 const messageBody = z.object({
   text: z.string().max(4096).default(""),
@@ -69,17 +68,11 @@ export async function GET(request: Request, context: Context) {
   });
   const sessionIds = sessions.some((session) => session.id === id) ? sessions.map((session) => session.id) : [id];
 
-  const rows = await prisma.chatMessage.findMany({
-    where: { conversationId: { in: sessionIds }, ...(after ? { createdAt: { gte: new Date(after) } } : {}) },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: PAGE_SIZE + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
-
-  const page = rows.slice(0, PAGE_SIZE);
+  // Só mensagens: leitura (POST /read), painel do cliente, VMSet e campanhas vêm em chamadas próprias, em paralelo.
+  const page = await latestMessagesPage((args) => prisma.chatMessage.findMany(args), { sessionIds, cursor, after });
   return NextResponse.json({
-    items: page.reverse().map(serializeMessage),
-    nextCursor: rows.length > PAGE_SIZE ? page[0].id : null,
+    items: page.items.map(serializeMessage),
+    nextCursor: page.nextCursor,
     sessions: sessions.length ? sessions : [{ id, createdAt: conversation.createdAt, closedAt: conversation.closedAt }],
   });
 }

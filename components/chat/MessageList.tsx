@@ -8,6 +8,9 @@ import { MediaViewer } from "@/components/chat/MediaViewer";
 import { InteractiveListBubble } from "@/components/chat/InteractiveListBubble";
 import { clockTime, dayLabel, fileSize } from "@/lib/chat/format";
 import { mergeMessages, replaceMessage } from "@/lib/chat/reconcile";
+import { cachedMessages, loadLatestMessages, rememberMessages } from "@/lib/chat/message-cache";
+
+const CACHED_MESSAGES = 40;
 import type { ChatDelivery, ChatMessageItem, ScheduledMessageItem } from "@/lib/chat/types";
 import { describeFailure } from "@/lib/chat/meta-failure";
 
@@ -313,22 +316,28 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
   }, []);
 
   const fetchLatest = useCallback(async () => {
-    const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, { cache: "no-store" });
-    if (!response.ok) throw new Error("Falha ao carregar mensagens.");
-    const data = (await response.json()) as { items: ChatMessageItem[]; nextCursor: string | null; sessions?: ChatSession[] };
+    const data = await loadLatestMessages(conversationId);
     rememberSessions(data.sessions);
     return data;
   }, [conversationId, rememberSessions]);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setMessages([]);
-    setSessions(new Map());
-    setCursor(null);
+    // Conversa já vista ou pré-carregada no hover: aparece na hora (cache) e revalida em segundo plano.
+    const cached = cachedMessages(conversationId);
+    pendingScroll.current = "instant";
+    setMessages(cached?.items ?? []);
+    setSessions(new Map((cached?.sessions ?? []).map((session) => [session.id, session])));
+    setCursor(cached?.nextCursor ?? null);
+    setLoading(!cached);
     fetchLatest()
       .then((data) => {
         if (!active) return;
+        if (cached) {
+          if (isNearBottom()) pendingScroll.current = "smooth";
+          merge(data.items);
+          return;
+        }
         pendingScroll.current = "instant";
         setMessages(data.items);
         setCursor(data.nextCursor);
@@ -340,7 +349,15 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
     return () => {
       active = false;
     };
-  }, [fetchLatest]);
+  }, [conversationId, fetchLatest, merge]);
+
+  // Mantém no cache a ponta mais recente da conversa (até 40), para reabrir na hora; o cursor aponta para a mais
+  // antiga guardada, e a rolagem para cima continua dali.
+  useEffect(() => {
+    if (loading || !messages.length) return;
+    const recent = messages.slice(-CACHED_MESSAGES);
+    rememberMessages(conversationId, { items: recent, nextCursor: messages.length > CACHED_MESSAGES ? recent[0].id : cursor, sessions: [...sessions.values()] });
+  }, [conversationId, loading, messages, cursor, sessions]);
 
   const refresh = useCallback(() => {
     if (refreshHolds.current > 0) {

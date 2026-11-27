@@ -470,7 +470,10 @@ function ChatWorkspace() {
     };
   }, []);
 
-  const open = selectedId ? detail?.id === selectedId ? detail : null : null;
+  // Abre na hora com o que a lista já tem (cabeçalho + mensagens em paralelo); o detalhe completo (bloqueio,
+  // campanhas, atendimentos anteriores) completa quando chegar, sem segurar a conversa.
+  const listedOpen = selectedId ? items.find((item) => item.id === selectedId) ?? null : null;
+  const open: (ConversationItem & Partial<ConversationDetail>) | null = selectedId ? (detail?.id === selectedId ? detail : listedOpen) : null;
 
   // Mensagem que chega na conversa aberta já foi vista; depende do horário para respeitar "Marcar como não lida".
   const openHasUnread = !!open?.unreadCount;
@@ -763,10 +766,10 @@ function ChatWorkspace() {
           />
         )}
 
-        {showDetails && open && (
+        {showDetails && open && detail?.id === open.id && (
           <ContactDetailsDialog
             key={open.id}
-            conversation={open}
+            conversation={detail}
             canWrite={canWrite}
             onClose={() => setShowDetails(false)}
             onTagsChange={(tags) => void updateConversation({ tags })}

@@ -9,7 +9,7 @@ import { FloatingMenu } from "@/components/chat/FloatingMenu";
 import { ScheduleMessageDialog } from "@/components/chat/ScheduleDialogs";
 import { TemplatePicker, type TemplateChoice } from "@/components/chat/TemplatePicker";
 import { fillVariables } from "@/lib/chat/text";
-import type { ChatMessageItem, ConversationDetail } from "@/lib/chat/types";
+import type { ChatMessageItem, ConversationDetail, ConversationItem } from "@/lib/chat/types";
 import { useRecorder } from "@/lib/chat/use-recorder";
 import { extractClipboardImages } from "@/lib/clipboard";
 import { MAX_IMAGE_BYTES } from "@/lib/chat/media-rules";
@@ -30,7 +30,8 @@ export type ComposerSend = { text: string; internal: boolean; replyTo: ChatMessa
 type QuickReply = Pick<FullQuickReply, "id" | "title" | "text" | "shortcut" | "queueId" | "category">;
 
 type Props = {
-  conversation: ConversationDetail;
+  /** Detalhe completo ou, enquanto ele carrega, o item da lista (blocked ainda indefinido). */
+  conversation: ConversationItem & Partial<ConversationDetail>;
   agentName: string;
   canWrite: boolean;
   replyTo: ChatMessageItem | null;
