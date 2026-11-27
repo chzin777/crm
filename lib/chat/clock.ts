@@ -68,6 +68,8 @@ async function notify(userIds: string[], notice: { conversationId?: string; type
 
 export async function runClock() {
   const summary = { closings: 0, wait3: 0, wait8: 0, positions: 0, queueFull: 0, silenceAsked: 0, silenceClosed: 0, surveysExpired: 0, resent: 0, cleaned: 0, mediaRecovered: 0, scheduledSent: 0, scheduledFailed: 0, followUpsDue: 0, automationsResumed: 0, automationsInactive: 0, automationsErp: 0, automationsConverted: 0, errors: [] as string[] };
+  // Começa a apuração independente antes que outras rotinas atrasem a resposta do cron.
+  void runAttendanceAttributionClock().catch((error: unknown) => void reportError("cron.atendentes", error));
   const block = async (name: string, action: () => Promise<void>) => {
     try {
       await action();
@@ -360,9 +362,6 @@ export async function runClock() {
 
   // Catálogo do VMSET (/produtos): sincronização incremental em segundo plano (produtos 15 min, saldo 5 min).
   void scheduleCatalogSync(now).catch((error: unknown) => void reportError("cron.catálogo", error));
-
-  // Cruzamento CRM x VMSET e auditoria da IA: sincroniza o mês atual e processa um atendimento por ciclo.
-  void runAttendanceAttributionClock().catch((error: unknown) => void reportError("cron.atendentes", error));
 
   return summary;
 }
