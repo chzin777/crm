@@ -686,7 +686,7 @@ export function AiSettingsPanel() {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-white"><ShieldCheck className="h-4 w-4 shrink-0 text-[#002187] dark:text-[#C4D600]" />Triagem inteligente e filtro pós-campanha</p>
-              <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">Silenciosa: identifica respostas automáticas, ausências e ruídos depois das campanhas e encerra com o motivo “Não é resposta da campanha”. Nunca envia mensagem ao cliente nem joga na fila.</p>
+              <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">Silenciosa: identifica respostas automáticas, ausências e ruídos depois das campanhas e exclui com o motivo “Não é resposta da campanha”. Nunca envia mensagem ao cliente nem joga na fila.</p>
             </div>
             <SwitchOnly label="Triagem inteligente" checked={settings.triageEnabled} onChange={(value) => set("triageEnabled", value)} />
           </div>

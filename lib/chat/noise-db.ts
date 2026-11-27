@@ -10,7 +10,6 @@ import { NOISE_AUTHOR, classifyNoise, type NoiseKind } from "@/lib/chat/noise";
 import { phoneVariants } from "@/lib/chat/phone";
 import { readMenuState } from "@/lib/chat/menu";
 import { readAiSettings } from "@/lib/ai/store";
-import { closeConversation } from "@/lib/chat/actions";
 import { addAudit, addSystemMessage } from "@/lib/chat/conversation";
 import type { ChatAttachment } from "@/lib/chat/media-rules";
 
@@ -134,7 +133,10 @@ export async function absorbNoise(input: {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
     return;
   }
-  if (input.campaignReason) await dismissCampaignNonReply(target, input.openConversationId, input.campaignReason);
+  if (input.campaignReason && await dismissCampaignNonReply(target, input.openConversationId, input.campaignReason)) {
+    notifyChatChange();
+    return;
+  }
   // A janela de 24 h do WhatsApp abre com qualquer mensagem do cliente; o resto da conversa não se mexe.
   if (input.openConversationId) {
     await prisma.chatConversation.updateMany({
@@ -150,21 +152,41 @@ export const NOT_CAMPAIGN_REPLY = "Não é resposta da campanha";
 
 /**
  * "Não é resposta da campanha" automático: a conversa aberta só com mensagens ignoradas (robô, ausência, ruído) é
- * encerrada com esse motivo, sem despedida; sem conversa aberta, o motivo fica registrado no histórico do contato.
+ * EXCLUÍDA com esse motivo (registrado na auditoria): não conta como atendimento encerrado, não dispara NPS nem
+ * despedida e não vai para a fila. A próxima mensagem real do cliente abre uma conversa nova e limpa.
+ * Sem conversa aberta, o motivo fica registrado no histórico do contato.
  * A métrica da campanha não conta a mensagem (ela nunca passa pela atribuição de resposta).
+ * Devolve true quando a conversa foi excluída.
  */
-async function dismissCampaignNonReply(targetId: string, openConversationId: string | null, reason: string) {
-  const text = `${NOT_CAMPAIGN_REPLY} (encerrado automaticamente: ${reason.slice(0, 160)})`;
+async function dismissCampaignNonReply(targetId: string, openConversationId: string | null, reason: string): Promise<boolean> {
   const open = openConversationId ? await prisma.chatConversation.findUnique({ where: { id: openConversationId } }) : null;
-  // Conversa com mensagem real do cliente (ex.: "Oi" antes do robô) não é encerrada: só a mensagem fica ignorada.
+  // Conversa com mensagem real do cliente (ex.: "Oi" antes do robô) não é excluída: só a mensagem fica ignorada.
   const human = open ? await prisma.chatMessage.count({ where: { conversationId: open.id, author: "customer", authorName: null } }) : 0;
   if (open && !open.closedAt && !open.assigneeId && human === 0) {
-    await closeConversation(open, null, text, "").catch((error) => console.warn("[chat][triagem] encerramento automático:", error instanceof Error ? error.message : error));
-    await addAudit({ userId: null, action: "conversation.not_campaign_reply", targetId: open.id, after: { motivo: NOT_CAMPAIGN_REPLY, detalhe: reason } });
-    return;
+    try {
+      const messageCount = await prisma.chatMessage.count({ where: { conversationId: open.id } });
+      // As mensagens saem por cascata; a auditoria permanece com o motivo.
+      await prisma.$transaction(async (tx) => {
+        await tx.chatNotification.deleteMany({ where: { conversationId: open.id } });
+        await tx.chatConversation.deleteMany({ where: { id: open.id } });
+        await addAudit({
+          userId: null,
+          action: "conversation.not_campaign_reply",
+          targetId: open.id,
+          before: { contactId: open.contactId, phone: open.phone, status: open.status, queueId: open.queueId, campaignId: open.campaignId, messageCount },
+          after: { motivo: NOT_CAMPAIGN_REPLY, detalhe: reason, excluida: true },
+        }, tx);
+      });
+      console.log(`[chat][triagem] conversa ${open.id} excluída: ${NOT_CAMPAIGN_REPLY} (${reason})`);
+      return true;
+    } catch (error) {
+      console.warn("[chat][triagem] exclusão automática:", error instanceof Error ? error.message : error);
+      return false;
+    }
   }
-  await addSystemMessage(targetId, text);
+  await addSystemMessage(targetId, `${NOT_CAMPAIGN_REPLY} (ignorado automaticamente: ${reason.slice(0, 160)})`);
   await addAudit({ userId: null, action: "conversation.not_campaign_reply", targetId, after: { motivo: NOT_CAMPAIGN_REPLY, detalhe: reason } });
+  return false;
 }
 
 /**

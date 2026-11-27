@@ -179,7 +179,7 @@ export async function recordInbound(message: MetaInboundMessage, profileName: st
 
   // Classificador rápido pós-campanha (IA, Structured Output): a última mensagem enviada ao contato foi um disparo e
   // não há atendimento engajado. Robô/ausência/ruído não conta na campanha, não vai para IA de vendas nem fila e a
-  // conversa é encerrada com o motivo "Não é resposta da campanha". Botão/lista e mídia são sempre interação real.
+  // conversa é excluída com o motivo "Não é resposta da campanha". Botão/lista e mídia são sempre interação real.
   if (message.type === "text" && text.trim()) {
     const campaign = await campaignReplyContext(message.from, receivedAt);
     const { open, engaged } = campaign ? await openEngagement(message.from) : { open: null, engaged: true };
