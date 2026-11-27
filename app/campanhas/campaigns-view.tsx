@@ -126,6 +126,7 @@ interface DispatchJobView {
   errors: string[];
   pause?: { kind: string; code?: number; message: string; detail?: string };
   retryQueue?: number[];
+  autoResumedAt?: string;
   scheduledAt?: string;
   startedAt?: string;
 }
@@ -522,7 +523,7 @@ export function CampaignsView() {
         const before = previous.get(job.campaignId);
         if (before === job.status || (before === undefined && job.status === "completed")) continue;
         changed = true;
-        if (job.status === "paused" && job.pause?.kind !== "manual") toastRef.current.error(`Disparo pausado: ${job.campaignName}`, job.pause?.message ?? "O disparo foi pausado.");
+        if (job.status === "paused" && job.pause?.kind !== "manual" && job.pause?.kind !== "restart") toastRef.current.error(`Disparo pausado: ${job.campaignName}`, job.pause?.message ?? "O disparo foi pausado.");
         if (job.status === "completed") toastRef.current.success(`Disparo concluído: ${job.campaignName}`, `${job.sent} enviadas, ${job.failed} falhas.`);
       }
       if (changed) {
@@ -2247,6 +2248,7 @@ export function CampaignsView() {
                       {selectedJob.status === "paused" && selectedJob.pause?.detail && (
                         <p className="break-words rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] text-slate-600 dark:bg-white/5 dark:text-slate-300">Detalhe técnico{selectedJob.pause.code ? ` (código ${selectedJob.pause.code})` : ""}: {selectedJob.pause.detail}</p>
                       )}
+                      {selectedJob.autoResumedAt && <p className="text-[11px] text-slate-500 dark:text-slate-400">Disparo retomado automaticamente após atualização do servidor em {formatDateTime(selectedJob.autoResumedAt)}.</p>}
                       {(selectedJob.retryQueue?.length ?? 0) > 0 && <p className="text-[11px] text-slate-500 dark:text-slate-400">{int(selectedJob.retryQueue?.length ?? 0)} contatos sem conexão com a Meta serão tentados de novo no fim do disparo.</p>}
                       {selectedJob.errors.length > 0 && (
                         <details className="text-[11px] text-slate-500 dark:text-slate-400">

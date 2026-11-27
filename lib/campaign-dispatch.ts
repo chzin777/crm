@@ -38,7 +38,7 @@ type CampaignRecord = {
 };
 
 /** `schedule`: fora da janela de horário da campanha; o relógio retoma sozinho em `resumeAt`. */
-export type PauseReason = { kind: "payment" | "rate_limit" | "auth" | "account" | "template" | "network" | "consecutive" | "manual" | "media" | "schedule"; code?: number; message: string; resumeAt?: string; /** Resposta técnica real (HTTP, código e mensagem da Meta ou erro de rede). */ detail?: string };
+export type PauseReason = { kind: "payment" | "rate_limit" | "auth" | "account" | "template" | "network" | "consecutive" | "manual" | "media" | "schedule" | "restart"; code?: number; message: string; resumeAt?: string; /** Resposta técnica real (HTTP, código e mensagem da Meta ou erro de rede). */ detail?: string };
 
 export type DispatchJob = {
   campaignId: string;
@@ -60,6 +60,10 @@ export type DispatchJob = {
   pause?: PauseReason;
   /** Posições de contatos que não saíram por falha de conexão/instabilidade da Meta: nova tentativa no fim do disparo. */
   retryQueue?: number[];
+  /** Interrompido pelo desligamento do servidor (deploy/reinício): a próxima instância retoma sozinha. */
+  autoResumeOnBoot?: boolean;
+  /** Última retomada automática depois de atualização/reinício do servidor (histórico na tela da campanha). */
+  autoResumedAt?: string;
   /** Disparo agendado: fica pausado (kind "schedule") até esta hora e o relógio do chat inicia sozinho. */
   scheduledAt?: string;
   startedAt: string;
@@ -111,11 +115,17 @@ const globalState = globalThis as unknown as {
   __dispatchControl?: Map<string, "pause" | "cancel">;
   __dispatchQueue?: Promise<void>;
   __dispatchCampaignLock?: Promise<void>;
+  __dispatchShutdown?: boolean;
 };
 const running = (globalState.__dispatchRunning ??= new Set());
 const control = (globalState.__dispatchControl ??= new Map());
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** SIGTERM do deploy recebido: nenhum contato novo é puxado e nenhum disparo é retomado por esta instância. */
+const shuttingDown = () => globalState.__dispatchShutdown === true;
+export const RESTART_PAUSE_MESSAGE = "Disparo interrompido pela atualização do servidor. Retoma sozinho em instantes, de onde parou.";
+export const AUTO_RESUME_NOTE = "Disparo retomado automaticamente após atualização do servidor";
+const pausedForRestart = (job: DispatchJob): DispatchJob => ({ ...job, status: "paused", pause: { kind: "restart", message: RESTART_PAUSE_MESSAGE }, autoResumeOnBoot: true });
 const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 
 async function readJob(campaignId: string): Promise<DispatchJob | null> {
@@ -350,13 +360,19 @@ const recipientKeys = (recipient: DispatchRecipient) => [recipient.id, ...phoneV
  * blue/green acharia o disparo órfão e retomaria em paralelo). Pausa/cancelamento pedidos interrompem a espera.
  */
 async function waitWithHeartbeat(campaignId: string, job: DispatchJob, ms: number) {
+  // Passos de 1 s: pausa, cancelamento e o desligamento do deploy interrompem a espera na hora.
   let left = ms;
+  let sinceWrite = 0;
   while (left > 0) {
-    const step = Math.min(left, 60_000);
+    const step = Math.min(left, 1_000);
     await sleep(step);
     left -= step;
-    if (control.has(campaignId)) return;
-    if (left > 0) await writeJob(job);
+    sinceWrite += step;
+    if (control.has(campaignId) || shuttingDown()) return;
+    if (left > 0 && sinceWrite >= 60_000) {
+      sinceWrite = 0;
+      await writeJob(job);
+    }
   }
 }
 
@@ -369,12 +385,21 @@ type Delivery =
   | { kind: "sent" }
   | { kind: "failed"; detail: string; code?: number; api: boolean }
   | { kind: "infra"; detail: string; code?: number }
-  | { kind: "pause"; pause: PauseReason };
+  | { kind: "pause"; pause: PauseReason }
+  /** Pausa pedida ou desligamento durante a espera: o contato não foi processado e volta primeiro. */
+  | { kind: "interrupted" };
 
 async function runJob(campaignId: string) {
   const initial = await readJob(campaignId);
   if (!initial || initial.status !== "running") return;
   let job: DispatchJob = initial;
+  // Desligando: o disparo da fila nem começa; fica marcado para a próxima instância.
+  if (shuttingDown()) {
+    job = pausedForRestart(job);
+    await writeJob(job);
+    await syncCampaign(job).catch(() => undefined);
+    return;
+  }
   try {
     const campaign = await readCampaign(campaignId);
     if (!campaign) throw new Error("Campanha não encontrada.");
@@ -412,6 +437,13 @@ async function runJob(campaignId: string) {
         job = requested === "pause"
           ? { ...job, status: "paused", pause: { kind: "manual", message: "Disparo pausado manualmente." } }
           : { ...job, status: "cancelled", finishedAt: new Date().toISOString() };
+        await writeJob(job);
+        await syncCampaign(job);
+        return true;
+      }
+      // Deploy/reinício: para antes do próximo contato e deixa marcado para retomar sozinho.
+      if (shuttingDown()) {
+        job = pausedForRestart(job);
         await writeJob(job);
         await syncCampaign(job);
         return true;
@@ -454,7 +486,7 @@ async function runJob(campaignId: string) {
           if (attempt < waits.length) {
             console.warn(`[campaign-dispatch] ${campaign.nome}: ${failure.detail} — nova tentativa ${attempt + 1} de ${waits.length}`);
             await backoff(waits[attempt]);
-            if (control.has(campaignId)) return { kind: "infra", detail: failure.detail, code: failure.code };
+            if (control.has(campaignId) || shuttingDown()) return { kind: "interrupted" };
             continue;
           }
           return { kind: "infra", detail: failure.detail, code: failure.code };
@@ -486,7 +518,7 @@ async function runJob(campaignId: string) {
     };
 
     /** Resultado de um contato; devolve a pausa quando o disparo deve parar. `final`: já é a nova tentativa do fim. */
-    const settle = async (index: number, recipient: DispatchRecipient, result: Delivery, final: boolean): Promise<PauseReason | null> => {
+    const settle = async (index: number, recipient: DispatchRecipient, result: Exclude<Delivery, { kind: "interrupted" }>, final: boolean): Promise<PauseReason | null> => {
       if (result.kind === "pause") return result.pause;
       if (result.kind === "sent") {
         job.sent += 1;
@@ -534,6 +566,10 @@ async function runJob(campaignId: string) {
         addError(job, `${recipient?.nome ?? "Contato"}: telefone não cadastrado.`);
       } else {
         const result = await deliver(recipient);
+        if (result.kind === "interrupted") {
+          if (await stopRequested()) return;
+          continue;
+        }
         pause = await settle(index, recipient, result, false);
         // Token, pagamento ou conta: o contato não foi processado e volta primeiro na retomada.
         if (pause && result.kind === "pause") {
@@ -562,6 +598,10 @@ async function runJob(campaignId: string) {
       let pause: PauseReason | null = null;
       if (recipient?.telefone?.trim() && !keys.some((key) => reached.has(key) || optedOut.has(key))) {
         const result = await deliver(recipient);
+        if (result.kind === "interrupted") {
+          if (await stopRequested()) return;
+          continue;
+        }
         if (result.kind === "pause") {
           await pauseWith(result.pause);
           return;
@@ -738,8 +778,23 @@ export async function listDispatchJobs(): Promise<DispatchJob[]> {
   const jobs = rows.map((row) => row.value as unknown as DispatchJob);
   for (const [index, row] of rows.entries()) {
     const job = jobs[index];
-    // Atualizado há pouco = outra instância (deploy blue/green) ainda está enviando: não retoma em paralelo.
-    if (job.status === "running" && !running.has(job.campaignId) && !recentlyActive(row.updatedAt)) enqueue(job.campaignId);
+    // Esta instância está desligando (deploy): quem retoma é a nova.
+    if (shuttingDown()) break;
+    // Interrompido pelo deploy (desligamento gracioso) ou órfão de queda (em andamento sem progresso há 3 min):
+    // volta sozinho. A gravação condicional (mesmo updatedAt) é a trava: só uma instância retoma cada disparo.
+    const interrupted = job.status === "paused" && job.pause?.kind !== "manual" && (job.pause?.kind === "restart" || job.autoResumeOnBoot === true);
+    const orphan = job.status === "running" && !recentlyActive(row.updatedAt);
+    if ((interrupted || orphan) && !running.has(job.campaignId)) {
+      const resumed: DispatchJob = { ...job, status: "running", pause: undefined, autoResumeOnBoot: undefined, autoResumedAt: new Date().toISOString() };
+      const claimed = await prisma.crmWorkspaceData.updateMany({ where: { key: row.key, updatedAt: row.updatedAt }, data: { value: asJson(resumed) } }).catch(() => ({ count: 0 }));
+      if (claimed.count === 1) {
+        console.info(`[campaign-dispatch] ${job.campaignName}: ${AUTO_RESUME_NOTE} (${job.cursor} de ${job.total}).`);
+        jobs[index] = resumed;
+        await syncCampaign(resumed).catch(() => undefined);
+        enqueue(job.campaignId);
+      }
+      continue;
+    }
     // Pausado por horário: volta sozinho ao chegar a hora. A gravação condicional (mesmo updatedAt) garante que
     // só uma instância retoma, mesmo com os relógios das duas cores rodando juntos.
     if (job.status === "paused" && job.pause?.kind === "schedule" && job.pause.resumeAt && new Date(job.pause.resumeAt).getTime() <= Date.now()) {
@@ -753,6 +808,33 @@ export async function listDispatchJobs(): Promise<DispatchJob[]> {
     }
   }
   return jobs;
+}
+
+/**
+ * Desligamento gracioso (SIGTERM/SIGINT do deploy): para de puxar contatos, espera o envio em andamento terminar
+ * (até timeoutMs) e deixa cada disparo desta instância como "interrompido pela atualização", para a próxima
+ * instância retomar sozinha. Pausa manual, erro fatal e disparos de outra instância nunca são tocados.
+ */
+export async function shutdownDispatches(timeoutMs = 20_000): Promise<string[]> {
+  globalState.__dispatchShutdown = true;
+  const mine = [...running];
+  const deadline = Date.now() + timeoutMs;
+  while (running.size > 0 && Date.now() < deadline) await sleep(50);
+  // Envio preso além do limite: marca mesmo assim (o processo vai sair em seguida).
+  for (const campaignId of running) {
+    const job = await readJob(campaignId).catch(() => null);
+    if (job?.status === "running") {
+      const paused = pausedForRestart(job);
+      await writeJob(paused).catch(() => undefined);
+      await syncCampaign(paused).catch(() => undefined);
+    }
+  }
+  return mine;
+}
+
+/** Desfaz o desligamento (desligamento cancelado; usado também pelos testes). */
+export function cancelDispatchShutdown() {
+  globalState.__dispatchShutdown = false;
 }
 
 /** Envios do follow-up ficam num disparo próprio (não somam no funil do principal); a resposta conta para a campanha. */

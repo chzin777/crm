@@ -21,8 +21,11 @@ RUN DB_HOST=build DB_PORT=5432 DB_NAME=build DB_USER=build DB_PASSWORD=build \
 # Stage 3: runtime mínimo, sem devDependencies nem código-fonte
 FROM node:20-alpine AS runner
 WORKDIR /app
+# NEXT_MANUAL_SIG_HANDLE: o SIGTERM do deploy é tratado em instrumentation.ts (disparos terminam o envio e ficam
+# marcados para a nova instância retomar) antes de o processo sair.
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_MANUAL_SIG_HANDLE=true \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
