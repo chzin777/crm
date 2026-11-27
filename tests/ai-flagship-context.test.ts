@@ -97,6 +97,17 @@ describe("modelo principal (flagship) no atendimento", () => {
     expect(user[1]).toEqual(image);
   });
 
+  it("com ferramentas (atendimento): gpt-5.4 vai com reasoning_effort none e a temperatura salva (o chat/completions recusa tools com raciocínio)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+      sent.push(JSON.parse(init.body) as Sent);
+      return reply(200, { choices: [{ message: { content: "{\"reply\":\"Oi!\"}" } }] });
+    }));
+    const tool = { definition: { type: "function" as const, function: { name: "consultar_lojas", description: "", parameters: {} } }, run: async () => null };
+    await aiJson([{ role: "user", content: "Achou ?" }], { feature: "atendimento", tools: [tool], maxTokens: 900 });
+    expect(sent[0]).toMatchObject({ model: "gpt-5.4", reasoning_effort: "none", temperature: 0.2, max_completion_tokens: 900 });
+    expect(reasoningEffortFor("gpt-5.4", true)).toBe("none");
+  });
+
   it("chamada de visão (foto do cliente) também vai no principal, mesmo pedindo um modelo pequeno", async () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
       sent.push(JSON.parse(init.body) as Sent);

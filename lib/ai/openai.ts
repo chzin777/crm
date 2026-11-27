@@ -49,10 +49,12 @@ const REASONING_BUDGET = 2000;
 
 /**
  * Raciocínio dos modelos GPT-5.1+ (inclui o principal gpt-5.4): "low" = rápido para WhatsApp, mas pensando no
- * contexto antes de responder (retomadas como "Achou?", geografia das lojas). Outros modelos: sem o parâmetro.
+ * contexto antes de responder. Com ferramentas o /v1/chat/completions do gpt-5.4 só aceita "none" (recusa function
+ * tools com raciocínio): vai "none", que aceita temperatura. Outros modelos: sem o parâmetro.
  */
-export function reasoningEffortFor(model: string): "low" | null {
-  return /^gpt-5\.[1-9]/i.test(model) && !/-pro\b/i.test(model) ? "low" : null;
+export function reasoningEffortFor(model: string, hasTools = false): "low" | "none" | null {
+  if (!/^gpt-5\.[1-9]/i.test(model) || /-pro\b/i.test(model)) return null;
+  return hasTools ? "none" : "low";
 }
 
 /** Erros da OpenAI traduzidos para a equipe: nunca expõe a chave nem o corpo bruto. */
@@ -82,7 +84,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   };
   const history: ChatMessage[] = [...messages];
   const tools = meta.tools ?? [];
-  let reasoning = NO_REASONING_MODELS.has(model) ? null : reasoningEffortFor(model);
+  let reasoning = NO_REASONING_MODELS.has(model) ? null : reasoningEffortFor(model, tools.length > 0);
   const call = async (temperature: number | null, withTools: boolean) => {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -90,9 +92,10 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
       body: JSON.stringify({
         model, messages: history,
         ...(meta.plainText ? {} : { response_format: meta.jsonSchema ? { type: "json_schema", json_schema: { name: meta.jsonSchema.name, strict: true, schema: meta.jsonSchema.schema } } : { type: "json_object" } }),
-        max_completion_tokens: (meta.maxTokens ?? 1200) + (reasoning ? REASONING_BUDGET : 0),
-        // Com raciocínio ligado os modelos GPT-5.x só aceitam a temperatura padrão.
-        ...(reasoning ? { reasoning_effort: reasoning } : temperature === null ? {} : { temperature }),
+        max_completion_tokens: (meta.maxTokens ?? 1200) + (reasoning === "low" ? REASONING_BUDGET : 0),
+        ...(reasoning ? { reasoning_effort: reasoning } : {}),
+        // Com raciocínio ligado ("low") os modelos GPT-5.x só aceitam a temperatura padrão; "none" aceita.
+        ...(reasoning === "low" || temperature === null ? {} : { temperature }),
         // Na última rodada as ferramentas seguem declaradas (o histórico tem chamadas), mas o modelo precisa responder.
         ...(tools.length ? { tools: tools.map((tool) => tool.definition), tool_choice: withTools ? "auto" : "none" } : {}),
       }),
@@ -116,7 +119,7 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
         ({ response, body } = await call(temperature, withTools));
       }
       // Modelo que só aceita a temperatura padrão: repete sem ela em vez de falhar.
-      if (response.status === 400 && !reasoning && temperature !== null && body.error?.param === "temperature") {
+      if (response.status === 400 && reasoning !== "low" && temperature !== null && body.error?.param === "temperature") {
         temperature = null;
         NO_TEMPERATURE_MODELS.add(model);
         ({ response, body } = await call(null, withTools));
