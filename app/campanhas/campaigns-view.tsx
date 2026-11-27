@@ -35,6 +35,7 @@ import {
   Send,
   Sparkles,
   SquareCheck,
+  Trash2,
   Users,
   X,
   XCircle,
@@ -45,6 +46,7 @@ import { CampaignTemplatePicker, type CampaignTemplate } from "@/components/Camp
 import { compareStoreNames, storeDisplayName } from "@/lib/stores";
 import Stepper, { Step } from "@/components/Stepper";
 import { EntityDialog } from "@/components/EntityDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { FormMultiSelect } from "@/components/FormMultiSelect";
 import { useCrmData } from "@/hooks/useCrmData";
@@ -503,7 +505,21 @@ export function CampaignsView() {
   const [bulkJobs, setBulkJobs] = useState<BulkJobView[]>([]);
   const [stats, setStats] = useState<Record<string, QuickStats>>({});
   const [jobBusy, setJobBusy] = useState<string | null>(null);
+  const [deletingCampaign, setDeletingCampaign] = useState<Campaign | null>(null);
   const jobStatusRef = useRef<Map<string, string> | null>(null);
+  const deleteCampaign = async (campaign: Campaign) => {
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, { method: "DELETE" });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error || "Não foi possível excluir a campanha.");
+      setCampaigns((current) => current.filter((item) => item.id !== campaign.id));
+      setSelectedCampaignIds((current) => { const next = new Set(current); next.delete(campaign.id); return next; });
+      setSelectedCampaign(null);
+      toast.success("Campanha excluída", campaign.nome);
+    } catch (error) {
+      toast.error("Erro ao excluir", error instanceof Error ? error.message : "Tente novamente.");
+    }
+  };
   const toastRef = useRef(toast);
   useEffect(() => { toastRef.current = toast; });
 
@@ -2357,7 +2373,12 @@ export function CampaignsView() {
             </div>
 
             <footer className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-              <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />Atualizada em {(() => { const time = new Date(selectedCampaign.dataAtualizacao).getTime(); return Number.isNaN(time) ? selectedCampaign.dataAtualizacao : formatDateTime(selectedCampaign.dataAtualizacao); })()}</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Clock3 className="h-3.5 w-3.5" />Atualizada em {(() => { const time = new Date(selectedCampaign.dataAtualizacao).getTime(); return Number.isNaN(time) ? selectedCampaign.dataAtualizacao : formatDateTime(selectedCampaign.dataAtualizacao); })()}</span>
+                {!(selectedJob && (selectedJob.status === "running" || selectedJob.status === "paused")) && (
+                  <button type="button" onClick={() => setDeletingCampaign(selectedCampaign)} className={`${ghostButton} border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/30`}><Trash2 className="h-3.5 w-3.5" />Excluir campanha</button>
+                )}
+              </div>
               {!selectedLocked && !selectedMetaPending && (
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={saveCampaign} className={ghostButton}>Salvar alterações</button>
@@ -2370,6 +2391,17 @@ export function CampaignsView() {
       )}
 
       {bulkDetailsId && <BulkJobDetailsDialog jobId={bulkDetailsId} onClose={() => setBulkDetailsId(null)} />}
+
+      {deletingCampaign && (
+        <ConfirmDialog
+          variant="destructive"
+          title="Excluir campanha"
+          description={`A campanha "${deletingCampaign.nome}" sai da lista. O histórico de envios dos contatos é mantido. Essa ação não pode ser desfeita.`}
+          confirmLabel="Excluir campanha"
+          onClose={() => setDeletingCampaign(null)}
+          onConfirm={async () => { await deleteCampaign(deletingCampaign); setDeletingCampaign(null); }}
+        />
+      )}
 
       {/* Barra de ações em lote */}
       {selectedCampaignIds.size > 0 && (

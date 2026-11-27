@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireModule } from "@/lib/api-auth";
-import { patchCampaign } from "@/lib/campaigns";
+import { patchCampaign, removeCampaign } from "@/lib/campaigns";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -22,4 +22,21 @@ export async function PATCH(request: Request, context: Context) {
   if (!list.some((campaign) => campaign.id === id)) return NextResponse.json({ error: "Campanha não encontrada." }, { status: 404 });
   await patchCampaign(id, { aiAutoReplyEnabled: body.aiAutoReplyEnabled });
   return NextResponse.json({ ok: true, aiAutoReplyEnabled: body.aiAutoReplyEnabled });
+}
+
+/**
+ * Exclui a campanha da lista. Disparo em andamento ou pausado bloqueia (pare ou cancele antes). O registro do
+ * disparo e a lista de destinatários saem junto; os envios já feitos (CampaignMessage) ficam como histórico do
+ * contato (intervalo entre campanhas, engajamento e atribuição de vendas).
+ */
+export async function DELETE(_request: Request, context: Context) {
+  const guard = await requireModule("campanhas");
+  if (guard.response) return guard.response;
+  const { id } = await context.params;
+  const job = await prisma.crmWorkspaceData.findUnique({ where: { key: `dispatch:${id}` }, select: { value: true } });
+  const status = (job?.value as { status?: string } | null)?.status;
+  if (status === "running" || status === "paused") return NextResponse.json({ error: "Esta campanha tem um disparo em andamento ou pausado. Cancele o disparo antes de excluir." }, { status: 409 });
+  if (!(await removeCampaign(id))) return NextResponse.json({ error: "Campanha não encontrada." }, { status: 404 });
+  await prisma.crmWorkspaceData.deleteMany({ where: { key: { in: [`dispatch:${id}`, `dispatch-recipients:${id}`] } } });
+  return NextResponse.json({ ok: true });
 }

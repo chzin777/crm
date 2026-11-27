@@ -42,6 +42,17 @@ export function upsertCampaign(campaign: CampaignRecord) {
   });
 }
 
+/** Tira a campanha da lista (mesma trava das gravações do disparo). true = existia. */
+export async function removeCampaign(campaignId: string) {
+  let removed = false;
+  await updateCampaigns((campaigns) => {
+    const next = campaigns.filter((item) => item.id !== campaignId);
+    removed = next.length !== campaigns.length;
+    return removed ? next : campaigns;
+  });
+  return removed;
+}
+
 export function patchCampaign(campaignId: string, patch: Partial<CampaignRecord>) {
   return updateCampaigns((campaigns) => campaigns.map((item) => item.id === campaignId ? { ...item, ...patch } : item));
 }
