@@ -592,9 +592,10 @@ export default function LiveSalesPage() {
   }), [scoped, origin, query, topStoreKeys, seller]);
   const paged = useMemo(() => paginate(feed, page, PAGE_SIZE), [feed, page]);
   const revenue = useAnimatedNumber(kpis.revenue);
-  const peak = hourly.reduce<HourPoint | null>((best, point) => (point.revenue > (best?.revenue ?? 0) ? point : best), null);
+  // Pico e comparativo só com horas reais já vividas (a barra "Antes" e horas futuras ficam fora).
+  const peak = hourly.reduce<HourPoint | null>((best, point) => (point.hour >= 0 && (!isLive || point.hour <= currentHour) && point.revenue > (best?.revenue ?? 0) ? point : best), null);
   const nowPoint = hourly.find((point) => point.hour === highlight);
-  const prevPoint = hourly.find((point) => point.hour === highlight - 1);
+  const prevPoint = highlight > 0 ? hourly.find((point) => point.hour === highlight - 1) : undefined;
   const suffix = PERIOD_SUFFIX[period];
   const rangeLabel = range.from === range.to ? shortDate(range.from) : `${shortDate(range.from)} a ${shortDate(range.to)}`;
   const rangeDays = rangeValid ? Math.round((new Date(`${range.to}T12:00:00Z`).getTime() - new Date(`${range.from}T12:00:00Z`).getTime()) / 86_400_000) + 1 : 0;
@@ -747,7 +748,7 @@ export default function LiveSalesPage() {
         </section>
 
         <section className={`${cardClass} flex min-w-0 flex-col p-4 lg:col-span-7 lg:p-5 ${mobileOnly("chart")}`}>
-          <SectionTitle icon={Activity} title={isLive ? "Ritmo hora a hora" : "Ritmo dia a dia"} hint={isLive ? "Barras: faturamento por hora · linha: pedidos · hora atual em verde" : "Barras: faturamento por dia · linha: pedidos · hoje em verde"}>
+          <SectionTitle icon={Activity} title={isLive ? "Ritmo hora a hora" : "Ritmo dia a dia"} hint={isLive ? "Barras: vendas por hora do pedido (Antes = pedidos de dias anteriores faturados hoje; devoluções abatidas só no total) · linha: pedidos · hora atual em verde" : "Barras: faturamento por dia · linha: pedidos · hoje em verde"}>
             <div className="flex flex-wrap gap-1.5 text-[11px]">
               {peak && <span className="inline-flex items-center gap-1 rounded-lg bg-[#F7915E]/15 px-2 py-1 font-semibold text-[#c25a26] dark:text-[#F7915E]"><TrendingUp className="h-3.5 w-3.5" />Pico {peak.label} · {compactMoney(peak.revenue)}</span>}
               {nowPoint && (

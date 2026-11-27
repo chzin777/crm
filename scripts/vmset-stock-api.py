@@ -628,7 +628,7 @@ SALES_SQL = """
 SELECT NVL(T.ITEM_MOVI_ESTOQUE_ID, T.LOJA || '-' || T.NUM_PEDIDO || '-' || T.CODIGO), T.LOJA, T.NUM_PEDIDO, T.NUM_NOTA,
        T.DATA_NOTA, T.HORA_PEDIDO2, T.VENDEDOR, T.NOME_CLIENTE, T.PARCEIRO_CPF, T.CELULAR, T.TELEFONE, T.MARCA,
        T.DESCRICAO, T.NOME_CATEGORIA, T.QTDE_ITEM_VENDA, T.VALOR_TOTAL, T.PAGTO, T.COND_PAGTO,
-       SUM(T.VALOR_TOTAL) OVER (PARTITION BY T.LOJA, T.NUM_PEDIDO)
+       SUM(T.VALOR_TOTAL) OVER (PARTITION BY T.LOJA, T.NUM_PEDIDO), T.DATA_PEDIDO
 FROM tab_dados_dinamicos T
 WHERE T.TIPO = 'Venda' AND T.DATA_NOTA >= :a AND T.DATA_NOTA < :b
   AND T.LOJA NOT BETWEEN 100 AND 199 AND T.LOJA NOT BETWEEN 1000 AND 2999
@@ -668,11 +668,14 @@ def digits(value, pad=0):
 
 def sale_item(row):
     (item_id, store, order, invoice, issued, hour, seller, customer, cpf, mobile, phone, brand, description, category,
-     quantity, amount, payment, terms, total) = row
+     quantity, amount, payment, terms, total, ordered) = row
     hour = text(hour)
+    # DATA_NOTA não tem hora; HORA_PEDIDO2 é a hora do PEDIDO. Pedido de outro dia faturado hoje leva "orderDate"
+    # diferente de "date": o painel não o põe na hora do pedido (que seria "18h de hoje", hora futura às 14h).
     return {
         "id": text(item_id), "store": text(store), "order": text(order), "invoice": text(invoice),
         "date": issued.strftime("%Y-%m-%d") if issued else None,
+        "orderDate": ordered.strftime("%Y-%m-%d") if ordered else None,
         "time": hour if hour and re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", hour) else "00:00:00",
         "seller": text(seller), "customer": text(customer), "cpf": digits(cpf, 11),
         "phone": digits(mobile) or digits(phone), "brand": text(brand),

@@ -22,6 +22,8 @@ export type SaleItem = {
   terms?: string | null;
   /** Dia da emissão (AAAA-MM-DD, Brasília): obrigatório nos períodos de vários dias. */
   date?: string | null;
+  /** Dia do PEDIDO (DATA_PEDIDO): a hora (time) é do pedido; pedido de outro dia faturado em `date` não tem hora no dia. */
+  orderDate?: string | null;
   /** Total líquido oficial do pedido no VMSet (PDSD_VLR_TOTAL), repetido em cada item: vale mais que a soma dos itens. */
   orderTotal?: number | null;
 };
@@ -40,6 +42,8 @@ export type LiveOrder = {
   at: string;
   /** Dia da venda em Brasília (AAAA-MM-DD). Opcional: retratos antigos não trazem. */
   day?: string;
+  /** Dia em que o pedido foi feito, quando é anterior ao dia da nota (faturado depois): fica fora do hora a hora. */
+  orderDay?: string;
   time: string;
   amount: number;
   items: number;
@@ -157,13 +161,16 @@ export function buildOrders(items: SaleItem[], day: string, input: { storeLabel:
     const amount = official != null ? money2(official) : money2(sorted.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0));
     const time = (first.time ?? "").slice(0, 5) || "--:--";
     const saleDay = first.date && /^\d{4}-\d{2}-\d{2}$/.test(first.date) ? first.date : day;
+    // Pedido de dia anterior faturado hoje: a hora é a do pedido (outro dia); entra no início do dia da nota.
+    const orderDay = first.orderDate && /^\d{4}-\d{2}-\d{2}$/.test(first.orderDate) && first.orderDate < saleDay ? first.orderDate : undefined;
     orders.push({
       key,
       store: first.store!,
       storeLabel: withClosedTag(first.store!, input.storeLabel(first.store!)),
       order: first.order!,
-      at: saleInstant(saleDay, first.time),
+      at: saleInstant(saleDay, orderDay ? "00:00" : first.time),
       day: saleDay,
+      ...(orderDay ? { orderDay } : {}),
       time,
       amount,
       items: sorted.reduce((sum, item) => sum + Math.max(1, Math.round(item.quantity || 1)), 0),
@@ -270,16 +277,29 @@ const orderHour = (order: Pick<LiveOrder, "time">) => {
 
 export type HourPoint = { hour: number; label: string; revenue: number; orders: number; cumulative: number };
 
-/** Faturamento e pedidos por hora (mínimo 08h–21h, estende se houver venda fora da faixa ou a hora atual passar). */
-export function hourlySeries(orders: Pick<LiveOrder, "time" | "amount">[], currentHour?: number): HourPoint[] {
-  const hours = orders.map(orderHour).filter((hour): hour is number => hour !== null);
+/** Barra dos pedidos de dias anteriores faturados hoje (sem hora no dia da nota). */
+export const CARRIED_HOUR = -1;
+
+/**
+ * Faturamento e pedidos por hora (mínimo 08h–21h, estende se houver venda fora da faixa ou a hora atual passar).
+ * Nenhuma venda cai em hora futura: pedido de outro dia faturado hoje vai para a barra "Antes" (a soma das barras
+ * continua igual às vendas do dia) e hora maior que a atual (relógio de loja adiantado) conta na hora atual.
+ */
+export function hourlySeries(orders: Pick<LiveOrder, "time" | "amount" | "orderDay">[], currentHour?: number): HourPoint[] {
+  const bucket = (order: Pick<LiveOrder, "time" | "orderDay">) => {
+    if (order.orderDay) return CARRIED_HOUR;
+    const hour = orderHour(order);
+    return hour !== null && currentHour !== undefined && hour > currentHour ? currentHour : hour;
+  };
+  const hours = orders.map(bucket).filter((hour): hour is number => hour !== null && hour >= 0);
   const start = Math.min(8, ...hours);
   const end = Math.max(21, currentHour ?? 0, ...hours);
   const points: HourPoint[] = [];
+  if (orders.some((order) => order.orderDay)) points.push({ hour: CARRIED_HOUR, label: "Antes", revenue: 0, orders: 0, cumulative: 0 });
   for (let hour = start; hour <= end; hour += 1) points.push({ hour, label: `${String(hour).padStart(2, "0")}h`, revenue: 0, orders: 0, cumulative: 0 });
   for (const order of orders) {
-    const hour = orderHour(order);
-    const point = hour === null ? undefined : points[hour - start];
+    const hour = bucket(order);
+    const point = hour === null ? undefined : points.find((item) => item.hour === hour);
     if (!point) continue;
     point.revenue = money2(point.revenue + order.amount);
     point.orders += 1;
@@ -341,8 +361,10 @@ export function validPeriod(from: string | null | undefined, to: string | null |
 }
 
 /** Hoje: "há 3 min · 14:20"; outros dias: "25/11 · 14:20". */
-export function saleWhen(order: Pick<LiveOrder, "at" | "time" | "day">, now: Date, today: string) {
+export function saleWhen(order: Pick<LiveOrder, "at" | "time" | "day" | "orderDay">, now: Date, today: string) {
   const day = order.day ?? dayOfInstant(order.at);
+  // Faturado no dia, pedido feito antes: mostra quando foi o pedido (nunca "há 14 h").
+  if (order.orderDay) return `Pedido de ${order.orderDay.slice(8, 10)}/${order.orderDay.slice(5, 7)} · ${order.time} · nota ${day === today ? "hoje" : `${day.slice(8, 10)}/${day.slice(5, 7)}`}`;
   return day === today ? relativeTime(order.at, now, order.time) : `${day.slice(8, 10)}/${day.slice(5, 7)} · ${order.time}`;
 }
 
