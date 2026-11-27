@@ -3,7 +3,7 @@ import { loadSemanticMemory, syncKnowledgeDocumentVectors } from "@/lib/ai/vecto
 import { prisma } from "@/lib/prisma";
 import { aiConfigured, aiJson, embedTexts } from "@/lib/ai/openai";
 import { readAiSettings } from "@/lib/ai/store";
-import { chunkText, CONSULTORIA_POS_CAMPANHA_MD, DEFAULT_SKILLS, LEGACY_CONSULTORIA_POS_CAMPANHA_MD, LEGACY_ESTOQUE_MD, LEGACY_ESTOQUE_MD_V2, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
+import { chunkText, CONSULTORIA_POS_CAMPANHA_MD, DEFAULT_SKILLS, LEGACY_CONSULTORIA_POS_CAMPANHA_MD, LEGACY_ESTOQUE_MD, LEGACY_ESTOQUE_MD_V2, fallbackSkills, rankChunks, seedSkillRows, shouldSearchKnowledge, skillModuleRow, skillModuleSlug, topicsToRules, type AiSkill, type BusinessRule, type KnowledgeChunkHit, type StudioPromptContext } from "@/lib/ai/studio";
 
 /** Estúdio de IA no banco: regras, skills e base de conhecimento (RAG). Falha de banco nunca derruba a resposta. */
 
@@ -78,6 +78,20 @@ export async function listSkills(): Promise<AiSkill[]> {
   if (rows.length && !(await addMissingNativeSkills(rows))) return rows;
   if (!rows.length) await seedSkills();
   return prisma.aiSkill.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: SKILL_SELECT });
+}
+
+/**
+ * Grava as instruções da skill no módulo de prompt que o motor lê (sem cache: vale na próxima resposta).
+ * Chamado ao criar, editar ou restaurar uma skill (nativa ou customizada).
+ */
+export async function syncSkillPromptModule(skill: Pick<AiSkill, "name" | "slug" | "triggerDescription" | "instructionsMd" | "sortOrder">): Promise<void> {
+  const row = skillModuleRow(skill);
+  const { slug, ...content } = row;
+  await prisma.aiPromptModule.upsert({ where: { slug }, create: row, update: content });
+}
+
+export async function deleteSkillPromptModule(slug: string): Promise<void> {
+  await prisma.aiPromptModule.deleteMany({ where: { slug: skillModuleSlug(slug) } });
 }
 
 /** Skills para o motor. Banco fora ou tabela ausente: skills nativas ligadas (comportamento anterior). */

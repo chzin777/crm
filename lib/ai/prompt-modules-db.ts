@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readAiSettings } from "@/lib/ai/store";
 import { listBusinessRules, listSkills } from "@/lib/ai/studio-db";
+import { skillModuleRow } from "@/lib/ai/studio";
 import { normalizeModuleInput, sortModules, type ModuleCategory, type PromptModule } from "@/lib/ai/prompt-modules";
 import seed from "@/lib/ai/prompt-modules.seed.json";
 
@@ -34,7 +35,7 @@ async function initialRows(): Promise<SeedRow[]> {
   const skills = await listSkills().catch(() => []);
   for (const skill of skills) {
     if (!skill.instructionsMd.trim() && !skill.triggerDescription.trim()) continue;
-    rows.push({ slug: `skill-${skill.slug}`.slice(0, 60), title: `Skill: ${skill.name}`, category: "fluxo", contentMarkdown: `### Skill: ${skill.name}\nQuando acionar: ${skill.triggerDescription.trim() || "quando o assunto da conversa corresponder ao nome da skill"}\n${skill.instructionsMd.trim()}`, isActive: true, alwaysInclude: false, keywords: [`@skill_${skill.slug}`], priorityOrder: 165 + skill.sortOrder });
+    rows.push(skillModuleRow(skill));
   }
   return rows;
 }

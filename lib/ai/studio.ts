@@ -286,6 +286,31 @@ export function skillEnabled(skills: AiSkill[] | undefined, key: SkillKey): bool
   return skills?.find((skill) => skill.builtin && skill.slug === key)?.isActive !== false;
 }
 
+/** Slug do módulo de prompt que leva as instruções da skill ao motor (condição "@skill_<slug>"). */
+export function skillModuleSlug(slug: string): string {
+  return `skill-${slug}`.slice(0, 60);
+}
+
+/** Módulo de prompt da skill: é este texto que o motor da IA lê (/chat, Valentina e automações). */
+export function skillModuleRow(skill: Pick<AiSkill, "name" | "slug" | "triggerDescription" | "instructionsMd" | "sortOrder">) {
+  return {
+    slug: skillModuleSlug(skill.slug),
+    title: `Skill: ${skill.name}`,
+    category: "fluxo" as const,
+    contentMarkdown: `### Skill: ${skill.name}\nQuando acionar: ${skill.triggerDescription.trim() || "quando o assunto da conversa corresponder ao nome da skill"}\n${skill.instructionsMd.trim()}`,
+    isActive: true,
+    alwaysInclude: false,
+    keywords: [`@skill_${skill.slug}`],
+    priorityOrder: 165 + skill.sortOrder,
+  };
+}
+
+/** Texto padrão de fábrica de uma skill nativa ("Restaurar padrão"); null para skill customizada. */
+export function defaultSkillInput(slug: string): AiSkillInput | null {
+  const base = DEFAULT_SKILLS.find((skill) => skill.slug === slug);
+  return base ? { name: base.name, triggerDescription: base.triggerDescription, instructionsMd: base.instructionsMd } : null;
+}
+
 /** Remove as tools das skills nativas desligadas (tools sem skill dona continuam). */
 export function filterToolsBySkills<T extends { definition: { function: { name: string } } }>(tools: T[], skills: AiSkill[] | undefined): T[] {
   const blocked = new Set(SKILL_KEYS.filter((key) => !skillEnabled(skills, key)).flatMap((key) => SKILL_TOOLS[key].tools));

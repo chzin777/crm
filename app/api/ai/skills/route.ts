@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireModule } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeSkillInput, SKILL_TOOLS, type AiSkillInput } from "@/lib/ai/studio";
-import { listSkills } from "@/lib/ai/studio-db";
+import { listSkills, syncSkillPromptModule } from "@/lib/ai/studio-db";
 
 /** Skills da IA em Markdown (Estúdio): lista (com seed das nativas na primeira vez) e criação de skill customizada. */
 export async function GET() {
@@ -19,5 +19,6 @@ export async function POST(request: Request) {
   const taken = await prisma.aiSkill.findUnique({ where: { slug: data.slug }, select: { id: true } });
   if (taken) return NextResponse.json({ error: `Já existe uma skill com o slug "${data.slug}".` }, { status: 409 });
   const skill = await prisma.aiSkill.create({ data: { ...data, builtin: false } });
+  await syncSkillPromptModule(skill);
   return NextResponse.json({ skill }, { status: 201 });
 }

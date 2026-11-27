@@ -4,6 +4,7 @@ type Row = Record<string, unknown> & { id: string };
 const db = vi.hoisted(() => ({
   rules: [] as Row[],
   skills: [] as Row[],
+  modules: [] as Row[],
   legacySkills: [] as { key: string; enabled: boolean; instructions: string }[],
   workspace: new Map<string, unknown>(),
   topics: [] as { id: string; title: string; enabled: boolean; content: string }[],
@@ -18,7 +19,7 @@ vi.mock("@/lib/ai/store", () => ({ readAiSettings: vi.fn(async () => ({ topics: 
 const helpers = vi.hoisted(() => {
   const bySlug = (rows: Record<string, unknown>[], slug: unknown) => rows.find((row) => row.slug === slug) ?? null;
   /** createMany com skipDuplicates por slug, como o Postgres com índice único. */
-  const insertMany = (table: "rules" | "skills", prefix: string, data: Record<string, unknown>[]) => {
+  const insertMany = (table: "rules" | "skills" | "modules", prefix: string, data: Record<string, unknown>[]) => {
     let count = 0;
     for (const item of data) {
       if (bySlug(db[table], item.slug)) continue;
@@ -53,6 +54,19 @@ vi.mock("@/lib/prisma", () => ({
       delete: vi.fn(async ({ where }: { where: { id: string } }) => { db.skills = db.skills.filter((item) => item.id !== where.id); return {}; }),
     },
     knowledgeChunk: { findMany: vi.fn(async () => []) },
+    aiPromptModule: {
+      count: vi.fn(async () => db.modules.length),
+      findMany: vi.fn(async () => db.modules),
+      createMany: vi.fn(async ({ data }: { data: Record<string, unknown>[] }) => helpers.insertMany("modules", "m", data)),
+      upsert: vi.fn(async ({ where, create, update }: { where: { slug: string }; create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        const row = helpers.bySlug(db.modules, where.slug);
+        if (row) return Object.assign(row, update);
+        const created = { id: `m${(db.seq += 1)}`, ...create };
+        db.modules.push(created);
+        return created;
+      }),
+      deleteMany: vi.fn(async ({ where }: { where: { slug: string } }) => { const before = db.modules.length; db.modules = db.modules.filter((row) => row.slug !== where.slug); return { count: before - db.modules.length }; }),
+    },
   },
 }));
 
@@ -74,6 +88,7 @@ const TOPICS = [
 beforeEach(async () => {
   db.rules = [];
   db.skills = [];
+  db.modules = [];
   db.legacySkills = [];
   db.workspace = new Map();
   db.topics = TOPICS.map((topic) => ({ ...topic }));
@@ -177,6 +192,49 @@ describe("Skills em Markdown: seed, CRUD e efeito no motor", () => {
     expect(promptOff).not.toContain("Pergunte a cidade ANTES de buscar");
     expect(promptOff).toContain("Consulta de estoque DESLIGADA");
     expect(filterToolsBySkills(tools, off.skills).map((item) => item.definition.function.name)).toEqual(["encerrarAtendimento"]);
+  });
+
+  it("skill nativa: edição completa (nome, gatilho, protocolo, ordem) persiste e o motor lê a versão editada", async () => {
+    // O setup global troca prompt-modules-db pelo seed em memória: aqui vale o módulo real (banco mockado acima).
+    const { loadPromptModules } = await vi.importActual<typeof import("@/lib/ai/prompt-modules-db")>("@/lib/ai/prompt-modules-db");
+    const { assembleSystemPrompt } = await import("@/lib/ai/agent-core");
+    const { DEFAULT_AI_SETTINGS } = await import("@/lib/ai/settings");
+    await listSkillsRoute();
+    await loadPromptModules();
+    const stock = db.skills.find((skill) => skill.slug === "estoque_cidade")!;
+    const original = String(stock.instructionsMd);
+
+    const response = await updateSkill(request("PUT", { name: "Estoque da Cidade", triggerDescription: "cliente pergunta se tem o modelo", instructionsMd: "## Protocolo\n1. Pergunte a cidade e a faixa de preço.", sortOrder: 3 }), ctx(stock.id));
+    expect(response.status).toBe(200);
+    expect(stock).toMatchObject({ slug: "estoque_cidade", builtin: true, name: "Estoque da Cidade", triggerDescription: "cliente pergunta se tem o modelo", sortOrder: 3 });
+
+    const modules = await loadPromptModules();
+    const module = modules.find((item) => item.slug === "skill-estoque_cidade")!;
+    expect(module.contentMarkdown).toBe("### Skill: Estoque da Cidade\nQuando acionar: cliente pergunta se tem o modelo\n## Protocolo\n1. Pergunte a cidade e a faixa de preço.");
+    expect(module).toMatchObject({ title: "Skill: Estoque da Cidade", isActive: true, keywords: ["@skill_estoque_cidade"], priorityOrder: 168 });
+    const skills = await loadSkills();
+    const system = assembleSystemPrompt({ modules, settings: DEFAULT_AI_SETTINGS, info: "", firstReply: false, prompt: { text: "tem esse modelo?" }, skills }).system;
+    expect(system).toContain("1. Pergunte a cidade e a faixa de preço.");
+
+    // Liga/desliga não regrava o texto do módulo.
+    const before = module.contentMarkdown;
+    await updateSkill(request("PUT", { isActive: false }), ctx(stock.id));
+    expect(db.modules.find((item) => item.slug === "skill-estoque_cidade")!.contentMarkdown).toBe(before);
+    await updateSkill(request("PUT", { isActive: true }), ctx(stock.id));
+
+    // Restaurar padrão: volta o texto de fábrica no banco e no módulo; customizada não tem padrão.
+    const restored = await updateSkill(request("PUT", { restoreDefault: true }), ctx(stock.id));
+    expect(restored.status).toBe(200);
+    expect(stock).toMatchObject({ name: "Consultar Estoque por Cidade", instructionsMd: original });
+    expect(String(db.modules.find((item) => item.slug === "skill-estoque_cidade")!.contentMarkdown)).toContain(original.trim());
+    const created = await createSkill(request("POST", { name: "Exame", triggerDescription: "marcar exame", instructionsMd: "## Protocolo\n1. Peça o dia." }));
+    const { skill } = (await created.json()) as { skill: AiSkill };
+    expect(db.modules.some((item) => item.slug === "skill-exame")).toBe(true);
+    expect((await updateSkill(request("PUT", { restoreDefault: true }), ctx(skill.id))).status).toBe(400);
+    await deleteSkill(request("DELETE"), ctx(skill.id));
+    expect(db.modules.some((item) => item.slug === "skill-exame")).toBe(false);
+    // Nativa continua sem exclusão.
+    expect((await deleteSkill(request("DELETE"), ctx(stock.id))).status).toBe(400);
   });
 
   it("banco fora: motor segue com as skills nativas ligadas", async () => {

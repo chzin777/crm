@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
+import { BookOpenText, Boxes, Calculator, ChevronDown, CircleCheck, CreditCard, FileText, FileUp, GitBranch, Headset, Loader2, PackageSearch, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, Wand2, Wrench, Zap } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -353,6 +353,18 @@ export function SkillsSection() {
       setBusy(null);
     }
   };
+  const restore = async (skill: SkillDraft) => {
+    setBusy(skill.id);
+    try {
+      const data = await api<{ skill: AiSkill }>(`/api/ai/skills/${skill.id}`, json("PUT", { restoreDefault: true }));
+      setSkills((current) => current?.map((item) => (item.id === skill.id ? data.skill : item)) ?? current);
+      toast.success("Skill restaurada", "O texto padrão voltou e a IA já usa na próxima resposta.");
+    } catch (cause) {
+      toast.error("Erro ao restaurar", cause instanceof Error ? cause.message : "Tente de novo.");
+    } finally {
+      setBusy(null);
+    }
+  };
   const toggleActive = async (skill: SkillDraft, isActive: boolean) => {
     if (skill.isNew) return patch(skill.id, { isActive });
     setSkills((current) => current?.map((item) => (item.id === skill.id ? { ...item, isActive } : item)) ?? current);
@@ -432,8 +444,15 @@ export function SkillsSection() {
                         {linked.tools.map((tool) => <code key={tool} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-white/10 dark:text-slate-300">{tool}</code>)}
                       </p>
                     )}
-                    <p className="rounded-lg border border-[#C8E600]/60 bg-[#C8E600]/10 px-3 py-2 text-[11px] text-slate-600 dark:text-slate-300">As instruções desta skill ficam no módulo <strong>Skill: {skill.name}</strong> em Módulos de Prompt (condição <code>@skill_{skill.slug}</code>). Aqui só se liga ou desliga a ferramenta.</p>
-                    <div className="flex justify-end">
+                    <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Quando acionar (gatilho)
+                      <textarea rows={2} value={skill.triggerDescription} onChange={(event) => patch(skill.id, { triggerDescription: event.target.value })} className={`${area} resize-y`} maxLength={600} />
+                    </label>
+                    <label className="block space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">Protocolo (Markdown)
+                      <textarea rows={10} value={skill.instructionsMd} onChange={(event) => patch(skill.id, { instructionsMd: event.target.value })} className={`${area} resize-y font-mono`} maxLength={20_000} />
+                    </label>
+                    <p className="min-w-0 break-words text-[11px] text-slate-500 dark:text-slate-400">Ao salvar, o texto vai para o módulo <strong>Skill: {skill.name}</strong> (condição <code>@skill_{skill.slug}</code>) e a IA já usa na próxima resposta.</p>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {skill.builtin && <button type="button" disabled={busy === skill.id} onClick={() => void restore(skill)} className={ghost}><RotateCcw className="h-3.5 w-3.5" />Restaurar padrão</button>}
                       <button type="button" disabled={busy === skill.id || !skill.dirty} onClick={() => void save(skill)} className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#C4D600] px-4 text-xs font-bold text-[#051647] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50">
                         {busy === skill.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Salvar skill
                       </button>
