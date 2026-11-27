@@ -33,6 +33,8 @@ export type AiCallMeta = {
   jsonSchema?: { name: string; schema: object };
   /** Modelo próprio para tarefas simples e frequentes (ex.: triagem); sem ele, o modelo configurado em /ia. */
   model?: string;
+  /** Permite uma variante econômica escolhida explicitamente para uma tarefa de background. */
+  allowMiniModel?: boolean;
   /** Resposta livre (sem response_format json): o texto vira { reply } quando não for JSON. */
   plainText?: boolean;
   /** Recebe os nomes das ferramentas chamadas (inspeção e teste de /ia). */
@@ -74,7 +76,8 @@ export async function aiJson<T>(messages: ChatMessage[], meta: AiCallMeta): Prom
   // O teste da página /ia usa os parâmetros ainda não salvos.
   const settings = meta.settings ?? (await readAiSettings());
   // Sempre o modelo principal: variante mini/nano (no banco, na tela ou no OPENAI_MODEL do servidor) é promovida.
-  const model = flagshipModel(meta.model || settings.model || process.env.OPENAI_MODEL?.trim() || FLAGSHIP_MODEL);
+  const selectedModel = meta.model || settings.model || process.env.OPENAI_MODEL?.trim() || FLAGSHIP_MODEL;
+  const model = meta.allowMiniModel && meta.model?.trim() ? meta.model.trim() : flagshipModel(selectedModel);
   const base = { feature: meta.feature, model, conversationId: meta.conversationId, userId: meta.userId };
 
   type Body = {

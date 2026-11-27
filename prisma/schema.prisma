@@ -8,33 +8,35 @@ datasource db {
 }
 
 model User {
-  id                String             @id
-  name              String
-  email             String             @unique
-  jobTitle          String?
+  id                             String                           @id
+  name                           String
+  email                          String                           @unique
+  jobTitle                       String?
   /// CPF (só dígitos): liga o usuário ao vendedor do VMSet (visão de vendedor no app). SQL: prisma/seller-link.sql
-  cpf               String?
-  teamLevel         String             @default("Operador")
-  roleId            String?
-  roleRef           Role?              @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  emailVerified     Boolean            @default(false)
-  image             String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  role              String             @default("user")
-  banned            Boolean            @default(false)
-  banReason         String?
-  banExpires        DateTime?
-  mustChangePassword Boolean           @default(false)
-  sessions          Session[]
-  accounts          Account[]
-  npsResponses      NpsResponse[]
-  chatQueues        ChatQueueMember[]
-  chatAgent         ChatAgent?
-  chatAssigned      ChatConversation[] @relation("ChatAssignee")
-  npsFeedbacks      NpsFeedback[]
-  followUps         FollowUp[]
-  scheduledMessages ScheduledMessage[]
+  cpf                            String?
+  teamLevel                      String                           @default("Operador")
+  roleId                         String?
+  roleRef                        Role?                            @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  emailVerified                  Boolean                          @default(false)
+  image                          String?
+  createdAt                      DateTime                         @default(now())
+  updatedAt                      DateTime                         @updatedAt
+  role                           String                           @default("user")
+  banned                         Boolean                          @default(false)
+  banReason                      String?
+  banExpires                     DateTime?
+  mustChangePassword             Boolean                          @default(false)
+  sessions                       Session[]
+  accounts                       Account[]
+  npsResponses                   NpsResponse[]
+  chatQueues                     ChatQueueMember[]
+  chatAgent                      ChatAgent?
+  chatAssigned                   ChatConversation[]               @relation("ChatAssignee")
+  npsFeedbacks                   NpsFeedback[]
+  followUps                      FollowUp[]
+  scheduledMessages              ScheduledMessage[]
+  reviewedAttendanceAttributions AttendanceSaleAttribution[]      @relation("AttendanceAttributionReviewer")
+  attendanceAttributionReviews   AttendanceSaleAttributionAudit[] @relation("AttendanceAttributionAuditActor")
 
   @@map("user")
 }
@@ -384,22 +386,22 @@ model NpsFeedback {
 }
 
 model CampaignMessage {
-  id            String                @id @default(cuid())
-  campaignId    String
-  contactId     String?
-  phone         String
-  whatsappMsgId String?               @unique
-  status        CampaignMessageStatus @default(queued)
-  sentAt        DateTime?
-  deliveredAt   DateTime?
-  readAt        DateTime?
-  repliedAt     DateTime?
-  failedAt      DateTime?
-  failureReason String?
+  id                    String                @id @default(cuid())
+  campaignId            String
+  contactId             String?
+  phone                 String
+  whatsappMsgId         String?               @unique
+  status                CampaignMessageStatus @default(queued)
+  sentAt                DateTime?
+  deliveredAt           DateTime?
+  readAt                DateTime?
+  repliedAt             DateTime?
+  failedAt              DateTime?
+  failureReason         String?
   /// Avaliado pela regra de engajamento (−5 se ficou 72 h sem leitura). Envios anteriores ao recurso já vêm preenchidos.
   engagementPenalizedAt DateTime?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
   @@index([campaignId])
   @@index([whatsappMsgId])
@@ -503,52 +505,53 @@ model ChatQueueMember {
 }
 
 model ChatAgent {
-  userId     String    @id
-  capacity   Int       @default(0)
-  paused     Boolean   @default(false)
-  lastSeenAt DateTime?
+  userId         String    @id
+  capacity       Int       @default(0)
+  paused         Boolean   @default(false)
+  lastSeenAt     DateTime?
   /// Legado (v1.101.0): loja única; o vínculo atual é `stores`.
-  store      String?
+  store          String?
   /// Lojas do ERP VMSet do usuário ("13", "5"): o rodízio por loja prioriza estes atendentes.
-  stores     String[]  @default([])
+  stores         String[]  @default([])
   /// Escolha do operador: ONLINE (recebe novos), AWAY (ausente/pausa) ou OFFLINE. `paused` acompanha (≠ ONLINE).
-  presenceStatus String @default("ONLINE")
+  presenceStatus String    @default("ONLINE")
   /// Última interação real (clique, digitação, envio) no CRM; base da pausa automática por inatividade.
   lastActivityAt DateTime?
   /// Ausente colocado pelo sistema (inatividade): a próxima interação volta para Online sozinha.
-  awayAuto   Boolean   @default(false)
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  awayAuto       Boolean   @default(false)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ChatConversation {
-  id                String             @id @default(cuid())
-  contactId         String
-  phone             String
-  openKey           String?            @unique
-  queueId           String?
-  assigneeId        String?
-  status            ChatStatus         @default(waiting)
-  priority          ChatPriority       @default(normal)
-  subject           String             @default("")
-  unreadCount       Int                @default(0)
-  waitingSince      DateTime?
-  lastMessageAt     DateTime?
-  lastInboundAt     DateTime?
-  tags              String[]           @default([])
-  menuState         Json?
-  campaignId        String?
-  campaignName      String?
-  closedAt          DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Restrict)
-  queue             ChatQueue?         @relation(fields: [queueId], references: [id], onDelete: SetNull)
-  assignee          User?              @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  messages          ChatMessage[]
-  aiPendingActions  AiPendingAction[]
-  npsFeedbacks      NpsFeedback[]
-  followUps         FollowUp[]
-  scheduledMessages ScheduledMessage[]
+  id                     String                      @id @default(cuid())
+  contactId              String
+  phone                  String
+  openKey                String?                     @unique
+  queueId                String?
+  assigneeId             String?
+  status                 ChatStatus                  @default(waiting)
+  priority               ChatPriority                @default(normal)
+  subject                String                      @default("")
+  unreadCount            Int                         @default(0)
+  waitingSince           DateTime?
+  lastMessageAt          DateTime?
+  lastInboundAt          DateTime?
+  tags                   String[]                    @default([])
+  menuState              Json?
+  campaignId             String?
+  campaignName           String?
+  closedAt               DateTime?
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+  contact                Contact                     @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  queue                  ChatQueue?                  @relation(fields: [queueId], references: [id], onDelete: SetNull)
+  assignee               User?                       @relation("ChatAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages               ChatMessage[]
+  aiPendingActions       AiPendingAction[]
+  npsFeedbacks           NpsFeedback[]
+  followUps              FollowUp[]
+  scheduledMessages      ScheduledMessage[]
+  attendanceAttributions AttendanceSaleAttribution[]
 
   @@index([queueId, status, waitingSince])
   @@index([assigneeId, closedAt])
@@ -559,31 +562,101 @@ model ChatConversation {
 }
 
 model ChatMessage {
-  id             String           @id @default(cuid())
-  conversationId String
-  author         ChatAuthor
-  authorUserId   String?
-  authorName     String?
-  text           String           @default("")
-  delivery       ChatDelivery?
-  failureReason  String?
-  internal       Boolean          @default(false)
-  attachment     Json?
-  metaMedia      Json?
-  replyTo        Json?
-  externalId     String?          @unique
+  id                  String           @id @default(cuid())
+  conversationId      String
+  author              ChatAuthor
+  authorUserId        String?
+  authorName          String?
+  text                String           @default("")
+  delivery            ChatDelivery?
+  failureReason       String?
+  internal            Boolean          @default(false)
+  attachment          Json?
+  metaMedia           Json?
+  replyTo             Json?
+  externalId          String?          @unique
   /// Texto do áudio do cliente (whisper); status: pending | done | failed.
   transcription       String?
   transcriptionStatus String?
   /// Mensagem apagada no /chat; scope "me" (só no CRM) ou "everyone" (revogada no WhatsApp). O conteúdo fica para auditoria.
-  deletedAt      DateTime?
-  deletedScope   String?
-  deletedById    String?
-  deletedByName  String?
-  createdAt      DateTime         @default(now())
-  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  deletedAt           DateTime?
+  deletedScope        String?
+  deletedById         String?
+  deletedByName       String?
+  createdAt           DateTime         @default(now())
+  conversation        ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
+}
+
+model AttendanceSaleAttribution {
+  id             String                           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  saleKey        String?                          @unique
+  sourceKey      String?
+  attendantId    String?
+  attendantName  String?
+  orderNumber    String?
+  invoiceNumber  String?
+  attendanceAt   DateTime                         @db.Timestamptz(6)
+  orderDate      DateTime?                        @db.Date
+  saleDate       DateTime?                        @db.Date
+  store          String?
+  seller         String?
+  customerName   String?
+  netAmount      Decimal?                         @db.Decimal(14, 2)
+  windowDays     Int                              @default(7)
+  aiStatus       String                           @default("pending")
+  aiQualified    Boolean?
+  aiConfidence   Int?
+  aiSummary      String?
+  targetStore    String?
+  aiModel        String?
+  aiError        String?
+  aiStartedAt    DateTime?                        @db.Timestamptz(6)
+  aiAttempts     Int                              @default(0)
+  manualDecision Boolean?
+  reviewNote     String?
+  reviewedById   String?
+  reviewer       User?                            @relation("AttendanceAttributionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt     DateTime?                        @db.Timestamptz(6)
+  createdAt      DateTime                         @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime                         @updatedAt @db.Timestamptz(6)
+  auditLog       AttendanceSaleAttributionAudit[]
+
+  @@index([conversationId, attendanceAt])
+  @@index([saleDate])
+  @@index([store, saleDate])
+  @@index([aiStatus, aiStartedAt])
+  @@map("attendance_sale_attributions")
+}
+
+model AttendanceSaleAttributionAudit {
+  id               String                    @id @default(cuid())
+  attributionId    String
+  attribution      AttendanceSaleAttribution @relation(fields: [attributionId], references: [id], onDelete: Cascade)
+  actorId          String
+  actor            User                      @relation("AttendanceAttributionAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+  previousDecision Boolean?
+  decision         Boolean
+  note             String?
+  createdAt        DateTime                  @default(now()) @db.Timestamptz(6)
+
+  @@index([attributionId, createdAt])
+  @@map("attendance_sale_attribution_audit")
+}
+
+model AttendanceSaleSetting {
+  id                    String    @id @default("default")
+  attributionWindowDays Int       @default(7)
+  commissionMode        String    @default("sale")
+  commissionValue       Decimal   @default(0) @db.Decimal(14, 4)
+  lastSyncAt            DateTime? @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(6)
+
+  @@map("attendance_sale_settings")
 }
 
 model ChatQuickReply {
@@ -974,23 +1047,23 @@ model AiKnowledgeVector {
 
 /// Automação visual (/automacoes): grafo do fluxo (nós e conexões em JSON) e o gatilho que o inicia.
 model AutomationFlow {
-  id            String                @id @default(cuid())
-  name          String
-  description   String                @default("")
+  id           String                @id @default(cuid())
+  name         String
+  description  String                @default("")
   /// "draft" | "active" | "paused"
-  status        String                @default("draft")
+  status       String                @default("draft")
   /// Tipo do nó de gatilho (trigger_message, trigger_stage, trigger_tag, trigger_inactive, trigger_webhook).
-  triggerType   String                @default("")
-  nodes         Json                  @default("[]")
-  edges         Json                  @default("[]")
+  triggerType  String                @default("")
+  nodes        Json                  @default("[]")
+  edges        Json                  @default("[]")
   /// Segredo da URL do gatilho Webhook Externo.
-  webhookToken  String                @default("")
+  webhookToken String                @default("")
   /// Configurações globais: { cancelOnConversion: ("purchase" | "paid" | "won")[] }.
-  settings      Json                  @default("{}")
-  createdById   String?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  executions    AutomationExecution[]
+  settings     Json                  @default("{}")
+  createdById  String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  executions   AutomationExecution[]
 
   @@index([status, triggerType])
   @@index([webhookToken])

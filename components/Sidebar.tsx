@@ -106,6 +106,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
     { title: "Filas", href: "/filas", icon: ListOrdered },
     { title: "Respostas Rápidas", href: "/respostas-rapidas", icon: MessageSquareText },
     { title: "Métricas de Atendimento", href: "/metricas-atendimento", icon: BarChart3 },
+    { title: "Desempenho de Atendentes", href: "/atendentes", icon: Users },
     { title: "Vendas ao vivo", href: "/vendas/ao-vivo", icon: Zap },
     { title: "Lojas", href: "/lojas", icon: Store },
     { title: "Metas de vendedores", href: "/vendas/metas", icon: Target },
@@ -125,7 +126,7 @@ export function Sidebar({ collapsed }: { collapsed?: boolean }) {
   const byHref = (href: string) => menuItems.find((item) => item.href === href)!;
 
   const navGroups = [
-    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento"), byHref("/vendas/ao-vivo")] },
+    { id: "vendas", label: "Vendas", icon: TrendingUp, items: [byHref("/"), byHref("/chat"), byHref("/produtos"), byHref("/filas"), byHref("/respostas-rapidas"), byHref("/metricas-atendimento"), byHref("/atendentes"), byHref("/vendas/ao-vivo")] },
     { id: "marketing", label: "Marketing", icon: Target, items: [byHref("/contatos"), byHref("/segmentos"), byHref("/campanhas"), byHref("/modelos"), byHref("/nps"), byHref("/automacoes"), byHref("/clientes-vip")] },
     { id: "gestao", label: "Gestão", icon: Building2, items: [byHref("/lojas"), byHref("/vendas/metas"), byHref("/vendas/campanhas"), byHref("/brasil-points"), byHref("/usuarios"), byHref("/permissoes")] },
   ]

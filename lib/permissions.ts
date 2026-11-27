@@ -75,6 +75,7 @@ export function canAccessModule(key: ModuleKey | null, modules: Partial<ModuleAc
 }
 
 export function moduleForPath(pathname: string): ModuleKey | null {
+  if (pathname === "/atendentes" || pathname.startsWith("/atendentes/")) return "metricas";
   const match = MODULES.find((module) => (module.href === "/" ? pathname === "/" : pathname === module.href || pathname.startsWith(`${module.href}/`)));
   return match?.key ?? null;
 }
