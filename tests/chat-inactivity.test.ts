@@ -43,6 +43,12 @@ describe("encerramento por inatividade do cliente (24 h)", () => {
     expect(plan({ lastAuthor: "agent", lastAt: ago(1 * HOUR), warnedAt: ago(2 * HOUR) })).toBe("reset");
   });
 
+  it("resposta humana reinicia a janela e impede novo aviso antes do prazo", () => {
+    expect(plan({ lastAuthor: "agent", lastAt: ago(1 * MIN), warnedAt: ago(2 * MIN) })).toBe("reset");
+    expect(plan({ lastAuthor: "agent", lastAt: ago(DAY - MIN), warnedAt: null })).toBe("none");
+    expect(plan({ lastAuthor: "agent", lastAt: ago(DAY), warnedAt: null })).toBe("warn");
+  });
+
   it("configuração antiga de 10 min + 3 min no banco vira 24 h + 24 h com o texto novo", () => {
     const merged = mergeChatSettings({
       silenceAskMinutes: 10,

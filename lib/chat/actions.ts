@@ -93,9 +93,14 @@ export async function assignFromMenu(conversation: ChatConversation, userId: str
 }
 
 /** Grava o encerramento antes da despedida: falha no envio não deixa a conversa aberta. */
-export async function closeConversation(conversation: ChatConversation, actor: ChatActor | null, systemText: string, farewell?: string) {
+export async function closeConversation(conversation: ChatConversation, actor: ChatActor | null, systemText: string, farewell?: string, expectedLastMessageAt?: Date | null) {
   const updated = await prisma.chatConversation.updateMany({
-    where: { id: conversation.id, closedAt: null },
+    where: {
+      id: conversation.id,
+      closedAt: null,
+      status: { not: "closed" },
+      ...(expectedLastMessageAt !== undefined ? { lastMessageAt: expectedLastMessageAt } : {}),
+    },
     data: { status: "closed", closedAt: new Date(), waitingSince: null, openKey: null },
   });
   if (updated.count === 0) throw new ChatRuleError("Esta conversa já está encerrada.", 409);

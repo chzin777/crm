@@ -248,7 +248,7 @@ function ScheduledBubble({ item, onCancel }: { item: ScheduledMessageItem; onCan
   const failed = item.status === "FAILED";
   const when = new Date(item.scheduledFor).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
   return (
-    <div className="flex justify-end">
+    <div className="flex shrink-0 justify-end">
       <div className={`max-w-[75%] rounded-2xl rounded-br-sm border border-dashed px-3 py-1.5 2xl:px-4 2xl:py-2.5 ${failed ? "border-red-300 bg-red-50/80 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200" : "border-[#002187]/40 bg-white/70 text-slate-700 dark:border-[#C4D600]/40 dark:bg-white/5 dark:text-slate-200"}`}>
         <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold opacity-80">
           <Clock className="h-3 w-3" />
@@ -504,8 +504,8 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
           <p className="text-sm">Nenhuma mensagem nesta conversa</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {loadingOlder && <p className="text-center text-xs text-slate-500">Carregando...</p>}
+        <div className="flex flex-col gap-3">
+          {loadingOlder && <p className="shrink-0 text-center text-xs text-slate-500">Carregando...</p>}
           {messages.map((message, index) => {
             const newDay = index === 0 || dayLabel(messages[index - 1].createdAt) !== dayLabel(message.createdAt);
             const divider = index > 0 ? sessionBreak(messages[index - 1], message, sessions) : null;
@@ -520,7 +520,7 @@ export function MessageList({ conversationId, tick, onReply, listRef, scheduled,
             const media = message.attachment?.kind === "image" || message.attachment?.kind === "video";
             const inset = media ? "px-1.5" : "";
             return (
-              <div key={message.id} id={`msg-${message.id}`} className="scroll-mt-4">
+              <div key={message.id} id={`msg-${message.id}`} className="min-w-0 shrink-0 scroll-mt-4">
                 {divider && (
                   <div role="separator" className="my-5 space-y-1.5">
                     {divider.closed && <SessionLine icon={<CircleCheck className="h-3.5 w-3.5 shrink-0" />} text={divider.closed} />}

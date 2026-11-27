@@ -223,7 +223,7 @@ export async function runClock() {
       state.warnedAt = null;
       await saveMenuState(row.id, state);
       try {
-        await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings));
+        await closeConversation(row, null, "Conversa encerrada por inatividade do cliente", silenceFarewell(settings), row.lastMessageAt);
         if ((await npsAttribution(row, null)).responderType === "ai") await sendSatisfactionSurvey(row, null);
         summary.silenceClosed += 1;
         await sleep(SILENCE_SEND_GAP_MS);

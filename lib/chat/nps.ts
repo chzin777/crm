@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma, type ChatConversation, type NpsFeedback } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendList, sendText } from "@/lib/meta-whatsapp";
-import { isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
+import { firstDispatch, isWindowOpen, readChatSettings } from "@/lib/chat/conversation";
 import { resendAutomatic, sendAutomaticMessage } from "@/lib/chat/outbound";
 import { phoneVariants } from "@/lib/chat/phone";
 import { NPS_LEGACY_SCALES, NPS_SCALE_TEXT, NPS_SCORE_EMOJIS, NPS_SCORE_LABELS as SCORE_LABELS, npsCommentPrompt, npsPrompt, npsScoreTitle, type ChatMenuSettings } from "@/lib/chat/settings";
@@ -80,6 +80,12 @@ export async function sendSatisfactionSurvey(conversation: ChatConversation, att
     if (!isWindowOpen(conversation.lastInboundAt)) return;
     const settings = await readChatSettings();
     if (!settings.npsEnabled) return;
+    const closed = await prisma.chatConversation.findUnique({
+      where: { id: conversation.id },
+      select: { status: true, closedAt: true },
+    });
+    if (closed?.status !== "closed" || !closed.closedAt) return;
+    if (!(await firstDispatch(`nps-close:${conversation.id}:${closed.closedAt.toISOString()}`))) return;
     const list = buildNpsList("ATENDIMENTO", await contactName(conversation.contactId), npsPrompt(settings));
     const sent = await sendNpsList(conversation, list);
     if (!sent || sent.delivery === "failed") return;

@@ -5,7 +5,15 @@ const attribution = vi.hoisted(() => ({ value: null as { responderType: "ai" | "
 vi.mock("@/lib/chat/nps-attribution", () => ({ npsAttribution: async (_conversation: unknown, attendantId: string | null) => attribution.value ?? ({ responderType: attendantId ? "human" : null, attendantId }) }));
 
 type Row = Record<string, unknown>;
-const db = vi.hoisted(() => ({ feedbacks: [] as Record<string, unknown>[], messages: [] as Record<string, unknown>[], openConversation: false, seq: 0 }));
+const db = vi.hoisted(() => ({
+  feedbacks: [] as Record<string, unknown>[],
+  messages: [] as Record<string, unknown>[],
+  dispatches: [] as string[],
+  openConversation: false,
+  conversationStatus: "closed",
+  closedAt: new Date("2026-11-19T18:00:00Z"),
+  seq: 0,
+}));
 
 /** Filtro mínimo do Prisma usado pela pesquisa: igualdade, null, { in }, { gte }, { lt }, { not }. */
 function matches(row: Row, where: Row = {}): boolean {
@@ -51,7 +59,10 @@ vi.mock("@/lib/prisma", async () => {
           return { count: before - db.feedbacks.length };
         },
       },
-      chatConversation: { findFirst: async () => (db.openConversation ? { id: "aberta" } : null) },
+      chatConversation: {
+        findFirst: async () => (db.openConversation ? { id: "aberta" } : null),
+        findUnique: async () => ({ status: db.conversationStatus, closedAt: db.closedAt }),
+      },
       chatMessage: {
         create: async ({ data }: { data: Row }) => { db.messages.push(data); return data; },
         findFirst: async ({ where }: { where: { conversationId: string; createdAt: { gt: Date } } }) =>
@@ -74,7 +85,15 @@ vi.mock("@/lib/meta-whatsapp", () => ({
 }));
 vi.mock("@/lib/chat/conversation", async () => {
   const { DEFAULT_CHAT_SETTINGS } = await import("@/lib/chat/settings");
-  return { isWindowOpen: () => true, readChatSettings: async () => DEFAULT_CHAT_SETTINGS };
+  return {
+    firstDispatch: async (key: string) => {
+      if (db.dispatches.includes(key)) return false;
+      db.dispatches.push(key);
+      return true;
+    },
+    isWindowOpen: () => true,
+    readChatSettings: async () => DEFAULT_CHAT_SETTINGS,
+  };
 });
 
 import { recordSurveyReply, releaseAutomationSurvey, reserveAutomationSurvey, sendSatisfactionSurvey } from "@/lib/chat/nps";
@@ -88,7 +107,10 @@ const reply = (text: string, minutes = 1, id = `w${Math.random()}`) => ({ extern
 beforeEach(() => {
   db.feedbacks = [];
   db.messages = [];
+  db.dispatches = [];
   db.openConversation = false;
+  db.conversationStatus = "closed";
+  db.closedAt = new Date("2026-11-19T18:00:00Z");
   sent.length = 0;
   lists.length = 0;
   attribution.value = null;
@@ -99,6 +121,7 @@ describe("NPS híbrido: lista interativa na janela de 24 h, modelo oficial fora 
 
   it("mantém a autoria da IA ou do humano ao gravar a pesquisa e a resposta", async () => {
     for (const owner of [{ responderType: "ai" as const, attendantId: null }, { responderType: "human" as const, attendantId: "u1" }]) {
+      db.dispatches = [];
       attribution.value = owner;
       await sendSatisfactionSurvey(conversation, null);
       expect(await recordSurveyReply(reply("10"))).toBe(true);
@@ -119,6 +142,26 @@ describe("NPS híbrido: lista interativa na janela de 24 h, modelo oficial fora 
     expect(list.body).not.toMatch(/[–—]|\s-\s/);
     expect(db.feedbacks).toHaveLength(1);
     expect(db.feedbacks[0]).toMatchObject({ status: "PENDING", surveyType: "ATENDIMENTO", conversationId: "aberta" });
+  });
+
+  it("três execuções para a mesma conversa fechada enviam no máximo uma pesquisa", async () => {
+    await Promise.all([
+      sendSatisfactionSurvey(conversation, "u1"),
+      sendSatisfactionSurvey(conversation, "u1"),
+      sendSatisfactionSurvey(conversation, "u1"),
+    ]);
+
+    expect(lists).toHaveLength(1);
+    expect(db.feedbacks).toHaveLength(1);
+  });
+
+  it("não envia pesquisa se a conversa ainda não foi encerrada", async () => {
+    db.conversationStatus = "in_progress";
+
+    await sendSatisfactionSurvey(conversation, "u1");
+
+    expect(lists).toHaveLength(0);
+    expect(db.dispatches).toHaveLength(0);
   });
 
   it("janela fechada: cai no modelo oficial aprovado (sem modelo, não envia); copy sem travessões nem hífens", () => {
