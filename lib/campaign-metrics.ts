@@ -4,6 +4,11 @@ import { phoneVariants } from "@/lib/chat/phone";
 import { addDays, brDay, buildOrders, campaignFinancials, isAttributedSale, lastTouch, type SaleItemRow, type Touch } from "@/lib/campaign-attribution";
 import { getMetaPricing, priceFor } from "@/lib/meta-pricing";
 import { storeNameForErpCode } from "@/lib/stores";
+import { Prisma } from "@/generated/prisma/client";
+
+/** Lojas fora do faturamento do /vendas/ao-vivo (scripts/vmset-stock-api.py: LOJA NOT BETWEEN 100 AND 199 / 1000 AND 2999). */
+export const SALES_LIVE_STORE_FILTER = Prisma.sql`COALESCE(CASE WHEN "store" ~ '^[0-9]{1,9}$' THEN "store"::bigint END NOT BETWEEN 100 AND 199
+  AND CASE WHEN "store" ~ '^[0-9]{1,9}$' THEN "store"::bigint END NOT BETWEEN 1000 AND 2999, true)`;
 
 export type ConvertedSale = {
   contactId: string;
@@ -145,6 +150,9 @@ export async function campaignMetrics(campaignId: string, category: string | nul
   }
 
   const firstDay = recipientList.reduce<string | null>((min, recipient) => (!min || recipient.sentDay < min ? recipient.sentDay : min), null);
+  // Mesma fonte e filtros do /vendas/ao-vivo: espelho da tab_dados_dinamicos (BI do VMSet), só Venda faturada
+  // (com DATA_NOTA) e devolução de cliente, fora as lojas internas (100–199 e 1000–2999). O valor é o VALOR_TOTAL
+  // do item (no BI igual ao VALOR_ITEM_VENDA gravado em "amount").
   // Vendas do espelho do VMSet (uma linha por item, sem duplicidade), atualizado a cada minuto.
   // Itens de venda e de devolução (a devolução repete o pedido e o produto): pedidos e devoluções são resolvidos em buildOrders.
   // Devoluções podem vir depois da janela, por isso não têm limite de data final.
@@ -154,7 +162,8 @@ export async function campaignMetrics(campaignId: string, category: string | nul
       COALESCE("invoiceNumber", '') AS "invoiceNumber", COALESCE("description", '') AS description, "syncedAt"
     FROM "VmsetSale"
     WHERE "sourceKey" = ANY(${[...owners.keys()]}::text[]) AND "orderDate" >= ${firstDay}::date
-      AND ("type" = 'Devolucao Cliente' OR ("type" = 'Venda' AND "orderDate" <= ${addDays(brDay(), 1)}::date))
+      AND ("type" = 'Devolucao Cliente' OR ("type" = 'Venda' AND "invoiceDate" IS NOT NULL AND "orderDate" <= ${addDays(brDay(), 1)}::date))
+      AND ${SALES_LIVE_STORE_FILTER}
   `;
   const sales = buildOrders(rows.map((row) => ({ ...row, amount: row.amount === null ? null : Number(row.amount), syncedAt: row.syncedAt ? new Date(row.syncedAt) : null })));
 
