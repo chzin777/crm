@@ -84,6 +84,7 @@ async function loadAttendanceConversations(fromDay: string, toDay: string): Prom
         LEFT JOIN "user" u ON u.id = m."authorUserId"
         WHERE m."conversationId" = cv.id AND m.author = 'agent' AND m."authorUserId" IS NOT NULL
           AND m.internal = false AND m."deletedAt" IS NULL
+          AND m."createdAt" >= ${from} AND m."createdAt" < ${to}
           AND (NULLIF(btrim(m.text), '') IS NOT NULL OR NULLIF(btrim(COALESCE(m.transcription, '')), '') IS NOT NULL)
         GROUP BY m."authorUserId", u.name
         ORDER BY count(*) DESC, min(m."createdAt") ASC, m."authorUserId" ASC
