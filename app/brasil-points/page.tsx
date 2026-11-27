@@ -16,7 +16,7 @@ export default function BrasilPointsPage() {
     <main className="w-full min-w-0 space-y-4 px-3 pb-24 pt-4 md:px-6 md:pt-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Image src="/images/brasil-point.png" alt="Brasil Point" width={768} height={768} className="h-14 w-14 shrink-0 object-contain" />
+          <Image src="/images/brasil-point-transparent.png" alt="Brasil Point" width={768} height={768} className="h-14 w-14 shrink-0 object-contain" />
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#F7915E]">Gestão</p>
             <h1 className="text-2xl font-bold tracking-tight text-[#051647] dark:text-white">Brasil Points</h1>
