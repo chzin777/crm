@@ -5,6 +5,7 @@ import { requireApiSession } from "@/lib/api-auth";
 import { invalidateCache } from "@/lib/cache";
 import { forbidUnless } from "@/lib/api-auth";
 import { formatCpf } from "@/lib/contact-search";
+import { ownContactIds } from "@/lib/own-clients";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -73,6 +74,8 @@ export async function GET(_request: Request, context: RouteContext<"/api/contact
   const user = await requireApiSession();
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
   const { id } = await context.params;
+  const own = await ownContactIds(user.id);
+  if (own && !own.has(id)) return Response.json({ error: "Contato não encontrado." }, { status: 404 });
   const contact = await prisma.contact.findUnique({ where: { id }, select: CONTACT_SELECT });
   if (!contact) return Response.json({ error: "Contato não encontrado." }, { status: 404 });
   return Response.json({ data: toContact(contact) });

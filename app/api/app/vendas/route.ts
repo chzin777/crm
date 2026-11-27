@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   // Vendedores (e o vínculo por e-mail/CPF) se renovam em segundo plano quando a lista tem mais de 12 h.
   if (!syncing) syncing = syncSellersIfStale().finally(() => (syncing = null));
   try {
-    return Response.json({ data: await salesForViewer(viewer, params.get("month"), params.get("store")) }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ data: await salesForViewer(viewer, params.get("month"), params.get("store"), params.get("page")) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[app/vendas]", error);
     return Response.json({ error: "Não foi possível carregar as vendas agora." }, { status: 500 });

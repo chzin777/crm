@@ -6,6 +6,7 @@ import { cachedStale, invalidateCache } from "@/lib/cache";
 import { phoneVariants } from "@/lib/chat/phone";
 import { forbidUnless } from "@/lib/api-auth";
 import { buildContactSearch, formatCpf } from "@/lib/contact-search";
+import { ownContactIds } from "@/lib/own-clients";
 
 const contactSchema = z.object({
   nome: z.string().trim().min(1).max(200),
@@ -103,6 +104,9 @@ export async function GET(request: Request) {
   if (category && ["cliente", "lead", "nps", "inativo"].includes(category)) {
     where.category = category;
   }
+  // Vendedor com "Só os próprios clientes": só quem comprou com ele ou foi atendido por ele.
+  const own = await ownContactIds(user.id);
+  if (own) where.id = { in: [...own] };
 
   const [contacts, total] = await Promise.all([
     prisma.contact.findMany({
@@ -133,7 +137,7 @@ export async function GET(request: Request) {
       },
     }),
     // Sem busca, contar a base inteira (~350 mil) leva quase 1 s: total em cache curto (renova em segundo plano).
-    search ? prisma.contact.count({ where }) : cachedStale(`contacts:count:${category || "todos"}`, 60, 600, () => prisma.contact.count({ where })),
+    search || own ? prisma.contact.count({ where }) : cachedStale(`contacts:count:${category || "todos"}`, 60, 600, () => prisma.contact.count({ where })),
   ]);
 
   return Response.json({

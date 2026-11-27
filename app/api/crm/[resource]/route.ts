@@ -4,6 +4,7 @@ import { getUserAccess, requireApiSession } from "@/lib/api-auth";
 import { allowsAny, CRM_RESOURCE_WRITE } from "@/lib/api-policy";
 import { invalidateCache } from "@/lib/cache";
 import { emitStageChanges } from "@/lib/automations/engine-db";
+import { mergeOwnCards, ownCards, ownContactIds } from "@/lib/own-clients";
 
 const allowedResources = new Set(["segments", "campaigns", "pipeline", "pipeline-stages", "pipeline-dismissed", "settings", "criteria", "nps"]);
 
@@ -50,8 +51,10 @@ export async function GET(_request: Request, context: RouteContext<"/api/crm/[re
   if (!allowedResources.has(resource)) return Response.json({ error: "Recurso não encontrado." }, { status: 404 });
 
   const stored = await prisma.crmWorkspaceData.findUnique({ where: { key: resource }, select: { value: true, updatedAt: true } });
+  // Vendedor com "Só os próprios clientes": o funil chega só com os cards dos clientes dele.
+  const own = resource === "pipeline" ? await ownContactIds(user.id) : null;
   return Response.json({
-    data: stored?.value ?? defaultValues[resource],
+    data: own && Array.isArray(stored?.value) ? ownCards(stored.value, own) : stored?.value ?? defaultValues[resource],
     revision: stored?.updatedAt.toISOString() ?? null,
   });
 }
@@ -89,10 +92,17 @@ export async function PUT(request: Request, context: RouteContext<"/api/crm/[res
     return Response.json({ error: "Formato de dados inválido para este recurso." }, { status: 400 });
   }
 
+  // Quem vê só os próprios clientes salva só os cards deles; os dos outros ficam como estão.
+  const own = resource === "pipeline" ? await ownContactIds(user.id) : null;
+  if (own) {
+    const current = await prisma.crmWorkspaceData.findUnique({ where: { key: resource }, select: { value: true } });
+    body.data = mergeOwnCards(Array.isArray(current?.value) ? current.value : [], body.data as unknown[], own) as Prisma.InputJsonValue[];
+  }
+
   if (body.revision === null) {
     try {
       const saved = await prisma.crmWorkspaceData.create({
-        data: { key: resource, value: body.data },
+        data: { key: resource, value: body.data as Prisma.InputJsonValue },
         select: { value: true, updatedAt: true },
       });
       await invalidateCache("dashboard");
@@ -111,7 +121,7 @@ export async function PUT(request: Request, context: RouteContext<"/api/crm/[res
   const previousPipeline = resource === "pipeline" ? await prisma.crmWorkspaceData.findUnique({ where: { key: "pipeline" }, select: { value: true } }) : null;
   const updateResult = await prisma.crmWorkspaceData.updateMany({
     where: { key: resource, updatedAt: revision },
-    data: { value: body.data },
+    data: { value: body.data as Prisma.InputJsonValue },
   });
   if (updateResult.count === 0) {
     return Response.json({ error: "Estes dados foram alterados em outra sessão. Recarregue antes de salvar novamente." }, { status: 409 });
@@ -124,7 +134,7 @@ export async function PUT(request: Request, context: RouteContext<"/api/crm/[res
   if (previousPipeline && Array.isArray(previousPipeline.value) && Array.isArray(saved.value)) {
     emitStageChanges(previousPipeline.value as unknown as StageCard[], saved.value as unknown as StageCard[]);
   }
-  return Response.json({ data: saved.value, revision: saved.updatedAt.toISOString() });
+  return Response.json({ data: own && Array.isArray(saved.value) ? ownCards(saved.value, own) : saved.value, revision: saved.updatedAt.toISOString() });
 }
 
 type StageCard = { id: string; contactId?: string; coluna: string };

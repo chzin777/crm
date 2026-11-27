@@ -15,3 +15,6 @@ ON CONFLICT (name) DO NOTHING;
 -- Visão do app por cargo: Gerente abre em Minha loja; Diretor no painel geral.
 UPDATE "Role" SET permissions = permissions || '{"app.visaoGerente": true}'::jsonb WHERE name = 'Gerente' AND NOT permissions ? 'app.visaoGerente';
 UPDATE "Role" SET permissions = permissions || '{"app.visaoGeral": true}'::jsonb WHERE name = 'Diretor' AND NOT permissions ? 'app.visaoGeral';
+
+-- Vendedor vê só os próprios clientes no Funil e em Contatos (comprou com ele no VMSet ou foi atendido por ele).
+UPDATE "Role" SET permissions = permissions || '{"app.somenteMeusClientes": true}'::jsonb WHERE name = 'Vendedor' AND NOT permissions ? 'app.somenteMeusClientes';

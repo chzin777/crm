@@ -7,6 +7,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { useCrmTheme } from "@/hooks/useCrmTheme";
 import { useToast } from "@/components/ToastProvider";
 import { PresenceDot } from "@/components/PresenceSelector";
+import { StoreLinkSelect } from "@/components/StoreLinkSelect";
 import { PRESENCE_LABELS, type PresenceStatus } from "@/lib/chat/presence-status";
 
 interface RoleOption {
@@ -340,24 +341,7 @@ export default function UsuariosPage() {
               {editing !== "new" && (editing as UserRecord).presence && (
                 <p className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400"><PresenceDot status={(editing as UserRecord).presence ?? "OFFLINE"} />Agora: {PRESENCE_LABELS[(editing as UserRecord).presence ?? "OFFLINE"]}</p>
               )}
-              <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                {[...stores, ...form.stores.filter((code) => !stores.some((store) => store.code === code)).map((code) => ({ code, name: `Loja ${code}` }))].map((store) => {
-                  const selected = form.stores.includes(store.code);
-                  return (
-                    <button
-                      key={store.code}
-                      type="button"
-                      aria-pressed={selected}
-                      title={store.name}
-                      onClick={() => setForm({ ...form, stores: selected ? form.stores.filter((code) => code !== store.code) : [...form.stores, store.code] })}
-                      className={`cursor-pointer rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${selected ? "border-[#002187] bg-[#002187] text-white dark:border-[#C4D600] dark:bg-[#C4D600] dark:text-[#051647]" : "border-slate-200 text-slate-600 hover:border-[#002187] dark:border-slate-700 dark:text-slate-300"}`}
-                    >
-                      Loja {store.code}
-                    </button>
-                  );
-                })}
-                {stores.length === 0 && form.stores.length === 0 && <span className="text-[11px] text-slate-400">Nenhuma loja cadastrada.</span>}
-              </div>
+              <StoreLinkSelect options={stores} selected={form.stores} onChange={(next) => setForm((current) => ({ ...current, stores: next }))} />
             </fieldset>
             {editing !== "new" && (
               <button

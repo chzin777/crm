@@ -9,6 +9,7 @@ import { isAdminRole } from "@/lib/permissions";
 export const APP_VIEW_CAPABILITIES = [
   { key: "app.visaoGeral", label: "Visão geral no app", description: "Vendas e metas de todas as lojas (como administrador)" },
   { key: "app.visaoGerente", label: "Visão de gerente no app", description: "Vendas, vendedores e metas das lojas do usuário; lança metas" },
+  { key: "app.somenteMeusClientes", label: "Só os próprios clientes", description: "Funil e contatos (app e site) mostram só quem comprou com ele no VMSet ou foi atendido por ele" },
 ] as const;
 
 export type AppView = "admin" | "gerente" | "vendedor";
